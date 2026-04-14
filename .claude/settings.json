@@ -1,0 +1,55 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm lint:*)",
+      "Bash(pnpm typecheck:*)",
+      "Bash(pnpm format:*)",
+      "Bash(pnpm test:*)",
+      "Bash(cd backend && pytest*)",
+      "Bash(cd backend && mypy*)",
+      "Bash(cd backend && alembic*)",
+      "Bash(docker compose*)",
+      "Bash(git add*)",
+      "Bash(git commit*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(cat *)",
+      "Bash(ls *)",
+      "Bash(find *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(grep *)",
+      "Read(*)",
+      "Edit(*)",
+      "Write(*)"
+    ],
+    "deny": [
+      "Bash(rm -rf /)",
+      "Bash(git push --force)",
+      "Bash(git reset --hard)",
+      "Bash(docker system prune)",
+      "Bash(pip install*:!--break-system-packages)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "pattern": "**/*.{ts,tsx}",
+        "command": "npx prettier --write $FILE 2>/dev/null || true"
+      },
+      {
+        "matcher": "Edit|Write",
+        "pattern": "**/*.py",
+        "command": "cd backend && python -m black $FILE --quiet 2>/dev/null || true"
+      }
+    ],
+    "Stop": [
+      {
+        "command": "echo '\\n⚠️  Recuerda: ¿Documentaste en internal_docs/? ¿Actualizaste lessons.md si hubo errores?'"
+      }
+    ]
+  }
+}
