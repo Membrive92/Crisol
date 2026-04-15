@@ -1,0 +1,12 @@
+node_modules
+.next
+.expo
+.turbo
+dist
+build
+coverage
+pnpm-lock.yaml
+*.md
+!README.md
+!CLAUDE.md
+!CONTRIBUTING.md
