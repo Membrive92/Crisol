@@ -11,6 +11,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ─────────────────────────────────────
+  # Frontend
+  # ─────────────────────────────────────
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
@@ -40,3 +43,63 @@ jobs:
 
       - name: Build web
         run: pnpm --filter @finanzas/web build
+
+  # ─────────────────────────────────────
+  # Backend (Postgres + pgvector as service container)
+  # ─────────────────────────────────────
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: finanzas
+          POSTGRES_PASSWORD: finanzas
+          POSTGRES_DB: finanzas
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://finanzas:finanzas@localhost:5432/finanzas
+      JWT_SECRET_KEY: ci-only-not-secret
+      APP_ENV: test
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Ruff (lint)
+        run: ruff check app tests
+
+      - name: Black (format check)
+        run: black --check app tests
+
+      - name: Mypy (typecheck)
+        run: mypy app
+
+      - name: Alembic upgrade (smoke test migrations)
+        run: alembic upgrade head
+
+      - name: Pytest
+        run: pytest -v --tb=short
