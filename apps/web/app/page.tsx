@@ -1,17 +1,18 @@
-export default function HomePage() {
-  return (
-    <main
-      style={{
-        minHeight: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '2rem',
-      }}
-    >
-      <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>Finanzas App — Web</h1>
-      <p style={{ color: '#666' }}>PHASE-0.1 — bootstrap del monorepo</p>
-    </main>
-  );
+'use client';
+
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+
+import { useAuthStore } from '@finanzas/store';
+
+export default function RootPage() {
+  const router = useRouter();
+  const { isAuthenticated, isHydrated } = useAuthStore();
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    router.replace(isAuthenticated ? '/home' : '/login');
+  }, [isAuthenticated, isHydrated, router]);
+
+  return null;
 }

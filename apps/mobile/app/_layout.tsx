@@ -1,11 +1,51 @@
-import { Stack } from 'expo-router';
+import { useEffect } from 'react';
+import { Slot, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 
+import { authApi } from '@finanzas/services';
+import { useAuthStore } from '@finanzas/store';
+
+import { useAuthInit } from '../lib/auth-provider';
+
 export default function RootLayout() {
+  useAuthInit();
+
+  const router = useRouter();
+  const segments = useSegments();
+  const { isAuthenticated, isHydrated, refreshToken, setTokens, setUser, logout } = useAuthStore();
+
+  useEffect(() => {
+    if (!isHydrated) return;
+
+    const inAuthGroup = segments[0] === '(auth)';
+
+    if (!isAuthenticated && refreshToken) {
+      authApi
+        .refresh(refreshToken)
+        .then((tokens) => {
+          setTokens(tokens.access_token, tokens.refresh_token);
+          return authApi.getMe();
+        })
+        .then((user) => {
+          setUser(user);
+        })
+        .catch(() => {
+          logout();
+        });
+      return;
+    }
+
+    if (!isAuthenticated && !inAuthGroup) {
+      router.replace('/(auth)/login');
+    } else if (isAuthenticated && inAuthGroup) {
+      router.replace('/(tabs)/home');
+    }
+  }, [isAuthenticated, isHydrated, segments, refreshToken, setTokens, setUser, logout, router]);
+
   return (
     <>
       <StatusBar style="auto" />
-      <Stack screenOptions={{ headerShown: false }} />
+      <Slot />
     </>
   );
 }
