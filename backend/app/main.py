@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.modules.ai.router import router as ai_router
+from app.modules.auth.router import router as auth_router
 
 app = FastAPI(
     title="Finanzas App API",
@@ -25,6 +26,7 @@ app.add_middleware(
 
 
 app.include_router(ai_router)
+app.include_router(auth_router)
 
 
 @app.get("/health", tags=["system"])

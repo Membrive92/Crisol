@@ -33,7 +33,7 @@ Leyenda: ⏳ pendiente · 🚧 en curso · ✅ completada · ❌ bloqueada
 
 | Fase | Nombre           | Estado | PR |
 |------|------------------|--------|----|
-| 1.1  | Auth backend     | ⏳     | —  |
+| 1.1  | Auth backend     | ✅     | —  |
 | 1.2  | Auth frontend    | ⏳     | —  |
 
 ### Fase 2 — Transacciones
