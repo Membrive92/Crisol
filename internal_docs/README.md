@@ -24,8 +24,8 @@ Leyenda: ⏳ pendiente · 🚧 en curso · ✅ completada · ❌ bloqueada
 
 | Fase | Nombre                | Estado | PR |
 |------|-----------------------|--------|----|
-| 0.0  | Setup inicial (docs)  | 🚧     | —  |
-| 0.1  | Bootstrap monorepo    | ⏳     | —  |
+| 0.0  | Setup inicial (docs)  | ✅     | —  |
+| 0.1  | Bootstrap monorepo    | 🚧     | —  |
 | 0.2  | Bootstrap backend     | ⏳     | —  |
 | 0.3  | Bootstrap Ollama      | ⏳     | —  |
 
