@@ -26,8 +26,8 @@ Leyenda: ⏳ pendiente · 🚧 en curso · ✅ completada · ❌ bloqueada
 |------|-----------------------|--------|----|
 | 0.0  | Setup inicial (docs)  | ✅     | —  |
 | 0.1  | Bootstrap monorepo    | ✅     | #1 |
-| 0.2  | Bootstrap backend     | 🚧     | —  |
-| 0.3  | Bootstrap Ollama      | ⏳     | —  |
+| 0.2  | Bootstrap backend     | ✅     | —  |
+| 0.3  | Bootstrap Ollama      | ✅     | —  |
 
 ### Fase 1 — Autenticación
 

@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 15
     jwt_refresh_token_expire_days: int = 7
 
+    # ---------- Ollama (IA local) ----------
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_vision_model: str = "qwen2.5-vl:7b"
+    ollama_timeout_seconds: int = 120
+
     # ---------- CORS ----------
     cors_origins: str = "http://localhost:3000,http://localhost:8081"
 
