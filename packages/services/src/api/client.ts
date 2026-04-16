@@ -10,10 +10,11 @@ let _accessToken: string | null = null;
 let _refreshToken: string | null = null;
 let _onAuthFailure: (() => void) | null = null;
 let _isRefreshing = false;
-let _refreshQueue: Array<{
+interface RefreshQueueEntry {
   resolve: (token: string) => void;
   reject: (err: unknown) => void;
-}> = [];
+}
+let _refreshQueue: RefreshQueueEntry[] = [];
 
 export const apiClient = axios.create({
   headers: { 'Content-Type': 'application/json' },
