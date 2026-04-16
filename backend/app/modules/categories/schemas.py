@@ -1,0 +1,43 @@
+"""Schemas Pydantic del módulo categories."""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+
+from pydantic import BaseModel, Field
+
+from app.modules.categories.models import CategoryKind
+
+
+class CategoryCreate(BaseModel):
+    """Datos para crear una categoría."""
+
+    name: str = Field(min_length=1, max_length=100)
+    icon: str | None = Field(default=None, max_length=50)
+    color: str | None = Field(default=None, max_length=7)
+    kind: CategoryKind
+
+
+class CategoryUpdate(BaseModel):
+    """Datos para actualizar una categoría (parcial)."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    icon: str | None = None
+    color: str | None = None
+    kind: CategoryKind | None = None
+
+
+class CategoryResponse(BaseModel):
+    """Respuesta pública de una categoría."""
+
+    id: uuid.UUID
+    user_id: uuid.UUID
+    name: str
+    icon: str | None
+    color: str | None
+    kind: CategoryKind
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
