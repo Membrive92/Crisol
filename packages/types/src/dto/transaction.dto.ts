@@ -1,0 +1,34 @@
+import type { Transaction, TransactionSource } from '../models/transaction';
+
+export interface TransactionCreateRequest {
+  category_id?: string | null;
+  amount: string;
+  currency?: string;
+  occurred_at: string;
+  description?: string | null;
+  source?: TransactionSource;
+}
+
+export interface TransactionUpdateRequest {
+  category_id?: string | null;
+  amount?: string;
+  currency?: string;
+  occurred_at?: string;
+  description?: string | null;
+}
+
+export interface TransactionListQuery {
+  category_id?: string;
+  date_from?: string;
+  date_to?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface TransactionListResponse {
+  items: Transaction[];
+  total: number;
+  limit: number;
+  offset: number;
+}
