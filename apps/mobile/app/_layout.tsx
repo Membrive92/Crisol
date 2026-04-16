@@ -1,11 +1,12 @@
 import { useEffect } from 'react';
-import { Slot, useRouter, useSegments } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 
 import { authApi } from '@finanzas/services';
 import { useAuthStore } from '@finanzas/store';
 
 import { useAuthInit } from '../lib/auth-provider';
+import { QueryProvider } from '../lib/query-provider';
 
 export default function RootLayout() {
   useAuthInit();
@@ -43,9 +44,14 @@ export default function RootLayout() {
   }, [isAuthenticated, isHydrated, segments, refreshToken, setTokens, setUser, logout, router]);
 
   return (
-    <>
+    <QueryProvider>
       <StatusBar style="auto" />
-      <Slot />
-    </>
+      <Stack>
+        <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="transaction/new" options={{ title: 'Nueva transacción' }} />
+        <Stack.Screen name="transaction/[id]" options={{ title: 'Editar transacción' }} />
+      </Stack>
+    </QueryProvider>
   );
 }

@@ -19,6 +19,8 @@
     "@finanzas/services": "workspace:*",
     "@finanzas/store": "workspace:*",
     "@finanzas/types": "workspace:*",
+    "@finanzas/ui": "workspace:*",
+    "@tanstack/react-query": "^5.59.0",
     "expo": "~52.0.20",
     "expo-secure-store": "~14.0.1",
     "expo-constants": "~17.0.3",
