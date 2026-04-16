@@ -41,7 +41,7 @@ Leyenda: ⏳ pendiente · 🚧 en curso · ✅ completada · ❌ bloqueada
 | Fase | Nombre                  | Estado | PR |
 |------|-------------------------|--------|----|
 | 2.1  | Transactions backend    | ✅     | —  |
-| 2.2  | Transactions frontend   | ⏳     | —  |
+| 2.2  | Transactions frontend   | ✅     | —  |
 
 ### Fase 3 — Dashboard
 
