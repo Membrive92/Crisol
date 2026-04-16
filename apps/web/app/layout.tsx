@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 
 import { AuthProvider } from '@/lib/auth-provider';
+import { QueryProvider } from '@/lib/query-provider';
 
 export const metadata = {
   title: 'Finanzas App',
@@ -17,7 +18,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif',
         }}
       >
-        <AuthProvider>{children}</AuthProvider>
+        <QueryProvider>
+          <AuthProvider>{children}</AuthProvider>
+        </QueryProvider>
       </body>
     </html>
   );

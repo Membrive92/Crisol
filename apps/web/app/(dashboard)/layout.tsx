@@ -1,10 +1,12 @@
 'use client';
 
 import { useEffect } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 import { useAuthStore } from '@finanzas/store';
 import { authApi } from '@finanzas/services';
+import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -49,5 +51,29 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return null;
   }
 
-  return <>{children}</>;
+  return (
+    <div style={{ minHeight: '100vh', backgroundColor: colors.background }}>
+      <nav
+        style={{
+          display: 'flex',
+          gap: spacing.lg,
+          alignItems: 'center',
+          padding: `${spacing.md}px ${spacing.lg}px`,
+          backgroundColor: colors.surface,
+          borderBottom: `1px solid ${colors.border}`,
+        }}
+      >
+        <span style={{ fontSize: fontSize.lg, fontWeight: fontWeight.semibold, color: colors.primary }}>
+          Finanzas
+        </span>
+        <Link href="/home" style={{ color: colors.text, textDecoration: 'none' }}>
+          Inicio
+        </Link>
+        <Link href="/transactions" style={{ color: colors.text, textDecoration: 'none' }}>
+          Transacciones
+        </Link>
+      </nav>
+      {children}
+    </div>
+  );
 }
