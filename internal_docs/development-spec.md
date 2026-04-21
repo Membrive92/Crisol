@@ -108,12 +108,13 @@ Opcional: GitHub Release con notas.
 
 ### Commits
 
-- Formato: `tipo(scope): descripción — Refs: PHASE-X.Y`
+- Formato: `tipo(scope): description — Refs: PHASE-X.Y`
 - Ejemplos:
-  - `feat(auth): login con JWT y refresh token — Refs: PHASE-1.1`
-  - `fix(transactions): aislamiento por user_id en filtros — Refs: PHASE-2.1`
-  - `docs(phase-2.1): añadir documento de fase — Refs: PHASE-2.1`
-- Idioma: español para descripciones, inglés para nombres técnicos.
+  - `feat(auth): JWT login with refresh tokens — Refs: PHASE-1.1`
+  - `fix(transactions): enforce user_id isolation in filters — Refs: PHASE-2.1`
+  - `docs(phase-2.1): add phase document — Refs: PHASE-2.1`
+- Idioma: **inglés en mensajes de commit** (subject + body). El resto de la
+  documentación del proyecto (phase docs, ADRs, README) sigue en español.
 - No mezclar fases en un mismo commit.
 
 ### PRs
