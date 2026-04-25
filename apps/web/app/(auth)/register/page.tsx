@@ -30,7 +30,7 @@ export default function RegisterPage() {
       setTokens(tokens.access_token, tokens.refresh_token);
       const user = await authApi.getMe();
       setUser(user);
-      router.replace('/home');
+      router.replace('/dashboard');
     } catch {
       setError('Error al registrarse. ¿El email ya está en uso?');
     } finally {

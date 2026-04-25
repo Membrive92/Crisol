@@ -47,6 +47,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, [isHydrated, isAuthenticated, accessToken, refreshToken, setTokens, setUser, logout, router]);
 
+  async function handleLogout() {
+    try {
+      if (refreshToken) {
+        await authApi.logout(refreshToken);
+      }
+    } finally {
+      logout();
+      router.replace('/login');
+    }
+  }
+
   if (!isHydrated || !isAuthenticated) {
     return null;
   }
@@ -63,15 +74,38 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           borderBottom: `1px solid ${colors.border}`,
         }}
       >
-        <span style={{ fontSize: fontSize.lg, fontWeight: fontWeight.semibold, color: colors.primary }}>
+        <span
+          style={{
+            fontSize: fontSize.lg,
+            fontWeight: fontWeight.semibold,
+            color: colors.primary,
+          }}
+        >
           Finanzas
         </span>
-        <Link href="/home" style={{ color: colors.text, textDecoration: 'none' }}>
-          Inicio
+        <Link href="/dashboard" style={{ color: colors.text, textDecoration: 'none' }}>
+          Dashboard
         </Link>
         <Link href="/transactions" style={{ color: colors.text, textDecoration: 'none' }}>
           Transacciones
         </Link>
+        <button
+          type="button"
+          onClick={handleLogout}
+          style={{
+            marginLeft: 'auto',
+            padding: `${spacing.xs}px ${spacing.sm}px`,
+            backgroundColor: 'transparent',
+            color: colors.danger,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 6,
+            cursor: 'pointer',
+            fontSize: fontSize.sm,
+            fontWeight: fontWeight.medium,
+          }}
+        >
+          Cerrar sesión
+        </button>
       </nav>
       {children}
     </div>

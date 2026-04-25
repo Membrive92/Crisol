@@ -25,7 +25,7 @@ export default function LoginPage() {
       setTokens(tokens.access_token, tokens.refresh_token);
       const user = await authApi.getMe();
       setUser(user);
-      router.replace('/home');
+      router.replace('/dashboard');
     } catch {
       setError('Credenciales incorrectas');
     } finally {
