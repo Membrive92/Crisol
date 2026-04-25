@@ -55,6 +55,32 @@ pero no lo arrastra para el binario del paquete).
 script de lint.
 **Regla:** Si añades script de `lint` a un paquete, añade `eslint` a sus devDeps en el mismo commit.
 
+### [PHASE-4.1] Endpoints con `status_code=204` y retorno `None` revientan en FastAPI ≥ 0.116
+**Error:** Tras actualizar a FastAPI 0.116, los endpoints con
+`@router.post(..., status_code=204)` y firma `-> None` lanzaban
+`AssertionError: Status code 204 must not have a response body` al arrancar la app.
+Bloqueaba todos los tests del backend, no solo los del módulo nuevo.
+**Causa:** FastAPI 0.116 añadió un check estricto: cuando hay `response_model` implícito
+(deducido del tipo de retorno) y el status code es 204, el assert falla. Antes era warning.
+**Solución:** Importar `Response` de FastAPI, declarar `response_class=Response` en el
+decorador, y devolver `Response(status_code=204)` explícitamente.
+**Regla:** Cualquier endpoint que devuelva 204 debe tener `response_class=Response` y
+retornar `Response(status_code=204)`. NUNCA confiar en el tipo `-> None` para indicar "sin body".
+
+### [PHASE-4.1] `model_validate` falla con `MissingGreenlet` tras `flush` con `onupdate`
+**Error:** `ImportJobResponse.model_validate(job)` devolvía `MissingGreenlet:
+greenlet_spawn has not been called` al acceder a `updated_at` justo después de
+`await db.flush()` cuando el service mutaba el job.
+**Causa:** El campo `updated_at` tiene `onupdate=func.now()`. Cuando SQLAlchemy emite el
+UPDATE, el valor calculado por la DB no se trae de vuelta al objeto en memoria; SA marca
+el atributo como expirado. Al leerlo desde Pydantic (síncrono) intenta lazy load, pero
+la sesión es async — y revienta. `expire_on_commit=False` no protege porque el atributo
+no se "expira" tras commit, queda *stale* tras el flush con `onupdate`.
+**Solución:** Después del último `flush()` que mute el objeto, llamar a
+`await db.refresh(job)` antes de devolverlo al router.
+**Regla:** Si un service muta un objeto con campos `onupdate=func.now()` y el endpoint
+serializa ese objeto post-mutación, hacer `await db.refresh(obj)` antes de retornar.
+
 ---
 
 ## Ejemplos de referencia (no son lecciones reales)
