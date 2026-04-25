@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -45,9 +45,20 @@ class Transaction(Base):
         nullable=False, default=TransactionSource.MANUAL
     )
     receipt_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    import_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_transactions_user_import_hash",
+            "user_id",
+            "import_hash",
+            unique=True,
+            postgresql_where="import_hash IS NOT NULL",
+        ),
     )
