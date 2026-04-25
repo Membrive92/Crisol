@@ -19,6 +19,8 @@ dependencies = [
   "argon2-cffi>=23.1.0",
   "PyJWT[crypto]>=2.9.0",
   "email-validator>=2.2.0",
+  "openpyxl>=3.1.5",
+  "python-multipart>=0.0.20",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +31,7 @@ dev = [
   "ruff>=0.8.0",
   "black>=24.10.0",
   "mypy>=1.13.0",
+  "types-openpyxl>=3.1.5",
 ]
 
 [tool.setuptools.packages.find]
