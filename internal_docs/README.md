@@ -48,7 +48,7 @@ Leyenda: ⏳ pendiente · 🚧 en curso · ✅ completada · ❌ bloqueada
 | Fase | Nombre              | Estado | PR |
 |------|---------------------|--------|----|
 | 3.1  | Dashboard backend   | ✅     | —  |
-| 3.2  | Dashboard frontend  | ⏳     | —  |
+| 3.2  | Dashboard frontend  | ✅     | —  |
 
 ### Fase 4 — Importación
 
