@@ -1,0 +1,127 @@
+# Schema de base de datos
+
+> Estado actual del modelo de datos. Se actualiza cuando una fase
+> introduce migraciones. Última actualización: PHASE-4.1.
+
+## Convenciones
+
+- PostgreSQL 16 + extensión `pgvector` (esta última se usará en PHASE-5.x).
+- PK: `id UUID DEFAULT uuid_generate_v4()` (o cliente).
+- Toda tabla de dominio tiene `user_id UUID NOT NULL` con FK a `users`
+  (`ON DELETE CASCADE`).
+- Importes en `NUMERIC(14, 2)` — nunca `float`.
+- Fechas en `TIMESTAMPTZ`.
+- `created_at`, `updated_at` en todas las tablas mutables.
+
+## Migraciones aplicadas
+
+| Revisión | Fase | Descripción |
+|----------|------|-------------|
+| `4698c02a5861` | 1.1, 2.1 | Initial schema — `users`, `refresh_tokens`, `categories`, `transactions`. |
+| `7c3a91f4d2b8` | 4.1 | `import_jobs` + `transactions.import_hash` + índice único parcial. |
+
+---
+
+## Tablas
+
+### `users` (`PHASE-1.1`)
+
+| Columna | Tipo | Notas |
+|---------|------|-------|
+| `id` | `UUID` PK | |
+| `email` | `VARCHAR(255)` UNIQUE | índice único, lower-cased en service. |
+| `password_hash` | `VARCHAR(512)` | argon2id. |
+| `display_name` | `VARCHAR(100)` | |
+| `is_active` | `BOOLEAN` | default `TRUE`. Soft-disable para futuros flujos de baja. |
+| `created_at` | `TIMESTAMPTZ` | `now()`. |
+| `updated_at` | `TIMESTAMPTZ` | `now()`, `onupdate=now()`. |
+
+### `refresh_tokens` (`PHASE-1.1`)
+
+| Columna | Tipo | Notas |
+|---------|------|-------|
+| `id` | `UUID` PK | |
+| `user_id` | `UUID` FK → `users.id` `ON DELETE CASCADE` | índice. |
+| `token_hash` | `VARCHAR(512)` UNIQUE | SHA-256 del refresh token. |
+| `expires_at` | `TIMESTAMPTZ` | 7 días. |
+| `revoked` | `BOOLEAN` | rotación marca el viejo. |
+| `created_at` | `TIMESTAMPTZ` | |
+
+### `categories` (`PHASE-2.1`)
+
+| Columna | Tipo | Notas |
+|---------|------|-------|
+| `id` | `UUID` PK | |
+| `user_id` | `UUID` FK → `users.id` `ON DELETE CASCADE` | índice. |
+| `name` | `VARCHAR(100)` | |
+| `icon` | `VARCHAR(50)` NULLABLE | identificador de icono (frontend lo resuelve). |
+| `color` | `VARCHAR(7)` NULLABLE | hex `#RRGGBB`. |
+| `kind` | `ENUM('income','expense')` | tipo `categorykind`. |
+| `created_at` / `updated_at` | `TIMESTAMPTZ` | |
+
+### `transactions` (`PHASE-2.1` + `PHASE-4.1`)
+
+| Columna | Tipo | Notas |
+|---------|------|-------|
+| `id` | `UUID` PK | |
+| `user_id` | `UUID` FK → `users.id` `ON DELETE CASCADE` | índice. |
+| `category_id` | `UUID` FK → `categories.id` `ON DELETE SET NULL` | índice, nullable. |
+| `amount` | `NUMERIC(14,2)` | siempre positivo. Signo lo decide `category.kind`. |
+| `currency` | `CHAR(3)` | ISO 4217. Default `EUR`. |
+| `occurred_at` | `TIMESTAMPTZ` | fecha de la transacción. |
+| `description` | `TEXT` NULLABLE | |
+| `source` | `ENUM('manual','import','receipt')` | tipo `transactionsource`. |
+| `receipt_id` | `UUID` NULLABLE | (PHASE-5.1, FK aún no creada). |
+| `import_hash` | `VARCHAR(64)` NULLABLE | SHA-256 — solo presente si `source='import'`. |
+| `created_at` / `updated_at` | `TIMESTAMPTZ` | |
+
+**Índices**:
+- `ix_transactions_user_id`.
+- `ix_transactions_category_id`.
+- `uq_transactions_user_import_hash` UNIQUE PARTIAL `(user_id, import_hash) WHERE import_hash IS NOT NULL`.
+
+### `import_jobs` (`PHASE-4.1`)
+
+| Columna | Tipo | Notas |
+|---------|------|-------|
+| `id` | `UUID` PK | |
+| `user_id` | `UUID` FK → `users.id` `ON DELETE CASCADE` | índice. |
+| `filename` | `VARCHAR(255)` | nombre original del fichero subido. |
+| `status` | `ENUM('pending','processing','completed','failed')` | tipo `importjobstatus`. |
+| `rows_total` | `INTEGER` | filas leídas del fichero. |
+| `rows_ok` | `INTEGER` | transacciones efectivamente persistidas. |
+| `rows_failed` | `INTEGER` | filas inválidas (validación). |
+| `rows_skipped` | `INTEGER` | duplicados intra-batch + ya existentes en BD. |
+| `column_mappings` | `JSONB` | mapping enviado en el upload. |
+| `error_log` | `JSONB` | `[{ row, error }]`, capado a 100. |
+| `created_at` / `updated_at` | `TIMESTAMPTZ` | |
+
+---
+
+## Tablas planeadas (próximas fases)
+
+| Tabla | Fase | Estado |
+|-------|------|--------|
+| `receipts` | 5.1 | ⏳ |
+
+---
+
+## Diagrama relacional
+
+```
+users ─┬─< refresh_tokens
+       ├─< categories ──┐
+       ├─< transactions ┘   (category_id ON DELETE SET NULL)
+       └─< import_jobs
+
+transactions.import_hash → unique partial index para deduplicar
+                           imports sin afectar a manual/receipt.
+```
+
+## Enums (PostgreSQL `CREATE TYPE`)
+
+| Nombre | Valores |
+|--------|---------|
+| `categorykind` | `INCOME`, `EXPENSE` |
+| `transactionsource` | `MANUAL`, `IMPORT`, `RECEIPT` |
+| `importjobstatus` | `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED` |

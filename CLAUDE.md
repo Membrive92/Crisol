@@ -21,8 +21,9 @@
     gestión de estado (Zustand + TanStack Query), y estándares de testing/calidad.
   - Las referencias están en .claude/skills/frontend-best-practices/references/
     (architecture.md, components.md, state-and-data.md, testing-and-quality.md)
-- Local AI integration: pendiente — se creará en PHASE-5.1 cuando se implemente
-  el módulo `backend/app/modules/ai/` y el pipeline de extracción de tickets.
+- Local AI integration: pendiente — el módulo `backend/app/modules/ai/` ya
+  existe con cliente Ollama y `/ai/health` (PHASE-0.3). La skill se creará en
+  PHASE-5.1 junto con el pipeline de extracción de tickets.
 
 ## IA local — principios no negociables
 - Runtime: Ollama (local). Modelo visión por defecto: qwen2.5-vl:7b.

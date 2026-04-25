@@ -1,7 +1,7 @@
 # Arquitectura — Finanzas App
 
 > Documento vivo. Se actualiza cuando una fase introduce cambios arquitectónicos.
-> Última actualización: PHASE-0.0 (setup inicial).
+> Última actualización: PHASE-4.1 — módulo `imports/` + `Transaction.import_hash`.
 
 ---
 
@@ -97,24 +97,20 @@ imagen para despliegue.
 ```
 finanzas-app/
 ├── apps/
-│   ├── web/                # Next.js App Router
-│   └── mobile/             # Expo Router
+│   ├── web/                # Next.js App Router (apps/web/components/* solo-web)
+│   └── mobile/             # Expo Router (apps/mobile/components/* solo-mobile)
 ├── packages/
-│   ├── ui/                 # Componentes compartidos (sin data fetching)
-│   ├── features/           # Feature modules (auth, transactions, receipts…)
-│   ├── hooks/              # Hooks genéricos
-│   ├── services/           # Cliente API + TanStack Query hooks
-│   ├── store/              # Zustand stores globales
 │   ├── types/              # Tipos del dominio compartidos
-│   ├── utils/              # Helpers, formatters
-│   └── config/             # ESLint, Tailwind, tsconfig compartidos
+│   ├── ui/                 # Design tokens + formatters puros (ADR 0001)
+│   ├── services/           # Cliente API + TanStack Query hooks + query keys
+│   └── store/              # Zustand stores (auth)
 ├── tooling/
 │   ├── eslint/
 │   └── typescript/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py
-│   │   ├── core/           # Config, DB, security, exceptions
+│   │   ├── core/           # Config, DB, security, deps
 │   │   └── modules/        # Un directorio por módulo de dominio
 │   ├── alembic/            # Migraciones
 │   ├── tests/
@@ -127,20 +123,32 @@ finanzas-app/
     ├── architecture.md
     ├── development-spec.md
     ├── lessons.md
+    ├── api/                # endpoints.md (PHASE-4.1)
+    ├── data-model/         # schema.md (PHASE-4.1)
+    ├── decisions/          # ADRs (0001-ui-tokens-only)
+    ├── phases/             # 1 doc por fase completada
     └── ai-context/
 ```
 
-Reglas de imports entre packages (ver [skill frontend-best-practices](../.claude/skills/frontend-best-practices/SKILL.md)):
+Notas sobre el monorepo actual:
+
+- `packages/ui` contiene **solo design tokens y formatters** —
+  no componentes RN/web (ver [ADR 0001](decisions/0001-ui-tokens-only.md)).
+  Los componentes UI viven en cada app (`apps/web/components/`,
+  `apps/mobile/components/`).
+- `packages/utils`, `packages/hooks`, `packages/features` y
+  `packages/config` están planeados en la spec original pero **no se
+  han creado todavía**: las apps no los han necesitado y no tiene
+  sentido crear paquetes vacíos.
+
+Reglas de imports vigentes:
 
 ```
-types  →  (sin deps internas)
-utils  →  types
-hooks  →  types, utils
-services → types, utils
-store  →  types, utils, services
-ui     →  types, utils, hooks   (NUNCA services ni store)
-features → cualquiera excepto otros features
-apps/* →  cualquier package
+types     →  (sin deps internas)
+ui        →  (sin deps internas — solo tokens y funciones puras)
+services  →  types
+store     →  types
+apps/*    →  cualquier package
 ```
 
 ---
@@ -169,16 +177,16 @@ modules/{nombre}/
 
 ### Módulos del MVP
 
-| Módulo           | Responsabilidad                                                       |
-|------------------|-----------------------------------------------------------------------|
-| `users`          | CRUD de usuarios, perfil                                              |
-| `auth`           | Registro, login, refresh token, logout                                |
-| `categories`     | Categorías de gasto/ingreso por usuario                               |
-| `transactions`   | CRUD de transacciones, filtros, aislamiento                           |
-| `imports`        | Importación de CSV/Excel bancarios                                    |
-| `ai`             | Cliente Ollama, prompts, extracción estructurada — **uso interno**    |
-| `receipts`       | Pipeline de tickets: upload → ai → confirmación → persistencia        |
-| `dashboard`      | Agregaciones y KPIs (sin estado propio)                               |
+| Módulo           | Estado | Responsabilidad                                                |
+|------------------|--------|----------------------------------------------------------------|
+| `users`          | ✅     | CRUD de usuarios, perfil                                       |
+| `auth`           | ✅     | Registro, login, refresh token con rotación, logout, `/me`     |
+| `categories`     | ✅     | Categorías de gasto/ingreso por usuario                        |
+| `transactions`   | ✅     | CRUD de transacciones, filtros, aislamiento, `import_hash`     |
+| `dashboard`      | ✅     | Agregaciones y KPIs (read-only sobre transactions/categories)  |
+| `imports`        | ✅     | Importación CSV/XLSX con dedup por hash, jobs auditables       |
+| `ai`             | 🚧     | Cliente Ollama + `/ai/health` (extracción se integra en 5.1)   |
+| `receipts`       | ⏳     | Pipeline de tickets: upload → ai → confirmación → persistencia |
 
 ---
 
@@ -186,14 +194,17 @@ modules/{nombre}/
 
 - **JWT propio**:
   - Access token: 15 min, en memoria (frontend) / Authorization header.
-  - Refresh token: 7 días, rotación en cada uso.
-- **Storage de refresh token**:
-  - Web: cookie `httpOnly`, `Secure`, `SameSite=Strict`.
+  - Refresh token: 7 días, rotación en cada uso (revocación marcada en BD).
+- **Storage de refresh token (estado actual)**:
+  - Web: `localStorage` (PHASE-1.2). El plan original era cookie
+    `httpOnly` + `Secure` + `SameSite=Strict`; queda como deuda
+    técnica a abordar antes de despliegue público.
   - Mobile: `expo-secure-store`.
 - **Password hashing**: argon2id (`argon2-cffi`).
 - **Rate limiting**: futuro. No bloqueante para MVP.
-- **CORS**: estricto por entorno.
-- **Headers de seguridad**: CSP, HSTS, X-Frame-Options (gestión en Next.js middleware y reverse proxy futuro).
+- **CORS**: estricto por entorno (`settings.cors_origins_list`).
+- **Headers de seguridad**: CSP, HSTS, X-Frame-Options pendientes
+  (Next.js middleware + reverse proxy en despliegue).
 
 ---
 
@@ -260,39 +271,31 @@ Convenciones:
 - Fechas en `TIMESTAMPTZ`.
 - FK con `ON DELETE CASCADE` en relaciones hijas del usuario.
 
-### Entidades iniciales
+### Entidades
+
+Estado actual del schema documentado en detalle en
+[`data-model/schema.md`](data-model/schema.md). Tablas implementadas:
 
 ```
-users
-├── id, email (unique), password_hash, display_name
-└── created_at, updated_at
-
-categories
-├── id, user_id, name, icon, color
-├── kind: ENUM('income', 'expense')
-└── created_at, updated_at
-
-transactions
-├── id, user_id, category_id, amount NUMERIC(14,2), currency CHAR(3)
-├── occurred_at TIMESTAMPTZ, description TEXT
-├── source: ENUM('manual', 'import', 'receipt')
-├── receipt_id FK NULLABLE
-└── created_at, updated_at
-
-receipts
-├── id, user_id, blob_key, mime_type
-├── status: ENUM('pending', 'confirmed', 'rejected')
-├── extracted_json JSONB, extracted_at, model_version
-└── created_at, updated_at
-
-import_jobs
-├── id, user_id, filename, status
-├── rows_ok, rows_failed, error_log JSONB
-└── created_at, updated_at
+users               (PHASE-1.1) ✅
+refresh_tokens      (PHASE-1.1) ✅
+categories          (PHASE-2.1) ✅
+transactions        (PHASE-2.1, PHASE-4.1: + import_hash) ✅
+import_jobs         (PHASE-4.1) ✅
+receipts            (PHASE-5.1) ⏳
 ```
 
-Se documentará en detalle en `internal_docs/data-model/schema.md` a medida
-que se implementen las migraciones (archivo se crea en PHASE-1.1).
+Resumen rápido:
+
+```
+users ─┬─< refresh_tokens
+       ├─< categories ──┐
+       ├─< transactions ┘   (category_id ON DELETE SET NULL)
+       └─< import_jobs
+
+transactions.import_hash → unique partial index (user_id, import_hash)
+                           para deduplicar imports sin afectar a manual.
+```
 
 ---
 

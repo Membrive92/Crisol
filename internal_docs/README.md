@@ -11,6 +11,10 @@ ADRs (Architecture Decision Records), catálogo de endpoints y schema de BD.
 - [architecture.md](architecture.md) — arquitectura del sistema
 - [development-spec.md](development-spec.md) — metodología y fases
 - [lessons.md](lessons.md) — errores y reglas aprendidas
+- [api/endpoints.md](api/endpoints.md) — catálogo de endpoints
+- [data-model/schema.md](data-model/schema.md) — estado del schema
+- [decisions/](decisions/) — ADRs (decisiones arquitectónicas)
+- [phases/](phases/) — un documento por fase completada
 - [ai-context/](ai-context/) — contexto de consulta bajo demanda para IA
   (glosario, ejemplos, evaluaciones de modelos, prompts guardados)
 
@@ -76,10 +80,10 @@ internal_docs/
 ├── lessons.md              # errores y reglas aprendidas
 ├── ai-context/             # contexto de consulta bajo demanda para IA
 │   └── README.md
-├── phases/                 # (se crea en PHASE-0.1) docs por fase completada
-├── decisions/              # (se crea cuando toque) ADRs
-├── api/                    # (se crea en PHASE-1.1) catálogo de endpoints
-└── data-model/             # (se crea en PHASE-1.1) estado del schema
+├── phases/                 # docs por fase completada
+├── decisions/              # ADRs (0001-ui-tokens-only)
+├── api/                    # endpoints.md (catálogo)
+└── data-model/             # schema.md (estado de las tablas)
 ```
 
 ---
