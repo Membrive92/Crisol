@@ -1,6 +1,12 @@
 export type { User } from './models/user';
 export type { Category, CategoryKind } from './models/category';
 export type { Transaction, TransactionSource } from './models/transaction';
+export type {
+  DashboardSummary,
+  CategoryBreakdownItem,
+  MonthlyBucket,
+  TopExpenseItem,
+} from './models/dashboard';
 
 export type {
   LoginRequest,
@@ -20,3 +26,10 @@ export type {
   TransactionListQuery,
   TransactionListResponse,
 } from './dto/transaction.dto';
+
+export type {
+  DashboardSummaryQuery,
+  DashboardByCategoryQuery,
+  DashboardByMonthQuery,
+  DashboardTopExpensesQuery,
+} from './dto/dashboard.dto';
