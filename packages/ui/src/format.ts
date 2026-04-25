@@ -50,3 +50,20 @@ export function fromDateInputValue(value: string): string {
   if (!value) return new Date().toISOString();
   return new Date(`${value}T00:00:00Z`).toISOString();
 }
+
+/**
+ * Formatea un mes `YYYY-MM` como etiqueta legible (`Abr 2026`).
+ * Si el formato es inválido devuelve el valor original.
+ */
+export function formatMonthLabel(yearMonth: string, locale = 'es-ES'): string {
+  const match = /^(\d{4})-(\d{2})$/.exec(yearMonth);
+  if (!match) return yearMonth;
+  const [, year, month] = match;
+  const date = new Date(Number(year), Number(month) - 1, 1);
+  if (Number.isNaN(date.getTime())) return yearMonth;
+  const label = new Intl.DateTimeFormat(locale, {
+    month: 'short',
+    year: 'numeric',
+  }).format(date);
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}

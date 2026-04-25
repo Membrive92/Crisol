@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   formatAmount,
   formatDate,
+  formatMonthLabel,
   fromDateInputValue,
   toDateInputValue,
 } from './format';
@@ -54,5 +55,22 @@ describe('fromDateInputValue', () => {
   it('devuelve un ISO válido si el input está vacío', () => {
     const iso = fromDateInputValue('');
     expect(new Date(iso).toString()).not.toBe('Invalid Date');
+  });
+});
+
+describe('formatMonthLabel', () => {
+  it('convierte YYYY-MM a una etiqueta legible capitalizada', () => {
+    const result = formatMonthLabel('2026-04', 'es-ES');
+    expect(result).toMatch(/^[A-Z]/);
+    expect(result).toContain('2026');
+  });
+
+  it('devuelve el valor original si el formato no coincide', () => {
+    expect(formatMonthLabel('not-a-month')).toBe('not-a-month');
+  });
+
+  it('soporta locales distintos', () => {
+    const result = formatMonthLabel('2026-01', 'en-US');
+    expect(result).toMatch(/Jan/i);
   });
 });
