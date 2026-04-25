@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -54,15 +54,16 @@ async def refresh_endpoint(
     return result
 
 
-@router.post("/logout", status_code=204)
+@router.post("/logout", status_code=204, response_class=Response)
 async def logout_endpoint(
     body: RefreshRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     _user: CurrentUser,
-) -> None:
+) -> Response:
     """Revoca el refresh token."""
     await logout(db, body.refresh_token)
     await db.commit()
+    return Response(status_code=204)
 
 
 @router.get("/me", response_model=UserResponse)

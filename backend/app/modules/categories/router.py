@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -68,12 +68,13 @@ async def update_endpoint(
     return CategoryResponse.model_validate(category)
 
 
-@router.delete("/{category_id}", status_code=204)
+@router.delete("/{category_id}", status_code=204, response_class=Response)
 async def delete_endpoint(
     category_id: uuid.UUID,
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> None:
+) -> Response:
     """Elimina una categoría."""
     await delete_category(db, category_id, user.id)
     await db.commit()
+    return Response(status_code=204)

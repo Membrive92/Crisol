@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -94,12 +94,13 @@ async def update_endpoint(
     return TransactionResponse.model_validate(transaction)
 
 
-@router.delete("/{transaction_id}", status_code=204)
+@router.delete("/{transaction_id}", status_code=204, response_class=Response)
 async def delete_endpoint(
     transaction_id: uuid.UUID,
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> None:
+) -> Response:
     """Elimina una transacción."""
     await delete_transaction(db, transaction_id, user.id)
     await db.commit()
+    return Response(status_code=204)
