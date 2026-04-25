@@ -27,4 +27,23 @@ describe('queryKeys', () => {
     expect(queryKeys.transactions.detail('abc')).toEqual(['transactions', 'detail', 'abc']);
     expect(queryKeys.categories.detail('xyz')).toEqual(['categories', 'detail', 'xyz']);
   });
+
+  it('dashboard.all es estable', () => {
+    expect(queryKeys.dashboard.all).toEqual(['dashboard']);
+  });
+
+  it('dashboard.summary normaliza el orden de filtros', () => {
+    const a = queryKeys.dashboard.summary({ currency: 'USD', date_from: '2026-01-01' });
+    const b = queryKeys.dashboard.summary({ date_from: '2026-01-01', currency: 'USD' });
+    expect(a).toEqual(b);
+  });
+
+  it('dashboard.byMonth conserva year', () => {
+    const key = queryKeys.dashboard.byMonth({ year: 2026, currency: 'EUR' });
+    expect(key).toEqual([
+      'dashboard',
+      'by-month',
+      { currency: 'EUR', year: 2026 },
+    ]);
+  });
 });

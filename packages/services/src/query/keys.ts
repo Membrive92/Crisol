@@ -1,4 +1,10 @@
-import type { TransactionListQuery } from '@finanzas/types';
+import type {
+  DashboardByCategoryQuery,
+  DashboardByMonthQuery,
+  DashboardSummaryQuery,
+  DashboardTopExpensesQuery,
+  TransactionListQuery,
+} from '@finanzas/types';
 
 /**
  * Query keys centralizados para TanStack Query.
@@ -16,8 +22,19 @@ export const queryKeys = {
   transactions: {
     all: ['transactions'] as const,
     list: (query: TransactionListQuery = {}) =>
-      [...queryKeys.transactions.all, 'list', normalizeListQuery(query)] as const,
+      [...queryKeys.transactions.all, 'list', normalizeQuery(query)] as const,
     detail: (id: string) => [...queryKeys.transactions.all, 'detail', id] as const,
+  },
+  dashboard: {
+    all: ['dashboard'] as const,
+    summary: (query: DashboardSummaryQuery = {}) =>
+      [...queryKeys.dashboard.all, 'summary', normalizeQuery(query)] as const,
+    byCategory: (query: DashboardByCategoryQuery = {}) =>
+      [...queryKeys.dashboard.all, 'by-category', normalizeQuery(query)] as const,
+    byMonth: (query: DashboardByMonthQuery = {}) =>
+      [...queryKeys.dashboard.all, 'by-month', normalizeQuery(query)] as const,
+    topExpenses: (query: DashboardTopExpensesQuery = {}) =>
+      [...queryKeys.dashboard.all, 'top-expenses', normalizeQuery(query)] as const,
   },
 } as const;
 
@@ -25,7 +42,7 @@ export const queryKeys = {
  * Ordena las claves del query para que objetos equivalentes generen
  * la misma cache key independientemente del orden de propiedades.
  */
-function normalizeListQuery(query: TransactionListQuery): Record<string, unknown> {
+function normalizeQuery<T extends object>(query: T): Record<string, unknown> {
   const entries = Object.entries(query).filter(([, v]) => v !== undefined && v !== '');
   entries.sort(([a], [b]) => a.localeCompare(b));
   return Object.fromEntries(entries);
