@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import io
 import json
+from decimal import Decimal
+from unittest.mock import AsyncMock, patch
 
 from httpx import AsyncClient
 from openpyxl import Workbook
 from reportlab.lib import colors as rl_colors
 from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
+
+from app.modules.ai.schemas import BankStatementRow
 
 
 async def _setup_user(client: AsyncClient, email: str = "imp@example.com") -> str:
@@ -304,3 +309,95 @@ async def test_import_european_amount_formats(client: AsyncClient) -> None:
     r = await client.get("/transactions", headers=_auth(token))
     amounts = sorted(t["amount"] for t in r.json()["items"])
     assert amounts == ["1234.56", "1234.56"]
+
+
+# ─────────────────────────────────────
+# Vision PDF fallback (PDFs sin tabla)
+# ─────────────────────────────────────
+
+
+def _build_scanned_pdf() -> bytes:
+    """PDF con sólo texto (sin tabla detectable por pdfplumber)."""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    style = getSampleStyleSheet()["BodyText"]
+    doc.build([Paragraph("Texto suelto sin estructura tabular.", style)])
+    return buffer.getvalue()
+
+
+async def test_import_pdf_vision_fallback_imports_rows(client: AsyncClient) -> None:
+    """PDF sin tablas → fallback a visión → rows importadas."""
+    token = await _setup_user(client, "vision@example.com")
+    pdf = _build_scanned_pdf()
+
+    with (
+        patch(
+            "app.modules.imports.service.render_pdf_pages_to_png",
+            return_value=[b"fake-png-page-1"],
+        ),
+        patch(
+            "app.modules.imports.service.ai_service.extract_bank_statement_page",
+            new_callable=AsyncMock,
+            return_value=[
+                BankStatementRow(
+                    description="Alquiler",
+                    amount=Decimal("750.00"),
+                    occurred_at="2026-04-01",
+                ),
+                BankStatementRow(
+                    description="Cafetería",
+                    amount=Decimal("3.20"),
+                    occurred_at="2026-04-02",
+                ),
+            ],
+        ),
+    ):
+        files = {"file": ("statement.pdf", pdf, "application/pdf")}
+        # El usuario manda un mapping con sus propias keys; el service lo
+        # ignora cuando entra al fallback de visión y usa las claves fijas.
+        data = {
+            "column_mappings": json.dumps(
+                {
+                    "amount": "Importe",
+                    "occurred_at": "Fecha",
+                    "description": "Concepto",
+                }
+            ),
+        }
+        r = await client.post("/imports", files=files, data=data, headers=_auth(token))
+
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["status"] == "completed"
+    assert body["rows_ok"] == 2
+    assert body["rows_failed"] == 0
+
+
+async def test_import_pdf_vision_fallback_when_ai_down_fails_job(
+    client: AsyncClient,
+) -> None:
+    """Si la visión falla, el job termina como failed con mensaje claro."""
+    from app.modules.ai.exceptions import AiUnavailableError
+
+    token = await _setup_user(client, "vision-down@example.com")
+    pdf = _build_scanned_pdf()
+
+    with (
+        patch(
+            "app.modules.imports.service.render_pdf_pages_to_png",
+            return_value=[b"fake-png"],
+        ),
+        patch(
+            "app.modules.imports.service.ai_service.extract_bank_statement_page",
+            new_callable=AsyncMock,
+            side_effect=AiUnavailableError("Ollama down"),
+        ),
+    ):
+        files = {"file": ("statement.pdf", pdf, "application/pdf")}
+        data = {"column_mappings": json.dumps(_DEFAULT_MAPPING)}
+        r = await client.post("/imports", files=files, data=data, headers=_auth(token))
+
+    assert r.status_code == 201
+    body = r.json()
+    assert body["status"] == "failed"
+    assert "Visión PDF" in body["error_log"][0]["error"]
