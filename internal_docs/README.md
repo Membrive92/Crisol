@@ -67,7 +67,7 @@ Leyenda: ⏳ pendiente · 🚧 en curso · ✅ completada · ❌ bloqueada
 | Fase | Nombre              | Estado | PR |
 |------|---------------------|--------|----|
 | 5.1  | Receipts backend    | ✅     | —  |
-| 5.2  | Receipts frontend   | ⏳     | —  |
+| 5.2  | Receipts frontend   | ✅     | —  |
 
 ---
 
