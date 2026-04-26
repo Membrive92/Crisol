@@ -60,4 +60,18 @@ describe('queryKeys', () => {
   it('imports.detail incluye el id como último segmento', () => {
     expect(queryKeys.imports.detail('job-1')).toEqual(['imports', 'detail', 'job-1']);
   });
+
+  it('receipts.all es estable', () => {
+    expect(queryKeys.receipts.all).toEqual(['receipts']);
+  });
+
+  it('receipts.list normaliza el orden de filtros', () => {
+    const a = queryKeys.receipts.list({ limit: 10, offset: 0 });
+    const b = queryKeys.receipts.list({ offset: 0, limit: 10 });
+    expect(a).toEqual(b);
+  });
+
+  it('receipts.detail incluye el id', () => {
+    expect(queryKeys.receipts.detail('r1')).toEqual(['receipts', 'detail', 'r1']);
+  });
 });
