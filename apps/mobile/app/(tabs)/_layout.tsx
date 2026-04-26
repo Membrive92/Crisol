@@ -22,6 +22,12 @@ export default function TabsLayout() {
           title: 'Transacciones',
         }}
       />
+      <Tabs.Screen
+        name="receipts"
+        options={{
+          title: 'Tickets',
+        }}
+      />
     </Tabs>
   );
 }
