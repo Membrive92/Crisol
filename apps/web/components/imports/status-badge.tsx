@@ -1,0 +1,43 @@
+'use client';
+
+import type { ImportJobStatus } from '@finanzas/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+
+const STATUS_LABEL: Record<ImportJobStatus, string> = {
+  pending: 'Pendiente',
+  processing: 'Procesando',
+  completed: 'Completado',
+  failed: 'Fallido',
+};
+
+const STATUS_COLOR: Record<ImportJobStatus, { bg: string; fg: string }> = {
+  pending: { bg: colors.surfaceMuted, fg: colors.textMuted },
+  processing: { bg: colors.surfaceMuted, fg: colors.primary },
+  completed: { bg: '#e8f5e9', fg: colors.success },
+  failed: { bg: '#fdecea', fg: colors.danger },
+};
+
+export interface StatusBadgeProps {
+  status: ImportJobStatus;
+}
+
+export function StatusBadge({ status }: StatusBadgeProps) {
+  const palette = STATUS_COLOR[status];
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        padding: `${spacing.xs}px ${spacing.sm}px`,
+        backgroundColor: palette.bg,
+        color: palette.fg,
+        borderRadius: radius.sm,
+        fontSize: fontSize.xs,
+        fontWeight: fontWeight.semibold,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+      }}
+    >
+      {STATUS_LABEL[status]}
+    </span>
+  );
+}

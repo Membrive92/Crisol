@@ -89,6 +89,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <Link href="/transactions" style={{ color: colors.text, textDecoration: 'none' }}>
           Transacciones
         </Link>
+        <Link href="/imports" style={{ color: colors.text, textDecoration: 'none' }}>
+          Importar
+        </Link>
         <button
           type="button"
           onClick={handleLogout}
