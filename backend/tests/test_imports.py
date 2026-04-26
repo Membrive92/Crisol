@@ -7,6 +7,9 @@ import json
 
 from httpx import AsyncClient
 from openpyxl import Workbook
+from reportlab.lib import colors as rl_colors
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 
 
 async def _setup_user(client: AsyncClient, email: str = "imp@example.com") -> str:
@@ -158,7 +161,8 @@ async def test_import_invalid_mapping_returns_422(client: AsyncClient) -> None:
     assert r.status_code == 422
 
 
-async def test_import_unsupported_format_marks_failed(client: AsyncClient) -> None:
+async def test_import_invalid_pdf_marks_failed(client: AsyncClient) -> None:
+    """PDF malformado: el job se marca como failed con error_log."""
     token = await _setup_user(client, "badfmt@example.com")
     files = {"file": ("import.pdf", b"%PDF-1.4 fake", "application/pdf")}
     data = {"column_mappings": json.dumps(_DEFAULT_MAPPING)}
@@ -168,6 +172,52 @@ async def test_import_unsupported_format_marks_failed(client: AsyncClient) -> No
     assert body["status"] == "failed"
     assert body["rows_total"] == 0
     assert body["error_log"]
+
+
+async def test_import_unsupported_extension_marks_failed(client: AsyncClient) -> None:
+    """Extensiones que no son CSV/XLSX/PDF terminan en failed."""
+    token = await _setup_user(client, "txtfmt@example.com")
+    files = {"file": ("notes.txt", b"random text", "text/plain")}
+    data = {"column_mappings": json.dumps(_DEFAULT_MAPPING)}
+    r = await client.post("/imports", files=files, data=data, headers=_auth(token))
+    assert r.status_code == 201
+    body = r.json()
+    assert body["status"] == "failed"
+
+
+async def test_import_pdf(client: AsyncClient) -> None:
+    """PDF con tabla bordeada se procesa por el mismo pipeline que CSV."""
+    token = await _setup_user(client, "pdf@example.com")
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    table = Table(
+        [
+            ["Fecha", "Importe", "Concepto"],
+            ["2026-04-15", "25.50", "Cafe"],
+            ["2026-04-16", "10.00", "Almuerzo"],
+        ]
+    )
+    table.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.5, rl_colors.black)]))
+    doc.build([table])
+    pdf_bytes = buffer.getvalue()
+
+    files = {"file": ("statement.pdf", pdf_bytes, "application/pdf")}
+    data = {
+        "column_mappings": json.dumps(
+            {
+                "amount": "Importe",
+                "occurred_at": "Fecha",
+                "description": "Concepto",
+            }
+        ),
+    }
+    r = await client.post("/imports", files=files, data=data, headers=_auth(token))
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["status"] == "completed"
+    assert body["rows_ok"] == 2
+    assert body["rows_failed"] == 0
 
 
 async def test_import_xlsx(client: AsyncClient) -> None:
