@@ -214,6 +214,7 @@ PHASE-X.Z — <nombre>
 |------|--------|------------|
 | **4.1** | Imports backend | Módulo `imports/`. Parser CSV/Excel, mapeo de columnas configurable, deduplicación por hash. Estado del job persistido. |
 | **4.2** | Imports frontend | Wizard de subida, preview de mapeo, resumen de resultados. Web (mobile opcional). |
+| **4.3** | PDF imports | Soporte de extractos bancarios en PDF. Extracción de texto con `pdfplumber` + heurística de tabla. Reusa el pipeline de 4.1 (mismo `import_jobs`, mismo dedup). El wizard frontend admite `.pdf`. Si el PDF no tiene texto extraíble (escaneado), el job termina en `failed` con mensaje claro; la opción de fallback a visión queda como follow-up cuando el módulo `ai/` esté maduro tras 5.1. |
 
 ### Fase 5 — IA: extracción de tickets
 
