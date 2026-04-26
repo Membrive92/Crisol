@@ -27,9 +27,18 @@ class Settings(BaseSettings):
 
     # ---------- Database ----------
     database_url: str = "postgresql+asyncpg://finanzas:finanzas@localhost:5432/finanzas"
+    # BD aislada para tests. Se crea automáticamente desde conftest si no
+    # existe. Nunca debe coincidir con `database_url` — los tests truncan
+    # tablas tras cada test y haría desaparecer datos de desarrollo.
+    test_database_url: str = (
+        "postgresql+asyncpg://finanzas:finanzas@localhost:5432/finanzas_test"
+    )
 
     # ---------- Auth ----------
-    jwt_secret_key: str = "change-me-in-local-env"
+    # Default cumple los 32 bytes mínimos para silenciar la advertencia de
+    # `PyJWT`, pero NO es seguro: cada despliegue debe sobreescribirlo en `.env`
+    # con algo generado por `openssl rand -hex 32` o `secrets.token_hex(32)`.
+    jwt_secret_key: str = "DEV-ONLY-CHANGE-ME-IN-DOT-ENV-PLEASE-32B"
     jwt_access_token_expire_minutes: int = 15
     jwt_refresh_token_expire_days: int = 7
 
