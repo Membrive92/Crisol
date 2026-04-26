@@ -41,4 +41,5 @@ export {
   useExtractReceipt,
   useConfirmReceipt,
   useRejectReceipt,
+  useReceiptImage,
 } from './query/hooks/useReceipts';

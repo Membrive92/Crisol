@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type {
@@ -58,4 +60,56 @@ export function useRejectReceipt(id: string) {
       queryClient.setQueryData(queryKeys.receipts.detail(updated.id), updated);
     },
   });
+}
+
+/**
+ * Descarga el blob del receipt y devuelve un `objectURL` listo para usar
+ * como `src` de un `<img>`. Limpia el URL al desmontar o cambiar el id.
+ *
+ * Se hace fuera de TanStack Query a propósito: el resultado es un recurso
+ * con ciclo de vida (URL.createObjectURL/revokeObjectURL) y cachearlo en
+ * el query cache complica la liberación de memoria.
+ */
+export function useReceiptImage(id: string | undefined): {
+  url: string | null;
+  isLoading: boolean;
+  error: Error | null;
+} {
+  const [url, setUrl] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    if (!id) {
+      setUrl(null);
+      return;
+    }
+    let cancelled = false;
+    let createdUrl: string | null = null;
+    setIsLoading(true);
+    setError(null);
+
+    receiptsApi
+      .getBlob(id)
+      .then((blob) => {
+        if (cancelled) return;
+        createdUrl = URL.createObjectURL(blob);
+        setUrl(createdUrl);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err : new Error('No se pudo cargar la imagen'));
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+      setUrl(null);
+    };
+  }, [id]);
+
+  return { url, isLoading, error };
 }

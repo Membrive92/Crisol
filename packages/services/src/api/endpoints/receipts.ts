@@ -43,4 +43,11 @@ export const receiptsApi = {
     const response = await apiClient.post<Receipt>(`/receipts/${id}/reject`);
     return response.data;
   },
+
+  async getBlob(id: string): Promise<Blob> {
+    const response = await apiClient.get<Blob>(`/receipts/${id}/blob`, {
+      responseType: 'blob',
+    });
+    return response.data;
+  },
 };
