@@ -11,7 +11,7 @@ import { Select, TextInput } from '../ui/field';
 import { detectCsvHeaders } from './detect-csv-headers';
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
-const ACCEPTED_EXTENSIONS = ['.csv', '.tsv', '.xlsx'] as const;
+const ACCEPTED_EXTENSIONS = ['.csv', '.tsv', '.xlsx', '.pdf'] as const;
 
 export interface UploadStepValue {
   file: File;
@@ -90,7 +90,7 @@ export function UploadStep({ onContinue }: UploadStepProps) {
             color: colors.text,
           }}
         >
-          Fichero (CSV / XLSX, máx 10 MB)
+          Fichero (CSV / XLSX / PDF, máx 10 MB)
         </span>
         <input
           type="file"

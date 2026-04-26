@@ -77,7 +77,9 @@ export function MappingStep({
         }}
       >
         Indica el nombre exacto de la columna del fichero para cada campo. El
-        importe debe ser positivo (el signo se infiere de la categoría).
+        importe debe ser positivo (el signo se infiere de la categoría). Para
+        XLSX y PDF teclea el nombre manualmente; los CSV detectan las
+        cabeceras y aparecen abajo como sugerencias.
       </p>
 
       {detectedHeaders ? (
