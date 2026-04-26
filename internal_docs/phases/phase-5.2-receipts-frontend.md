@@ -1,6 +1,6 @@
 # PHASE-5.2 — Receipts frontend
 
-**Estado**: ✅ completada (web); mobile diferido como follow-up
+**Estado**: ✅ completada (web + mobile vía follow-up `feat/mobile-receipts`)
 **Rama**: `feat/phase-5.2-receipts-frontend`
 **PR**: —
 **Fecha de merge**: 2026-04-26
