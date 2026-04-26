@@ -1,0 +1,132 @@
+"""Router del módulo receipts."""
+
+from __future__ import annotations
+
+import uuid
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
+from app.core.deps import CurrentUser
+from app.modules.ai.schemas import ReceiptExtraction
+from app.modules.receipts.repository import get_receipt_by_id, list_receipts
+from app.modules.receipts.schemas import (
+    ReceiptConfirmRequest,
+    ReceiptExtractResponse,
+    ReceiptListResponse,
+    ReceiptResponse,
+)
+from app.modules.receipts.service import (
+    confirm_receipt,
+    extract_and_persist,
+    reject_receipt,
+)
+
+router = APIRouter(prefix="/receipts", tags=["receipts"])
+
+# 8 MB. Suficiente para fotos de móvil; evita imágenes RAW gigantes.
+MAX_RECEIPT_BYTES = 8 * 1024 * 1024
+
+
+@router.post(
+    "/extract",
+    response_model=ReceiptExtractResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def extract_receipt_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    file: Annotated[UploadFile, File(...)],
+) -> ReceiptExtractResponse:
+    """Sube una imagen de ticket, ejecuta extracción IA y devuelve el job."""
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="La imagen está vacía")
+    if len(payload) > MAX_RECEIPT_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"La imagen supera {MAX_RECEIPT_BYTES // (1024 * 1024)} MB",
+        )
+
+    content_type = (file.content_type or "").lower() or "application/octet-stream"
+
+    receipt, extraction = await extract_and_persist(
+        db,
+        user.id,
+        payload=payload,
+        content_type=content_type,
+    )
+    await db.commit()
+    return ReceiptExtractResponse(
+        receipt=ReceiptResponse.model_validate(receipt),
+        extraction=extraction,
+    )
+
+
+@router.post(
+    "/{receipt_id}/confirm",
+    response_model=ReceiptResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def confirm_receipt_endpoint(
+    receipt_id: uuid.UUID,
+    payload: ReceiptConfirmRequest,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ReceiptResponse:
+    """Confirma el recibo, crea la transacción asociada y devuelve el receipt."""
+    receipt = await confirm_receipt(db, user.id, receipt_id, payload)
+    await db.commit()
+    return ReceiptResponse.model_validate(receipt)
+
+
+@router.post(
+    "/{receipt_id}/reject",
+    response_model=ReceiptResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def reject_receipt_endpoint(
+    receipt_id: uuid.UUID,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ReceiptResponse:
+    """Rechaza el recibo (no crea transacción)."""
+    receipt = await reject_receipt(db, user.id, receipt_id)
+    await db.commit()
+    return ReceiptResponse.model_validate(receipt)
+
+
+@router.get("", response_model=ReceiptListResponse)
+async def list_receipts_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> ReceiptListResponse:
+    """Lista paginada de recibos del usuario, más recientes primero."""
+    items, total = await list_receipts(db, user.id, limit=limit, offset=offset)
+    return ReceiptListResponse(
+        items=[ReceiptResponse.model_validate(r) for r in items],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/{receipt_id}", response_model=ReceiptResponse)
+async def get_receipt_endpoint(
+    receipt_id: uuid.UUID,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ReceiptResponse:
+    """Detalle de un recibo concreto."""
+    receipt = await get_receipt_by_id(db, receipt_id, user.id)
+    if receipt is None:
+        raise HTTPException(status_code=404, detail="Recibo no encontrado")
+    return ReceiptResponse.model_validate(receipt)
+
+
+# Para que el módulo `ai/schemas` cargue eager las dependencias del response model
+_ = ReceiptExtraction
