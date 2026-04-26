@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     ollama_vision_model: str = "qwen2.5-vl:7b"
     ollama_timeout_seconds: int = 120
 
+    # ---------- MinIO (blob storage) ----------
+    minio_endpoint: str = "localhost:9000"
+    minio_access_key: str = "minioadmin"
+    minio_secret_key: str = "minioadmin"
+    minio_bucket_receipts: str = "receipts"
+    minio_secure: bool = False
+
     # ---------- CORS ----------
     cors_origins: str = "http://localhost:3000,http://localhost:8081"
 
