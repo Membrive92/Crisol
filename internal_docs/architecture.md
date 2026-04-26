@@ -1,7 +1,8 @@
 # Arquitectura — Finanzas App
 
 > Documento vivo. Se actualiza cuando una fase introduce cambios arquitectónicos.
-> Última actualización: PHASE-5.1 — módulo `receipts/` + cliente vision Ollama + MinIO.
+> Última actualización: PDF imports caen a visión local cuando `pdfplumber` no
+> detecta tablas (compartido entre `imports/` y `ai.service.extract_bank_statement_page`).
 
 ---
 

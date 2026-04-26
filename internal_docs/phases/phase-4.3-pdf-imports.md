@@ -105,8 +105,11 @@ exactamente igual que en 4.1.
 
 ## Limitaciones conocidas
 
-- PDFs escaneados (sin texto) terminan en `failed`. El usuario verá
-  un mensaje claro pero no se intenta OCR.
+- PDFs escaneados (sin texto) — **ya cubierto** vía fallback de visión
+  (follow-up post 5.1, branch `feat/pdf-vision-fallback`): el service
+  detecta `NoTablesInPdfError`, renderiza páginas con `pypdfium2` y
+  llama a `ai.service.extract_bank_statement_page`. Limitado a las
+  primeras 5 páginas para no saturar Ollama.
 - Si las celdas tienen contenido en varias líneas (caso raro), se
   colapsan a un único string separado por espacios.
 - La heurística de tablas de `pdfplumber` requiere bordes visibles.
