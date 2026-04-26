@@ -20,6 +20,7 @@ dependencies = [
   "PyJWT[crypto]>=2.9.0",
   "email-validator>=2.2.0",
   "openpyxl>=3.1.5",
+  "pdfplumber>=0.11.0",
   "python-multipart>=0.0.20",
 ]
 
@@ -32,6 +33,7 @@ dev = [
   "black>=24.10.0",
   "mypy>=1.13.0",
   "types-openpyxl>=3.1.5",
+  "reportlab>=4.0.0",
 ]
 
 [tool.setuptools.packages.find]
