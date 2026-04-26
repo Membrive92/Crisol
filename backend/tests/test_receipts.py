@@ -208,3 +208,58 @@ async def test_receipt_user_isolation(client: AsyncClient) -> None:
     # Usuario B no ve el recibo de A
     r = await client.get(f"/receipts/{rid}", headers=_auth(token_b))
     assert r.status_code == 404
+
+
+async def test_get_blob_returns_image_bytes(client: AsyncClient) -> None:
+    token = await _setup_user(client, "blob@example.com")
+    files = {"file": ("ticket.jpg", b"fake", "image/jpeg")}
+    with _mock_storage_and_ai():
+        extract = await client.post("/receipts/extract", files=files, headers=_auth(token))
+    rid = extract.json()["receipt"]["id"]
+
+    fake_bytes = b"\xff\xd8\xff\xe0image-bytes"
+    with patch(
+        "app.modules.receipts.router.storage.get_receipt",
+        return_value=fake_bytes,
+    ):
+        r = await client.get(f"/receipts/{rid}/blob", headers=_auth(token))
+    assert r.status_code == 200
+    assert r.content == fake_bytes
+    assert r.headers["content-type"].startswith("image/jpeg")
+
+
+async def test_get_blob_isolated_per_user(client: AsyncClient) -> None:
+    token_a = await _setup_user(client, "ablob@example.com")
+    token_b = await _setup_user(client, "bblob@example.com")
+    files = {"file": ("ticket.jpg", b"fake", "image/jpeg")}
+    with _mock_storage_and_ai():
+        a_extract = await client.post(
+            "/receipts/extract", files=files, headers=_auth(token_a)
+        )
+    rid = a_extract.json()["receipt"]["id"]
+
+    with patch(
+        "app.modules.receipts.router.storage.get_receipt",
+        return_value=b"x",
+    ) as get_mock:
+        r = await client.get(f"/receipts/{rid}/blob", headers=_auth(token_b))
+    assert r.status_code == 404
+    # No debe haber tocado MinIO si el receipt no es del usuario.
+    get_mock.assert_not_called()
+
+
+async def test_get_blob_storage_failure_returns_404(client: AsyncClient) -> None:
+    from app.core.storage import StorageError
+
+    token = await _setup_user(client, "missing@example.com")
+    files = {"file": ("ticket.jpg", b"fake", "image/jpeg")}
+    with _mock_storage_and_ai():
+        extract = await client.post("/receipts/extract", files=files, headers=_auth(token))
+    rid = extract.json()["receipt"]["id"]
+
+    with patch(
+        "app.modules.receipts.router.storage.get_receipt",
+        side_effect=StorageError("blob no existe"),
+    ):
+        r = await client.get(f"/receipts/{rid}/blob", headers=_auth(token))
+    assert r.status_code == 404

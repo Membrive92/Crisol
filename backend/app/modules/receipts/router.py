@@ -5,9 +5,10 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import storage
 from app.core.database import get_db
 from app.core.deps import CurrentUser
 from app.modules.ai.schemas import ReceiptExtraction
@@ -126,6 +127,36 @@ async def get_receipt_endpoint(
     if receipt is None:
         raise HTTPException(status_code=404, detail="Recibo no encontrado")
     return ReceiptResponse.model_validate(receipt)
+
+
+@router.get("/{receipt_id}/blob")
+async def get_receipt_blob_endpoint(
+    receipt_id: uuid.UUID,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    """Devuelve el binario de la imagen del recibo desde MinIO.
+
+    Aislamiento: el receipt se busca por `user_id`, así que un usuario
+    nunca puede pedir el blob de otro. La descarga se hace en el backend
+    (no presigned URL) para mantener el control de acceso vía JWT y
+    evitar exponer credenciales de MinIO.
+    """
+    receipt = await get_receipt_by_id(db, receipt_id, user.id)
+    if receipt is None:
+        raise HTTPException(status_code=404, detail="Recibo no encontrado")
+    try:
+        payload = storage.get_receipt(receipt.blob_key)
+    except storage.StorageError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No se pudo recuperar la imagen",
+        ) from e
+    return Response(
+        content=payload,
+        media_type=receipt.content_type or "application/octet-stream",
+        headers={"Cache-Control": "private, max-age=300"},
+    )
 
 
 # Para que el módulo `ai/schemas` cargue eager las dependencias del response model
