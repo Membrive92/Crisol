@@ -1,7 +1,7 @@
 # Schema de base de datos
 
 > Estado actual del modelo de datos. Se actualiza cuando una fase
-> introduce migraciones. Última actualización: PHASE-4.1.
+> introduce migraciones. Última actualización: PHASE-5.1.
 
 ## Convenciones
 
@@ -19,6 +19,7 @@
 |----------|------|-------------|
 | `4698c02a5861` | 1.1, 2.1 | Initial schema — `users`, `refresh_tokens`, `categories`, `transactions`. |
 | `7c3a91f4d2b8` | 4.1 | `import_jobs` + `transactions.import_hash` + índice único parcial. |
+| `a91d8f4c2e10` | 5.1 | `receipts` + índices por `user_id` y `transaction_id`. |
 
 ---
 
@@ -96,13 +97,22 @@
 | `error_log` | `JSONB` | `[{ row, error }]`, capado a 100. |
 | `created_at` / `updated_at` | `TIMESTAMPTZ` | |
 
----
+### `receipts` (`PHASE-5.1`)
 
-## Tablas planeadas (próximas fases)
+| Columna | Tipo | Notas |
+|---------|------|-------|
+| `id` | `UUID` PK | |
+| `user_id` | `UUID` FK → `users.id` `ON DELETE CASCADE` | índice. |
+| `status` | `ENUM('pending','confirmed','rejected')` | tipo `receiptstatus`. |
+| `blob_key` | `VARCHAR(512)` | path en MinIO bucket `receipts`. |
+| `content_type` | `VARCHAR(100)` | MIME type del original. |
+| `extraction` | `JSON` | salida del modelo de visión (validada Pydantic antes de guardar). |
+| `transaction_id` | `UUID` FK → `transactions.id` `ON DELETE SET NULL` | índice, nullable. Se rellena al confirmar. |
+| `created_at` / `updated_at` | `TIMESTAMPTZ` | |
 
-| Tabla | Fase | Estado |
-|-------|------|--------|
-| `receipts` | 5.1 | ⏳ |
+No existe FK formal `transactions.receipt_id → receipts.id` (evita
+ciclo bidireccional); la consistencia la garantiza
+`receipts.service.confirm_receipt`.
 
 ---
 
@@ -112,10 +122,14 @@
 users ─┬─< refresh_tokens
        ├─< categories ──┐
        ├─< transactions ┘   (category_id ON DELETE SET NULL)
-       └─< import_jobs
+       ├─< import_jobs
+       └─< receipts ──┐
+                      │
+                      └─→ transactions   (receipts.transaction_id ON DELETE SET NULL)
 
 transactions.import_hash → unique partial index para deduplicar
                            imports sin afectar a manual/receipt.
+transactions.receipt_id  → UUID sin FK formal (consistencia en service).
 ```
 
 ## Enums (PostgreSQL `CREATE TYPE`)
@@ -125,3 +139,4 @@ transactions.import_hash → unique partial index para deduplicar
 | `categorykind` | `INCOME`, `EXPENSE` |
 | `transactionsource` | `MANUAL`, `IMPORT`, `RECEIPT` |
 | `importjobstatus` | `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED` |
+| `receiptstatus` | `PENDING`, `CONFIRMED`, `REJECTED` |

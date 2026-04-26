@@ -1,7 +1,7 @@
 # Arquitectura — Finanzas App
 
 > Documento vivo. Se actualiza cuando una fase introduce cambios arquitectónicos.
-> Última actualización: PHASE-4.3 — `imports/` admite PDF (`pdfplumber`).
+> Última actualización: PHASE-5.1 — módulo `receipts/` + cliente vision Ollama + MinIO.
 
 ---
 
@@ -185,8 +185,8 @@ modules/{nombre}/
 | `transactions`   | ✅     | CRUD de transacciones, filtros, aislamiento, `import_hash`     |
 | `dashboard`      | ✅     | Agregaciones y KPIs (read-only sobre transactions/categories)  |
 | `imports`        | ✅     | Importación CSV/XLSX/PDF con dedup por hash, jobs auditables   |
-| `ai`             | 🚧     | Cliente Ollama + `/ai/health` (extracción se integra en 5.1)   |
-| `receipts`       | ⏳     | Pipeline de tickets: upload → ai → confirmación → persistencia |
+| `ai`             | ✅     | Cliente Ollama + `/ai/health` + `extract_receipt`              |
+| `receipts`       | ✅     | Pipeline de tickets: upload → ai → confirmación → persistencia |
 
 ---
 
@@ -282,7 +282,7 @@ refresh_tokens      (PHASE-1.1) ✅
 categories          (PHASE-2.1) ✅
 transactions        (PHASE-2.1, PHASE-4.1: + import_hash) ✅
 import_jobs         (PHASE-4.1) ✅
-receipts            (PHASE-5.1) ⏳
+receipts            (PHASE-5.1) ✅
 ```
 
 Resumen rápido:
@@ -291,10 +291,15 @@ Resumen rápido:
 users ─┬─< refresh_tokens
        ├─< categories ──┐
        ├─< transactions ┘   (category_id ON DELETE SET NULL)
-       └─< import_jobs
+       ├─< import_jobs
+       └─< receipts ───┐
+                       │
+                       └─→ transactions   (receipts.transaction_id ON DELETE SET NULL)
 
 transactions.import_hash → unique partial index (user_id, import_hash)
                            para deduplicar imports sin afectar a manual.
+transactions.receipt_id  → UUID sin FK formal; consistencia mantenida
+                           por receipts.service.confirm_receipt.
 ```
 
 ---

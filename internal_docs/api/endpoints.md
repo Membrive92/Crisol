@@ -121,6 +121,34 @@ Reglas:
 
 ---
 
+## Receipts (`PHASE-5.1`)
+
+| Método | Ruta | Auth | Body / Query | Response |
+|--------|------|------|--------------|----------|
+| POST   | `/receipts/extract` | sí | multipart `file` (image/jpeg\|png\|webp\|heic\|heif, ≤8 MB) | `201` `{ receipt, extraction }` |
+| POST   | `/receipts/{id}/confirm` | sí | `{ amount, occurred_at, currency, description?, category_id? }` | `200` `ReceiptResponse` |
+| POST   | `/receipts/{id}/reject` | sí | — | `200` `ReceiptResponse` |
+| GET    | `/receipts` | sí | `limit` (1..200, def 50), `offset` (def 0) | `200` `{ items, total, limit, offset }` |
+| GET    | `/receipts/{id}` | sí | — | `200` `ReceiptResponse` |
+
+Reglas:
+- La imagen va a MinIO (`<user_id>/<YYYYMMDD>/<uuid>.<ext>`); el blob
+  no se devuelve por API (en MVP).
+- La extracción usa Ollama con `qwen2.5-vl:7b` (configurable). Si
+  Ollama no responde o devuelve algo no parseable, se devuelve **502**
+  y se borra el blob para no dejar huérfanos.
+- `confirm` solo acepta receipts en estado `pending` (si no, **409**).
+  Crea una transacción con `source=receipt` enlazada al receipt.
+- `reject` solo acepta receipts en estado `pending`. No crea
+  transacción.
+- `ReceiptStatus`: `pending | confirmed | rejected` (irreversible
+  desde `confirmed`/`rejected`).
+- Las `line_items` se persisten en `extraction` (JSON) pero **no** se
+  crean como transacciones individuales — el MVP crea una sola
+  transacción con el total.
+
+---
+
 ## Convenciones de errores
 
 | Código | Cuándo |
