@@ -46,4 +46,18 @@ describe('queryKeys', () => {
       { currency: 'EUR', year: 2026 },
     ]);
   });
+
+  it('imports.all es estable', () => {
+    expect(queryKeys.imports.all).toEqual(['imports']);
+  });
+
+  it('imports.list normaliza el orden de filtros', () => {
+    const a = queryKeys.imports.list({ limit: 50, offset: 0 });
+    const b = queryKeys.imports.list({ offset: 0, limit: 50 });
+    expect(a).toEqual(b);
+  });
+
+  it('imports.detail incluye el id como último segmento', () => {
+    expect(queryKeys.imports.detail('job-1')).toEqual(['imports', 'detail', 'job-1']);
+  });
 });
