@@ -130,6 +130,7 @@ Reglas:
 | POST   | `/receipts/{id}/reject` | sí | — | `200` `ReceiptResponse` |
 | GET    | `/receipts` | sí | `limit` (1..200, def 50), `offset` (def 0) | `200` `{ items, total, limit, offset }` |
 | GET    | `/receipts/{id}` | sí | — | `200` `ReceiptResponse` |
+| GET    | `/receipts/{id}/blob` | sí | — | `200` bytes (Content-Type del original; cache `private,max-age=300`) |
 
 Reglas:
 - La imagen va a MinIO (`<user_id>/<YYYYMMDD>/<uuid>.<ext>`); el blob

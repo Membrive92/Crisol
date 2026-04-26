@@ -10,6 +10,7 @@ import {
   ExtractionSummary,
   ReceiptConfirmForm,
 } from '@/components/receipts/confirm-form';
+import { ReceiptImage } from '@/components/receipts/receipt-image';
 import { ReceiptStatusBadge } from '@/components/receipts/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -68,6 +69,10 @@ export default function ReceiptDetailPage() {
               <span style={{ fontSize: fontSize.sm, color: colors.textMuted }}>
                 {formatDate(receipt.created_at)}
               </span>
+            </div>
+
+            <div style={{ marginBottom: spacing.lg }}>
+              <ReceiptImage receiptId={receipt.id} />
             </div>
 
             {receipt.status === 'pending' ? (
