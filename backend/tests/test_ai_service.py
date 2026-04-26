@@ -10,7 +10,6 @@ import pytest
 from app.modules.ai import service as ai_service
 from app.modules.ai.exceptions import AiInvalidOutputError
 
-
 _VALID_RESPONSE = json.dumps(
     {
         "merchant": "Mercadona",
@@ -47,9 +46,8 @@ async def test_extract_receipt_invalid_json_raises() -> None:
         "app.modules.ai.client.generate_with_image",
         new_callable=AsyncMock,
         return_value="not json {",
-    ):
-        with pytest.raises(AiInvalidOutputError):
-            await ai_service.extract_receipt(b"fake")
+    ), pytest.raises(AiInvalidOutputError):
+        await ai_service.extract_receipt(b"fake")
 
 
 async def test_extract_receipt_invalid_schema_raises() -> None:
@@ -58,6 +56,5 @@ async def test_extract_receipt_invalid_schema_raises() -> None:
         "app.modules.ai.client.generate_with_image",
         new_callable=AsyncMock,
         return_value=json.dumps({"merchant": "X"}),
-    ):
-        with pytest.raises(AiInvalidOutputError):
-            await ai_service.extract_receipt(b"fake")
+    ), pytest.raises(AiInvalidOutputError):
+        await ai_service.extract_receipt(b"fake")

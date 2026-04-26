@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from httpx import AsyncClient
 
-from app.modules.ai.schemas import ReceiptExtraction, ReceiptLineItem
 from app.modules.ai.exceptions import AiUnavailableError
+from app.modules.ai.schemas import ReceiptExtraction, ReceiptLineItem
 
 
 def _sample_extraction() -> ReceiptExtraction:
