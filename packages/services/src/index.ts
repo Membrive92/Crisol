@@ -10,6 +10,7 @@ export { categoriesApi } from './api/endpoints/categories';
 export { transactionsApi } from './api/endpoints/transactions';
 export { dashboardApi } from './api/endpoints/dashboard';
 export { importsApi, type CreateImportPayload } from './api/endpoints/imports';
+export { receiptsApi } from './api/endpoints/receipts';
 
 export { queryKeys } from './query/keys';
 export {
@@ -33,3 +34,10 @@ export {
   useDashboardTopExpenses,
 } from './query/hooks/useDashboard';
 export { useImports, useImport, useCreateImport } from './query/hooks/useImports';
+export {
+  useReceipts,
+  useReceipt,
+  useExtractReceipt,
+  useConfirmReceipt,
+  useRejectReceipt,
+} from './query/hooks/useReceipts';

@@ -4,6 +4,7 @@ import type {
   DashboardSummaryQuery,
   DashboardTopExpensesQuery,
   ImportListQuery,
+  ReceiptListQuery,
   TransactionListQuery,
 } from '@finanzas/types';
 
@@ -42,6 +43,12 @@ export const queryKeys = {
     list: (query: ImportListQuery = {}) =>
       [...queryKeys.imports.all, 'list', normalizeQuery(query)] as const,
     detail: (id: string) => [...queryKeys.imports.all, 'detail', id] as const,
+  },
+  receipts: {
+    all: ['receipts'] as const,
+    list: (query: ReceiptListQuery = {}) =>
+      [...queryKeys.receipts.all, 'list', normalizeQuery(query)] as const,
+    detail: (id: string) => [...queryKeys.receipts.all, 'detail', id] as const,
   },
 } as const;
 

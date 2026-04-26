@@ -13,6 +13,12 @@ export type {
   ImportJob,
   ImportJobStatus,
 } from './models/import';
+export type {
+  Receipt,
+  ReceiptExtraction,
+  ReceiptLineItem,
+  ReceiptStatus,
+} from './models/receipt';
 
 export type {
   LoginRequest,
@@ -41,3 +47,10 @@ export type {
 } from './dto/dashboard.dto';
 
 export type { ImportListQuery, ImportListResponse } from './dto/import.dto';
+
+export type {
+  ReceiptConfirmRequest,
+  ReceiptExtractResponse,
+  ReceiptListQuery,
+  ReceiptListResponse,
+} from './dto/receipt.dto';
