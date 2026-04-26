@@ -1,7 +1,7 @@
 # Arquitectura — Finanzas App
 
 > Documento vivo. Se actualiza cuando una fase introduce cambios arquitectónicos.
-> Última actualización: PHASE-4.1 — módulo `imports/` + `Transaction.import_hash`.
+> Última actualización: PHASE-4.3 — `imports/` admite PDF (`pdfplumber`).
 
 ---
 
@@ -184,7 +184,7 @@ modules/{nombre}/
 | `categories`     | ✅     | Categorías de gasto/ingreso por usuario                        |
 | `transactions`   | ✅     | CRUD de transacciones, filtros, aislamiento, `import_hash`     |
 | `dashboard`      | ✅     | Agregaciones y KPIs (read-only sobre transactions/categories)  |
-| `imports`        | ✅     | Importación CSV/XLSX con dedup por hash, jobs auditables       |
+| `imports`        | ✅     | Importación CSV/XLSX/PDF con dedup por hash, jobs auditables   |
 | `ai`             | 🚧     | Cliente Ollama + `/ai/health` (extracción se integra en 5.1)   |
 | `receipts`       | ⏳     | Pipeline de tickets: upload → ai → confirmación → persistencia |
 

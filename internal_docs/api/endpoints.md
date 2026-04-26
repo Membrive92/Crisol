@@ -95,7 +95,7 @@ Reglas relevantes:
 
 ---
 
-## Imports (`PHASE-4.1`)
+## Imports (`PHASE-4.1`, `PHASE-4.3`)
 
 | Método | Ruta | Auth | Body / Query | Response |
 |--------|------|------|--------------|----------|
@@ -104,7 +104,9 @@ Reglas relevantes:
 | GET  | `/imports/{id}` | sí | — | `200` `ImportJobResponse` |
 
 Reglas:
-- Formatos: CSV (auto-detect delimitador) y XLSX. Tamaño máx 10 MB.
+- Formatos: CSV (auto-detect delimitador), XLSX y PDF (extracción de
+  tablas vía `pdfplumber`; PDFs sin tablas → job `failed`). Tamaño
+  máx 10 MB.
 - `column_mappings`: `{ amount, occurred_at, description?, category_name? }` —
   obligatorios sólo `amount` y `occurred_at`.
 - Pipeline **síncrono**: parse → map → validate → SHA-256 dedup
