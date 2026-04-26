@@ -19,6 +19,31 @@
 
 ## Lecciones
 
+### [tech-debt] FastAPI con `response_class=Response` pierde cookies seteadas en la `Response` inyectada
+**Error:** En el endpoint de logout (status 204) seteábamos `delete_cookie` sobre la
+`Response` que FastAPI inyecta vía Depends, y luego devolvíamos `Response(status_code=204)`.
+El `Set-Cookie` no aparecía en la respuesta.
+**Causa:** Cuando un endpoint con `response_class=Response` devuelve una `Response` nueva,
+ésta reemplaza por completo a la inyectada. Las cookies/headers que se hubieran añadido a
+la inyectada se descartan.
+**Solución:** Construir la `Response` final dentro del handler, setear las cookies sobre
+ella y devolverla. No usar la `Response` inyectada cuando devuelves una nueva.
+**Regla:** En endpoints `response_class=Response` que devuelven `Response(...)` directamente,
+no inyectes `response: Response`; muta la que devuelves.
+
+### [tech-debt] Cookie `Path=/auth` no llega al backend cuando el frontend usa rewrites
+**Error:** Backend setea `Set-Cookie: ...; Path=/auth`. Frontend (Next.js) hace rewrite
+`/api/auth/*` → backend. El navegador setea la cookie con `Path=/auth`, pero la siguiente
+petición sale a `/api/auth/refresh`. El navegador no envía la cookie porque
+`/api/auth/refresh` no empieza por `/auth`.
+**Causa:** El navegador interpreta el `Path` con respecto a la URL que ve él, no la del
+backend al otro lado del proxy. Con un rewrite el path observable cambia y el `Path` del
+backend deja de aplicar.
+**Solución:** Usar `Path=/` en cookies que vayan a viajar a través de un rewrite o reverse
+proxy. Sigue siendo `httpOnly` + `SameSite=Lax`, así que la superficie no aumenta.
+**Regla:** Si el frontend usa rewrites para llamar al backend, las cookies del backend deben
+tener `Path=/` (o coincidir con el prefijo público del rewrite).
+
 ### [PHASE-2.2] `exactOptionalPropertyTypes` rechaza `undefined` explícito en props opcionales
 **Error:** Al pasar `{ category_id: undefined, date_from: '' }` a un query o al declarar
 `error?: string` en las props de un componente y luego pasarle `error={undefined}` desde el padre,

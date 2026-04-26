@@ -195,11 +195,13 @@ modules/{nombre}/
 - **JWT propio**:
   - Access token: 15 min, en memoria (frontend) / Authorization header.
   - Refresh token: 7 días, rotación en cada uso (revocación marcada en BD).
-- **Storage de refresh token (estado actual)**:
-  - Web: `localStorage` (PHASE-1.2). El plan original era cookie
-    `httpOnly` + `Secure` + `SameSite=Strict`; queda como deuda
-    técnica a abordar antes de despliegue público.
-  - Mobile: `expo-secure-store`.
+- **Storage de refresh token**:
+  - Web: cookie `httpOnly` `SameSite=Lax` (`Secure` configurable, off
+    en dev HTTP). Same-origin garantizado vía Next.js rewrites
+    (`/api/*` → backend). XSS no puede leerla.
+  - Mobile: `expo-secure-store`. El backend acepta el refresh tanto en
+    cookie (web) como en body (mobile); si llegan ambos, gana la
+    cookie.
 - **Password hashing**: argon2id (`argon2-cffi`).
 - **Rate limiting**: futuro. No bloqueante para MVP.
 - **CORS**: estricto por entorno (`settings.cors_origins_list`).
