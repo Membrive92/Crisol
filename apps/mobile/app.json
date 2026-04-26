@@ -21,7 +21,16 @@
       "bundler": "metro",
       "output": "static"
     },
-    "plugins": ["expo-router"],
+    "plugins": [
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "La app necesita acceder a la cámara para capturar tickets.",
+          "photosPermission": "La app necesita acceder a tu galería para subir tickets."
+        }
+      ]
+    ],
     "experiments": {
       "typedRoutes": true
     }
