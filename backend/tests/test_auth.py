@@ -101,22 +101,62 @@ async def test_refresh_ok(client: AsyncClient) -> None:
 
 
 async def test_refresh_revoked_token(client: AsyncClient) -> None:
+    """Flujo mobile (body-only): un refresh ya rotado no se puede reutilizar."""
     _, body = await _register(client, email="revoked@example.com")
     old_refresh = body["refresh_token"]
 
-    # First refresh — should succeed and revoke the old token
+    # Simulamos cliente sin cookies (mobile usa expo-secure-store + body).
+    client.cookies.clear()
     response1 = await client.post(
         "/auth/refresh",
         json={"refresh_token": old_refresh},
     )
     assert response1.status_code == 200
 
-    # Second refresh with the same (now revoked) token — should fail
+    # El backend setea cookie en response1; httpx la guarda. Limpiamos otra
+    # vez para que la segunda petición sí mande el body antiguo y nada más.
+    client.cookies.clear()
     response2 = await client.post(
         "/auth/refresh",
         json={"refresh_token": old_refresh},
     )
     assert response2.status_code == 401
+
+
+async def test_refresh_via_cookie(client: AsyncClient) -> None:
+    """Flujo web: el refresh viaja en la cookie httpOnly, body vacío."""
+    _, body = await _register(client, email="cookie@example.com")
+    old_refresh = body["refresh_token"]
+
+    response = await client.post("/auth/refresh", json={})
+    assert response.status_code == 200
+    new_body = response.json()
+    assert new_body["refresh_token"] != old_refresh
+    # La cookie nueva está en el response.
+    set_cookie = response.headers.get("set-cookie", "")
+    assert "finanzas_refresh=" in set_cookie
+    assert "HttpOnly" in set_cookie
+
+
+async def test_refresh_cookie_takes_precedence_over_body(client: AsyncClient) -> None:
+    """Si llegan cookie + body distintos, gana la cookie (caso edge: web con body residual)."""
+    _, body = await _register(client, email="precedence@example.com")
+    cookie_refresh = body["refresh_token"]
+
+    # Body con un valor inválido; la cookie sigue siendo válida → 200.
+    response = await client.post(
+        "/auth/refresh",
+        json={"refresh_token": "definitely-not-a-real-token"},
+    )
+    assert response.status_code == 200
+    assert response.json()["refresh_token"] != cookie_refresh
+
+
+async def test_refresh_without_token_anywhere_401(client: AsyncClient) -> None:
+    """Sin cookie ni body → 401 con mensaje claro."""
+    response = await client.post("/auth/refresh", json={})
+    assert response.status_code == 401
+    assert "ausente" in response.json()["detail"].lower()
 
 
 # ─────────────────────────────────────
@@ -135,8 +175,13 @@ async def test_logout_ok(client: AsyncClient) -> None:
         headers={"Authorization": f"Bearer {access}"},
     )
     assert response.status_code == 204
+    # logout debe limpiar la cookie.
+    set_cookie = response.headers.get("set-cookie", "")
+    assert "finanzas_refresh=" in set_cookie
 
-    # Refresh with the revoked token should fail
+    # Refresh with the revoked token should fail. Limpiamos cookie por si
+    # httpx mantuvo la versión obsoleta.
+    client.cookies.clear()
     response2 = await client.post(
         "/auth/refresh",
         json={"refresh_token": refresh_token},

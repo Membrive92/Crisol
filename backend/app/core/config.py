@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 15
     jwt_refresh_token_expire_days: int = 7
 
+    # Cookie del refresh token (web). Mobile sigue usando expo-secure-store
+    # y enviando el refresh en el body — el backend acepta ambos.
+    auth_cookie_name: str = "finanzas_refresh"
+    auth_cookie_secure: bool = False  # ponerlo a true en prod (HTTPS).
+    auth_cookie_samesite: str = "lax"  # lax | strict | none (none requiere secure).
+
     # ---------- Ollama (IA local) ----------
     ollama_base_url: str = "http://localhost:11434"
     ollama_vision_model: str = "qwen2.5-vl:7b"

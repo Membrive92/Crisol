@@ -21,9 +21,13 @@ class LoginRequest(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    """Petición de refresh de token."""
+    """Petición de refresh de token.
 
-    refresh_token: str
+    `refresh_token` es opcional: si la petición trae cookie `finanzas_refresh`
+    (flujo web), no hace falta. Mobile envía el token en el body.
+    """
+
+    refresh_token: str | None = None
 
 
 class TokenResponse(BaseModel):
