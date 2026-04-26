@@ -4,7 +4,7 @@ import { type FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
-import { authApi } from '@finanzas/services';
+import { authApi, formatApiError } from '@finanzas/services';
 import { useAuthStore } from '@finanzas/store';
 
 export default function LoginPage() {
@@ -26,8 +26,8 @@ export default function LoginPage() {
       const user = await authApi.getMe();
       setUser(user);
       router.replace('/dashboard');
-    } catch {
-      setError('Credenciales incorrectas');
+    } catch (err) {
+      setError(formatApiError(err, 'Credenciales incorrectas.'));
     } finally {
       setLoading(false);
     }

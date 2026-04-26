@@ -4,7 +4,7 @@ import { type FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
-import { authApi } from '@finanzas/services';
+import { authApi, formatApiError } from '@finanzas/services';
 import { useAuthStore } from '@finanzas/store';
 
 export default function RegisterPage() {
@@ -31,8 +31,8 @@ export default function RegisterPage() {
       const user = await authApi.getMe();
       setUser(user);
       router.replace('/dashboard');
-    } catch {
-      setError('Error al registrarse. ¿El email ya está en uso?');
+    } catch (err) {
+      setError(formatApiError(err, 'No se pudo completar el registro.'));
     } finally {
       setLoading(false);
     }

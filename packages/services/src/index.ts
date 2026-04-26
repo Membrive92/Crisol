@@ -5,6 +5,7 @@ export {
   setRefreshToken,
   setOnAuthFailure,
 } from './api/client';
+export { formatApiError } from './api/errors';
 export { authApi } from './api/endpoints/auth';
 export { categoriesApi } from './api/endpoints/categories';
 export { transactionsApi } from './api/endpoints/transactions';
