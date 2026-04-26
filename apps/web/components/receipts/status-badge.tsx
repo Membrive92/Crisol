@@ -1,0 +1,41 @@
+'use client';
+
+import type { ReceiptStatus } from '@finanzas/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+
+const STATUS_LABEL: Record<ReceiptStatus, string> = {
+  pending: 'Pendiente',
+  confirmed: 'Confirmado',
+  rejected: 'Rechazado',
+};
+
+const STATUS_COLOR: Record<ReceiptStatus, { bg: string; fg: string }> = {
+  pending: { bg: colors.surfaceMuted, fg: colors.primary },
+  confirmed: { bg: '#e8f5e9', fg: colors.success },
+  rejected: { bg: '#fdecea', fg: colors.danger },
+};
+
+export interface ReceiptStatusBadgeProps {
+  status: ReceiptStatus;
+}
+
+export function ReceiptStatusBadge({ status }: ReceiptStatusBadgeProps) {
+  const palette = STATUS_COLOR[status];
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        padding: `${spacing.xs}px ${spacing.sm}px`,
+        backgroundColor: palette.bg,
+        color: palette.fg,
+        borderRadius: radius.sm,
+        fontSize: fontSize.xs,
+        fontWeight: fontWeight.semibold,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+      }}
+    >
+      {STATUS_LABEL[status]}
+    </span>
+  );
+}
