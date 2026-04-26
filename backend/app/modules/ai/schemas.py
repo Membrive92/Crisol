@@ -42,3 +42,25 @@ class ReceiptExtraction(BaseModel):
     tax: Decimal | None = None
     line_items: list[ReceiptLineItem] = Field(default_factory=list)
     raw_text: str | None = Field(default=None, max_length=5000)
+
+
+class BankStatementRow(BaseModel):
+    """Fila individual de un extracto bancario extraída por el modelo de visión.
+
+    Se usa en el fallback de importación PDF cuando `pdfplumber` no encuentra
+    tablas (PDFs escaneados). Cada fila se mapea 1:1 a una transacción.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    description: str = Field(min_length=1, max_length=500)
+    amount: Decimal = Field(gt=0)
+    occurred_at: str = Field(min_length=1, max_length=64)
+
+
+class BankStatementPage(BaseModel):
+    """Wrapper del JSON que devuelve el modelo para una página del extracto."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    rows: list[BankStatementRow] = Field(default_factory=list)
