@@ -9,6 +9,7 @@ export { authApi } from './api/endpoints/auth';
 export { categoriesApi } from './api/endpoints/categories';
 export { transactionsApi } from './api/endpoints/transactions';
 export { dashboardApi } from './api/endpoints/dashboard';
+export { importsApi, type CreateImportPayload } from './api/endpoints/imports';
 
 export { queryKeys } from './query/keys';
 export {
@@ -31,3 +32,4 @@ export {
   useDashboardByMonth,
   useDashboardTopExpenses,
 } from './query/hooks/useDashboard';
+export { useImports, useImport, useCreateImport } from './query/hooks/useImports';

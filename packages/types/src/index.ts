@@ -7,6 +7,12 @@ export type {
   MonthlyBucket,
   TopExpenseItem,
 } from './models/dashboard';
+export type {
+  ImportColumnMappings,
+  ImportErrorEntry,
+  ImportJob,
+  ImportJobStatus,
+} from './models/import';
 
 export type {
   LoginRequest,
@@ -33,3 +39,5 @@ export type {
   DashboardByMonthQuery,
   DashboardTopExpensesQuery,
 } from './dto/dashboard.dto';
+
+export type { ImportListQuery, ImportListResponse } from './dto/import.dto';
