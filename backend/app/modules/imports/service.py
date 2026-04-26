@@ -22,15 +22,32 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.ai import service as ai_service
+from app.modules.ai.exceptions import AiError
 from app.modules.categories.models import Category
 from app.modules.imports.models import ImportJob, ImportJobStatus
-from app.modules.imports.parser import ParseError, parse_file
+from app.modules.imports.parser import (
+    NoTablesInPdfError,
+    ParseError,
+    parse_file,
+    render_pdf_pages_to_png,
+)
 from app.modules.imports.repository import create_job, find_existing_hashes
 from app.modules.imports.schemas import ImportColumnMappings
 from app.modules.transactions.models import Transaction, TransactionSource
 
 MAX_ERROR_LOG = 100
 DEFAULT_CURRENCY = "EUR"
+MAX_VISION_PDF_PAGES = 5
+
+# Mapping forzado para el flujo de visión: el modelo siempre devuelve estas
+# claves y no usamos las del usuario en este caso.
+VISION_FORCED_MAPPING = ImportColumnMappings(
+    amount="amount",
+    occurred_at="occurred_at",
+    description="description",
+    category_name=None,
+)
 
 DATE_FORMATS = (
     "%Y-%m-%dT%H:%M:%S",
@@ -75,8 +92,21 @@ async def run_import(
     )
     job = await create_job(db, job)
 
+    effective_mappings = mappings
     try:
         rows = parse_file(payload, filename, content_type)
+    except NoTablesInPdfError:
+        # PDF sin texto extraíble — caemos al pipeline de visión local.
+        try:
+            rows = await _parse_pdf_with_vision(payload)
+        except (ParseError, AiError) as e:
+            job.status = ImportJobStatus.FAILED
+            job.error_log = [{"row": 0, "error": f"Visión PDF falló: {e}"}]
+            await db.flush()
+            await db.refresh(job)
+            return job
+        # Las filas vienen con keys fijas: ignoramos el mapping del usuario.
+        effective_mappings = VISION_FORCED_MAPPING
     except ParseError as e:
         job.status = ImportJobStatus.FAILED
         job.error_log = [{"row": 0, "error": str(e)}]
@@ -103,7 +133,7 @@ async def run_import(
         try:
             parsed_row = _parse_row(
                 raw,
-                mappings=mappings,
+                mappings=effective_mappings,
                 user_id=user_id,
                 currency=currency.upper(),
                 category_lookup=category_lookup,
@@ -159,6 +189,34 @@ async def run_import(
 # ─────────────────────────────────────────────────────────────────────────────
 # Internals
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+async def _parse_pdf_with_vision(payload: bytes) -> list[dict[str, str]]:
+    """Renderiza el PDF a imágenes y las pasa al modelo de visión.
+
+    Devuelve filas con las keys fijas `amount`, `occurred_at`, `description`
+    para que el resto del pipeline las trate igual que las parseadas con
+    `parse_file`.
+
+    Limita a `MAX_VISION_PDF_PAGES` páginas: la inferencia es cara y los
+    extractos típicos rara vez tienen más de 3-4 páginas relevantes.
+    """
+    images = render_pdf_pages_to_png(payload, max_pages=MAX_VISION_PDF_PAGES)
+    if not images:
+        raise ParseError("PDF sin páginas renderizables")
+
+    rows: list[dict[str, str]] = []
+    for image in images:
+        page_rows = await ai_service.extract_bank_statement_page(image)
+        for r in page_rows:
+            rows.append(
+                {
+                    "amount": str(r.amount),
+                    "occurred_at": r.occurred_at,
+                    "description": r.description,
+                }
+            )
+    return rows
 
 
 class _RowError(ValueError):

@@ -6,7 +6,8 @@ normalizan a `str` para que la lógica de validación posterior los
 parsee homogéneamente.
 
 PDF: usa `pdfplumber.extract_tables()` con la heurística por defecto.
-PDFs sin texto extraíble (escaneados) terminan en `ParseError`.
+Los PDFs sin tablas extraíbles (escaneados) lanzan `NoTablesInPdfError`,
+que el service de imports captura para fallback con visión local.
 """
 
 from __future__ import annotations
@@ -34,6 +35,14 @@ PDF_MIME_TYPES = {"application/pdf"}
 
 class ParseError(Exception):
     """Error al parsear un fichero subido."""
+
+
+class NoTablesInPdfError(ParseError):
+    """El PDF no tiene tablas extraíbles (típicamente escaneado).
+
+    El service de imports lo captura para intentar el fallback con visión
+    local (renderizar páginas como imagen y pasarlas al modelo).
+    """
 
 
 def detect_format(filename: str, content_type: str | None) -> str:
@@ -142,7 +151,9 @@ def parse_pdf(payload: bytes) -> list[dict[str, str]]:
                     tables.append(table)
 
     if not tables:
-        raise ParseError("No se detectaron tablas en el PDF (¿escaneado?)")
+        raise NoTablesInPdfError(
+            "No se detectaron tablas en el PDF (¿escaneado?)"
+        )
 
     first_header_raw = tables[0][0]
     if not first_header_raw:
@@ -200,6 +211,46 @@ def parse_file(payload: bytes, filename: str, content_type: str | None) -> list[
 def parse_stream(stream: IO[bytes], filename: str, content_type: str | None) -> list[dict[str, str]]:
     """Variante para streams ya abiertos (p.ej. `UploadFile`)."""
     return parse_file(stream.read(), filename, content_type)
+
+
+def render_pdf_pages_to_png(payload: bytes, *, max_pages: int, dpi: int = 150) -> list[bytes]:
+    """Renderiza las primeras `max_pages` páginas del PDF a PNG.
+
+    Se usa en el fallback de visión cuando `pdfplumber` no detecta tablas.
+    Limitamos el número de páginas para evitar tiempos de inferencia
+    desbordados — extractos típicos de banca tienen 1-3 páginas relevantes.
+    """
+    if max_pages <= 0:
+        return []
+    try:
+        import pypdfium2 as pdfium  # type: ignore[import-untyped]
+    except ImportError as e:
+        raise ParseError("pypdfium2 no disponible") from e
+
+    try:
+        pdf = pdfium.PdfDocument(payload)
+    except Exception as e:
+        raise ParseError(f"PDF inválido para render: {e}") from e
+
+    pages: list[bytes] = []
+    try:
+        scale = dpi / 72  # PDF default es 72 DPI.
+        for index in range(min(len(pdf), max_pages)):
+            page = pdf[index]
+            try:
+                bitmap = page.render(scale=scale)
+                try:
+                    image = bitmap.to_pil()
+                    buffer = io.BytesIO()
+                    image.save(buffer, format="PNG")
+                    pages.append(buffer.getvalue())
+                finally:
+                    bitmap.close()
+            finally:
+                page.close()
+    finally:
+        pdf.close()
+    return pages
 
 
 def _stringify(value: Any) -> str:
