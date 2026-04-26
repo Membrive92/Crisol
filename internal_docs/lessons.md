@@ -81,6 +81,20 @@ no se "expira" tras commit, queda *stale* tras el flush con `onupdate`.
 **Regla:** Si un service muta un objeto con campos `onupdate=func.now()` y el endpoint
 serializa ese objeto post-mutación, hacer `await db.refresh(obj)` antes de retornar.
 
+### [PHASE-4.2] `Blob.text()` y `Blob.slice().text()` no existen en jsdom
+**Error:** Un detector de cabeceras CSV en el browser usaba
+`file.slice(0, 8192).text()` (y luego `file.text()`). Los tests con `vitest` + `jsdom`
+rompían con `TypeError: slice.text is not a function` y `file.text is not a function`,
+aunque ambos métodos están en la spec moderna del DOM y funcionan en navegadores reales.
+**Causa:** jsdom (la versión que usa vitest 2.x en este repo) no implementa el método
+asíncrono `Blob.text()`. El código de producción funciona en Chrome/Firefox, pero los
+tests caen.
+**Solución:** Envolver `FileReader.readAsText(blob)` en una promesa. `FileReader` sí
+está implementado tanto en jsdom como en todos los navegadores soportados. La
+diferencia de API queda contenida en un helper privado.
+**Regla:** Para leer Blobs/Files como texto desde código que tiene tests en jsdom, usar
+`FileReader.readAsText` en lugar de `Blob.text()` o `Blob.slice().text()`.
+
 ---
 
 ## Ejemplos de referencia (no son lecciones reales)

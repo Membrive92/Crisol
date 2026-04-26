@@ -59,7 +59,8 @@ Leyenda: ⏳ pendiente · 🚧 en curso · ✅ completada · ❌ bloqueada
 | Fase | Nombre             | Estado | PR |
 |------|--------------------|--------|----|
 | 4.1  | Imports backend    | ✅     | —  |
-| 4.2  | Imports frontend   | ⏳     | —  |
+| 4.2  | Imports frontend   | ✅     | —  |
+| 4.3  | PDF imports        | ⏳     | —  |
 
 ### Fase 5 — IA: tickets
 
