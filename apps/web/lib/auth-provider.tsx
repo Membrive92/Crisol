@@ -2,10 +2,10 @@
 
 import { useEffect, useRef } from 'react';
 
-import { configureApi, setAccessToken, setOnAuthFailure, setRefreshToken } from '@finanzas/services';
+import { configureApi, setAccessToken, setOnAuthFailure } from '@finanzas/services';
 import { useAuthStore } from '@finanzas/store';
 
-const API_URL = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:8000';
+const API_URL = process.env['NEXT_PUBLIC_API_URL'] ?? '/api';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const initialized = useRef(false);
@@ -14,31 +14,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (initialized.current) return;
     initialized.current = true;
 
-    configureApi({ baseURL: API_URL });
+    // El refresh viaja en cookie httpOnly. axios necesita `withCredentials`
+    // para que el navegador la incluya en cada request al backend (vía
+    // /api/* rewrite, así que la cookie es same-origin).
+    configureApi({ baseURL: API_URL, withCredentials: true });
 
     setOnAuthFailure(() => {
       useAuthStore.getState().logout();
-      localStorage.removeItem('refresh_token');
       window.location.href = '/login';
     });
 
-    const refreshToken = localStorage.getItem('refresh_token');
-    if (refreshToken) {
-      setRefreshToken(refreshToken);
-      useAuthStore.getState().hydrate(null, refreshToken, null);
-    } else {
-      useAuthStore.getState().hydrate(null, null, null);
-    }
+    // No leemos refresh de localStorage: vive en cookie httpOnly. El
+    // dashboard layout intentará un /auth/refresh al montar; si la cookie
+    // no existe o expiró, redirige a login.
+    useAuthStore.getState().hydrate(null, null, null);
 
     useAuthStore.subscribe((state) => {
       setAccessToken(state.accessToken);
-      if (state.refreshToken) {
-        setRefreshToken(state.refreshToken);
-        localStorage.setItem('refresh_token', state.refreshToken);
-      } else {
-        setRefreshToken(null);
-        localStorage.removeItem('refresh_token');
-      }
     });
   }, []);
 

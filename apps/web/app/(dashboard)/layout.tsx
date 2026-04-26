@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -10,55 +10,73 @@ import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const { isAuthenticated, isHydrated, accessToken, refreshToken, setTokens, setUser, logout } =
+  const { isAuthenticated, isHydrated, accessToken, setTokens, setUser, logout } =
     useAuthStore();
+  const [bootstrapping, setBootstrapping] = useState(true);
 
   useEffect(() => {
     if (!isHydrated) return;
+    let cancelled = false;
 
-    if (!isAuthenticated && !refreshToken) {
-      router.replace('/login');
-      return;
+    // Si ya tenemos accessToken (tras login/registro), sólo hidratamos el
+    // user con /me si aún no está cargado.
+    if (accessToken) {
+      if (!useAuthStore.getState().user) {
+        authApi
+          .getMe()
+          .then((user) => {
+            if (!cancelled) setUser(user);
+          })
+          .catch(() => {
+            if (!cancelled) {
+              logout();
+              router.replace('/login');
+            }
+          });
+      }
+      setBootstrapping(false);
+      return () => {
+        cancelled = true;
+      };
     }
 
-    if (!accessToken && refreshToken) {
-      authApi
-        .refresh(refreshToken)
-        .then((tokens) => {
-          setTokens(tokens.access_token, tokens.refresh_token);
-          return authApi.getMe();
-        })
-        .then((user) => setUser(user))
-        .catch(() => {
-          logout();
-          router.replace('/login');
-        });
-      return;
-    }
+    // Sin accessToken: intentamos refrescar usando la cookie httpOnly. Si
+    // no hay cookie (o expiró), el backend devuelve 401 y vamos a login.
+    authApi
+      .refresh()
+      .then((tokens) => {
+        if (cancelled) return null;
+        setTokens(tokens.access_token, tokens.refresh_token);
+        return authApi.getMe();
+      })
+      .then((user) => {
+        if (cancelled || !user) return;
+        setUser(user);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        logout();
+        router.replace('/login');
+      })
+      .finally(() => {
+        if (!cancelled) setBootstrapping(false);
+      });
 
-    if (accessToken && !useAuthStore.getState().user) {
-      authApi
-        .getMe()
-        .then((user) => setUser(user))
-        .catch(() => {
-          logout();
-          router.replace('/login');
-        });
-    }
-  }, [isHydrated, isAuthenticated, accessToken, refreshToken, setTokens, setUser, logout, router]);
+    return () => {
+      cancelled = true;
+    };
+  }, [isHydrated, accessToken, setTokens, setUser, logout, router]);
 
   async function handleLogout() {
     try {
-      if (refreshToken) {
-        await authApi.logout(refreshToken);
-      }
+      await authApi.logout();
     } finally {
       logout();
       router.replace('/login');
     }
   }
 
-  if (!isHydrated || !isAuthenticated) {
+  if (!isHydrated || bootstrapping || !isAuthenticated) {
     return null;
   }
 

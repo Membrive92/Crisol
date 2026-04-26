@@ -18,15 +18,24 @@ export const authApi = {
     return response.data;
   },
 
-  async refresh(refreshToken: string): Promise<TokenResponse> {
-    const response = await apiClient.post<TokenResponse>('/auth/refresh', {
-      refresh_token: refreshToken,
-    });
+  /**
+   * Rota el refresh token. En web déjalo sin argumento — el navegador
+   * envía la cookie httpOnly. En mobile pasa el token guardado en
+   * `expo-secure-store`.
+   */
+  async refresh(refreshToken?: string): Promise<TokenResponse> {
+    const body = refreshToken ? { refresh_token: refreshToken } : {};
+    const response = await apiClient.post<TokenResponse>('/auth/refresh', body);
     return response.data;
   },
 
-  async logout(refreshToken: string): Promise<void> {
-    await apiClient.post('/auth/logout', { refresh_token: refreshToken });
+  /**
+   * Revoca el refresh token. Web puede llamar sin argumento (la cookie
+   * basta); mobile pasa el token guardado.
+   */
+  async logout(refreshToken?: string): Promise<void> {
+    const body = refreshToken ? { refresh_token: refreshToken } : {};
+    await apiClient.post('/auth/logout', body);
   },
 
   async getMe(): Promise<User> {

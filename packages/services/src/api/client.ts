@@ -21,8 +21,19 @@ export const apiClient = axios.create({
   timeout: 15_000,
 });
 
-export function configureApi(config: { baseURL: string }): void {
-  apiClient.defaults.baseURL = config.baseURL;
+export interface ConfigureApiOptions {
+  baseURL: string;
+  /**
+   * Si `true`, axios manda cookies en cada petición — necesario para que
+   * la cookie httpOnly del refresh token llegue al backend (flujo web). En
+   * mobile (Expo) déjalo en `false` y pasa el refresh por body.
+   */
+  withCredentials?: boolean;
+}
+
+export function configureApi(options: ConfigureApiOptions): void {
+  apiClient.defaults.baseURL = options.baseURL;
+  apiClient.defaults.withCredentials = options.withCredentials ?? false;
 }
 
 export function setAccessToken(token: string | null): void {
@@ -45,17 +56,26 @@ apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 });
 
 async function attemptRefresh(): Promise<string | null> {
-  if (!_refreshToken) return null;
+  // Si el cliente no tiene refresh en memoria (flujo web con cookie httpOnly)
+  // mandamos body vacío y el backend extrae el token de la cookie. En mobile,
+  // el refresh sí está en memoria y va por body.
+  const body = _refreshToken ? { refresh_token: _refreshToken } : {};
 
   try {
     const response: AxiosResponse<TokenResponse> = await axios.post(
       `${apiClient.defaults.baseURL ?? ''}/auth/refresh`,
-      { refresh_token: _refreshToken },
-      { headers: { 'Content-Type': 'application/json' } },
+      body,
+      {
+        headers: { 'Content-Type': 'application/json' },
+        withCredentials: apiClient.defaults.withCredentials ?? false,
+      },
     );
     const { access_token, refresh_token } = response.data;
     _accessToken = access_token;
-    _refreshToken = refresh_token;
+    // Guardamos el refresh sólo si no estamos usando la cookie. Si estamos en
+    // flujo web (withCredentials), el navegador ya gestiona la cookie y el
+    // body refresh es información redundante que **no** queremos persistir.
+    _refreshToken = apiClient.defaults.withCredentials ? null : refresh_token;
     return access_token;
   } catch {
     _accessToken = null;
