@@ -15,19 +15,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
-from app.modules.dashboard.schemas import (
+from app.modules.personal_finance.categories.models import CategoryKind
+from app.modules.personal_finance.dashboard.schemas import (
     CategoryBreakdownItem,
     MonthlyBucket,
     SummaryResponse,
     TopExpenseItem,
 )
-from app.modules.dashboard.service import (
+from app.modules.personal_finance.dashboard.service import (
     get_breakdown_by_category,
     get_monthly_breakdown,
     get_summary,
     get_top_expenses,
 )
-from app.modules.personal_finance.categories.models import CategoryKind
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 

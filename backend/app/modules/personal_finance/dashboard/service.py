@@ -13,14 +13,14 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.dashboard import repository
-from app.modules.dashboard.schemas import (
+from app.modules.personal_finance.categories.models import CategoryKind
+from app.modules.personal_finance.dashboard import repository
+from app.modules.personal_finance.dashboard.schemas import (
     CategoryBreakdownItem,
     MonthlyBucket,
     SummaryResponse,
     TopExpenseItem,
 )
-from app.modules.personal_finance.categories.models import CategoryKind
 
 _UNCATEGORIZED_NAME = "Sin categoría"
 
