@@ -48,10 +48,10 @@ def _mock_storage_and_ai(
         extract_kwargs["return_value"] = extraction or _sample_extraction()
 
     with (
-        patch("app.modules.receipts.service.storage.put_receipt", return_value="fakekey/img.jpg"),
-        patch("app.modules.receipts.service.storage.delete_receipt", delete_mock),
+        patch("app.modules.personal_finance.receipts.service.storage.put_receipt", return_value="fakekey/img.jpg"),
+        patch("app.modules.personal_finance.receipts.service.storage.delete_receipt", delete_mock),
         patch(
-            "app.modules.receipts.service.ai_service.extract_receipt",
+            "app.modules.personal_finance.receipts.service.ai_service.extract_receipt",
             new_callable=AsyncMock,
             **extract_kwargs,
         ),
@@ -219,7 +219,7 @@ async def test_get_blob_returns_image_bytes(client: AsyncClient) -> None:
 
     fake_bytes = b"\xff\xd8\xff\xe0image-bytes"
     with patch(
-        "app.modules.receipts.router.storage.get_receipt",
+        "app.modules.personal_finance.receipts.router.storage.get_receipt",
         return_value=fake_bytes,
     ):
         r = await client.get(f"/receipts/{rid}/blob", headers=_auth(token))
@@ -239,7 +239,7 @@ async def test_get_blob_isolated_per_user(client: AsyncClient) -> None:
     rid = a_extract.json()["receipt"]["id"]
 
     with patch(
-        "app.modules.receipts.router.storage.get_receipt",
+        "app.modules.personal_finance.receipts.router.storage.get_receipt",
         return_value=b"x",
     ) as get_mock:
         r = await client.get(f"/receipts/{rid}/blob", headers=_auth(token_b))
@@ -258,7 +258,7 @@ async def test_get_blob_storage_failure_returns_404(client: AsyncClient) -> None
     rid = extract.json()["receipt"]["id"]
 
     with patch(
-        "app.modules.receipts.router.storage.get_receipt",
+        "app.modules.personal_finance.receipts.router.storage.get_receipt",
         side_effect=StorageError("blob no existe"),
     ):
         r = await client.get(f"/receipts/{rid}/blob", headers=_auth(token))

@@ -22,10 +22,10 @@ from app.modules.ai import service as ai_service
 from app.modules.ai.exceptions import AiError
 from app.modules.ai.schemas import ReceiptExtraction
 from app.modules.personal_finance.categories.repository import get_category_by_id
+from app.modules.personal_finance.receipts.models import Receipt, ReceiptStatus
+from app.modules.personal_finance.receipts.repository import create_receipt, get_receipt_by_id
+from app.modules.personal_finance.receipts.schemas import ReceiptConfirmRequest
 from app.modules.personal_finance.transactions.models import Transaction, TransactionSource
-from app.modules.receipts.models import Receipt, ReceiptStatus
-from app.modules.receipts.repository import create_receipt, get_receipt_by_id
-from app.modules.receipts.schemas import ReceiptConfirmRequest
 
 ALLOWED_IMAGE_TYPES = {
     "image/jpeg",

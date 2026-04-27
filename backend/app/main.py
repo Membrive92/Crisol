@@ -11,8 +11,8 @@ from app.modules.auth.router import router as auth_router
 from app.modules.personal_finance.categories.router import router as categories_router
 from app.modules.personal_finance.dashboard.router import router as dashboard_router
 from app.modules.personal_finance.imports.router import router as imports_router
+from app.modules.personal_finance.receipts.router import router as receipts_router
 from app.modules.personal_finance.transactions.router import router as transactions_router
-from app.modules.receipts.router import router as receipts_router
 
 app = FastAPI(
     title="Finanzas App API",

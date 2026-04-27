@@ -12,14 +12,14 @@ from app.core import storage
 from app.core.database import get_db
 from app.core.deps import CurrentUser
 from app.modules.ai.schemas import ReceiptExtraction
-from app.modules.receipts.repository import get_receipt_by_id, list_receipts
-from app.modules.receipts.schemas import (
+from app.modules.personal_finance.receipts.repository import get_receipt_by_id, list_receipts
+from app.modules.personal_finance.receipts.schemas import (
     ReceiptConfirmRequest,
     ReceiptExtractResponse,
     ReceiptListResponse,
     ReceiptResponse,
 )
-from app.modules.receipts.service import (
+from app.modules.personal_finance.receipts.service import (
     confirm_receipt,
     extract_and_persist,
     reject_receipt,

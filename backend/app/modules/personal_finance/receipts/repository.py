@@ -7,7 +7,7 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.receipts.models import Receipt
+from app.modules.personal_finance.receipts.models import Receipt
 
 
 async def create_receipt(db: AsyncSession, receipt: Receipt) -> Receipt:

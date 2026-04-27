@@ -10,7 +10,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.modules.ai.schemas import ReceiptExtraction
-from app.modules.receipts.models import ReceiptStatus
+from app.modules.personal_finance.receipts.models import ReceiptStatus
 
 
 class ReceiptResponse(BaseModel):
