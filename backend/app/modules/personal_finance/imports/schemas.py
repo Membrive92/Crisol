@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.modules.imports.models import ImportJobStatus
+from app.modules.personal_finance.imports.models import ImportJobStatus
 
 # Campos del CSV/XLSX que el cliente puede mapear.
 TARGET_FIELDS = ("amount", "occurred_at", "description", "category_name")

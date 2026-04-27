@@ -11,7 +11,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import PageBreak, SimpleDocTemplate, Table, TableStyle
 
-from app.modules.imports.parser import (
+from app.modules.personal_finance.imports.parser import (
     ParseError,
     detect_format,
     parse_csv,

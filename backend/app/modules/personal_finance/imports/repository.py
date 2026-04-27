@@ -7,7 +7,7 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.imports.models import ImportJob
+from app.modules.personal_finance.imports.models import ImportJob
 from app.modules.personal_finance.transactions.models import Transaction
 
 

@@ -12,13 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
-from app.modules.imports.repository import get_job_by_id, list_jobs
-from app.modules.imports.schemas import (
+from app.modules.personal_finance.imports.repository import get_job_by_id, list_jobs
+from app.modules.personal_finance.imports.schemas import (
     ImportColumnMappings,
     ImportJobListResponse,
     ImportJobResponse,
 )
-from app.modules.imports.service import run_import
+from app.modules.personal_finance.imports.service import run_import
 
 router = APIRouter(prefix="/imports", tags=["imports"])
 

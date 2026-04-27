@@ -332,11 +332,11 @@ async def test_import_pdf_vision_fallback_imports_rows(client: AsyncClient) -> N
 
     with (
         patch(
-            "app.modules.imports.service.render_pdf_pages_to_png",
+            "app.modules.personal_finance.imports.service.render_pdf_pages_to_png",
             return_value=[b"fake-png-page-1"],
         ),
         patch(
-            "app.modules.imports.service.ai_service.extract_bank_statement_page",
+            "app.modules.personal_finance.imports.service.ai_service.extract_bank_statement_page",
             new_callable=AsyncMock,
             return_value=[
                 BankStatementRow(
@@ -384,11 +384,11 @@ async def test_import_pdf_vision_fallback_when_ai_down_fails_job(
 
     with (
         patch(
-            "app.modules.imports.service.render_pdf_pages_to_png",
+            "app.modules.personal_finance.imports.service.render_pdf_pages_to_png",
             return_value=[b"fake-png"],
         ),
         patch(
-            "app.modules.imports.service.ai_service.extract_bank_statement_page",
+            "app.modules.personal_finance.imports.service.ai_service.extract_bank_statement_page",
             new_callable=AsyncMock,
             side_effect=AiUnavailableError("Ollama down"),
         ),
