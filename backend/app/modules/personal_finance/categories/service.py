@@ -7,20 +7,20 @@ import uuid
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.categories.models import Category
-from app.modules.categories.repository import (
+from app.modules.personal_finance.categories.models import Category
+from app.modules.personal_finance.categories.repository import (
     create_category as persist_category,
 )
-from app.modules.categories.repository import (
+from app.modules.personal_finance.categories.repository import (
     delete_category as remove_category,
 )
-from app.modules.categories.repository import (
+from app.modules.personal_finance.categories.repository import (
     get_category_by_id,
 )
-from app.modules.categories.repository import (
+from app.modules.personal_finance.categories.repository import (
     list_categories as list_all,
 )
-from app.modules.categories.schemas import CategoryCreate, CategoryUpdate
+from app.modules.personal_finance.categories.schemas import CategoryCreate, CategoryUpdate
 
 
 async def list_categories(db: AsyncSession, user_id: uuid.UUID) -> list[Category]:

@@ -7,7 +7,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.modules.categories.models import CategoryKind
+from app.modules.personal_finance.categories.models import CategoryKind
 
 
 class CategoryCreate(BaseModel):

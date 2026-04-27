@@ -18,7 +18,7 @@ from alembic import context
 from app.core.config import settings
 from app.core.database import Base
 from app.modules.auth.models import RefreshToken  # noqa: F401
-from app.modules.categories.models import Category  # noqa: F401
+from app.modules.personal_finance.categories.models import Category  # noqa: F401
 from app.modules.imports.models import ImportJob  # noqa: F401
 from app.modules.transactions.models import Transaction  # noqa: F401
 from app.modules.users.models import User  # noqa: F401

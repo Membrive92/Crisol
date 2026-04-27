@@ -16,7 +16,7 @@ from typing import Any
 from sqlalchemy import Select, extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.categories.models import Category, CategoryKind
+from app.modules.personal_finance.categories.models import Category, CategoryKind
 from app.modules.transactions.models import Transaction
 
 

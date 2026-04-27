@@ -24,7 +24,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.ai import service as ai_service
 from app.modules.ai.exceptions import AiError
-from app.modules.categories.models import Category
 from app.modules.imports.models import ImportJob, ImportJobStatus
 from app.modules.imports.parser import (
     NoTablesInPdfError,
@@ -34,6 +33,7 @@ from app.modules.imports.parser import (
 )
 from app.modules.imports.repository import create_job, find_existing_hashes
 from app.modules.imports.schemas import ImportColumnMappings
+from app.modules.personal_finance.categories.models import Category
 from app.modules.transactions.models import Transaction, TransactionSource
 
 MAX_ERROR_LOG = 100

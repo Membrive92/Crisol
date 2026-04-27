@@ -7,7 +7,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.categories.models import Category
+from app.modules.personal_finance.categories.models import Category
 
 
 async def list_categories(db: AsyncSession, user_id: uuid.UUID) -> list[Category]:

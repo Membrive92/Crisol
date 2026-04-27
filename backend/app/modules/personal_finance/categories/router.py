@@ -10,8 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
-from app.modules.categories.schemas import CategoryCreate, CategoryResponse, CategoryUpdate
-from app.modules.categories.service import (
+from app.modules.personal_finance.categories.schemas import (
+    CategoryCreate,
+    CategoryResponse,
+    CategoryUpdate,
+)
+from app.modules.personal_finance.categories.service import (
     create_category,
     delete_category,
     get_category,

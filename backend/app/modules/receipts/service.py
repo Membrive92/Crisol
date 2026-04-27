@@ -21,7 +21,7 @@ from app.core import storage
 from app.modules.ai import service as ai_service
 from app.modules.ai.exceptions import AiError
 from app.modules.ai.schemas import ReceiptExtraction
-from app.modules.categories.repository import get_category_by_id
+from app.modules.personal_finance.categories.repository import get_category_by_id
 from app.modules.receipts.models import Receipt, ReceiptStatus
 from app.modules.receipts.repository import create_receipt, get_receipt_by_id
 from app.modules.receipts.schemas import ReceiptConfirmRequest
