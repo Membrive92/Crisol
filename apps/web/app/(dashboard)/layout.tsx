@@ -8,6 +8,8 @@ import { useAuthStore } from '@finanzas/store';
 import { authApi } from '@finanzas/services';
 import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
 
+import { ThemeToggle } from '@/components/ui/theme-toggle';
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { isAuthenticated, isHydrated, accessToken, setTokens, setUser, logout } =
@@ -113,11 +115,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <Link href="/receipts" style={{ color: colors.text, textDecoration: 'none' }}>
           Tickets
         </Link>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: spacing.sm }}>
+          <ThemeToggle />
+        </div>
         <button
           type="button"
           onClick={handleLogout}
           style={{
-            marginLeft: 'auto',
             padding: `${spacing.xs}px ${spacing.sm}px`,
             backgroundColor: 'transparent',
             color: colors.danger,
