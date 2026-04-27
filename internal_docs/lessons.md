@@ -19,6 +19,19 @@
 
 ## Lecciones
 
+### [tech-debt] CSS vars en design tokens → hidratación SSR consistente vía detección de RN
+**Error:** Pensé en activar/desactivar `var(--color-…)` según `typeof document`, pero
+Next.js SSR (Node) **también** tiene `document` undefined, igual que React Native. El
+servidor habría emitido literales hex y el cliente CSS vars → mismatch de hidratación.
+**Causa:** El detector "modo browser" no es exclusivo del browser real. Hay tres entornos:
+RN, Node SSR y browser cliente.
+**Solución:** Usar `navigator.product === 'ReactNative'` (canonical RN detection). Es
+`false` tanto en Node SSR (no hay navigator) como en browser, así que ambos lados emiten
+las mismas cadenas `var(--color-…, fallback)`. Sólo RN ve los literales.
+**Regla:** Para cualquier rama de código que dependa del entorno y vaya en `<style>`
+SSR-able, distinguir entre "no es browser" y "es React Native"; lo segundo se hace con
+`navigator?.product === 'ReactNative'`, no con `typeof document`.
+
 ### [tech-debt] FastAPI con `response_class=Response` pierde cookies seteadas en la `Response` inyectada
 **Error:** En el endpoint de logout (status 204) seteábamos `delete_cookie` sobre la
 `Response` que FastAPI inyecta vía Depends, y luego devolvíamos `Response(status_code=204)`.
