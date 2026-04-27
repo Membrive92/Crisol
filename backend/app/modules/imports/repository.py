@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.imports.models import ImportJob
-from app.modules.transactions.models import Transaction
+from app.modules.personal_finance.transactions.models import Transaction
 
 
 async def create_job(db: AsyncSession, job: ImportJob) -> ImportJob:

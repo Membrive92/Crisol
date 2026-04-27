@@ -8,7 +8,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
-from app.modules.transactions.models import TransactionSource
+from app.modules.personal_finance.transactions.models import TransactionSource
 
 
 class TransactionCreate(BaseModel):

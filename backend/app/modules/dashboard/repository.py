@@ -17,7 +17,7 @@ from sqlalchemy import Select, extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.personal_finance.categories.models import Category, CategoryKind
-from app.modules.transactions.models import Transaction
+from app.modules.personal_finance.transactions.models import Transaction
 
 
 def _apply_scope[Q: Select[Any]](

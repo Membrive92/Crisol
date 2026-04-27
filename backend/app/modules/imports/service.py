@@ -34,7 +34,7 @@ from app.modules.imports.parser import (
 from app.modules.imports.repository import create_job, find_existing_hashes
 from app.modules.imports.schemas import ImportColumnMappings
 from app.modules.personal_finance.categories.models import Category
-from app.modules.transactions.models import Transaction, TransactionSource
+from app.modules.personal_finance.transactions.models import Transaction, TransactionSource
 
 MAX_ERROR_LOG = 100
 DEFAULT_CURRENCY = "EUR"

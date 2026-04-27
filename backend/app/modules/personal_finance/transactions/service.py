@@ -8,20 +8,20 @@ from datetime import datetime
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.transactions.models import Transaction
-from app.modules.transactions.repository import (
+from app.modules.personal_finance.transactions.models import Transaction
+from app.modules.personal_finance.transactions.repository import (
     create_transaction as persist_transaction,
 )
-from app.modules.transactions.repository import (
+from app.modules.personal_finance.transactions.repository import (
     delete_transaction as remove_transaction,
 )
-from app.modules.transactions.repository import (
+from app.modules.personal_finance.transactions.repository import (
     get_transaction_by_id,
 )
-from app.modules.transactions.repository import (
+from app.modules.personal_finance.transactions.repository import (
     list_transactions as list_all,
 )
-from app.modules.transactions.schemas import TransactionCreate, TransactionUpdate
+from app.modules.personal_finance.transactions.schemas import TransactionCreate, TransactionUpdate
 
 
 async def list_transactions(

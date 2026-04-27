@@ -8,7 +8,7 @@ from datetime import datetime
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.transactions.models import Transaction
+from app.modules.personal_finance.transactions.models import Transaction
 
 
 def _base_query(user_id: uuid.UUID) -> Select[tuple[Transaction]]:

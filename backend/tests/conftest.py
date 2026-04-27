@@ -28,8 +28,8 @@ from app.main import app
 from app.modules.auth.models import RefreshToken  # noqa: F401
 from app.modules.imports.models import ImportJob  # noqa: F401
 from app.modules.personal_finance.categories.models import Category  # noqa: F401
+from app.modules.personal_finance.transactions.models import Transaction  # noqa: F401
 from app.modules.receipts.models import Receipt  # noqa: F401
-from app.modules.transactions.models import Transaction  # noqa: F401
 from app.modules.users.models import User  # noqa: F401
 
 

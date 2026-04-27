@@ -11,13 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
-from app.modules.transactions.schemas import (
+from app.modules.personal_finance.transactions.schemas import (
     TransactionCreate,
     TransactionListResponse,
     TransactionResponse,
     TransactionUpdate,
 )
-from app.modules.transactions.service import (
+from app.modules.personal_finance.transactions.service import (
     create_transaction,
     delete_transaction,
     get_transaction,
