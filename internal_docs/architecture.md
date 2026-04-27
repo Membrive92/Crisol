@@ -1,8 +1,10 @@
 # Arquitectura — Finanzas App
 
 > Documento vivo. Se actualiza cuando una fase introduce cambios arquitectónicos.
-> Última actualización: PDF imports caen a visión local cuando `pdfplumber` no
-> detecta tablas (compartido entre `imports/` y `ai.service.extract_bank_statement_page`).
+> Última actualización: refactor a `personal_finance/` — los sub-features de
+> finanzas personales (categorías, transacciones, dashboard, imports, receipts)
+> viven bajo un único módulo de dominio. `auth/`, `users/` y `ai/` siguen
+> top-level como infraestructura transversal.
 
 ---
 
@@ -156,10 +158,33 @@ apps/*    →  cualquier package
 
 ## 6. Backend — estructura modular
 
-Cada módulo vive en `backend/app/modules/{nombre}/` y sigue exactamente:
+Hay dos niveles:
+
+1. **Módulos de dominio** (`personal_finance/`, en el futuro `crypto/`,
+   `inversiones/`, `inmuebles/`…). Cada uno agrupa los sub-features que
+   pertenecen a esa "cartera". Son **sumar carpetas** — el MVP entrega
+   sólo `personal_finance/`.
+2. **Módulos transversales** (`auth/`, `users/`, `ai/`). Servicios de
+   infraestructura que cualquier módulo de dominio puede usar.
 
 ```
-modules/{nombre}/
+backend/app/modules/
+├── auth/                    # cross-cutting
+├── users/                   # cross-cutting
+├── ai/                      # cross-cutting (cliente Ollama, prompts)
+└── personal_finance/        # módulo de dominio
+    ├── __init__.py
+    ├── categories/
+    ├── transactions/
+    ├── dashboard/
+    ├── imports/
+    └── receipts/
+```
+
+Cada sub-módulo sigue siempre la misma estructura interna:
+
+```
+{sub-módulo}/
 ├── __init__.py
 ├── router.py       # APIRouter con prefix y tags
 ├── service.py      # Lógica de negocio (async)
@@ -169,8 +194,10 @@ modules/{nombre}/
 ```
 
 **Reglas no negociables**:
-- Ningún módulo importa de otro módulo directamente. Si necesitan compartir
-  algo, va a `app/core/` o se comunica por DB.
+- Los sub-módulos dentro de `personal_finance/` pueden importar entre sí
+  por ser parte del mismo dominio (`transactions` enlaza `categories`).
+  **Distintos módulos de dominio** (cuando existan) no se importan entre
+  sí — comparten vía core o eventos.
 - `repository.py` **nunca** usa string interpolation en SQL — siempre bind params.
 - `service.py` recibe `db` y `user_id` como parámetros, nunca accede al `Request`.
 - Todas las queries de dominio filtran por `user_id`.
@@ -178,16 +205,16 @@ modules/{nombre}/
 
 ### Módulos del MVP
 
-| Módulo           | Estado | Responsabilidad                                                |
-|------------------|--------|----------------------------------------------------------------|
-| `users`          | ✅     | CRUD de usuarios, perfil                                       |
-| `auth`           | ✅     | Registro, login, refresh token con rotación, logout, `/me`     |
-| `categories`     | ✅     | Categorías de gasto/ingreso por usuario                        |
-| `transactions`   | ✅     | CRUD de transacciones, filtros, aislamiento, `import_hash`     |
-| `dashboard`      | ✅     | Agregaciones y KPIs (read-only sobre transactions/categories)  |
-| `imports`        | ✅     | Importación CSV/XLSX/PDF con dedup por hash, jobs auditables   |
-| `ai`             | ✅     | Cliente Ollama + `/ai/health` + `extract_receipt`              |
-| `receipts`       | ✅     | Pipeline de tickets: upload → ai → confirmación → persistencia |
+| Módulo                            | Estado | Responsabilidad                                                |
+|-----------------------------------|--------|----------------------------------------------------------------|
+| `users`                           | ✅     | CRUD de usuarios, perfil                                       |
+| `auth`                            | ✅     | Registro, login, refresh token con rotación, logout, `/me`     |
+| `ai`                              | ✅     | Cliente Ollama + `/ai/health` + extract_receipt + extract_bank_statement_page |
+| `personal_finance.categories`     | ✅     | Categorías de gasto/ingreso por usuario                        |
+| `personal_finance.transactions`   | ✅     | CRUD de transacciones, filtros, aislamiento, `import_hash`     |
+| `personal_finance.dashboard`      | ✅     | Agregaciones y KPIs (read-only sobre transactions/categories)  |
+| `personal_finance.imports`        | ✅     | Importación CSV/XLSX/PDF con dedup por hash, jobs auditables   |
+| `personal_finance.receipts`       | ✅     | Pipeline de tickets: upload → ai → confirmación → persistencia |
 
 ---
 
