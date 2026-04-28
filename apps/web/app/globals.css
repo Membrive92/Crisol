@@ -87,6 +87,33 @@ select:focus {
   opacity: 0.75;
 }
 
+/* Auth shell: layout split en desktop, columna única en móvil. */
+.auth-shell {
+  flex-direction: row;
+}
+.auth-brand {
+  flex: 1 1 50%;
+  min-width: 0;
+  max-width: 600px;
+  display: flex;
+}
+.auth-form-side {
+  flex: 1 1 50%;
+}
+@media (max-width: 960px) {
+  .auth-shell {
+    flex-direction: column;
+  }
+  .auth-brand {
+    flex-basis: auto;
+    max-width: none;
+    min-height: 220px;
+  }
+  .auth-form-side {
+    flex-basis: auto;
+  }
+}
+
 /* Scrollbar dark — la barra blanca sobre fondo oscuro canta (WebKit/Chromium). */
 [data-theme="dark"] ::-webkit-scrollbar {
   width: 12px;
