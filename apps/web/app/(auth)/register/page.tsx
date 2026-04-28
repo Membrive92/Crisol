@@ -1,39 +1,24 @@
 'use client';
 
-import { type CSSProperties, type FormEvent, useState } from 'react';
+import { type FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
 import { authApi, formatApiError } from '@finanzas/services';
 import { useAuthStore } from '@finanzas/store';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import { colors, fontWeight, spacing } from '@finanzas/ui';
 
-const inputStyle: CSSProperties = {
-  padding: spacing.sm + 2,
-  border: `1px solid ${colors.border}`,
-  borderRadius: radius.sm,
-  fontSize: fontSize.md,
-  backgroundColor: colors.surface,
-  color: colors.text,
-};
-
-const buttonStyle: CSSProperties = {
-  padding: spacing.sm + 2,
-  background: colors.primary,
-  color: '#ffffff',
-  border: 'none',
-  borderRadius: radius.sm,
-  fontSize: fontSize.md,
-  fontWeight: fontWeight.semibold,
-  cursor: 'pointer',
-};
+import { AuthCard } from '@/components/auth/auth-card';
+import { AuthInput } from '@/components/auth/auth-input';
+import { IconLock, IconMail, IconUser } from '@/components/auth/icons';
+import { SubmitButton } from '@/components/auth/submit-button';
 
 export default function RegisterPage() {
   const router = useRouter();
   const { setTokens, setUser } = useAuthStore();
+  const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -41,7 +26,6 @@ export default function RegisterPage() {
     e.preventDefault();
     setError('');
     setLoading(true);
-
     try {
       const tokens = await authApi.register({
         email,
@@ -60,82 +44,64 @@ export default function RegisterPage() {
   }
 
   return (
-    <>
-      <h1
-        style={{
-          margin: `0 0 ${spacing.lg}px`,
-          fontSize: fontSize.xl,
-          fontWeight: fontWeight.semibold,
-          color: colors.text,
-          textAlign: 'center',
-        }}
-      >
-        Crear cuenta
-      </h1>
-      {error ? (
-        <p
-          style={{
-            color: colors.danger,
-            fontSize: fontSize.sm,
-            textAlign: 'center',
-            marginBottom: spacing.sm,
-          }}
-        >
-          {error}
-        </p>
-      ) : null}
+    <AuthCard
+      title="Crea tu cuenta"
+      subtitle="Tus datos se guardan en local. Sin cuentas externas, sin tracking."
+      errorMessage={error || undefined}
+      footer={
+        <>
+          ¿Ya tienes cuenta?{' '}
+          <Link
+            href="/login"
+            style={{ color: colors.primary, fontWeight: fontWeight.semibold }}
+          >
+            Inicia sesión
+          </Link>
+        </>
+      }
+    >
       <form
         onSubmit={handleSubmit}
-        style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}
+        noValidate
+        style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}
       >
-        <input
+        <AuthInput
+          label="Nombre"
           type="text"
-          placeholder="Nombre"
+          placeholder="¿Cómo te llamas?"
           value={displayName}
           onChange={(e) => setDisplayName(e.target.value)}
           required
           autoComplete="name"
-          style={inputStyle}
+          autoFocus
+          icon={<IconUser size={18} />}
         />
-        <input
+        <AuthInput
+          label="Email"
           type="email"
-          placeholder="Email"
+          placeholder="tu@email.com"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           required
           autoComplete="email"
-          style={inputStyle}
+          icon={<IconMail size={18} />}
         />
-        <input
+        <AuthInput
+          label="Contraseña"
           type="password"
-          placeholder="Contraseña (mín. 8 caracteres)"
+          placeholder="••••••••"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
           minLength={8}
           autoComplete="new-password"
-          style={inputStyle}
+          icon={<IconLock size={18} />}
+          hint="Mínimo 8 caracteres."
         />
-        <button type="submit" disabled={loading} style={buttonStyle}>
-          {loading ? 'Registrando…' : 'Registrarse'}
-        </button>
+        <SubmitButton loading={loading} loadingLabel="Registrando…">
+          Crear cuenta
+        </SubmitButton>
       </form>
-      <p
-        style={{
-          marginTop: spacing.md,
-          textAlign: 'center',
-          fontSize: fontSize.sm,
-          color: colors.textMuted,
-        }}
-      >
-        ¿Ya tienes cuenta?{' '}
-        <Link
-          href="/login"
-          style={{ color: colors.primary, fontWeight: fontWeight.medium }}
-        >
-          Inicia sesión
-        </Link>
-      </p>
-    </>
+    </AuthCard>
   );
 }

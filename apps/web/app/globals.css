@@ -87,6 +87,13 @@ select:focus {
   opacity: 0.75;
 }
 
+/* Auth submit button spinner. */
+@keyframes auth-spinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Auth shell: layout split en desktop, columna única en móvil. */
 .auth-shell {
   flex-direction: row;
