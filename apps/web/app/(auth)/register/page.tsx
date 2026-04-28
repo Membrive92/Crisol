@@ -1,11 +1,32 @@
 'use client';
 
-import { type FormEvent, useState } from 'react';
+import { type CSSProperties, type FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
 import { authApi, formatApiError } from '@finanzas/services';
 import { useAuthStore } from '@finanzas/store';
+import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+
+const inputStyle: CSSProperties = {
+  padding: spacing.sm + 2,
+  border: `1px solid ${colors.border}`,
+  borderRadius: radius.sm,
+  fontSize: fontSize.md,
+  backgroundColor: colors.surface,
+  color: colors.text,
+};
+
+const buttonStyle: CSSProperties = {
+  padding: spacing.sm + 2,
+  background: colors.primary,
+  color: '#ffffff',
+  border: 'none',
+  borderRadius: radius.sm,
+  fontSize: fontSize.md,
+  fontWeight: fontWeight.semibold,
+  cursor: 'pointer',
+};
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -40,19 +61,40 @@ export default function RegisterPage() {
 
   return (
     <>
-      <h1 style={{ margin: '0 0 1.5rem', fontSize: '1.5rem', textAlign: 'center' }}>
+      <h1
+        style={{
+          margin: `0 0 ${spacing.lg}px`,
+          fontSize: fontSize.xl,
+          fontWeight: fontWeight.semibold,
+          color: colors.text,
+          textAlign: 'center',
+        }}
+      >
         Crear cuenta
       </h1>
-      {error && (
-        <p style={{ color: '#d32f2f', fontSize: '0.875rem', textAlign: 'center' }}>{error}</p>
-      )}
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {error ? (
+        <p
+          style={{
+            color: colors.danger,
+            fontSize: fontSize.sm,
+            textAlign: 'center',
+            marginBottom: spacing.sm,
+          }}
+        >
+          {error}
+        </p>
+      ) : null}
+      <form
+        onSubmit={handleSubmit}
+        style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}
+      >
         <input
           type="text"
           placeholder="Nombre"
           value={displayName}
           onChange={(e) => setDisplayName(e.target.value)}
           required
+          autoComplete="name"
           style={inputStyle}
         />
         <input
@@ -61,6 +103,7 @@ export default function RegisterPage() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           required
+          autoComplete="email"
           style={inputStyle}
         />
         <input
@@ -70,35 +113,29 @@ export default function RegisterPage() {
           onChange={(e) => setPassword(e.target.value)}
           required
           minLength={8}
+          autoComplete="new-password"
           style={inputStyle}
         />
         <button type="submit" disabled={loading} style={buttonStyle}>
-          {loading ? 'Registrando...' : 'Registrarse'}
+          {loading ? 'Registrando…' : 'Registrarse'}
         </button>
       </form>
-      <p style={{ marginTop: '1rem', textAlign: 'center', fontSize: '0.875rem' }}>
+      <p
+        style={{
+          marginTop: spacing.md,
+          textAlign: 'center',
+          fontSize: fontSize.sm,
+          color: colors.textMuted,
+        }}
+      >
         ¿Ya tienes cuenta?{' '}
-        <Link href="/login" style={{ color: '#1976d2' }}>
+        <Link
+          href="/login"
+          style={{ color: colors.primary, fontWeight: fontWeight.medium }}
+        >
           Inicia sesión
         </Link>
       </p>
     </>
   );
 }
-
-const inputStyle: React.CSSProperties = {
-  padding: '0.75rem',
-  border: '1px solid #ddd',
-  borderRadius: 6,
-  fontSize: '1rem',
-};
-
-const buttonStyle: React.CSSProperties = {
-  padding: '0.75rem',
-  background: '#1976d2',
-  color: '#fff',
-  border: 'none',
-  borderRadius: 6,
-  fontSize: '1rem',
-  cursor: 'pointer',
-};

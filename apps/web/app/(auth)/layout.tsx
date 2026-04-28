@@ -1,5 +1,9 @@
 import type { ReactNode } from 'react';
 
+import { colors, radius, spacing } from '@finanzas/ui';
+
+import { ThemeToggle } from '@/components/ui/theme-toggle';
+
 export default function AuthLayout({ children }: { children: ReactNode }) {
   return (
     <div
@@ -8,18 +12,30 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '2rem',
-        background: '#f5f5f5',
+        padding: spacing.xl,
+        backgroundColor: colors.background,
       }}
     >
       <div
         style={{
+          position: 'fixed',
+          top: spacing.md,
+          right: spacing.md,
+        }}
+      >
+        <ThemeToggle />
+      </div>
+      <div
+        style={{
           width: '100%',
           maxWidth: 400,
-          background: '#fff',
-          borderRadius: 8,
-          padding: '2rem',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+          backgroundColor: colors.surface,
+          borderRadius: radius.md,
+          padding: spacing.xl,
+          border: `1px solid ${colors.border}`,
+          // Sombra sutil que se ve en light pero apenas en dark — usa rgba
+          // negro de baja opacidad, así que dark "absorbe" el efecto.
+          boxShadow: '0 2px 12px rgba(0, 0, 0, 0.08)',
         }}
       >
         {children}
