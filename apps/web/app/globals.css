@@ -27,26 +27,79 @@
 }
 
 [data-theme="dark"] {
-  --color-primary: #4f9cdf;
-  --color-primary-dark: #1976d2;
-  --color-danger: #ef5350;
-  --color-success: #66bb6a;
-  --color-warning: #ffa726;
-  --color-text: #e8e8e8;
-  --color-text-muted: #a0a0a0;
-  --color-text-subtle: #707070;
-  --color-border: #2a2a2a;
-  --color-border-strong: #3a3a3a;
-  --color-surface: #1c1c1c;
-  --color-surface-muted: #242424;
-  --color-background: #121212;
-  --color-income: #66bb6a;
-  --color-expense: #ef5350;
+  /* Paleta dark refinada: bg azulado oscuro (no negro puro); superficies
+     escalonadas; texto a 90/60/40% para jerarquía clara; primario
+     desaturado para no quemar en pantallas oscuras. */
+  --color-primary: #5fa8e6;
+  --color-primary-dark: #4f9cdf;
+  --color-danger: #ef6e6e;
+  --color-success: #6dc788;
+  --color-warning: #f5b461;
+  --color-text: #e6e7ea;
+  --color-text-muted: #9aa0aa;
+  --color-text-subtle: #6c7280;
+  --color-border: #272c36;
+  --color-border-strong: #3a4150;
+  --color-surface: #171a21;
+  --color-surface-muted: #1f232c;
+  --color-background: #0f1115;
+  --color-income: #6dc788;
+  --color-expense: #ef6e6e;
 
   color-scheme: dark;
 }
 
-html, body {
+html,
+body {
   background-color: var(--color-background);
   color: var(--color-text);
+}
+
+/* Form controls: pintamos desde las tokens para evitar que el navegador
+   aplique su styling por defecto cuando `color-scheme: dark` está
+   activo (inputs grises del UA chocando con cards claras hardcoded). */
+input,
+textarea,
+select {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  border-color: var(--color-border);
+  caret-color: var(--color-text);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--color-text-subtle);
+  opacity: 1;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+/* Date input: el icono nativo en dark se ve negro contra fondos oscuros.
+   Lo invertimos sólo cuando el tema es dark. */
+[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  opacity: 0.75;
+}
+
+/* Scrollbar dark — la barra blanca sobre fondo oscuro canta (WebKit/Chromium). */
+[data-theme="dark"] ::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+[data-theme="dark"] ::-webkit-scrollbar-track {
+  background: var(--color-background);
+}
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 6px;
+  border: 3px solid var(--color-background);
+}
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-subtle);
 }
