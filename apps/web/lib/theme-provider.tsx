@@ -35,7 +35,6 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 const STORAGE_KEY = 'finanzas_theme';
 
 function readStoredPreference(): ThemePreference {
-  if (typeof window === 'undefined') return 'system';
   try {
     const value = window.localStorage.getItem(STORAGE_KEY);
     if (value === 'dark' || value === 'light' || value === 'system') return value;
@@ -46,88 +45,83 @@ function readStoredPreference(): ThemePreference {
 }
 
 function detectSystemTheme(): ResolvedTheme {
-  if (
-    typeof window !== 'undefined' &&
-    window.matchMedia?.('(prefers-color-scheme: dark)').matches
-  ) {
+  if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) {
     return 'dark';
   }
   return 'light';
 }
 
-function resolve(pref: ThemePreference): ResolvedTheme {
+function resolveOnClient(pref: ThemePreference): ResolvedTheme {
   return pref === 'system' ? detectSystemTheme() : pref;
 }
 
-function readInitialAttribute(): ResolvedTheme {
-  if (typeof document === 'undefined') return 'light';
-  const attr = document.documentElement.dataset.theme;
-  return attr === 'dark' ? 'dark' : 'light';
-}
-
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  // Sincronizado con el script de bootstrap del layout: el atributo del
-  // <html> ya está aplicado en la primera pintura, sin parpadeo.
-  const [preference, setPreferenceState] = useState<ThemePreference>(
-    () => readStoredPreference(),
-  );
-  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(
-    () => readInitialAttribute(),
-  );
+  // El primer render (SSR + hidratación cliente) arranca en 'system' / 'light':
+  // server y client coinciden y no hay mismatch de hidratación. El estado real
+  // (lo que hay en localStorage o el SO) se aplica en el efecto que corre
+  // post-mount. El tema *visual* está bien desde el primer paint porque el
+  // script de bootstrap del layout ya puso `data-theme` en el <html>; sólo
+  // el contenido del toggle (icono/etiqueta) puede parpadear en ese instante.
+  const [preference, setPreferenceState] = useState<ThemePreference>('system');
+  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>('light');
+
+  // Hidratación: tras montar, alineamos el estado React con localStorage y
+  // con el atributo `data-theme` que el bootstrap ya escribió.
+  useEffect(() => {
+    const stored = readStoredPreference();
+    setPreferenceState(stored);
+    const fromAttr = document.documentElement.dataset.theme;
+    if (fromAttr === 'dark' || fromAttr === 'light') {
+      setResolvedTheme(fromAttr);
+    } else {
+      setResolvedTheme(resolveOnClient(stored));
+    }
+  }, []);
 
   const apply = useCallback(
     (pref: ThemePreference) => {
-      const next = resolve(pref);
+      // Sólo se llama desde handlers/efectos cliente, así que `window` y
+      // `document` están definidos.
+      const next = resolveOnClient(pref);
       setResolvedTheme(next);
-      if (typeof document !== 'undefined') {
-        document.documentElement.dataset.theme = next;
-      }
+      document.documentElement.dataset.theme = next;
     },
     [],
   );
 
+  const persistPreference = useCallback((next: ThemePreference) => {
+    try {
+      if (next === 'system') {
+        window.localStorage.removeItem(STORAGE_KEY);
+      } else {
+        window.localStorage.setItem(STORAGE_KEY, next);
+      }
+    } catch {
+      // no-op (modo privado, etc.)
+    }
+  }, []);
+
   const setPreference = useCallback(
     (next: ThemePreference) => {
       setPreferenceState(next);
-      try {
-        if (typeof window !== 'undefined') {
-          if (next === 'system') {
-            window.localStorage.removeItem(STORAGE_KEY);
-          } else {
-            window.localStorage.setItem(STORAGE_KEY, next);
-          }
-        }
-      } catch {
-        // no-op
-      }
+      persistPreference(next);
       apply(next);
     },
-    [apply],
+    [apply, persistPreference],
   );
 
   const cyclePreference = useCallback(() => {
     setPreferenceState((prev) => {
       const next: ThemePreference =
         prev === 'light' ? 'dark' : prev === 'dark' ? 'system' : 'light';
-      try {
-        if (typeof window !== 'undefined') {
-          if (next === 'system') {
-            window.localStorage.removeItem(STORAGE_KEY);
-          } else {
-            window.localStorage.setItem(STORAGE_KEY, next);
-          }
-        }
-      } catch {
-        // no-op
-      }
+      persistPreference(next);
       apply(next);
       return next;
     });
-  }, [apply]);
+  }, [apply, persistPreference]);
 
   // Si la preferencia es 'system', escuchamos cambios del SO en vivo.
   useEffect(() => {
-    if (typeof window === 'undefined') return;
     if (preference !== 'system') return;
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     function onChange() {
