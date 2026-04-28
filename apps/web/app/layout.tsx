@@ -11,14 +11,19 @@ export const metadata = {
 };
 
 // Inline script que aplica el tema antes del primer paint para evitar
-// flash de modo claro al cargar en modo oscuro: lee localStorage o
-// `prefers-color-scheme` y setea `data-theme` en el <html>.
+// flash de modo claro al cargar en modo oscuro. Soporta tres preferencias
+// (light / dark / system); si no hay nada guardado, sigue al SO.
 const themeBootstrapScript = `
 (function() {
   try {
     var saved = localStorage.getItem('finanzas_theme');
-    var theme = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-    document.documentElement.dataset.theme = theme;
+    var resolved;
+    if (saved === 'light' || saved === 'dark') {
+      resolved = saved;
+    } else {
+      resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    document.documentElement.dataset.theme = resolved;
   } catch (e) {
     document.documentElement.dataset.theme = 'light';
   }
