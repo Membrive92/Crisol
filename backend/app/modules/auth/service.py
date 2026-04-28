@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -30,13 +32,26 @@ from app.modules.users.models import User
 from app.modules.users.repository import create_user, get_user_by_email
 
 
+@dataclass(frozen=True, slots=True)
+class IssuedSession:
+    """Resultado de un login/register/refresh: tokens + TTL del refresh.
+
+    El router usa `tokens` para serializar la respuesta y `refresh_ttl_days`
+    para fijar el `Max-Age` de la cookie httpOnly. Se mantienen separados
+    para que `TokenResponse` (DTO público) no exponga detalles internos.
+    """
+
+    tokens: TokenResponse
+    refresh_ttl_days: int
+
+
 async def register(
     db: AsyncSession,
     email: str,
     password: str,
     display_name: str,
-) -> TokenResponse:
-    """Registra un nuevo usuario y devuelve tokens.
+) -> IssuedSession:
+    """Registra un nuevo usuario y devuelve tokens + TTL del refresh.
 
     Raises:
         HTTPException 409: si el email ya está registrado.
@@ -61,8 +76,13 @@ async def login(
     db: AsyncSession,
     email: str,
     password: str,
-) -> TokenResponse:
-    """Autentica un usuario por email/password y devuelve tokens.
+    *,
+    remember_me: bool = False,
+) -> IssuedSession:
+    """Autentica un usuario por email/password y devuelve tokens + TTL.
+
+    Si `remember_me=True`, el refresh token (y la cookie en web) se emite
+    con el TTL extendido configurado en settings.
 
     Raises:
         HTTPException 401: si las credenciales son incorrectas.
@@ -80,14 +100,23 @@ async def login(
             detail="Cuenta desactivada",
         )
 
-    return await _issue_tokens(db, user)
+    ttl_days = (
+        settings.jwt_refresh_token_remember_me_expire_days
+        if remember_me
+        else settings.jwt_refresh_token_expire_days
+    )
+    return await _issue_tokens(db, user, ttl_days=ttl_days)
 
 
 async def refresh(
     db: AsyncSession,
     refresh_token_plain: str,
-) -> TokenResponse:
+) -> IssuedSession:
     """Rota un refresh token: revoca el viejo, emite uno nuevo.
+
+    Preserva el "remember_me-ness" del token original: si se emitió con TTL
+    extendido (>= remember_me_days), el rotado también, así un usuario que
+    pidió 30 días no se degrada a 7 al primer refresh.
 
     Raises:
         HTTPException 401: si el refresh token es inválido, revocado o expirado.
@@ -108,10 +137,17 @@ async def refresh(
             detail="Refresh token expirado",
         )
 
+    original_ttl_days = (token_record.expires_at - token_record.created_at).days
+    ttl_days = (
+        settings.jwt_refresh_token_remember_me_expire_days
+        if original_ttl_days >= settings.jwt_refresh_token_remember_me_expire_days
+        else settings.jwt_refresh_token_expire_days
+    )
+
     await revoke_token(db, token_record.id)
 
     access = create_access_token(user_id)
-    new_plain, expires_at = create_refresh_token(user_id)
+    new_plain, expires_at = create_refresh_token(user_id, ttl_days=ttl_days)
     new_record = RefreshToken(
         user_id=user_id,
         token_hash=hash_refresh_token(new_plain),
@@ -119,7 +155,8 @@ async def refresh(
     )
     await persist_refresh_token(db, new_record)
 
-    return TokenResponse(access_token=access, refresh_token=new_plain)
+    tokens = TokenResponse(access_token=access, refresh_token=new_plain)
+    return IssuedSession(tokens=tokens, refresh_ttl_days=ttl_days)
 
 
 async def logout(db: AsyncSession, refresh_token_plain: str) -> None:
@@ -143,17 +180,23 @@ async def logout_all(db: AsyncSession, user_id: uuid.UUID) -> None:
     await revoke_all_user_tokens(db, user_id)
 
 
-async def _issue_tokens(db: AsyncSession, user: User) -> TokenResponse:
+async def _issue_tokens(
+    db: AsyncSession, user: User, *, ttl_days: int | None = None
+) -> IssuedSession:
     """Emite un par access + refresh token para el usuario."""
+    effective_ttl = (
+        ttl_days if ttl_days is not None else settings.jwt_refresh_token_expire_days
+    )
     access = create_access_token(user.id)
-    plain, expires_at = create_refresh_token(user.id)
+    plain, expires_at = create_refresh_token(user.id, ttl_days=effective_ttl)
     record = RefreshToken(
         user_id=user.id,
         token_hash=hash_refresh_token(plain),
         expires_at=expires_at,
     )
     await persist_refresh_token(db, record)
-    return TokenResponse(access_token=access, refresh_token=plain)
+    tokens = TokenResponse(access_token=access, refresh_token=plain)
+    return IssuedSession(tokens=tokens, refresh_ttl_days=effective_ttl)
 
 
 async def _find_matching_token(

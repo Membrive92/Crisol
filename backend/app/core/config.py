@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     jwt_secret_key: str = "DEV-ONLY-CHANGE-ME-IN-DOT-ENV-PLEASE-32B"
     jwt_access_token_expire_minutes: int = 15
     jwt_refresh_token_expire_days: int = 7
+    # TTL extendido cuando el cliente pide "Recordarme" en el login.
+    jwt_refresh_token_remember_me_expire_days: int = 30
 
     # Cookie del refresh token (web). Mobile sigue usando expo-secure-store
     # y enviando el refresh en el body — el backend acepta ambos.

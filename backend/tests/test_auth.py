@@ -81,6 +81,31 @@ async def test_login_nonexistent_user(client: AsyncClient) -> None:
     assert response.status_code == 401
 
 
+async def test_login_remember_me_extends_cookie_max_age(client: AsyncClient) -> None:
+    """Con remember_me=true, la cookie del refresh dura ≥30 días en lugar de 7."""
+    await _register(client, email="remember@example.com")
+
+    response = await client.post(
+        "/auth/login",
+        json={
+            "email": "remember@example.com",
+            "password": "SecurePass123",
+            "remember_me": True,
+        },
+    )
+    assert response.status_code == 200
+
+    set_cookie = response.headers.get("set-cookie", "")
+    assert "finanzas_refresh=" in set_cookie
+    # 30 días en segundos = 2_592_000. Aceptamos cualquier valor ≥ 8 días
+    # para que falle si volvemos al default de 7.
+    import re
+    match = re.search(r"Max-Age=(\d+)", set_cookie)
+    assert match is not None
+    max_age = int(match.group(1))
+    assert max_age >= 8 * 24 * 60 * 60, f"Max-Age too short for remember_me: {max_age}"
+
+
 # ─────────────────────────────────────
 # Refresh
 # ─────────────────────────────────────

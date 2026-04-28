@@ -18,6 +18,7 @@ export default function LoginPage() {
   const { setTokens, setUser } = useAuthStore();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -26,7 +27,7 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      const tokens = await authApi.login({ email, password });
+      const tokens = await authApi.login({ email, password, remember_me: rememberMe });
       setTokens(tokens.access_token, tokens.refresh_token);
       const user = await authApi.getMe();
       setUser(user);
@@ -82,6 +83,30 @@ export default function LoginPage() {
           autoComplete="current-password"
           icon={<IconLock size={18} />}
         />
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: spacing.sm,
+            fontSize: '0.875rem',
+            color: colors.textMuted,
+            cursor: 'pointer',
+            userSelect: 'none',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={rememberMe}
+            onChange={(e) => setRememberMe(e.target.checked)}
+            style={{
+              width: 16,
+              height: 16,
+              accentColor: colors.primary,
+              cursor: 'pointer',
+            }}
+          />
+          Recuérdame durante 30 días
+        </label>
         <SubmitButton loading={loading} loadingLabel="Entrando…">
           Entrar
         </SubmitButton>

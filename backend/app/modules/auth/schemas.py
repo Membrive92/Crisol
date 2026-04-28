@@ -14,10 +14,16 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    """Credenciales de login."""
+    """Credenciales de login.
+
+    `remember_me` extiende el TTL del refresh token (y la cookie en web)
+    al valor de `jwt_refresh_token_remember_me_expire_days`. Útil para
+    "Recordarme 30 días". Default `False`.
+    """
 
     email: EmailStr
     password: str
+    remember_me: bool = False
 
 
 class RefreshRequest(BaseModel):

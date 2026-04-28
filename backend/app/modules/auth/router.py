@@ -22,16 +22,19 @@ from app.modules.users.schemas import UserResponse
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
+def _set_refresh_cookie(
+    response: Response, refresh_token: str, *, ttl_days: int | None = None
+) -> None:
     """Setea la cookie httpOnly con el refresh token.
 
-    `max_age` se sincroniza con la expiración del JWT refresh para que el
-    navegador la borre cuando expira. `httponly=True` la oculta de JS, lo que
-    es la razón principal de cambiar a cookies (XSS no puede leerla).
+    `ttl_days` permite usar el TTL extendido cuando el cliente pide
+    "Recordarme". Si no se pasa, se usa el default de settings.
+    `httponly=True` la oculta de JS (XSS no puede leerla).
     """
     samesite = cast(
         Literal["lax", "strict", "none"], settings.auth_cookie_samesite.lower()
     )
+    days = ttl_days if ttl_days is not None else settings.jwt_refresh_token_expire_days
     # Path="/" para que la cookie viaje también cuando el frontend usa el
     # rewrite `/api/auth/...` de Next.js: la cookie la setea el browser con
     # el path que ve, y el browser ve `/api/auth/...`, no `/auth`. Con `/`
@@ -41,7 +44,7 @@ def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
     response.set_cookie(
         key=settings.auth_cookie_name,
         value=refresh_token,
-        max_age=settings.jwt_refresh_token_expire_days * 24 * 60 * 60,
+        max_age=days * 24 * 60 * 60,
         httponly=True,
         secure=settings.auth_cookie_secure,
         samesite=samesite,
@@ -79,10 +82,12 @@ async def register_endpoint(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TokenResponse:
     """Registra un nuevo usuario, devuelve tokens y setea la cookie."""
-    result = await register(db, body.email, body.password, body.display_name)
+    session = await register(db, body.email, body.password, body.display_name)
     await db.commit()
-    _set_refresh_cookie(response, result.refresh_token)
-    return result
+    _set_refresh_cookie(
+        response, session.tokens.refresh_token, ttl_days=session.refresh_ttl_days
+    )
+    return session.tokens
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -91,11 +96,19 @@ async def login_endpoint(
     response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TokenResponse:
-    """Autentica un usuario, devuelve tokens y setea la cookie."""
-    result = await login(db, body.email, body.password)
+    """Autentica un usuario, devuelve tokens y setea la cookie.
+
+    Si `body.remember_me` es true, la cookie y el refresh usan el TTL
+    extendido de settings.
+    """
+    session = await login(
+        db, body.email, body.password, remember_me=body.remember_me
+    )
     await db.commit()
-    _set_refresh_cookie(response, result.refresh_token)
-    return result
+    _set_refresh_cookie(
+        response, session.tokens.refresh_token, ttl_days=session.refresh_ttl_days
+    )
+    return session.tokens
 
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -107,14 +120,17 @@ async def refresh_endpoint(
 ) -> TokenResponse:
     """Rota el refresh token y setea la cookie nueva.
 
-    Acepta el refresh por cookie (web) o por body (mobile). Si vienen ambos,
-    gana la cookie.
+    Acepta el refresh por cookie (web) o por body (mobile); cookie tiene
+    prioridad. La nueva cookie hereda el TTL del token rotado: si era
+    extendido (remember_me), sigue siéndolo.
     """
     token = _resolve_refresh_token(body.refresh_token, refresh_cookie)
-    result = await refresh(db, token)
+    session = await refresh(db, token)
     await db.commit()
-    _set_refresh_cookie(response, result.refresh_token)
-    return result
+    _set_refresh_cookie(
+        response, session.tokens.refresh_token, ttl_days=session.refresh_ttl_days
+    )
+    return session.tokens
 
 
 @router.post("/logout", status_code=204, response_class=Response)

@@ -47,14 +47,20 @@ def create_access_token(user_id: uuid.UUID) -> str:
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=JWT_ALGORITHM)
 
 
-def create_refresh_token(user_id: uuid.UUID) -> tuple[str, datetime]:
+def create_refresh_token(
+    user_id: uuid.UUID, *, ttl_days: int | None = None
+) -> tuple[str, datetime]:
     """Crea un refresh token opaco (UUID) y su fecha de expiración.
+
+    `ttl_days` permite que el caller pase un TTL personalizado (p.ej. para
+    "Recordarme 30 días"); si no, cae al default de settings.
 
     Retorna (token_plaintext, expires_at). El caller es responsable de
     hashear el token antes de persistirlo en BD.
     """
+    days = ttl_days if ttl_days is not None else settings.jwt_refresh_token_expire_days
     token = str(uuid.uuid4())
-    expires_at = datetime.now(UTC) + timedelta(days=settings.jwt_refresh_token_expire_days)
+    expires_at = datetime.now(UTC) + timedelta(days=days)
     return token, expires_at
 
 
