@@ -30,11 +30,14 @@ function Feature({ icon, title, description }: FeatureProps) {
           width: 40,
           height: 40,
           borderRadius: radius.md,
-          backgroundColor: 'rgba(255, 255, 255, 0.12)',
+          // Tinte primario suave (~14%) — adapta a light y dark sin
+          // hardcodear rgba blanco.
+          backgroundColor:
+            'color-mix(in srgb, var(--color-primary) 14%, transparent)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: '#ffffff',
+          color: colors.primary,
         }}
       >
         {icon}
@@ -44,7 +47,7 @@ function Feature({ icon, title, description }: FeatureProps) {
           style={{
             fontSize: fontSize.md,
             fontWeight: fontWeight.semibold,
-            color: '#ffffff',
+            color: colors.text,
             marginBottom: 2,
           }}
         >
@@ -53,7 +56,7 @@ function Feature({ icon, title, description }: FeatureProps) {
         <div
           style={{
             fontSize: fontSize.sm,
-            color: 'rgba(255, 255, 255, 0.78)',
+            color: colors.textMuted,
             lineHeight: 1.5,
           }}
         >
@@ -75,48 +78,63 @@ export function BrandPanel() {
         flexDirection: 'column',
         justifyContent: 'space-between',
         padding: spacing.xxl,
-        // Gradiente que tira del primario hacia un azul más profundo —
-        // se mantiene legible en light y dark porque es una superficie
-        // intencionalmente saturada.
-        background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.primaryDark} 100%)`,
-        color: '#ffffff',
+        // Panel calmado: usa las propias superficies del tema con un
+        // gradiente sutil entre `surface` y `surface-muted` + un acento
+        // primario radial en la esquina superior derecha. No compite con
+        // el formulario por la atención.
+        background: `
+          radial-gradient(circle at top right,
+            color-mix(in srgb, var(--color-primary) 16%, transparent) 0%,
+            transparent 55%),
+          linear-gradient(135deg, var(--color-surface) 0%, var(--color-surface-muted) 100%)
+        `,
+        color: colors.text,
+        borderRight: `1px solid ${colors.border}`,
         overflow: 'hidden',
       }}
     >
-      {/* Decoración: dos círculos translúcidos que dan profundidad. */}
+      {/* Decoración: dos manchas suaves del primario para dar profundidad
+          sin saturar. Visibles tanto en light como en dark. */}
       <div
         aria-hidden="true"
         style={{
           position: 'absolute',
-          top: -120,
-          right: -120,
-          width: 360,
-          height: 360,
+          top: -140,
+          right: -140,
+          width: 380,
+          height: 380,
           borderRadius: '50%',
-          background: 'rgba(255, 255, 255, 0.08)',
+          background:
+            'color-mix(in srgb, var(--color-primary) 10%, transparent)',
+          filter: 'blur(40px)',
         }}
       />
       <div
         aria-hidden="true"
         style={{
           position: 'absolute',
-          bottom: -160,
-          left: -80,
-          width: 280,
-          height: 280,
+          bottom: -180,
+          left: -100,
+          width: 320,
+          height: 320,
           borderRadius: '50%',
-          background: 'rgba(255, 255, 255, 0.06)',
+          background:
+            'color-mix(in srgb, var(--color-primary) 6%, transparent)',
+          filter: 'blur(50px)',
         }}
       />
 
       <div style={{ position: 'relative', zIndex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm }}>
-          <IconLogo size={36} />
+          <span style={{ color: colors.primary, display: 'inline-flex' }}>
+            <IconLogo size={36} />
+          </span>
           <span
             style={{
               fontSize: fontSize.xl,
               fontWeight: fontWeight.semibold,
               letterSpacing: '-0.01em',
+              color: colors.text,
             }}
           >
             Finanzas
@@ -133,6 +151,7 @@ export function BrandPanel() {
             lineHeight: 1.15,
             letterSpacing: '-0.02em',
             marginBottom: spacing.sm,
+            color: colors.text,
           }}
         >
           Tus finanzas, privadas y locales.
@@ -141,7 +160,7 @@ export function BrandPanel() {
           style={{
             margin: 0,
             fontSize: fontSize.md,
-            color: 'rgba(255, 255, 255, 0.85)',
+            color: colors.textMuted,
             lineHeight: 1.5,
             maxWidth: 460,
             marginBottom: spacing.xl,
@@ -184,7 +203,7 @@ export function BrandPanel() {
           position: 'relative',
           zIndex: 1,
           fontSize: fontSize.xs,
-          color: 'rgba(255, 255, 255, 0.6)',
+          color: colors.textSubtle,
         }}
       >
         © {new Date().getFullYear()} Finanzas — open source, autoalojado.
