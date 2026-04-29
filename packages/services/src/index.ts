@@ -7,6 +7,7 @@ export {
 } from './api/client';
 export { formatApiError } from './api/errors';
 export { authApi } from './api/endpoints/auth';
+export { passkeysApi, type PasskeyResponse } from './api/endpoints/passkeys';
 export { categoriesApi } from './api/endpoints/categories';
 export { transactionsApi } from './api/endpoints/transactions';
 export { dashboardApi } from './api/endpoints/dashboard';

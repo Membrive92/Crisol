@@ -8,6 +8,7 @@ import { useAuthStore } from '@finanzas/store';
 import { authApi } from '@finanzas/services';
 import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
 
+import { PasskeyPrompt } from '@/components/auth/passkey-prompt';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -135,6 +136,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           Cerrar sesión
         </button>
       </nav>
+      <PasskeyPrompt />
       {children}
     </div>
   );

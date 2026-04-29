@@ -1,17 +1,23 @@
 'use client';
 
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
 import { authApi, formatApiError } from '@finanzas/services';
 import { useAuthStore } from '@finanzas/store';
-import { colors, fontWeight, spacing } from '@finanzas/ui';
+import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
 
 import { AuthCard } from '@/components/auth/auth-card';
 import { AuthInput } from '@/components/auth/auth-input';
 import { IconLock, IconMail } from '@/components/auth/icons';
+import { PasskeyDivider } from '@/components/auth/passkey-divider';
 import { SubmitButton } from '@/components/auth/submit-button';
+import {
+  PasskeyAbortError,
+  authenticateWithPasskey,
+  supportsPasskeys,
+} from '@/lib/webauthn';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -21,6 +27,12 @@ export default function LoginPage() {
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [passkeyLoading, setPasskeyLoading] = useState(false);
+  const [passkeySupported, setPasskeySupported] = useState(false);
+
+  useEffect(() => {
+    setPasskeySupported(supportsPasskeys());
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -36,6 +48,31 @@ export default function LoginPage() {
       setError(formatApiError(err, 'Credenciales incorrectas.'));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handlePasskeyLogin() {
+    setError('');
+    if (!email.trim()) {
+      setError('Escribe tu email para entrar con passkey.');
+      return;
+    }
+    setPasskeyLoading(true);
+    try {
+      const tokens = await authenticateWithPasskey(email);
+      setTokens(tokens.access_token, tokens.refresh_token);
+      const user = await authApi.getMe();
+      setUser(user);
+      router.replace('/dashboard');
+    } catch (err) {
+      if (err instanceof PasskeyAbortError) {
+        // Usuario canceló el diálogo del SO — no es un error real, no
+        // mostramos nada para no asustarle.
+        return;
+      }
+      setError(formatApiError(err, 'No se pudo autenticar con passkey.'));
+    } finally {
+      setPasskeyLoading(false);
     }
   }
 
@@ -68,7 +105,7 @@ export default function LoginPage() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           required
-          autoComplete="email"
+          autoComplete="email webauthn"
           autoFocus
           icon={<IconMail size={18} />}
         />
@@ -80,7 +117,7 @@ export default function LoginPage() {
           onChange={(e) => setPassword(e.target.value)}
           required
           minLength={8}
-          autoComplete="current-password"
+          autoComplete="current-password webauthn"
           icon={<IconLock size={18} />}
         />
         <label
@@ -88,7 +125,7 @@ export default function LoginPage() {
             display: 'flex',
             alignItems: 'center',
             gap: spacing.sm,
-            fontSize: '0.875rem',
+            fontSize: fontSize.sm,
             color: colors.textMuted,
             cursor: 'pointer',
             userSelect: 'none',
@@ -110,6 +147,38 @@ export default function LoginPage() {
         <SubmitButton loading={loading} loadingLabel="Entrando…">
           Entrar
         </SubmitButton>
+
+        {passkeySupported ? (
+          <>
+            <PasskeyDivider />
+            <button
+              type="button"
+              onClick={handlePasskeyLogin}
+              disabled={passkeyLoading}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: spacing.sm,
+                width: '100%',
+                padding: `${spacing.sm + 4}px ${spacing.md}px`,
+                backgroundColor: colors.surface,
+                color: colors.text,
+                border: `1px solid ${colors.border}`,
+                borderRadius: radius.sm,
+                fontSize: fontSize.md,
+                fontWeight: fontWeight.medium,
+                cursor: passkeyLoading ? 'not-allowed' : 'pointer',
+                opacity: passkeyLoading ? 0.6 : 1,
+              }}
+            >
+              <span aria-hidden="true">🔑</span>
+              <span>
+                {passkeyLoading ? 'Esperando dispositivo…' : 'Entrar con passkey'}
+              </span>
+            </button>
+          </>
+        ) : null}
       </form>
     </AuthCard>
   );
