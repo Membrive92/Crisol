@@ -50,6 +50,16 @@ class Settings(BaseSettings):
     auth_cookie_secure: bool = False  # ponerlo a true en prod (HTTPS).
     auth_cookie_samesite: str = "lax"  # lax | strict | none (none requiere secure).
 
+    # ---------- WebAuthn / Passkeys ----------
+    # `rp_id` es el dominio que firma las credenciales — en dev coincide con
+    # el host del navegador (ej. localhost). `rp_name` es lo que ven los
+    # usuarios en el diálogo del SO. `origin` es el origin completo que
+    # debe coincidir con el del cliente (incl. puerto en dev).
+    webauthn_rp_id: str = "localhost"
+    webauthn_rp_name: str = "Finanzas"
+    webauthn_origin: str = "http://localhost:3030"
+    webauthn_challenge_ttl_seconds: int = 300
+
     # ---------- Ollama (IA local) ----------
     ollama_base_url: str = "http://localhost:11434"
     ollama_vision_model: str = "qwen2.5-vl:7b"

@@ -18,6 +18,10 @@ from alembic import context
 from app.core.config import settings
 from app.core.database import Base
 from app.modules.auth.models import RefreshToken  # noqa: F401
+from app.modules.auth.webauthn.models import (  # noqa: F401
+    WebAuthnChallenge,
+    WebAuthnCredential,
+)
 from app.modules.personal_finance.categories.models import Category  # noqa: F401
 from app.modules.personal_finance.imports.models import ImportJob  # noqa: F401
 from app.modules.personal_finance.transactions.models import Transaction  # noqa: F401
