@@ -27,9 +27,13 @@ class PasskeyRegistrationVerifyRequest(BaseModel):
 
 
 class PasskeyAuthenticationOptionsRequest(BaseModel):
-    """Para arrancar el flujo el cliente nos dice qué email autentica."""
+    """Body para `/authenticate-options`.
 
-    email: EmailStr
+    `email` es opcional: si no viene, el flow es Conditional UI y el
+    navegador descubrirá la credencial mediante autocompletado.
+    """
+
+    email: EmailStr | None = None
 
 
 class PasskeyAuthenticationOptionsResponse(BaseModel):
@@ -39,10 +43,20 @@ class PasskeyAuthenticationOptionsResponse(BaseModel):
 
 
 class PasskeyAuthenticationVerifyRequest(BaseModel):
-    """El navegador devuelve la assertion tras firmar el challenge."""
+    """El navegador devuelve la assertion tras firmar el challenge.
 
-    email: EmailStr
+    `email` es opcional; en el flow Conditional UI no lo conocemos hasta
+    que la credencial se identifica.
+    """
+
+    email: EmailStr | None = None
     credential: dict[str, Any]
+
+
+class PasskeyRelabelRequest(BaseModel):
+    """Renombrar la etiqueta de una passkey existente."""
+
+    label: str = Field(min_length=1, max_length=100)
 
 
 class PasskeyResponse(BaseModel):

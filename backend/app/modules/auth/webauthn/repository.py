@@ -51,6 +51,36 @@ async def consume_challenge(
     return challenge
 
 
+async def consume_authentication_challenge(
+    db: AsyncSession, *, user_id: uuid.UUID
+) -> WebAuthnChallenge | None:
+    """Variante de consume para autenticación que acepta también challenges
+    sin usuario (Conditional UI / discoverable). El user_id se infiere del
+    `credential_id` durante la verificación.
+    """
+    now = datetime.now(UTC)
+    result = await db.execute(
+        select(WebAuthnChallenge)
+        .where(
+            WebAuthnChallenge.purpose == "authenticate",
+            WebAuthnChallenge.expires_at > now,
+            (
+                (WebAuthnChallenge.user_id == user_id)
+                | (WebAuthnChallenge.user_id.is_(None))
+            ),
+        )
+        .order_by(WebAuthnChallenge.created_at.desc())
+        .limit(1)
+    )
+    challenge = result.scalar_one_or_none()
+    if challenge is None:
+        return None
+    await db.execute(
+        delete(WebAuthnChallenge).where(WebAuthnChallenge.id == challenge.id)
+    )
+    return challenge
+
+
 async def delete_expired_challenges(db: AsyncSession) -> None:
     """Limpia challenges expirados — se puede llamar en startup u oportunidad."""
     now = datetime.now(UTC)
@@ -103,3 +133,16 @@ async def delete_credential(
         .returning(WebAuthnCredential.id)
     )
     return result.scalar_one_or_none() is not None
+
+
+async def get_user_credential(
+    db: AsyncSession, *, user_id: uuid.UUID, credential_pk: uuid.UUID
+) -> WebAuthnCredential | None:
+    """Obtiene una credencial concreta filtrada por usuario."""
+    result = await db.execute(
+        select(WebAuthnCredential).where(
+            WebAuthnCredential.id == credential_pk,
+            WebAuthnCredential.user_id == user_id,
+        )
+    )
+    return result.scalar_one_or_none()

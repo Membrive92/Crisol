@@ -318,6 +318,123 @@ async def test_delete_passkey(client: AsyncClient) -> None:
     assert r_list.json() == []
 
 
+async def test_relabel_passkey(client: AsyncClient) -> None:
+    token, _ = await _register_user(client, "relabel@example.com")
+    await client.post("/auth/webauthn/register-options", headers=_auth(token))
+    with patch(
+        "app.modules.auth.webauthn.service.verify_registration_response",
+        return_value=_FakeRegistration(b"\x77" * 16, b"\xff" * 64),
+    ):
+        created = await client.post(
+            "/auth/webauthn/register-verify",
+            json={
+                "credential": {
+                    "id": "x",
+                    "rawId": "x",
+                    "type": "public-key",
+                    "response": {},
+                },
+                "label": "Old name",
+            },
+            headers=_auth(token),
+        )
+    pkid = created.json()["id"]
+
+    r = await client.patch(
+        f"/auth/webauthn/{pkid}",
+        json={"label": "MacBook personal"},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200
+    assert r.json()["label"] == "MacBook personal"
+
+
+async def test_relabel_other_user_passkey_returns_404(client: AsyncClient) -> None:
+    """A no puede renombrar passkeys de B (404 para no filtrar existencia)."""
+    token_a, _ = await _register_user(client, "rl-a@example.com")
+    token_b, _ = await _register_user(client, "rl-b@example.com")
+    await client.post("/auth/webauthn/register-options", headers=_auth(token_a))
+    with patch(
+        "app.modules.auth.webauthn.service.verify_registration_response",
+        return_value=_FakeRegistration(b"\x88" * 16, b"\xff" * 64),
+    ):
+        created = await client.post(
+            "/auth/webauthn/register-verify",
+            json={
+                "credential": {
+                    "id": "x",
+                    "rawId": "x",
+                    "type": "public-key",
+                    "response": {},
+                }
+            },
+            headers=_auth(token_a),
+        )
+    pkid = created.json()["id"]
+    r = await client.patch(
+        f"/auth/webauthn/{pkid}",
+        json={"label": "Hijacked"},
+        headers=_auth(token_b),
+    )
+    assert r.status_code == 404
+
+
+async def test_conditional_ui_options_no_email(client: AsyncClient) -> None:
+    """authenticate-options sin email devuelve options sin allowCredentials."""
+    r = await client.post("/auth/webauthn/authenticate-options", json={})
+    assert r.status_code == 200
+    options = r.json()["options"]
+    assert "challenge" in options
+    assert not options.get("allowCredentials")
+
+
+async def test_conditional_ui_full_flow(client: AsyncClient) -> None:
+    """El usuario se autentica sin email — el credential_id lo identifica."""
+    token, _ = await _register_user(client, "condui@example.com")
+    await client.post("/auth/webauthn/register-options", headers=_auth(token))
+    fake_cred_id = b"\xaa" * 16
+    with patch(
+        "app.modules.auth.webauthn.service.verify_registration_response",
+        return_value=_FakeRegistration(fake_cred_id, b"\xbb" * 64),
+    ):
+        await client.post(
+            "/auth/webauthn/register-verify",
+            json={
+                "credential": {
+                    "id": "x",
+                    "rawId": "x",
+                    "type": "public-key",
+                    "response": {},
+                }
+            },
+            headers=_auth(token),
+        )
+
+    client.cookies.clear()
+    await client.post("/auth/webauthn/authenticate-options", json={})
+
+    import base64
+
+    raw_id = base64.urlsafe_b64encode(fake_cred_id).rstrip(b"=").decode("ascii")
+    with patch(
+        "app.modules.auth.webauthn.service.verify_authentication_response",
+        return_value=_FakeAuthentication(new_sign_count=1),
+    ):
+        r = await client.post(
+            "/auth/webauthn/authenticate-verify",
+            json={
+                "credential": {
+                    "id": raw_id,
+                    "rawId": raw_id,
+                    "type": "public-key",
+                    "response": {},
+                }
+            },
+        )
+    assert r.status_code == 200, r.text
+    assert "access_token" in r.json()
+
+
 async def test_user_isolation_in_list(client: AsyncClient) -> None:
     """Las passkeys de A no aparecen al listar como B."""
     token_a, _ = await _register_user(client, "iso-a@example.com")

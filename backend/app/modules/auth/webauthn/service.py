@@ -35,6 +35,7 @@ from webauthn.helpers.structs import (
 from app.core.config import settings
 from app.modules.auth.webauthn.models import WebAuthnChallenge, WebAuthnCredential
 from app.modules.auth.webauthn.repository import (
+    consume_authentication_challenge,
     consume_challenge,
     create_challenge,
     create_credential,
@@ -42,7 +43,7 @@ from app.modules.auth.webauthn.repository import (
     list_user_credentials,
 )
 from app.modules.users.models import User
-from app.modules.users.repository import get_user_by_email
+from app.modules.users.repository import get_user_by_email, get_user_by_id
 
 PURPOSE_REGISTER = "register"
 PURPOSE_AUTHENTICATE = "authenticate"
@@ -136,30 +137,40 @@ async def verify_and_store_credential(
 
 
 async def build_authentication_options(
-    db: AsyncSession, email: str
+    db: AsyncSession, email: str | None = None
 ) -> dict[str, Any]:
-    """Genera las options para `navigator.credentials.get` para un email dado.
+    """Genera las options para `navigator.credentials.get`.
 
-    Si el email no existe o no tiene passkeys, devolvemos un error genérico
-    para no filtrar la existencia de cuentas. El cliente solo sabe que "no
-    es válido".
+    Dos modos:
+    - **Email-driven**: el cliente conoce el email; el backend incluye
+      `allowCredentials` con las credenciales del usuario. Este es el
+      flujo "Entrar con passkey" del botón.
+    - **Discoverable / Conditional UI**: sin email, `allowCredentials`
+      vacío, challenge guardado con `user_id=NULL`. El navegador ofrece
+      passkeys en el autocompletado del input email; el usuario elige
+      una y al verificar identificamos al usuario por `credential_id`.
     """
-    user = await get_user_by_email(db, email)
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No hay passkeys registradas para esta cuenta",
-        )
-    credentials = await list_user_credentials(db, user.id)
-    if not credentials:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No hay passkeys registradas para esta cuenta",
-        )
+    user_id_for_challenge: uuid.UUID | None = None
+    allow_credentials: list[PublicKeyCredentialDescriptor] | None = None
 
-    allow_credentials = [
-        PublicKeyCredentialDescriptor(id=c.credential_id) for c in credentials
-    ]
+    if email is not None:
+        user = await get_user_by_email(db, email)
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No hay passkeys registradas para esta cuenta",
+            )
+        credentials = await list_user_credentials(db, user.id)
+        if not credentials:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No hay passkeys registradas para esta cuenta",
+            )
+        allow_credentials = [
+            PublicKeyCredentialDescriptor(id=c.credential_id) for c in credentials
+        ]
+        user_id_for_challenge = user.id
+
     options = generate_authentication_options(
         rp_id=settings.webauthn_rp_id,
         allow_credentials=allow_credentials,
@@ -168,7 +179,7 @@ async def build_authentication_options(
 
     await _persist_challenge(
         db,
-        user_id=user.id,
+        user_id=user_id_for_challenge,
         challenge=options.challenge,
         purpose=PURPOSE_AUTHENTICATE,
     )
@@ -179,30 +190,21 @@ async def build_authentication_options(
 async def verify_authentication_and_get_user(
     db: AsyncSession,
     *,
-    email: str,
+    email: str | None,
     credential: dict[str, Any],
 ) -> User:
     """Verifica la assertion y devuelve el usuario autenticado.
 
-    Actualiza el sign_count y last_used_at de la credencial usada.
-    El caller (router) emite los tokens normales (access + refresh).
+    Funciona en dos modos:
+    - Si `email` viene → flujo email-driven (el del botón "Entrar con
+      passkey"). Validamos además que la credencial recibida pertenezca
+      al usuario del email (defensa en profundidad).
+    - Si `email` es None → flujo Conditional UI: el usuario sale de
+      `credential_id`. Es seguro porque la firma sólo verifica si la
+      `public_key` y la cuenta de firmas casan con la BD.
+
+    Actualiza `sign_count` y `last_used_at` de la credencial usada.
     """
-    user = await get_user_by_email(db, email)
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Autenticación inválida",
-        )
-
-    pending = await consume_challenge(
-        db, user_id=user.id, purpose=PURPOSE_AUTHENTICATE
-    )
-    if pending is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Challenge inválido o expirado",
-        )
-
     raw_id = credential.get("rawId") or credential.get("id")
     if not isinstance(raw_id, str):
         raise HTTPException(
@@ -212,10 +214,31 @@ async def verify_authentication_and_get_user(
     credential_id_bytes = _decode_base64url(raw_id)
 
     stored = await get_credential_by_credential_id(db, credential_id_bytes)
-    if stored is None or stored.user_id != user.id:
+    if stored is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Credencial desconocida",
+        )
+
+    user = await get_user_by_id(db, stored.user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Usuario asociado a la credencial no existe",
+        )
+
+    if email is not None and email.lower() != user.email.lower():
+        # El cliente dijo un email pero la credencial es de otro usuario.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Credencial no coincide con la cuenta",
+        )
+
+    pending = await consume_authentication_challenge(db, user_id=user.id)
+    if pending is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Challenge inválido o expirado",
         )
 
     try:
@@ -248,7 +271,7 @@ async def verify_authentication_and_get_user(
 async def _persist_challenge(
     db: AsyncSession,
     *,
-    user_id: uuid.UUID,
+    user_id: uuid.UUID | None,
     challenge: bytes,
     purpose: str,
 ) -> None:

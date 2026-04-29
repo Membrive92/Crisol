@@ -16,6 +16,7 @@ from app.modules.auth.schemas import TokenResponse
 from app.modules.auth.service import _issue_tokens
 from app.modules.auth.webauthn.repository import (
     delete_credential,
+    get_user_credential,
     list_user_credentials,
 )
 from app.modules.auth.webauthn.schemas import (
@@ -24,6 +25,7 @@ from app.modules.auth.webauthn.schemas import (
     PasskeyAuthenticationVerifyRequest,
     PasskeyRegistrationOptionsResponse,
     PasskeyRegistrationVerifyRequest,
+    PasskeyRelabelRequest,
     PasskeyResponse,
 )
 from app.modules.auth.webauthn.service import (
@@ -155,6 +157,30 @@ async def list_passkeys_endpoint(
         )
         for c in items
     ]
+
+
+@router.patch("/{credential_id}", response_model=PasskeyResponse)
+async def relabel_passkey_endpoint(
+    credential_id: uuid.UUID,
+    body: PasskeyRelabelRequest,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PasskeyResponse:
+    """Renombra la etiqueta de una passkey del usuario."""
+    record = await get_user_credential(db, user_id=user.id, credential_pk=credential_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Passkey no encontrada")
+    record.label = body.label.strip()
+    await db.flush()
+    await db.refresh(record)
+    await db.commit()
+    return PasskeyResponse(
+        id=str(record.id),
+        label=record.label,
+        transports=record.transports,
+        created_at=record.created_at.isoformat(),
+        last_used_at=record.last_used_at.isoformat() if record.last_used_at else None,
+    )
 
 
 @router.delete("/{credential_id}", status_code=204, response_class=Response)

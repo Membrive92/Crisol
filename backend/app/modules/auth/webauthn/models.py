@@ -59,12 +59,12 @@ class WebAuthnChallenge(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     # Para registro siempre hay user_id. Para autenticación con email
-    # también. Para flujos discoverable (sin email) el user_id sale de
-    # la credencial al verificar; pero por simplicidad de MVP exigimos
-    # email en /authenticate-options, así que siempre hay user_id.
-    user_id: Mapped[uuid.UUID] = mapped_column(
+    # también. Para flujos "Conditional UI" (passkey autofill sin email)
+    # el challenge se emite sin saber el usuario; al verificar, el
+    # `credential_id` lo identifica.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
     challenge: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
