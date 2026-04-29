@@ -49,9 +49,10 @@ Reglas:
 |--------|------|------|------|----------|
 | POST   | `/auth/webauthn/register-options` | sí | — | `200` `{ options }` (PublicKeyCredentialCreationOptionsJSON) |
 | POST   | `/auth/webauthn/register-verify` | sí | `{ credential, label? }` | `201` `PasskeyResponse` |
-| POST   | `/auth/webauthn/authenticate-options` | no | `{ email }` | `200` `{ options }` |
-| POST   | `/auth/webauthn/authenticate-verify` | no | `{ email, credential }` | `200` `TokenResponse` (+ cookie) |
+| POST   | `/auth/webauthn/authenticate-options` | no | `{ email? }` | `200` `{ options }` |
+| POST   | `/auth/webauthn/authenticate-verify` | no | `{ email?, credential }` | `200` `TokenResponse` (+ cookie) |
 | GET    | `/auth/webauthn` | sí | — | `200` `PasskeyResponse[]` |
+| PATCH  | `/auth/webauthn/{id}` | sí | `{ label }` | `200` `PasskeyResponse` |
 | DELETE | `/auth/webauthn/{id}` | sí | — | `204` |
 
 Reglas:
@@ -61,8 +62,16 @@ Reglas:
 - Los `challenges` viven 5 minutos y se borran al verificar (un solo uso).
 - `authenticate-verify` emite los mismos JWT que el login normal y setea
   la cookie `httpOnly`.
-- Aislamiento estricto por usuario: una credencial sólo se acepta si su
-  `user_id` coincide con el del email del request.
+- **Dos modos de autenticación**:
+  - **Email-driven** (botón "Entrar con passkey"): cliente manda `email`,
+    backend filtra credenciales del usuario en `allowCredentials`.
+  - **Conditional UI** (autocompletado del input): cliente omite `email`,
+    backend devuelve options sin `allowCredentials`. Al verificar, el
+    `credential_id` identifica al usuario; el challenge se persistió con
+    `user_id=NULL` y el de auth admite ambos casos.
+- Aislamiento por usuario: si llega `email`, el `credential_id` debe
+  pertenecer a ese usuario. Si no llega, el usuario sale del propio
+  `credential_id`.
 
 ---
 
