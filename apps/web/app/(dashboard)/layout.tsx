@@ -116,6 +116,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <Link href="/receipts" style={{ color: colors.text, textDecoration: 'none' }}>
           Tickets
         </Link>
+        <Link href="/settings" style={{ color: colors.text, textDecoration: 'none' }}>
+          Ajustes
+        </Link>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: spacing.sm }}>
           <ThemeToggle />
         </div>
