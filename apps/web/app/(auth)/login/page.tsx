@@ -16,6 +16,7 @@ import { SubmitButton } from '@/components/auth/submit-button';
 import {
   PasskeyAbortError,
   authenticateWithPasskey,
+  startConditionalAuthentication,
   supportsPasskeys,
 } from '@/lib/webauthn';
 
@@ -33,6 +34,32 @@ export default function LoginPage() {
   useEffect(() => {
     setPasskeySupported(supportsPasskeys());
   }, []);
+
+  // Conditional UI: arranca un startAuthentication "en background" que se
+  // queda esperando a que el usuario seleccione una passkey desde el
+  // autocompletado del input email. Si el navegador no lo soporta o el
+  // usuario nunca interactúa, no pasa nada.
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      try {
+        const tokens = await startConditionalAuthentication();
+        if (cancelled || !tokens) return;
+        setTokens(tokens.access_token, tokens.refresh_token);
+        const me = await authApi.getMe();
+        if (cancelled) return;
+        setUser(me);
+        router.replace('/dashboard');
+      } catch {
+        // Conditional UI es best-effort: el usuario aún puede usar el
+        // botón clásico o password. Silencioso a propósito.
+      }
+    }
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [router, setTokens, setUser]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();

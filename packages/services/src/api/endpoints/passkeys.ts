@@ -35,16 +35,18 @@ export const passkeysApi = {
     return response.data;
   },
 
-  async authenticationOptions(email: string): Promise<unknown> {
+  /** Si `email` se omite, el backend genera options para Conditional UI
+   *  (sin allowCredentials). Útil para autocompletado del navegador. */
+  async authenticationOptions(email?: string): Promise<unknown> {
     const response = await apiClient.post<{ options: unknown }>(
       '/auth/webauthn/authenticate-options',
-      { email },
+      email ? { email } : {},
     );
     return response.data.options;
   },
 
   async authenticationVerify(payload: {
-    email: string;
+    email?: string;
     credential: unknown;
   }): Promise<{ access_token: string; refresh_token: string; token_type: string }> {
     const response = await apiClient.post<{
@@ -57,6 +59,14 @@ export const passkeysApi = {
 
   async list(): Promise<PasskeyResponse[]> {
     const response = await apiClient.get<PasskeyResponse[]>('/auth/webauthn');
+    return response.data;
+  },
+
+  async relabel(id: string, label: string): Promise<PasskeyResponse> {
+    const response = await apiClient.patch<PasskeyResponse>(
+      `/auth/webauthn/${id}`,
+      { label },
+    );
     return response.data;
   },
 

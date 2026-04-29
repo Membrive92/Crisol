@@ -53,11 +53,9 @@ export async function registerPasskey(label?: string) {
 }
 
 /**
- * Autentica al usuario por passkey. El email es necesario porque el
- * backend localiza la lista de credenciales del usuario antes de generar
- * el challenge (no usamos discoverable credentials en MVP).
- *
- * Devuelve los tokens. El caller (login page) los pone en el authStore.
+ * Autentica al usuario por passkey en modo email-driven (botón explícito).
+ * El backend filtra por las credenciales del email; al verificar valida
+ * además que el credential_id corresponda al usuario.
  */
 export async function authenticateWithPasskey(email: string) {
   const options = (await passkeysApi.authenticationOptions(email)) as Parameters<
@@ -73,6 +71,48 @@ export async function authenticateWithPasskey(email: string) {
   }
 
   return passkeysApi.authenticationVerify({ email, credential });
+}
+
+/**
+ * Inicia un flujo Conditional UI: pide options sin email y deja la promesa
+ * de `startAuthentication` viva en background. El navegador mostrará
+ * passkeys disponibles en el autocompletado del input email (que debe
+ * llevar `autoComplete="email webauthn"`); cuando el usuario elija una,
+ * esta función resuelve con los tokens.
+ *
+ * Devuelve `null` si el navegador no soporta autofill condicional o si el
+ * usuario cancela.
+ */
+export async function startConditionalAuthentication(): Promise<
+  { access_token: string; refresh_token: string; token_type: string } | null
+> {
+  if (typeof window === 'undefined') return null;
+  const supportsConditional =
+    typeof PublicKeyCredential !== 'undefined' &&
+    'isConditionalMediationAvailable' in PublicKeyCredential &&
+    (await (
+      PublicKeyCredential as unknown as {
+        isConditionalMediationAvailable: () => Promise<boolean>;
+      }
+    ).isConditionalMediationAvailable());
+  if (!supportsConditional) return null;
+
+  const options = (await passkeysApi.authenticationOptions()) as Parameters<
+    typeof startAuthentication
+  >[0]['optionsJSON'];
+
+  let credential;
+  try {
+    credential = await startAuthentication({
+      optionsJSON: options,
+      useBrowserAutofill: true,
+    });
+  } catch (err) {
+    if (isAbort(err)) return null;
+    throw err;
+  }
+
+  return passkeysApi.authenticationVerify({ credential });
 }
 
 function isAbort(err: unknown): boolean {
