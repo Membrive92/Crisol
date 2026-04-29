@@ -29,15 +29,40 @@ Convenciones generales:
 | Método | Ruta | Auth | Body | Response |
 |--------|------|------|------|----------|
 | POST | `/auth/register` | no | `{ email, password, display_name }` | `201` `{ access_token, refresh_token, token_type }` |
-| POST | `/auth/login` | no | `{ email, password }` | `200` `TokenResponse` |
-| POST | `/auth/refresh` | no | `{ refresh_token }` | `200` `TokenResponse` (rota el refresh) |
-| POST | `/auth/logout` | sí | `{ refresh_token }` | `204` |
+| POST | `/auth/login` | no | `{ email, password, remember_me? }` | `200` `TokenResponse` |
+| POST | `/auth/refresh` | no | `{ refresh_token? }` (cookie en web) | `200` `TokenResponse` (rota el refresh) |
+| POST | `/auth/logout` | sí | `{ refresh_token? }` (cookie en web) | `204` |
 | GET  | `/auth/me` | sí | — | `200` `UserResponse` |
 
 Reglas:
-- Access token: 15 min. Refresh token: 7 días.
-- Refresh hace **rotación** — el viejo se revoca, devuelve uno nuevo.
+- Access token: 15 min. Refresh token: 7 días por defecto, **30 días si
+  `remember_me=true`** en el login. Web también recibe el refresh en
+  cookie `httpOnly` con el mismo TTL.
+- Refresh hace **rotación** — el viejo se revoca, devuelve uno nuevo. La
+  rotación preserva el "remember_me-ness": un refresh con TTL extendido
+  rota a otro refresh con TTL extendido.
 - Password hashing: argon2id.
+
+## WebAuthn / Passkeys
+
+| Método | Ruta | Auth | Body | Response |
+|--------|------|------|------|----------|
+| POST   | `/auth/webauthn/register-options` | sí | — | `200` `{ options }` (PublicKeyCredentialCreationOptionsJSON) |
+| POST   | `/auth/webauthn/register-verify` | sí | `{ credential, label? }` | `201` `PasskeyResponse` |
+| POST   | `/auth/webauthn/authenticate-options` | no | `{ email }` | `200` `{ options }` |
+| POST   | `/auth/webauthn/authenticate-verify` | no | `{ email, credential }` | `200` `TokenResponse` (+ cookie) |
+| GET    | `/auth/webauthn` | sí | — | `200` `PasskeyResponse[]` |
+| DELETE | `/auth/webauthn/{id}` | sí | — | `204` |
+
+Reglas:
+- El backend solo guarda **clave pública** + `credential_id` + `sign_count`.
+  La privada vive en la secure enclave del dispositivo (Touch ID / Windows
+  Hello / llave física).
+- Los `challenges` viven 5 minutos y se borran al verificar (un solo uso).
+- `authenticate-verify` emite los mismos JWT que el login normal y setea
+  la cookie `httpOnly`.
+- Aislamiento estricto por usuario: una credencial sólo se acepta si su
+  `user_id` coincide con el del email del request.
 
 ---
 

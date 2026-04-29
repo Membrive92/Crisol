@@ -208,7 +208,8 @@ Cada sub-módulo sigue siempre la misma estructura interna:
 | Módulo                            | Estado | Responsabilidad                                                |
 |-----------------------------------|--------|----------------------------------------------------------------|
 | `users`                           | ✅     | CRUD de usuarios, perfil                                       |
-| `auth`                            | ✅     | Registro, login, refresh token con rotación, logout, `/me`     |
+| `auth`                            | ✅     | Registro, login, refresh token con rotación, logout, `/me`, "Recordarme 30 días" |
+| `auth.webauthn`                   | ✅     | Passkeys (Touch ID / Windows Hello / llaves físicas) — registro y login sin password |
 | `ai`                              | ✅     | Cliente Ollama + `/ai/health` + extract_receipt + extract_bank_statement_page |
 | `personal_finance.categories`     | ✅     | Categorías de gasto/ingreso por usuario                        |
 | `personal_finance.transactions`   | ✅     | CRUD de transacciones, filtros, aislamiento, `import_hash`     |
