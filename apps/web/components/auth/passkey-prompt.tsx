@@ -159,7 +159,7 @@ export function PasskeyPrompt() {
             style={{
               padding: `${spacing.xs}px ${spacing.md}px`,
               backgroundColor: colors.primary,
-              color: '#ffffff',
+              color: colors.onPrimary,
               border: 'none',
               borderRadius: radius.sm,
               fontSize: fontSize.sm,

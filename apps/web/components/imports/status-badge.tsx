@@ -12,9 +12,9 @@ const STATUS_LABEL: Record<ImportJobStatus, string> = {
 
 const STATUS_COLOR: Record<ImportJobStatus, { bg: string; fg: string }> = {
   pending: { bg: colors.surfaceMuted, fg: colors.textMuted },
-  processing: { bg: colors.surfaceMuted, fg: colors.primary },
-  completed: { bg: '#e8f5e9', fg: colors.success },
-  failed: { bg: '#fdecea', fg: colors.danger },
+  processing: { bg: colors.primarySoft, fg: colors.primary },
+  completed: { bg: colors.successSoft, fg: colors.success },
+  failed: { bg: colors.dangerSoft, fg: colors.danger },
 };
 
 export interface StatusBadgeProps {

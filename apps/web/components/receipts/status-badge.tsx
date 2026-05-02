@@ -10,9 +10,9 @@ const STATUS_LABEL: Record<ReceiptStatus, string> = {
 };
 
 const STATUS_COLOR: Record<ReceiptStatus, { bg: string; fg: string }> = {
-  pending: { bg: colors.surfaceMuted, fg: colors.primary },
-  confirmed: { bg: '#e8f5e9', fg: colors.success },
-  rejected: { bg: '#fdecea', fg: colors.danger },
+  pending: { bg: colors.primarySoft, fg: colors.primary },
+  confirmed: { bg: colors.successSoft, fg: colors.success },
+  rejected: { bg: colors.dangerSoft, fg: colors.danger },
 };
 
 export interface ReceiptStatusBadgeProps {

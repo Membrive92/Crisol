@@ -36,7 +36,7 @@ export function SubmitButton({
         width: '100%',
         padding: `${spacing.sm + 4}px ${spacing.md}px`,
         backgroundColor: colors.primary,
-        color: '#ffffff',
+        color: colors.onPrimary,
         border: 'none',
         borderRadius: radius.sm,
         fontSize: fontSize.md,
@@ -68,7 +68,7 @@ function Spinner() {
         width: 16,
         height: 16,
         border: '2px solid rgba(255, 255, 255, 0.4)',
-        borderTopColor: '#ffffff',
+        borderTopColor: colors.onPrimary,
         borderRadius: '50%',
         animation: 'auth-spinner 0.7s linear infinite',
       }}
