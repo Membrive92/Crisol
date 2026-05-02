@@ -9,9 +9,14 @@
 :root {
   --color-primary: #1976d2;
   --color-primary-dark: #115293;
+  --color-on-primary: #f7f9fc;
+  --color-primary-soft: #e3eefb;
   --color-danger: #d32f2f;
+  --color-danger-soft: #fdecea;
   --color-success: #2e7d32;
+  --color-success-soft: #e8f5e9;
   --color-warning: #ed6c02;
+  --color-warning-soft: #fff4e5;
   --color-text: #1f1f1f;
   --color-text-muted: #666666;
   --color-text-subtle: #8a8a8a;
@@ -28,13 +33,21 @@
 
 [data-theme="dark"] {
   /* Paleta dark refinada: bg azulado oscuro (no negro puro); superficies
-     escalonadas; texto a 90/60/40% para jerarquía clara; primario
-     desaturado para no quemar en pantallas oscuras. */
-  --color-primary: #5fa8e6;
-  --color-primary-dark: #4f9cdf;
+     escalonadas; texto a 90/60/40% para jerarquía clara; primario más
+     profundo (no neón) para que los CTA filled lleven texto blanco con
+     contraste cómodo y no canten contra el fondo. Los `*-soft` son los
+     fondos tonales para chips y badges — tintados oscuros, NO pastel
+     claros (eso es lo que canta y queda fatal en dark). */
+  --color-primary: #2f6fb8;
+  --color-primary-dark: #245690;
+  --color-on-primary: #f4f7fb;
+  --color-primary-soft: #1d2a3d;
   --color-danger: #ef6e6e;
+  --color-danger-soft: #3a1f1f;
   --color-success: #6dc788;
+  --color-success-soft: #1c2a20;
   --color-warning: #f5b461;
+  --color-warning-soft: #322318;
   --color-text: #e6e7ea;
   --color-text-muted: #9aa0aa;
   --color-text-subtle: #6c7280;
