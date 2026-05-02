@@ -19,14 +19,14 @@ export function formatApiError(error: unknown, fallback: string): string {
   }
 
   const status = error.response.status;
-  if (status >= 500) {
-    return 'Error del servidor. Inténtalo en unos minutos.';
-  }
-
   const data = error.response.data as unknown;
   const detail = (data as { detail?: unknown } | null)?.detail;
 
   if (typeof detail === 'string' && detail.trim()) {
+    // El backend pone `detail` en HTTPException para mensajes user-facing
+    // (en español). Lo respetamos también en 5xx — p. ej. /receipts/extract
+    // devuelve 502 con "Extracción fallida: Timeout de inferencia" y eso
+    // es lo que el usuario necesita ver para decidir si reintenta.
     return detail;
   }
 
@@ -35,6 +35,10 @@ export function formatApiError(error: unknown, fallback: string): string {
     if (typeof first.msg === 'string' && first.msg.trim()) {
       return `Datos inválidos: ${first.msg}`;
     }
+  }
+
+  if (status >= 500) {
+    return 'Error del servidor. Inténtalo en unos minutos.';
   }
 
   return fallback;
