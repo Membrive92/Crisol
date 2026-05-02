@@ -16,8 +16,12 @@ interface RefreshQueueEntry {
 }
 let _refreshQueue: RefreshQueueEntry[] = [];
 
+// No fijamos `Content-Type` por defecto: axios lo deduce del body. Con plain
+// objects emite `application/json`; con `FormData` emite
+// `multipart/form-data; boundary=...`. Si pusiéramos el default JSON aquí,
+// rompería los uploads de tickets e imports — el backend recibiría JSON donde
+// espera multipart y devolvería 422.
 export const apiClient = axios.create({
-  headers: { 'Content-Type': 'application/json' },
   timeout: 15_000,
 });
 
@@ -54,6 +58,18 @@ apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   }
   return config;
 });
+
+// Cuando reintentamos una petición tras refrescar el access token, hay que
+// borrar el `Content-Type` que dejó el primer envío si el body es FormData.
+// Ese header lleva el `boundary` del multipart original; el reintento genera
+// un body nuevo con boundary nuevo y reutilizar la cabecera vieja produce
+// multipart inconsistente — el backend resetea la conexión sin loguear nada.
+function stripFormDataContentType(config: InternalAxiosRequestConfig): void {
+  if (typeof FormData === 'undefined' || !(config.data instanceof FormData)) return;
+  const headers = config.headers as unknown as Record<string, unknown>;
+  delete headers['Content-Type'];
+  delete headers['content-type'];
+}
 
 async function attemptRefresh(): Promise<string | null> {
   // Si el cliente no tiene refresh en memoria (flujo web con cookie httpOnly)
@@ -102,6 +118,7 @@ apiClient.interceptors.response.use(
         _refreshQueue.push({
           resolve: (token: string) => {
             originalRequest.headers.Authorization = `Bearer ${token}`;
+            stripFormDataContentType(originalRequest);
             resolve(apiClient(originalRequest));
           },
           reject,
@@ -122,6 +139,7 @@ apiClient.interceptors.response.use(
       }
 
       originalRequest.headers.Authorization = `Bearer ${newToken}`;
+      stripFormDataContentType(originalRequest);
       _refreshQueue.forEach((q) => q.resolve(newToken));
       _refreshQueue = [];
       return apiClient(originalRequest);

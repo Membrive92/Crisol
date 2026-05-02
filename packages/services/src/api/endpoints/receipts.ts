@@ -24,9 +24,13 @@ export const receiptsApi = {
   async extract(file: File): Promise<ReceiptExtractResponse> {
     const formData = new FormData();
     formData.append('file', file);
+    // La inferencia local con qwen2.5vl en CPU puede tardar 60-120s en frío.
+    // El backend tiene 120s de timeout contra Ollama, así que damos 180s aquí
+    // para cubrir tanto la inferencia como el round-trip + persistencia.
     const response = await apiClient.post<ReceiptExtractResponse>(
       '/receipts/extract',
       formData,
+      { timeout: 180_000 },
     );
     return response.data;
   },
