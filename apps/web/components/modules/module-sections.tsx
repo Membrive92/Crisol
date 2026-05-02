@@ -11,23 +11,34 @@ interface ModuleSectionsProps {
   module: AppModule;
 }
 
+/**
+ * Tabs de secciones del módulo. Pensado para vivir inline en el
+ * header de la app: sin wrapping (el padre maneja overflow-x), gap
+ * ajustado y sin barra inferior — el activo se marca con bg pill +
+ * texto fuerte, ya que el `borderBottom` del header ya cierra la fila.
+ */
 export function ModuleSections({ module }: ModuleSectionsProps) {
   const pathname = usePathname() ?? '';
   return (
-    <nav
-      aria-label="Secciones del módulo"
+    <ul
       style={{
-        display: 'flex',
+        display: 'inline-flex',
         gap: spacing.xs,
         alignItems: 'center',
-        flexWrap: 'wrap',
+        margin: 0,
+        padding: 0,
+        listStyle: 'none',
       }}
     >
       {module.sections.map((section) => {
         const active = pathname === section.path || pathname.startsWith(`${section.path}/`);
-        return <SectionTab key={section.key} section={section} active={active} />;
+        return (
+          <li key={section.key} style={{ flex: '0 0 auto' }}>
+            <SectionTab section={section} active={active} />
+          </li>
+        );
       })}
-    </nav>
+    </ul>
   );
 }
 
@@ -48,8 +59,8 @@ function SectionTab({ section, active }: { section: ModuleSection; active: boole
       onMouseLeave={() => setHovered(false)}
       aria-current={active ? 'page' : undefined}
       style={{
-        position: 'relative',
-        padding: `${spacing.xs + 2}px ${spacing.sm + 4}px`,
+        display: 'inline-block',
+        padding: `${spacing.xs}px ${spacing.sm + 4}px`,
         borderRadius: radius.md,
         fontSize: fontSize.sm,
         fontWeight: active ? fontWeight.semibold : fontWeight.medium,
@@ -57,24 +68,11 @@ function SectionTab({ section, active }: { section: ModuleSection; active: boole
         backgroundColor: bg,
         textDecoration: 'none',
         transition: 'background-color 120ms ease, color 120ms ease',
-        lineHeight: 1.2,
+        lineHeight: 1.3,
+        whiteSpace: 'nowrap',
       }}
     >
       {section.label}
-      {active ? (
-        <span
-          aria-hidden
-          style={{
-            position: 'absolute',
-            left: spacing.sm + 4,
-            right: spacing.sm + 4,
-            bottom: -1,
-            height: 2,
-            borderRadius: 2,
-            backgroundColor: colors.primary,
-          }}
-        />
-      ) : null}
     </Link>
   );
 }

@@ -89,82 +89,85 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     return null;
   }
 
+  const hasSections = !!activeModule && activeModule.sections.length > 0;
+
   return (
     <div style={{ minHeight: '100vh', backgroundColor: colors.background }}>
       <header
         style={{
           display: 'flex',
-          flexDirection: 'column',
+          alignItems: 'center',
+          gap: spacing.md,
+          padding: `${spacing.sm + 2}px ${spacing.lg}px`,
           backgroundColor: colors.surface,
           borderBottom: `1px solid ${colors.border}`,
         }}
       >
-        <div
+        <span
           style={{
-            display: 'flex',
-            gap: spacing.md,
-            alignItems: 'center',
-            padding: `${spacing.md}px ${spacing.lg}px`,
+            fontSize: fontSize.lg,
+            fontWeight: fontWeight.bold,
+            color: colors.text,
+            letterSpacing: '-0.01em',
+            flex: '0 0 auto',
           }}
         >
-          <span
-            style={{
-              fontSize: fontSize.lg,
-              fontWeight: fontWeight.semibold,
-              color: colors.primary,
-            }}
-          >
-            Finanzas
-          </span>
-          {activeModule && <ModuleSwitcher active={activeModule} />}
-          <div
-            style={{
-              marginLeft: 'auto',
-              display: 'flex',
-              gap: spacing.sm,
-              alignItems: 'center',
-            }}
-          >
-            <Link
-              href="/settings"
-              style={{
-                color: colors.text,
-                fontSize: fontSize.sm,
-                fontWeight: fontWeight.medium,
-                textDecoration: 'none',
-                padding: `${spacing.xs}px ${spacing.sm}px`,
-              }}
-            >
-              Ajustes
-            </Link>
-            <ThemeToggle />
-            <button
-              type="button"
-              onClick={handleLogout}
-              style={{
-                padding: `${spacing.xs}px ${spacing.sm}px`,
-                backgroundColor: 'transparent',
-                color: colors.danger,
-                border: `1px solid ${colors.border}`,
-                borderRadius: 6,
-                cursor: 'pointer',
-                fontSize: fontSize.sm,
-                fontWeight: fontWeight.medium,
-              }}
-            >
-              Cerrar sesión
-            </button>
-          </div>
-        </div>
-        {activeModule && activeModule.sections.length > 0 && (
+          Finanzas
+        </span>
+        {activeModule && <ModuleSwitcher active={activeModule} />}
+        {hasSections && (
           <nav
+            aria-label="Secciones del módulo"
             style={{
-              padding: `0 ${spacing.lg}px ${spacing.sm}px`,
+              flex: '1 1 auto',
+              minWidth: 0,
+              overflowX: 'auto',
+              marginLeft: spacing.sm,
             }}
           >
             <ModuleSections module={activeModule} />
           </nav>
         )}
+        <div
+          style={{
+            marginLeft: hasSections ? 0 : 'auto',
+            display: 'flex',
+            gap: spacing.xs,
+            alignItems: 'center',
+            flex: '0 0 auto',
+          }}
+        >
+          <Link
+            href="/settings"
+            style={{
+              color: colors.textMuted,
+              fontSize: fontSize.sm,
+              fontWeight: fontWeight.medium,
+              textDecoration: 'none',
+              padding: `${spacing.xs}px ${spacing.sm}px`,
+              borderRadius: 6,
+            }}
+          >
+            Ajustes
+          </Link>
+          <ThemeToggle />
+          <button
+            type="button"
+            onClick={handleLogout}
+            style={{
+              padding: `${spacing.xs}px ${spacing.sm}px`,
+              backgroundColor: 'transparent',
+              color: colors.textMuted,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 6,
+              cursor: 'pointer',
+              fontSize: fontSize.sm,
+              fontWeight: fontWeight.medium,
+            }}
+          >
+            Salir
+          </button>
+        </div>
       </header>
       <PasskeyPrompt />
       {children}
