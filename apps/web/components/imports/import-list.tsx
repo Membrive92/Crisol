@@ -62,7 +62,7 @@ export function ImportList({ items }: ImportListProps) {
           </div>
           <StatusBadge status={job.status} />
           <Link
-            href={{ pathname: `/imports/${job.id}` }}
+            href={{ pathname: `/personal-finance/imports/${job.id}` }}
             style={{
               fontSize: fontSize.sm,
               fontWeight: fontWeight.medium,

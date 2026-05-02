@@ -1,4 +1,12 @@
 export type { User } from './models/user';
+export type { AppModule, ModuleId, ModuleSection } from './models/module';
+export {
+  MODULES,
+  DEFAULT_MODULE_ID,
+  PERSONAL_FINANCE_BASE,
+  getModule,
+  findModuleByPath,
+} from './registry/modules';
 export type { Category, CategoryKind } from './models/category';
 export type { Transaction, TransactionSource } from './models/transaction';
 export type {

@@ -3,18 +3,22 @@
 import { useState } from 'react';
 import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 
-import type { CategoryBreakdownItem, CategoryKind } from '@finanzas/types';
+import type { CategoryBreakdownItem } from '@finanzas/types';
 import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
 import { formatAmount } from '@finanzas/ui';
 
 import { Card } from '@/components/ui/card';
 
+// 'all' = ingresos + gastos + sin categoría juntos en el mismo donut.
+// Se mapea a `kind=undefined` al llamar al backend.
+export type DonutKindFilter = 'all' | 'income' | 'expense';
+
 export interface CategoryDonutProps {
   data: CategoryBreakdownItem[] | undefined;
   currency: string;
   isLoading: boolean;
-  kind: CategoryKind;
-  onKindChange: (next: CategoryKind) => void;
+  kind: DonutKindFilter;
+  onKindChange: (next: DonutKindFilter) => void;
 }
 
 const PALETTE = [
@@ -125,8 +129,8 @@ function KindToggle({
   value,
   onChange,
 }: {
-  value: CategoryKind;
-  onChange: (next: CategoryKind) => void;
+  value: DonutKindFilter;
+  onChange: (next: DonutKindFilter) => void;
 }) {
   return (
     <div
@@ -137,6 +141,9 @@ function KindToggle({
         overflow: 'hidden',
       }}
     >
+      <ToggleButton active={value === 'all'} onClick={() => onChange('all')}>
+        Total
+      </ToggleButton>
       <ToggleButton active={value === 'expense'} onClick={() => onChange('expense')}>
         Gastos
       </ToggleButton>
@@ -163,7 +170,7 @@ function ToggleButton({
       style={{
         padding: `${spacing.xs}px ${spacing.sm}px`,
         backgroundColor: active ? colors.primary : colors.surface,
-        color: active ? colors.surface : colors.text,
+        color: active ? colors.onPrimary : colors.text,
         border: 'none',
         cursor: 'pointer',
         fontSize: fontSize.xs,

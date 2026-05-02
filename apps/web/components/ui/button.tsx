@@ -11,14 +11,29 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   fullWidth?: boolean;
 }
 
+// Convenciones de variantes:
+// - `primary`   → CTA fuerte (sólido). Usar para la acción dominante de la
+//                  pantalla: "Confirmar", "Iniciar sesión", "Analizar ticket".
+// - `secondary` → CTA secundario (outlined). Usar para acciones de soporte
+//                  como "+ Subir ticket" desde un listado o "Cancelar".
+// - `danger`    → destructivo. Sólido rojo.
+// - `ghost`     → neutro con borde sutil. Paginación, cancelar inline.
 const variantStyles: Record<ButtonVariant, CSSProperties> = {
-  primary: { backgroundColor: colors.primary, color: colors.surface, border: 'none' },
+  primary: {
+    backgroundColor: colors.primary,
+    color: colors.onPrimary,
+    border: `1px solid ${colors.primary}`,
+  },
   secondary: {
-    backgroundColor: colors.surface,
+    backgroundColor: 'transparent',
     color: colors.primary,
     border: `1px solid ${colors.primary}`,
   },
-  danger: { backgroundColor: colors.danger, color: colors.surface, border: 'none' },
+  danger: {
+    backgroundColor: colors.danger,
+    color: colors.onPrimary,
+    border: `1px solid ${colors.danger}`,
+  },
   ghost: {
     backgroundColor: 'transparent',
     color: colors.text,

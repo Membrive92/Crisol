@@ -39,7 +39,7 @@ export default function RootLayout() {
     if (!isAuthenticated && !inAuthGroup) {
       router.replace('/(auth)/login');
     } else if (isAuthenticated && inAuthGroup) {
-      router.replace('/(tabs)/home');
+      router.replace('/(modules)/personal-finance/(tabs)/home');
     }
   }, [isAuthenticated, isHydrated, segments, refreshToken, setTokens, setUser, logout, router]);
 
@@ -48,9 +48,7 @@ export default function RootLayout() {
       <StatusBar style="auto" />
       <Stack>
         <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="transaction/new" options={{ title: 'Nueva transacción' }} />
-        <Stack.Screen name="transaction/[id]" options={{ title: 'Editar transacción' }} />
+        <Stack.Screen name="(modules)" options={{ headerShown: false }} />
       </Stack>
     </QueryProvider>
   );

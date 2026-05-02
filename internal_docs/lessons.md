@@ -133,6 +133,57 @@ diferencia de API queda contenida en un helper privado.
 **Regla:** Para leer Blobs/Files como texto desde código que tiene tests en jsdom, usar
 `FileReader.readAsText` en lugar de `Blob.text()` o `Blob.slice().text()`.
 
+### [PHASE-5.2] `Content-Type: application/json` por defecto en axios rompe `multipart/form-data`
+**Error:** El cliente axios tenía `headers: { 'Content-Type': 'application/json' }` como
+default. Cualquier `apiClient.post('/...', formData)` (receipts, imports) salía con
+`Content-Type: application/json` en vez de `multipart/form-data; boundary=...`. El
+backend recibía el FormData como un blob JSON malformado y devolvía 422.
+**Causa:** axios sólo deduce el header del body cuando NO hay un Content-Type explícito.
+Si lo fijas a JSON en `create({ headers })`, ese default gana sobre la inferencia y
+nunca emite la cabecera multipart con el boundary correcto.
+**Solución:** Quitar el default de `Content-Type` del `axios.create`. axios deduce
+`application/json` para plain objects y `multipart/form-data` con boundary para
+`FormData`.
+**Regla:** No fijes `Content-Type` por defecto en clientes HTTP que vayan a subir
+archivos. Deja que la librería lo deduzca por body. Si necesitas forzar JSON en una
+ruta concreta, hazlo en esa request, no en el cliente compartido.
+
+### [PHASE-5.2] Reintento tras refresh con `FormData` reutiliza el `boundary` viejo y revienta multipart
+**Error:** El interceptor de axios refrescaba el access token tras un 401 y reintentaba
+la petición original con `apiClient(originalRequest)`. Para uploads de tickets, el
+reintento llegaba al backend pero uvicorn cerraba la conexión sin loguear nada (el
+proxy de Next.js veía `socket hang up / ECONNRESET` ~10s después). El primer 401
+no aparecía como problema — pero el reintento sí.
+**Causa:** El primer envío grabó en `originalRequest.headers` un
+`Content-Type: multipart/form-data; boundary=----WebKitFormBoundaryXXX`. axios
+reutiliza esa cabecera en el reintento, pero el adapter genera un body NUEVO con
+un boundary NUEVO. Resultado: el backend recibe multipart con boundary inconsistente,
+`python-multipart` falla al parsear y uvicorn resetea la conexión sin pasar al handler
+(de ahí el "missing log entry").
+**Solución:** Antes de reintentar, borrar `Content-Type` de `originalRequest.headers`
+si el body es `FormData`. Así el adapter (XHR en navegador, form-data en Node) regenera
+la cabecera con el boundary correcto.
+**Regla:** Cualquier interceptor que reintente peticiones tras refresh de token debe
+limpiar `Content-Type` cuando el body es `FormData` (o `Blob` con su propio
+boundary/encoding). Reutilizar headers de un envío previo asume que el body es
+idempotente; con multipart NO lo es.
+
+### [PHASE-5.2] El dev server de Next.js corta los rewrites a 30s — incompatible con IA local
+**Error:** Subir un ticket en dev devolvía 500 con `socket hang up / ECONNRESET` exactamente
+a los 30s, sin que la petición llegara a aparecer en el log de uvicorn. Ollama estaba
+respondiendo correctamente pero la inferencia con `qwen2.5vl:7b` en CPU tarda 60–120s.
+**Causa:** Next.js dev server cierra las conexiones de los rewrites a los 30s por
+defecto. Cuando el upstream (uvicorn) sigue procesando pasados esos 30s, el dev server
+resetea la conexión. uvicorn ve `ConnectionResetError` mientras espera a Ollama y aborta
+el handler antes de loguear la línea de access.
+**Solución:** Subir `experimental.proxyTimeout` en `next.config.mjs` a un valor que cubra
+la inferencia local más holgura (300_000 = 5 min). Sólo afecta al dev server; en
+producción detrás de un reverse proxy (Caddy/Traefik/Nginx) el timeout se configura ahí.
+**Regla:** Cualquier endpoint que pase por el rewrite de Next.js dev y pueda tardar
+>30s (IA local, exports grandes, jobs síncronos) requiere subir `experimental.proxyTimeout`.
+Si una petición "muere" exactamente a los 30s sin trazas en uvicorn, el sospechoso es
+casi siempre el dev server.
+
 ---
 
 ## Ejemplos de referencia (no son lecciones reales)

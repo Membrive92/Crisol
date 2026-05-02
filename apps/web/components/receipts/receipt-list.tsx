@@ -63,7 +63,7 @@ export function ReceiptList({ items }: ReceiptListProps) {
             </div>
             <ReceiptStatusBadge status={r.status} />
             <Link
-              href={{ pathname: `/receipts/${r.id}` }}
+              href={{ pathname: `/personal-finance/receipts/${r.id}` }}
               style={{
                 fontSize: fontSize.sm,
                 fontWeight: fontWeight.medium,

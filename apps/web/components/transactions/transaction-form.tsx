@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from 'react';
 
 import {
+  colors,
   fromDateInputValue,
   toDateInputValue,
 } from '@finanzas/ui';
@@ -125,7 +126,7 @@ export function TransactionForm({
       />
 
       {error ? (
-        <div style={{ color: '#d32f2f', fontSize: 14, marginBottom: 12 }}>{error}</div>
+        <div style={{ color: colors.danger, fontSize: 14, marginBottom: 12 }}>{error}</div>
       ) : null}
 
       <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
