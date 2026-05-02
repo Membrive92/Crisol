@@ -11,7 +11,9 @@ export interface ReceiptExtraction {
   merchant: string | null;
   occurred_at: string | null;
   currency: string;
-  total: string;
+  // `total` puede venir null cuando el modelo no lo lee. El form de
+  // confirmación pide al usuario que rellene `amount` antes de persistir.
+  total: string | null;
   tax: string | null;
   line_items: ReceiptLineItem[];
   raw_text: string | null;

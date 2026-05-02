@@ -57,13 +57,89 @@ async def test_extract_receipt_invalid_json_raises() -> None:
 
 
 async def test_extract_receipt_invalid_schema_raises() -> None:
-    """Falta el campo `total` (obligatorio)."""
+    """`currency` con menos de 3 letras incumple el schema."""
     with patch(
         "app.modules.ai.client.generate_with_image",
         new_callable=AsyncMock,
-        return_value=json.dumps({"merchant": "X"}),
+        return_value=json.dumps({"currency": "X"}),
     ), pytest.raises(AiInvalidOutputError):
         await ai_service.extract_receipt(b"fake")
+
+
+async def test_extract_receipt_total_null_is_accepted() -> None:
+    """El modelo puede devolver `total: null` cuando no consigue leerlo;
+    el usuario lo rellenará en el form de confirmación."""
+    response = json.dumps(
+        {
+            "merchant": "Mercadona",
+            "total": None,
+            "currency": "EUR",
+            "line_items": [],
+        }
+    )
+    with patch(
+        "app.modules.ai.client.generate_with_image",
+        new_callable=AsyncMock,
+        return_value=response,
+    ):
+        extraction = await ai_service.extract_receipt(b"fake")
+    assert extraction.total is None
+    assert extraction.merchant == "Mercadona"
+
+
+async def test_extract_receipt_normalizes_spanish_decimals_and_dates() -> None:
+    """El modelo a veces devuelve `27,66` y `19/02/26T12:31`; el schema
+    normaliza ambos antes de validar."""
+    response = json.dumps(
+        {
+            "merchant": "Fcia. San Pedro",
+            "occurred_at": "19/02/26T12:31",
+            "currency": "EUR",
+            "total": "27,66",
+            "tax": "1,06",
+            "line_items": [
+                {
+                    "description": "SPRAAXN 200 MG",
+                    "quantity": "1",
+                    "unit_price": "9,21",
+                    "total": "27,66",
+                }
+            ],
+        }
+    )
+    with patch(
+        "app.modules.ai.client.generate_with_image",
+        new_callable=AsyncMock,
+        return_value=response,
+    ):
+        extraction = await ai_service.extract_receipt(b"fake")
+    assert extraction.total == Decimal("27.66")
+    assert extraction.tax == Decimal("1.06")
+    assert extraction.occurred_at is not None
+    assert extraction.occurred_at.year == 2026
+    assert extraction.occurred_at.month == 2
+    assert extraction.occurred_at.day == 19
+    assert extraction.line_items[0].unit_price == Decimal("9.21")
+    assert extraction.line_items[0].total == Decimal("27.66")
+
+
+async def test_extract_receipt_normalizes_thousands_separator() -> None:
+    """`1.234,56` (formato español con miles) → `1234.56`."""
+    response = json.dumps(
+        {
+            "merchant": "Big Receipt",
+            "currency": "EUR",
+            "total": "1.234,56",
+            "line_items": [],
+        }
+    )
+    with patch(
+        "app.modules.ai.client.generate_with_image",
+        new_callable=AsyncMock,
+        return_value=response,
+    ):
+        extraction = await ai_service.extract_receipt(b"fake")
+    assert extraction.total == Decimal("1234.56")
 
 
 # ─────────────────────────────────────

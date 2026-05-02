@@ -7,12 +7,51 @@ con su API HTTP. Ningún otro módulo importa httpx para hablar con Ollama.
 from __future__ import annotations
 
 import base64
+import io
 from typing import Any
 
 import httpx
+from PIL import Image, ImageOps
 
 from app.core.config import settings
 from app.modules.ai.exceptions import AiTimeoutError, AiUnavailableError
+
+# Tamaño máximo del lado largo al pasar imágenes al modelo de visión. Las
+# fotos de móvil llegan a 4032 px y producen miles de tokens de visión que
+# disparan el tiempo de inferencia (>120 s en CPU) y a veces hacen que el
+# runner devuelva 500 al exceder la KV cache. 1280 px conserva detalle
+# suficiente para leer tickets y reduce la inferencia a ~30-60 s.
+_MAX_IMAGE_LONG_SIDE = 1280
+_JPEG_QUALITY = 85
+
+
+def _downscale_for_vision(image: bytes) -> bytes:
+    """Reduce la imagen al lado largo máximo si excede `_MAX_IMAGE_LONG_SIDE`.
+
+    Devuelve los bytes originales sin tocar si:
+    - la imagen ya cabe,
+    - Pillow no puede abrirla (formato raro): que el modelo lo intente igual.
+
+    El blob original se guarda íntegro en MinIO antes de llegar aquí — esta
+    reducción es sólo para alimentar al modelo.
+    """
+    try:
+        with Image.open(io.BytesIO(image)) as img:
+            img = ImageOps.exif_transpose(img)
+            w, h = img.size
+            if max(w, h) <= _MAX_IMAGE_LONG_SIDE:
+                return image
+            img.thumbnail(
+                (_MAX_IMAGE_LONG_SIDE, _MAX_IMAGE_LONG_SIDE),
+                Image.Resampling.LANCZOS,
+            )
+            if img.mode not in {"RGB", "L"}:
+                img = img.convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=_JPEG_QUALITY, optimize=True)
+            return buf.getvalue()
+    except (OSError, Image.UnidentifiedImageError):
+        return image
 
 
 async def ping() -> bool:
@@ -78,7 +117,7 @@ async def generate_with_image(
         AiTimeout: la inferencia excede el timeout configurado.
     """
     target = model or settings.ollama_vision_model
-    encoded = base64.b64encode(image).decode("ascii")
+    encoded = base64.b64encode(_downscale_for_vision(image)).decode("ascii")
     payload: dict[str, Any] = {
         "model": target,
         "prompt": prompt,
@@ -101,3 +140,8 @@ async def generate_with_image(
         raise AiUnavailableError("Ollama no responde") from e
     except httpx.ReadTimeout as e:
         raise AiTimeoutError("Timeout de inferencia") from e
+    except httpx.HTTPStatusError as e:
+        # Ollama puede devolver 500 cuando la KV cache se queda corta o el
+        # runner aborta con OOM. Lo tratamos como "no disponible" para que
+        # el caller (receipts service) limpie blobs y devuelva 502.
+        raise AiUnavailableError(f"Ollama error {e.response.status_code}") from e
