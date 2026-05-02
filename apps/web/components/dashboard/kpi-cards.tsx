@@ -1,18 +1,25 @@
 'use client';
 
-import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
+import { colors } from '@finanzas/ui';
 import { formatAmount } from '@finanzas/ui';
 import type { DashboardSummary } from '@finanzas/types';
 
-import { Card } from '@/components/ui/card';
+import { KpiCard } from '@/components/ui/kpi-card';
+
+import { KpiDelta } from './kpi-delta';
 
 export interface KpiCardsProps {
   summary: DashboardSummary | undefined;
   isLoading: boolean;
 }
 
+/**
+ * Tres KPIs principales del dashboard: Saldo, Ingresos y Gastos. Cada
+ * uno con delta vs periodo previo cuando el backend lo devuelve. El
+ * cuarto card ("Movimientos") se mueve al sidebar de actividad.
+ */
 export function KpiCards({ summary, isLoading }: KpiCardsProps) {
-  const currency = summary?.currency ?? 'USD';
+  const currency = summary?.currency ?? 'EUR';
   const balance = summary ? Number(summary.balance) : 0;
   const balanceColor = balance >= 0 ? colors.income : colors.expense;
 
@@ -20,74 +27,64 @@ export function KpiCards({ summary, isLoading }: KpiCardsProps) {
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-        gap: spacing.md,
-        marginBottom: spacing.lg,
+        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+        gap: 16,
       }}
     >
-      <Kpi
-        label="Balance"
-        value={summary ? formatAmount(summary.balance, currency) : '—'}
+      <KpiCard
+        label="Saldo"
+        value={summary && !isLoading ? formatAmount(summary.balance, currency) : '—'}
         valueColor={summary ? balanceColor : colors.text}
-        loading={isLoading}
+        footer={
+          summary ? (
+            <KpiDelta
+              current={Number(summary.balance)}
+              previous={
+                summary.previous_period_balance !== null
+                  ? Number(summary.previous_period_balance)
+                  : null
+              }
+              polarity="up=good"
+            />
+          ) : null
+        }
       />
-      <Kpi
+      <KpiCard
         label="Ingresos"
-        value={summary ? formatAmount(summary.income, currency) : '—'}
+        value={summary && !isLoading ? formatAmount(summary.income, currency) : '—'}
         valueColor={colors.income}
-        loading={isLoading}
+        footer={
+          summary ? (
+            <KpiDelta
+              current={Number(summary.income)}
+              previous={
+                summary.previous_period_income !== null
+                  ? Number(summary.previous_period_income)
+                  : null
+              }
+              polarity="up=good"
+            />
+          ) : null
+        }
       />
-      <Kpi
+      <KpiCard
         label="Gastos"
-        value={summary ? formatAmount(summary.expenses, currency) : '—'}
+        value={summary && !isLoading ? formatAmount(summary.expenses, currency) : '—'}
         valueColor={colors.expense}
-        loading={isLoading}
-      />
-      <Kpi
-        label="Movimientos"
-        value={summary ? String(summary.transaction_count) : '—'}
-        valueColor={colors.text}
-        loading={isLoading}
+        footer={
+          summary ? (
+            <KpiDelta
+              current={Number(summary.expenses)}
+              previous={
+                summary.previous_period_expenses !== null
+                  ? Number(summary.previous_period_expenses)
+                  : null
+              }
+              polarity="up=bad"
+            />
+          ) : null
+        }
       />
     </div>
-  );
-}
-
-function Kpi({
-  label,
-  value,
-  valueColor,
-  loading,
-}: {
-  label: string;
-  value: string;
-  valueColor: string;
-  loading: boolean;
-}) {
-  return (
-    <Card>
-      <p
-        style={{
-          margin: 0,
-          fontSize: fontSize.xs,
-          fontWeight: fontWeight.medium,
-          color: colors.textMuted,
-          textTransform: 'uppercase',
-          letterSpacing: 0.5,
-        }}
-      >
-        {label}
-      </p>
-      <p
-        style={{
-          margin: `${spacing.xs}px 0 0`,
-          fontSize: fontSize.xl,
-          fontWeight: fontWeight.bold,
-          color: loading ? colors.textSubtle : valueColor,
-        }}
-      >
-        {loading ? '…' : value}
-      </p>
-    </Card>
   );
 }

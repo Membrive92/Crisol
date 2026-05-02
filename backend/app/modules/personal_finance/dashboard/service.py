@@ -25,6 +25,14 @@ from app.modules.personal_finance.dashboard.schemas import (
 _UNCATEGORIZED_NAME = "Sin categoría"
 
 
+async def list_user_currencies(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+) -> list[str]:
+    """Monedas distintas presentes en las transacciones del usuario."""
+    return await repository.list_user_currencies(db, user_id)
+
+
 async def get_summary(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -33,7 +41,12 @@ async def get_summary(
     date_from: datetime | None = None,
     date_to: datetime | None = None,
 ) -> SummaryResponse:
-    """Balance global (ingresos, gastos, neto) y cuenta de transacciones."""
+    """Balance global (ingresos, gastos, neto) y cuenta de transacciones.
+
+    Si llegan `date_from` y `date_to`, se calcula además el rango previo
+    de igual longitud (terminando justo antes de `date_from`) para que el
+    frontend pueda pintar deltas vs periodo anterior.
+    """
     totals = await repository.get_totals_by_kind(
         db, user_id, currency, date_from=date_from, date_to=date_to
     )
@@ -42,12 +55,32 @@ async def get_summary(
     count = await repository.count_transactions(
         db, user_id, currency, date_from=date_from, date_to=date_to
     )
+
+    prev_income: Decimal | None = None
+    prev_expenses: Decimal | None = None
+    prev_balance: Decimal | None = None
+    if date_from is not None and date_to is not None:
+        # Periodo previo de la misma duración, terminando justo antes de date_from.
+        # Ej.: rango "2026-01-01..2026-12-31" → previo "2025-01-01..2025-12-31".
+        period_length = date_to - date_from
+        prev_to = date_from
+        prev_from = date_from - period_length
+        prev_totals = await repository.get_totals_by_kind(
+            db, user_id, currency, date_from=prev_from, date_to=prev_to
+        )
+        prev_income = prev_totals.get(CategoryKind.INCOME, Decimal("0"))
+        prev_expenses = prev_totals.get(CategoryKind.EXPENSE, Decimal("0"))
+        prev_balance = prev_income - prev_expenses
+
     return SummaryResponse(
         income=income,
         expenses=expenses,
         balance=income - expenses,
         transaction_count=count,
         currency=currency,
+        previous_period_income=prev_income,
+        previous_period_expenses=prev_expenses,
+        previous_period_balance=prev_balance,
     )
 
 

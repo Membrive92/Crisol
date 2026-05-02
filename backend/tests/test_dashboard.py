@@ -368,6 +368,150 @@ async def test_dashboard_user_isolation(client: AsyncClient) -> None:
 
 
 async def test_dashboard_requires_auth(client: AsyncClient) -> None:
-    for path in ("/dashboard/summary", "/dashboard/by-category", "/dashboard/by-month", "/dashboard/top-expenses"):
+    for path in (
+        "/dashboard/summary",
+        "/dashboard/by-category",
+        "/dashboard/by-month",
+        "/dashboard/top-expenses",
+        "/dashboard/currencies",
+    ):
         r = await client.get(path)
         assert r.status_code == 401, path
+
+
+# ---------- /dashboard/summary previous-period ----------
+
+
+async def test_summary_previous_period_null_without_date_range(
+    client: AsyncClient,
+) -> None:
+    """Sin date_from/date_to no se calcula periodo previo."""
+    token = await _register(client, "dash-prev-null@example.com")
+    cat = await _make_category(client, token, name="Comida", kind="expense")
+    await _make_tx(
+        client, token, amount="10.00", occurred_at="2026-01-15T10:00:00Z",
+        category_id=cat,
+    )
+
+    r = await client.get("/dashboard/summary", headers=_auth(token))
+    body = r.json()
+    assert body["previous_period_income"] is None
+    assert body["previous_period_expenses"] is None
+    assert body["previous_period_balance"] is None
+
+
+async def test_summary_previous_period_computed_with_date_range(
+    client: AsyncClient,
+) -> None:
+    """Con date_from y date_to se computa el rango previo de igual longitud."""
+    token = await _register(client, "dash-prev-range@example.com")
+    income_cat = await _make_category(client, token, name="Salario", kind="income")
+    expense_cat = await _make_category(client, token, name="Comida", kind="expense")
+
+    # Periodo actual: febrero 2026.
+    await _make_tx(
+        client, token, amount="100.00", occurred_at="2026-02-10T10:00:00Z",
+        category_id=income_cat,
+    )
+    await _make_tx(
+        client, token, amount="40.00", occurred_at="2026-02-15T10:00:00Z",
+        category_id=expense_cat,
+    )
+
+    # Periodo previo (enero 2026, longitud equivalente).
+    await _make_tx(
+        client, token, amount="80.00", occurred_at="2026-01-10T10:00:00Z",
+        category_id=income_cat,
+    )
+    await _make_tx(
+        client, token, amount="30.00", occurred_at="2026-01-15T10:00:00Z",
+        category_id=expense_cat,
+    )
+
+    r = await client.get(
+        "/dashboard/summary",
+        params={
+            "date_from": "2026-02-01T00:00:00Z",
+            "date_to": "2026-02-28T23:59:59Z",
+        },
+        headers=_auth(token),
+    )
+    body = r.json()
+    assert body["income"] == "100.00"
+    assert body["expenses"] == "40.00"
+    assert body["balance"] == "60.00"
+    assert body["previous_period_income"] == "80.00"
+    assert body["previous_period_expenses"] == "30.00"
+    assert body["previous_period_balance"] == "50.00"
+
+
+async def test_summary_previous_period_zero_when_no_prior_data(
+    client: AsyncClient,
+) -> None:
+    """Si no hay transacciones en el rango previo, los valores son 0 (no None)."""
+    token = await _register(client, "dash-prev-zero@example.com")
+    income_cat = await _make_category(client, token, name="Salario", kind="income")
+    await _make_tx(
+        client, token, amount="200.00", occurred_at="2026-02-10T10:00:00Z",
+        category_id=income_cat,
+    )
+
+    r = await client.get(
+        "/dashboard/summary",
+        params={
+            "date_from": "2026-02-01T00:00:00Z",
+            "date_to": "2026-02-28T23:59:59Z",
+        },
+        headers=_auth(token),
+    )
+    body = r.json()
+    assert body["previous_period_income"] == "0"
+    assert body["previous_period_expenses"] == "0"
+    assert body["previous_period_balance"] == "0"
+
+
+# ---------- /dashboard/currencies ----------
+
+
+async def test_currencies_returns_distinct_user_currencies(
+    client: AsyncClient,
+) -> None:
+    token = await _register(client, "dash-curr@example.com")
+    cat = await _make_category(client, token, name="Comida", kind="expense")
+    await _make_tx(
+        client, token, amount="10.00", currency="EUR",
+        occurred_at="2026-01-15T10:00:00Z", category_id=cat,
+    )
+    await _make_tx(
+        client, token, amount="5.00", currency="USD",
+        occurred_at="2026-01-16T10:00:00Z", category_id=cat,
+    )
+    await _make_tx(
+        client, token, amount="3.00", currency="EUR",
+        occurred_at="2026-01-17T10:00:00Z", category_id=cat,
+    )
+
+    r = await client.get("/dashboard/currencies", headers=_auth(token))
+    assert r.status_code == 200
+    assert r.json() == ["EUR", "USD"]
+
+
+async def test_currencies_empty_for_new_user(client: AsyncClient) -> None:
+    token = await _register(client, "dash-curr-empty@example.com")
+    r = await client.get("/dashboard/currencies", headers=_auth(token))
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+async def test_currencies_isolated_per_user(client: AsyncClient) -> None:
+    token_a = await _register(client, "dash-curr-a@example.com")
+    token_b = await _register(client, "dash-curr-b@example.com")
+
+    cat_a = await _make_category(client, token_a, name="X", kind="expense")
+    await _make_tx(
+        client, token_a, amount="1.00", currency="JPY",
+        occurred_at="2026-01-15T10:00:00Z", category_id=cat_a,
+    )
+
+    r = await client.get("/dashboard/currencies", headers=_auth(token_b))
+    assert r.json() == []

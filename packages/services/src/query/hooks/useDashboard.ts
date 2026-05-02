@@ -11,6 +11,18 @@ import { dashboardApi } from '../../api/endpoints/dashboard';
 import { queryKeys } from '../keys';
 
 const STALE_TIME = 60_000;
+// Las monedas del usuario cambian poco; cache larga para que el filtro
+// del dashboard no parpadee al navegar entre páginas.
+const CURRENCIES_STALE_TIME = 5 * 60_000;
+
+export function useUserCurrencies() {
+  return useQuery({
+    queryKey: queryKeys.dashboard.currencies(),
+    queryFn: () => dashboardApi.currencies(),
+    staleTime: CURRENCIES_STALE_TIME,
+    placeholderData: (previous) => previous,
+  });
+}
 
 export function useDashboardSummary(query: DashboardSummaryQuery = {}) {
   return useQuery({

@@ -14,13 +14,22 @@ from pydantic import BaseModel
 
 
 class SummaryResponse(BaseModel):
-    """Balance global en el rango y moneda pedidos."""
+    """Balance global en el rango y moneda pedidos.
+
+    Cuando el caller pasa `date_from` y `date_to`, se calcula también el
+    rango previo de igual longitud (`previous_period_*`) para que el
+    frontend pinte deltas vs periodo anterior. Si no hay rango, los
+    `previous_*` quedan en `None`.
+    """
 
     income: Decimal
     expenses: Decimal
     balance: Decimal
     transaction_count: int
     currency: str
+    previous_period_income: Decimal | None = None
+    previous_period_expenses: Decimal | None = None
+    previous_period_balance: Decimal | None = None
 
 
 class CategoryBreakdownItem(BaseModel):
