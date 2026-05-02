@@ -112,7 +112,8 @@ Todos GET, read-only, agregaciones SUM/COUNT/GROUP BY filtradas por
 
 | Método | Ruta | Query | Response |
 |--------|------|-------|----------|
-| GET | `/dashboard/summary` | `currency` (def `USD`), `date_from?`, `date_to?` | `{ income, expenses, balance, transaction_count, currency }` |
+| GET | `/dashboard/currencies` | — | `string[]` con las monedas distintas presentes en las transacciones del usuario (ordenadas alfabéticamente). |
+| GET | `/dashboard/summary` | `currency` (def `USD`), `date_from?`, `date_to?` | `{ income, expenses, balance, transaction_count, currency, previous_period_income, previous_period_expenses, previous_period_balance }` |
 | GET | `/dashboard/by-category` | `currency`, `date_from?`, `date_to?`, `kind?` (`income\|expense`) | `[{ category_id, category_name, category_kind, total, count }]` |
 | GET | `/dashboard/by-month` | `year` (def actual), `currency` | `[{ month: "YYYY-MM", income, expenses, balance }]` (12 buckets) |
 | GET | `/dashboard/top-expenses` | `currency`, `date_from?`, `date_to?`, `limit` (1..50, def 10) | `[{ transaction_id, description, amount, occurred_at, category_id, category_name }]` |
@@ -122,6 +123,13 @@ Reglas relevantes:
   incluso sin categoría.
 - `summary.income` / `expenses` sólo cuentan transacciones con
   categoría (el signo lo decide `category.kind`).
+- `summary.previous_period_*` se computa cuando llegan `date_from` y
+  `date_to`. Es el rango previo de igual longitud, terminando justo
+  antes de `date_from` (rango actual `[2026-02-01, 2026-02-28]` →
+  rango previo `[2026-01-04, 2026-02-01]`). Si no llega rango, los
+  tres campos son `null` y el frontend no pinta delta.
+- `currencies` permite al frontend hidratar el selector de moneda con
+  valores reales del usuario en lugar de hardcodear `USD`/`EUR`.
 - `by-category` incluye un bucket `{ category_id: null, category_name:
   "Sin categoría" }` que se excluye cuando se filtra por `kind`.
 - `top-expenses` solo devuelve transacciones cuya categoría es

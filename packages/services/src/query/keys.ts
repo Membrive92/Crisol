@@ -37,6 +37,7 @@ export const queryKeys = {
       [...queryKeys.dashboard.all, 'by-month', normalizeQuery(query)] as const,
     topExpenses: (query: DashboardTopExpensesQuery = {}) =>
       [...queryKeys.dashboard.all, 'top-expenses', normalizeQuery(query)] as const,
+    currencies: () => [...queryKeys.dashboard.all, 'currencies'] as const,
   },
   imports: {
     all: ['imports'] as const,

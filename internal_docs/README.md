@@ -79,8 +79,8 @@ Leyenda: ⏳ pendiente · 🚧 en curso · ✅ completada · ❌ bloqueada
 
 | Fase | Nombre                       | Estado | PR |
 |------|------------------------------|--------|----|
-| 7.0  | Design primitives + shell    | 🚧     | —  |
-| 7.1  | Dashboard bento              | ⏳     | —  |
+| 7.0  | Design primitives + shell    | ✅     | —  |
+| 7.1  | Dashboard bento              | 🚧     | —  |
 | 7.2  | Transactions tabla           | ⏳     | —  |
 | 7.3  | Imports + Receipts polish    | ⏳     | —  |
 | 7.4  | Mobile parity                | ⏳     | —  |

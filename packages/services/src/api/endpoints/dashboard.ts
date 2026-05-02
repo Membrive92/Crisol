@@ -12,6 +12,11 @@ import type {
 import { apiClient } from '../client';
 
 export const dashboardApi = {
+  async currencies(): Promise<string[]> {
+    const response = await apiClient.get<string[]>('/dashboard/currencies');
+    return response.data;
+  },
+
   async summary(query: DashboardSummaryQuery = {}): Promise<DashboardSummary> {
     const response = await apiClient.get<DashboardSummary>('/dashboard/summary', {
       params: query,

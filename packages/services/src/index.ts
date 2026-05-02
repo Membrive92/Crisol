@@ -34,6 +34,7 @@ export {
   useDashboardByCategory,
   useDashboardByMonth,
   useDashboardTopExpenses,
+  useUserCurrencies,
 } from './query/hooks/useDashboard';
 export { useImports, useImport, useCreateImport } from './query/hooks/useImports';
 export {

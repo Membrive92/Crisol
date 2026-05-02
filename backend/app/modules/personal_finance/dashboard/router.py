@@ -27,11 +27,25 @@ from app.modules.personal_finance.dashboard.service import (
     get_monthly_breakdown,
     get_summary,
     get_top_expenses,
+    list_user_currencies,
 )
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 _DEFAULT_CURRENCY = "USD"
+
+
+@router.get("/currencies", response_model=list[str])
+async def currencies_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[str]:
+    """Monedas distintas presentes en las transacciones del usuario.
+
+    Sirve para que el frontend arranque el filtro de moneda con un valor
+    real del usuario en vez de hardcodear `USD`/`EUR`.
+    """
+    return await list_user_currencies(db, user.id)
 
 
 @router.get("/summary", response_model=SummaryResponse)

@@ -6,6 +6,14 @@ export interface DashboardSummary {
   balance: string;
   transaction_count: number;
   currency: string;
+  /**
+   * Totales del periodo previo de igual longitud (terminando justo antes
+   * de `date_from`). El backend los devuelve cuando el caller pasa
+   * `date_from` y `date_to`; sin rango, los tres son `null`.
+   */
+  previous_period_income: string | null;
+  previous_period_expenses: string | null;
+  previous_period_balance: string | null;
 }
 
 export interface CategoryBreakdownItem {

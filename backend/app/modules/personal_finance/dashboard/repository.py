@@ -20,6 +20,25 @@ from app.modules.personal_finance.categories.models import Category, CategoryKin
 from app.modules.personal_finance.transactions.models import Transaction
 
 
+async def list_user_currencies(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+) -> list[str]:
+    """Devuelve las monedas distintas en las transacciones del usuario.
+
+    Útil para que el dashboard arranque con la moneda real del usuario
+    en lugar de un default hardcodeado.
+    """
+    query = (
+        select(Transaction.currency)
+        .where(Transaction.user_id == user_id)
+        .distinct()
+        .order_by(Transaction.currency)
+    )
+    result = await db.execute(query)
+    return [row[0] for row in result.all()]
+
+
 def _apply_scope[Q: Select[Any]](
     query: Q,
     *,

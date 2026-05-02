@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import {
   useDashboardByCategory,
   useDashboardByMonth,
   useDashboardSummary,
   useDashboardTopExpenses,
+  useUserCurrencies,
 } from '@finanzas/services';
 import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
 
@@ -20,16 +21,40 @@ import {
 } from '@/components/dashboard/dashboard-filters';
 import { KpiCards } from '@/components/dashboard/kpi-cards';
 import { MonthlyChart } from '@/components/dashboard/monthly-chart';
+import { RecentActivity } from '@/components/dashboard/recent-activity';
+import { TipCard } from '@/components/dashboard/tip-card';
 import { TopExpensesList } from '@/components/dashboard/top-expenses-list';
+import { FabLink } from '@/components/ui/fab';
 
 const TOP_EXPENSES_LIMIT = 5;
+const FALLBACK_CURRENCY = 'EUR';
 
 export default function DashboardPage() {
   const [filters, setFilters] = useState<DashboardFiltersValue>({
-    currency: 'EUR',
+    currency: FALLBACK_CURRENCY,
     year: new Date().getFullYear(),
   });
   const [donutKind, setDonutKind] = useState<DonutKindFilter>('all');
+  const [currencyHydrated, setCurrencyHydrated] = useState(false);
+
+  const currenciesQuery = useUserCurrencies();
+
+  // Una vez sabemos qué monedas tiene el usuario, ajustamos la moneda
+  // del filtro a la primera real (si la fallback no está entre ellas).
+  // Sólo lo hacemos una vez para no pisar la elección manual del user.
+  useEffect(() => {
+    if (currencyHydrated) return;
+    const list = currenciesQuery.data;
+    if (!list) return;
+    if (list.length === 0) {
+      setCurrencyHydrated(true);
+      return;
+    }
+    if (!list.includes(filters.currency)) {
+      setFilters((prev) => ({ ...prev, currency: list[0] ?? FALLBACK_CURRENCY }));
+    }
+    setCurrencyHydrated(true);
+  }, [currenciesQuery.data, currencyHydrated, filters.currency]);
 
   const dateFrom = new Date(filters.year, 0, 1).toISOString();
   const dateTo = new Date(filters.year, 11, 31, 23, 59, 59).toISOString();
@@ -59,51 +84,95 @@ export default function DashboardPage() {
     limit: TOP_EXPENSES_LIMIT,
   });
 
+  const anyError =
+    summaryQuery.isError ||
+    monthlyQuery.isError ||
+    byCategoryQuery.isError ||
+    topExpensesQuery.isError;
+
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: spacing.lg }}>
-      <header style={{ marginBottom: spacing.lg }}>
-        <h1 style={{ margin: 0, fontSize: fontSize.xl, color: colors.text }}>Dashboard</h1>
-        <p style={{ margin: 0, color: colors.textMuted, fontSize: fontSize.sm }}>
-          Vista general de ingresos, gastos y categorías.
-        </p>
-      </header>
-
-      <DashboardFilters value={filters} onChange={setFilters} />
-
-      <KpiCards summary={summaryQuery.data} isLoading={summaryQuery.isLoading} />
-
-      <div
+      <header
         style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
+          display: 'flex',
+          alignItems: 'flex-end',
+          justifyContent: 'space-between',
           gap: spacing.md,
-          marginBottom: spacing.md,
+          flexWrap: 'wrap',
+          marginBottom: spacing.lg,
         }}
       >
-        <MonthlyChart
-          data={monthlyQuery.data}
-          currency={filters.currency}
-          isLoading={monthlyQuery.isLoading}
+        <div>
+          <h1
+            style={{
+              margin: 0,
+              fontSize: fontSize.xl,
+              fontWeight: fontWeight.bold,
+              color: colors.text,
+              letterSpacing: '-0.01em',
+            }}
+          >
+            Dashboard
+          </h1>
+          <p
+            style={{
+              margin: `${spacing.xs}px 0 0 0`,
+              color: colors.textMuted,
+              fontSize: fontSize.sm,
+            }}
+          >
+            Vista general de ingresos, gastos y categorías.
+          </p>
+        </div>
+        <DashboardFilters
+          value={filters}
+          onChange={setFilters}
+          currencies={currenciesQuery.data}
         />
-        <CategoryDonut
-          data={byCategoryQuery.data}
-          currency={filters.currency}
-          isLoading={byCategoryQuery.isLoading}
-          kind={donutKind}
-          onKindChange={setDonutKind}
-        />
+      </header>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
+        <KpiCards summary={summaryQuery.data} isLoading={summaryQuery.isLoading} />
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)',
+            gap: spacing.md,
+          }}
+        >
+          <MonthlyChart
+            data={monthlyQuery.data}
+            currency={filters.currency}
+            isLoading={monthlyQuery.isLoading}
+          />
+          <RecentActivity />
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)',
+            gap: spacing.md,
+          }}
+        >
+          <CategoryDonut
+            data={byCategoryQuery.data}
+            currency={filters.currency}
+            isLoading={byCategoryQuery.isLoading}
+            kind={donutKind}
+            onKindChange={setDonutKind}
+          />
+          <TopExpensesList
+            data={topExpensesQuery.data}
+            currency={filters.currency}
+            isLoading={topExpensesQuery.isLoading}
+          />
+          <TipCard />
+        </div>
       </div>
 
-      <TopExpensesList
-        data={topExpensesQuery.data}
-        currency={filters.currency}
-        isLoading={topExpensesQuery.isLoading}
-      />
-
-      {(summaryQuery.isError ||
-        monthlyQuery.isError ||
-        byCategoryQuery.isError ||
-        topExpensesQuery.isError) && (
+      {anyError && (
         <p
           style={{
             color: colors.danger,
@@ -115,6 +184,11 @@ export default function DashboardPage() {
           Error cargando alguna sección del dashboard.
         </p>
       )}
+
+      <FabLink
+        href="/personal-finance/transactions/new"
+        ariaLabel="Añadir transacción"
+      />
     </div>
   );
 }
