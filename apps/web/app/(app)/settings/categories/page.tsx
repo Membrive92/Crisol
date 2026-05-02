@@ -1,0 +1,372 @@
+'use client';
+
+import Link from 'next/link';
+import { useState, type FormEvent } from 'react';
+
+import {
+  formatApiError,
+  useCategories,
+  useCreateCategory,
+  useDeleteCategory,
+  useUpdateCategory,
+} from '@finanzas/services';
+import type { Category, CategoryKind } from '@finanzas/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Select, TextInput } from '@/components/ui/field';
+
+interface FormState {
+  name: string;
+  kind: CategoryKind;
+}
+
+const EMPTY_FORM: FormState = { name: '', kind: 'expense' };
+
+export default function CategoriesSettingsPage() {
+  const list = useCategories();
+  const create = useCreateCategory();
+  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  function handleCreate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setCreateError(null);
+    const name = form.name.trim();
+    if (!name) {
+      setCreateError('El nombre es obligatorio');
+      return;
+    }
+    create.mutate(
+      { name, kind: form.kind },
+      {
+        onSuccess: () => setForm(EMPTY_FORM),
+        onError: (err) => setCreateError(formatApiError(err, 'No se pudo crear')),
+      },
+    );
+  }
+
+  const items = list.data ?? [];
+  const expenseItems = items.filter((c) => c.kind === 'expense');
+  const incomeItems = items.filter((c) => c.kind === 'income');
+
+  return (
+    <div style={{ maxWidth: 760, margin: '0 auto', padding: spacing.lg }}>
+      <Link
+        href="/settings"
+        style={{
+          fontSize: fontSize.sm,
+          color: colors.textMuted,
+          textDecoration: 'none',
+        }}
+      >
+        ← Ajustes
+      </Link>
+
+      <header style={{ marginTop: spacing.sm, marginBottom: spacing.lg }}>
+        <h1
+          style={{
+            margin: 0,
+            fontSize: fontSize.xl,
+            fontWeight: fontWeight.bold,
+            color: colors.text,
+            letterSpacing: '-0.01em',
+          }}
+        >
+          Categorías
+        </h1>
+        <p
+          style={{
+            margin: `${spacing.xs}px 0 0 0`,
+            fontSize: fontSize.sm,
+            color: colors.textMuted,
+            lineHeight: 1.4,
+          }}
+        >
+          Las usas para clasificar transacciones, tickets e importaciones del
+          módulo Finanzas personales. Al borrar una categoría, las transacciones
+          que la usaban quedan sin categoría (no se borran).
+        </p>
+      </header>
+
+      <Card style={{ padding: spacing.lg, marginBottom: spacing.lg }}>
+        <h2
+          style={{
+            margin: 0,
+            marginBottom: spacing.md,
+            fontSize: fontSize.lg,
+            fontWeight: fontWeight.semibold,
+            color: colors.text,
+          }}
+        >
+          Nueva categoría
+        </h2>
+        <form
+          onSubmit={handleCreate}
+          style={{ display: 'flex', gap: spacing.md, alignItems: 'flex-end', flexWrap: 'wrap' }}
+        >
+          <div style={{ flex: '2 1 220px', minWidth: 0 }}>
+            <TextInput
+              label="Nombre"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              maxLength={64}
+              placeholder="Comida, Nómina, Transporte…"
+              required
+            />
+          </div>
+          <div style={{ flex: '1 1 160px', minWidth: 0 }}>
+            <Select
+              label="Tipo"
+              value={form.kind}
+              onChange={(e) => setForm({ ...form, kind: e.target.value as CategoryKind })}
+            >
+              <option value="expense">Gasto</option>
+              <option value="income">Ingreso</option>
+            </Select>
+          </div>
+          <div style={{ flex: '0 0 auto', marginBottom: spacing.md }}>
+            <Button type="submit" disabled={create.isPending}>
+              {create.isPending ? 'Creando…' : 'Crear'}
+            </Button>
+          </div>
+        </form>
+        {createError ? (
+          <div style={{ color: colors.danger, fontSize: fontSize.sm, marginTop: spacing.xs }}>
+            {createError}
+          </div>
+        ) : null}
+      </Card>
+
+      {list.isLoading ? (
+        <p style={{ color: colors.textMuted }}>Cargando…</p>
+      ) : list.isError ? (
+        <p style={{ color: colors.danger }}>
+          {formatApiError(list.error, 'Error cargando categorías')}
+        </p>
+      ) : items.length === 0 ? (
+        <Card style={{ padding: spacing.lg, textAlign: 'center' }}>
+          <p style={{ margin: 0, color: colors.textMuted, fontSize: fontSize.sm }}>
+            Aún no tienes categorías. Crea la primera arriba.
+          </p>
+        </Card>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg }}>
+          <CategoryGroup title="Gastos" items={expenseItems} />
+          <CategoryGroup title="Ingresos" items={incomeItems} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CategoryGroup({ title, items }: { title: string; items: Category[] }) {
+  if (items.length === 0) {
+    return (
+      <section>
+        <h3
+          style={{
+            margin: 0,
+            marginBottom: spacing.sm,
+            fontSize: fontSize.sm,
+            fontWeight: fontWeight.semibold,
+            color: colors.textMuted,
+            textTransform: 'uppercase',
+            letterSpacing: '0.04em',
+          }}
+        >
+          {title}
+        </h3>
+        <Card style={{ padding: spacing.md }}>
+          <p style={{ margin: 0, fontSize: fontSize.sm, color: colors.textMuted }}>
+            Ninguna en esta sección.
+          </p>
+        </Card>
+      </section>
+    );
+  }
+  return (
+    <section>
+      <h3
+        style={{
+          margin: 0,
+          marginBottom: spacing.sm,
+          fontSize: fontSize.sm,
+          fontWeight: fontWeight.semibold,
+          color: colors.textMuted,
+          textTransform: 'uppercase',
+          letterSpacing: '0.04em',
+        }}
+      >
+        {title} · {items.length}
+      </h3>
+      <Card style={{ padding: 0 }}>
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+          {items.map((cat, idx) => (
+            <li
+              key={cat.id}
+              style={{
+                borderTop: idx === 0 ? 'none' : `1px solid ${colors.border}`,
+              }}
+            >
+              <CategoryRow category={cat} />
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </section>
+  );
+}
+
+function CategoryRow({ category }: { category: Category }) {
+  const [editing, setEditing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [draftName, setDraftName] = useState(category.name);
+  const [draftKind, setDraftKind] = useState<CategoryKind>(category.kind);
+  const [rowError, setRowError] = useState<string | null>(null);
+
+  const update = useUpdateCategory(category.id);
+  const remove = useDeleteCategory();
+
+  function startEdit() {
+    setRowError(null);
+    setDraftName(category.name);
+    setDraftKind(category.kind);
+    setEditing(true);
+  }
+
+  function saveEdit() {
+    setRowError(null);
+    const name = draftName.trim();
+    if (!name) {
+      setRowError('El nombre es obligatorio');
+      return;
+    }
+    update.mutate(
+      { name, kind: draftKind },
+      {
+        onSuccess: () => setEditing(false),
+        onError: (err) => setRowError(formatApiError(err, 'No se pudo guardar')),
+      },
+    );
+  }
+
+  function handleDelete() {
+    setRowError(null);
+    remove.mutate(category.id, {
+      onError: (err) => setRowError(formatApiError(err, 'No se pudo eliminar')),
+    });
+  }
+
+  if (editing) {
+    return (
+      <div style={{ padding: spacing.md, display: 'flex', gap: spacing.sm, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div style={{ flex: '2 1 200px', minWidth: 0 }}>
+          <TextInput
+            label="Nombre"
+            value={draftName}
+            onChange={(e) => setDraftName(e.target.value)}
+            maxLength={64}
+          />
+        </div>
+        <div style={{ flex: '1 1 140px', minWidth: 0 }}>
+          <Select
+            label="Tipo"
+            value={draftKind}
+            onChange={(e) => setDraftKind(e.target.value as CategoryKind)}
+          >
+            <option value="expense">Gasto</option>
+            <option value="income">Ingreso</option>
+          </Select>
+        </div>
+        <div style={{ display: 'flex', gap: spacing.xs, marginBottom: spacing.md }}>
+          <Button type="button" onClick={saveEdit} disabled={update.isPending}>
+            {update.isPending ? 'Guardando…' : 'Guardar'}
+          </Button>
+          <Button type="button" variant="ghost" onClick={() => setEditing(false)}>
+            Cancelar
+          </Button>
+        </div>
+        {rowError ? (
+          <div style={{ flex: '1 0 100%', color: colors.danger, fontSize: fontSize.sm }}>
+            {rowError}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        padding: `${spacing.sm}px ${spacing.md}px`,
+        display: 'flex',
+        alignItems: 'center',
+        gap: spacing.md,
+      }}
+    >
+      <span
+        style={{
+          flex: 1,
+          fontSize: fontSize.md,
+          color: colors.text,
+          fontWeight: fontWeight.medium,
+        }}
+      >
+        {category.name}
+      </span>
+      <KindBadge kind={category.kind} />
+      <div style={{ display: 'flex', gap: spacing.xs }}>
+        <Button type="button" variant="ghost" onClick={startEdit}>
+          Editar
+        </Button>
+        {confirming ? (
+          <>
+            <Button
+              type="button"
+              variant="danger"
+              onClick={handleDelete}
+              disabled={remove.isPending}
+            >
+              {remove.isPending ? 'Eliminando…' : 'Confirmar'}
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => setConfirming(false)}>
+              Cancelar
+            </Button>
+          </>
+        ) : (
+          <Button type="button" variant="ghost" onClick={() => setConfirming(true)}>
+            Eliminar
+          </Button>
+        )}
+      </div>
+      {rowError ? (
+        <div style={{ flex: '1 0 100%', color: colors.danger, fontSize: fontSize.sm }}>
+          {rowError}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function KindBadge({ kind }: { kind: CategoryKind }) {
+  const isIncome = kind === 'income';
+  return (
+    <span
+      style={{
+        padding: `${spacing.xs / 2}px ${spacing.sm}px`,
+        borderRadius: radius.sm,
+        fontSize: fontSize.xs,
+        fontWeight: fontWeight.semibold,
+        textTransform: 'uppercase',
+        letterSpacing: '0.04em',
+        backgroundColor: 'transparent',
+        color: isIncome ? colors.income : colors.expense,
+        border: `1px solid ${isIncome ? colors.income : colors.expense}`,
+      }}
+    >
+      {isIncome ? 'Ingreso' : 'Gasto'}
+    </span>
+  );
+}
