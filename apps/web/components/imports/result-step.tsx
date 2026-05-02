@@ -99,14 +99,14 @@ export function ResultStep({ job, onRestart }: ResultStepProps) {
 
       <div style={{ display: 'flex', gap: spacing.sm }}>
         {isSuccess ? (
-          <Link href="/transactions">
+          <Link href="/personal-finance/transactions">
             <Button>Ver transacciones</Button>
           </Link>
         ) : null}
         <Button variant="secondary" onClick={onRestart}>
           Importar otro fichero
         </Button>
-        <Link href="/imports">
+        <Link href="/personal-finance/imports">
           <Button variant="ghost">Volver al listado</Button>
         </Link>
       </div>

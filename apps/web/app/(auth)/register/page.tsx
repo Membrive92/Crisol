@@ -35,7 +35,7 @@ export default function RegisterPage() {
       setTokens(tokens.access_token, tokens.refresh_token);
       const user = await authApi.getMe();
       setUser(user);
-      router.replace('/dashboard');
+      router.replace('/personal-finance/dashboard');
     } catch (err) {
       setError(formatApiError(err, 'No se pudo completar el registro.'));
     } finally {

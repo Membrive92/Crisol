@@ -10,8 +10,12 @@ const BACKEND_ORIGIN = process.env.BACKEND_ORIGIN ?? 'http://localhost:8001';
 const nextConfig = {
   reactStrictMode: true,
   outputFileTracingRoot: path.join(__dirname, '../..'),
+  // El dev server cierra los rewrites/proxy a los 30s por defecto. La
+  // inferencia local con qwen2.5vl:7b en CPU puede tardar 60–120s, así que
+  // damos 5 minutos para que /receipts/extract llegue a completar.
   experimental: {
     typedRoutes: true,
+    proxyTimeout: 300_000,
   },
   // Proxy /api/* a FastAPI para que la cookie httpOnly del refresh token
   // viaje same-origin. En producción este rewrite también funciona detrás
@@ -24,6 +28,24 @@ const nextConfig = {
         destination: `${BACKEND_ORIGIN}/:path*`,
       },
     ];
+  },
+  // Las rutas planas (`/dashboard`, `/transactions`, …) se han movido bajo
+  // `/personal-finance/*` para reflejar la modularización del dominio. Los
+  // 308 preservan el método HTTP y mantienen vivos los bookmarks anteriores.
+  async redirects() {
+    const sections = ['dashboard', 'transactions', 'imports', 'receipts'];
+    return sections.flatMap((section) => [
+      {
+        source: `/${section}`,
+        destination: `/personal-finance/${section}`,
+        permanent: true,
+      },
+      {
+        source: `/${section}/:path*`,
+        destination: `/personal-finance/${section}/:path*`,
+        permanent: true,
+      },
+    ]);
   },
 };
 

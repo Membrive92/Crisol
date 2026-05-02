@@ -143,6 +143,12 @@ Notas sobre el monorepo actual:
   `packages/config` están planeados en la spec original pero **no se
   han creado todavía**: las apps no los han necesitado y no tiene
   sentido crear paquetes vacíos.
+- Desde PHASE-6.1, las apps tienen una **shell de módulos**: web bajo
+  `apps/web/app/(app)/<module-id>/...` y mobile bajo
+  `apps/mobile/app/(modules)/<module-id>/...`. Sólo `personal-finance`
+  está activo; el registro `MODULES` en `@finanzas/types/registry/modules.ts`
+  declara el resto como `enabled: false`. Settings sigue cross-cutting
+  (`apps/web/app/(app)/settings/`).
 
 Reglas de imports vigentes:
 

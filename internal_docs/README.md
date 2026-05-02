@@ -69,6 +69,12 @@ Leyenda: ⏳ pendiente · 🚧 en curso · ✅ completada · ❌ bloqueada
 | 5.1  | Receipts backend    | ✅     | —  |
 | 5.2  | Receipts frontend   | ✅     | —  |
 
+### Fase 6 — Modularización del frontend
+
+| Fase | Nombre               | Estado | PR |
+|------|----------------------|--------|----|
+| 6.1  | Module shell + PF    | ✅     | —  |
+
 ---
 
 ## Estructura de este directorio

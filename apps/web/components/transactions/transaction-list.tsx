@@ -95,7 +95,7 @@ export function TransactionList({
               {formatAmount(t.amount, t.currency)}
             </div>
             <div style={{ display: 'flex', gap: spacing.sm }}>
-              <Link href={{ pathname: `/transactions/${t.id}` }}>
+              <Link href={{ pathname: `/personal-finance/transactions/${t.id}` }}>
                 <Button variant="secondary">Editar</Button>
               </Link>
               <Button
