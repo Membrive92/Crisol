@@ -1,9 +1,9 @@
 # PHASE-7.6 — Stitch fidelity rewrite
 
-**Estado**: 🚧 en curso
-**Rama**: `feat/phase-7.6-stitch-fidelity`
+**Estado**: ✅ completada
+**Rama**: `main` (commits directos — sin rama temática)
 **PR**: —
-**Fecha de merge**: —
+**Fecha de merge**: 2026-05-03
 
 ## Objetivo
 
@@ -45,21 +45,37 @@ Decisiones tomadas con el usuario antes de empezar:
 
 ### Shell
 
-- `apps/web/components/modules/module-sidebar.tsx` — sidebar fija
-  240 px. Cabecera con dot indicator + label del módulo activo +
-  caption "Local-first". Lista de secciones del módulo (Dashboard,
-  Análisis, Transacciones, Importar, Tickets) con icono lucide-style
-  + active state (bg `surface-muted` + texto `primary` + border
-  derecho). Sección "Otros módulos" deshabilitada. Footer fijo:
-  link a Ajustes + CTA "+ Añadir transacción" filled primary.
-- `apps/web/app/(app)/layout.tsx` — top header slim sticky con
-  marca alineada al ancho de la sidebar + acciones (notificaciones,
-  cartera, theme toggle, salir). Main content desplazado con
-  `padding-left: 240px`. Las tabs flat del header anterior se han
-  retirado — la navegación entera vive en la sidebar.
+> El primer intento llevaba **toda la navegación a la sidebar**
+> (módulos + secciones). Tras probarlo el usuario pidió moverla al
+> patrón Stitch real: **módulos en la sidebar, secciones del módulo
+> activo en una segunda fila del header**. Lo que sigue describe el
+> estado final tras esa iteración.
+
+- `apps/web/components/modules/app-sidebar.tsx` — sidebar fija 240 px,
+  full-height (`top:0`) para que la esquina superior izquierda
+  pertenezca al panel lateral. Header con la marca `Finanzas`
+  (sin dot, sin caption "Workspace"). Lista de **módulos** (no
+  secciones): activo con bg `primarySoft` + texto `primary` + dot
+  azul + border-right primary; deshabilitados (Cripto, Inversiones,
+  Inmuebles) con `LockIcon` + badge "Pronto". Footer fijo: CTA
+  "+ Añadir transacción" filled.
+- `apps/web/components/modules/module-sections.tsx` — pestañas pill
+  inline para las secciones del módulo activo. Se monta en la fila 2
+  del header. Activa: bg `primarySoft` + texto `primary`.
+- `apps/web/app/(app)/layout.tsx` — header `fixed` offset por
+  `SIDEBAR_WIDTH`, dos filas: `[icons + UserMenu]` arriba (56 px) y
+  `[ModuleSections]` debajo (48 px) cuando el módulo tiene secciones.
+  Los módulos sin secciones (Dashboard, ver iteraciones) hacen
+  colapsar la fila 2 — `paddingTop` del `<main>` es condicional
+  `HEADER_HEIGHT` (104) o `HEADER_HEIGHT_BARE` (56).
+- `apps/web/components/auth/user-menu.tsx` — avatar dropdown en el
+  extremo derecho del header. Despliega header con `display_name` +
+  email + dos acciones (Ajustes, Salir). Sustituye al `IconButton`
+  Logout suelto del primer intento.
 - Componentes obsoletos eliminados:
   `apps/web/components/modules/module-switcher.tsx` y
-  `apps/web/components/modules/module-sections.tsx`.
+  `apps/web/components/modules/module-sidebar.tsx` (el módulo-único
+  intermedio).
 
 ### Dashboard
 
@@ -141,18 +157,77 @@ Componentes obsoletos eliminados: `kpi-cards`, `kpi-delta`,
 Componentes obsoletos eliminados: `coming-soon-card`,
 `expense-breakdown`, `income-vs-expenses-chart`.
 
+### Iteraciones post-rewrite
+
+Tras testear el primer cierre de la fase, el usuario pidió tres
+ajustes que se entregaron como commits adicionales bajo este mismo
+hito:
+
+#### Dashboard como módulo top-level
+
+- `packages/types/src/registry/modules.ts` — nuevo módulo `dashboard`
+  primero en la lista, `enabled: true`, `sections: []`. Se elimina
+  `dashboard` de las secciones de `personal-finance`.
+  `DEFAULT_MODULE_ID` pasa a `'dashboard'`.
+- `apps/web/app/(app)/dashboard/page.tsx` (nuevo, movido de
+  `personal-finance/dashboard/`) — agrega ingresos/gastos pensados
+  para combinarse con futuros módulos verticales (cripto,
+  inversiones…).
+- `next.config.mjs` — redirect 308 inverso
+  `/personal-finance/dashboard → /dashboard` para preservar bookmarks.
+  El array de secciones que se redirigen a `/personal-finance/*` deja
+  de incluir `dashboard`.
+- Auth/root pages (`page.tsx`, `login`, `register`,
+  `(app)/home`) redirigen a `/dashboard`.
+
+#### Imports y Receipts como acciones, no tabs
+
+- `personal-finance.sections` se queda con dos pestañas: Análisis y
+  Transacciones. `imports` y `receipts` salen del chrome.
+- `apps/web/app/(app)/personal-finance/transactions/page.tsx` — eyebrow
+  bar gana dos CTAs ghost (`Importar`, `Capturar ticket`) junto al
+  primario `Nueva transacción`.
+- `apps/web/app/(app)/personal-finance/{imports,receipts}/page.tsx` —
+  link "← Volver a Transacciones" arriba del listado para anclar el
+  contexto al haber perdido la tab primaria.
+
+#### Selector de moneda global
+
+- `packages/store/src/currency.ts` — Zustand persistido en
+  localStorage (`finanzas:currency`). Default `EUR`.
+- `apps/web/components/header/currency-menu.tsx` — dropdown anclado al
+  icono cartera del header. Lista EUR + USD siempre + cualquier
+  moneda que el usuario tenga en datos. Cada entrada con un círculo
+  con el símbolo (€, $, £, ¥). La activa marcada con `primarySoft`
+  + check.
+- Las páginas que filtraban por moneda (Dashboard, Análisis,
+  Transacciones) eliminan su `useState/useEffect` local y consumen el
+  store. Eliminado `dashboard-filters.tsx` (ya no es necesario).
+  Nuevo `dashboard/year-select.tsx` para el selector de año.
+- `apps/web/components/transactions/transaction-form.tsx` — el campo
+  Moneda pasa de `<input>` libre a `<select>` con EUR + USD + las
+  del usuario, pre-rellenado con la activa global.
+
 ## Archivos clave
 
 - `apps/web/components/ui/icons.tsx`
 - `apps/web/lib/category-icons.tsx`
-- `apps/web/components/modules/module-sidebar.tsx`
+- `apps/web/components/modules/app-sidebar.tsx`
+- `apps/web/components/modules/module-sections.tsx`
+- `apps/web/components/auth/user-menu.tsx`
+- `apps/web/components/header/currency-menu.tsx`
 - `apps/web/app/(app)/layout.tsx`
-- `apps/web/app/(app)/personal-finance/dashboard/page.tsx`
+- `apps/web/app/(app)/dashboard/page.tsx`
 - `apps/web/app/(app)/personal-finance/transactions/page.tsx`
 - `apps/web/app/(app)/personal-finance/analysis/page.tsx`
-- `apps/web/components/dashboard/stitch-*` (5 archivos)
-- `apps/web/components/transactions/stitch-*` (2 archivos)
+- `apps/web/components/dashboard/stitch-*` (5 archivos) +
+  `dashboard/year-select.tsx`
+- `apps/web/components/transactions/stitch-*` (2 archivos) +
+  `transactions/transaction-form.tsx`
 - `apps/web/components/analysis/stitch-*` (5 archivos)
+- `packages/store/src/currency.ts`
+- `packages/types/src/{models,registry}/module.ts` /
+  `registry/modules.ts`
 
 ## Endpoints añadidos
 
@@ -170,11 +245,14 @@ Ninguna.
 - [x] `pnpm typecheck` verde
 - [x] `pnpm lint` verde
 - [x] `pnpm test` (8/8) verde
-- [ ] Smoke manual: las tres pantallas con datos reales — sidebar
-      activa la sección correcta al navegar; KPIs con delta cuando
-      hay periodo previo; chart de balance con bars proporcionales;
-      actividad reciente con iconos contextuales; toggle de periodo
-      en Análisis cambia el rango.
+- [x] Smoke manual: las tres pantallas con datos reales — sidebar
+      con módulos, secciones del módulo activo en el header,
+      Dashboard como ruta top-level, KPIs con delta cuando hay
+      periodo previo, chart de balance proporcional, actividad
+      reciente con iconos contextuales, toggle de periodo en
+      Análisis, Importar/Tickets accesibles desde Transacciones,
+      selector de moneda global persiste tras reload, formulario de
+      transacción con select de moneda.
 
 ## Decisiones tomadas
 
@@ -222,7 +300,13 @@ Ninguna.
 
 ## Próxima fase
 
-Sin definir. Posibles candidatas para PHASE-8:
+PHASE-8 — Multimoneda con conversión global. Definida en
+[phase-8-roadmap.md](phase-8-roadmap.md). Surge directamente del
+selector de moneda global introducido aquí: ahora cada pantalla
+filtra por una moneda; PHASE-8 las hace **sumar** convirtiendo a la
+moneda activa con tasas históricas anónimas (frankfurter.app / ECB).
+
+Otros candidatos sin priorizar:
 
 - Detección de subscripciones recurrentes (módulo `ai`).
 - Modelo de presupuestos (vault de Stitch) con alertas.
