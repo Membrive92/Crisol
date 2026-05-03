@@ -49,7 +49,7 @@ export default function LoginPage() {
         const me = await authApi.getMe();
         if (cancelled) return;
         setUser(me);
-        router.replace('/personal-finance/dashboard');
+        router.replace('/dashboard');
       } catch {
         // Conditional UI es best-effort: el usuario aún puede usar el
         // botón clásico o password. Silencioso a propósito.
@@ -70,7 +70,7 @@ export default function LoginPage() {
       setTokens(tokens.access_token, tokens.refresh_token);
       const user = await authApi.getMe();
       setUser(user);
-      router.replace('/personal-finance/dashboard');
+      router.replace('/dashboard');
     } catch (err) {
       setError(formatApiError(err, 'Credenciales incorrectas.'));
     } finally {
@@ -90,7 +90,7 @@ export default function LoginPage() {
       setTokens(tokens.access_token, tokens.refresh_token);
       const user = await authApi.getMe();
       setUser(user);
-      router.replace('/personal-finance/dashboard');
+      router.replace('/dashboard');
     } catch (err) {
       if (err instanceof PasskeyAbortError) {
         // Usuario canceló el diálogo del SO — no es un error real, no

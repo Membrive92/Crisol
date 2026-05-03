@@ -1,4 +1,9 @@
-export type ModuleId = 'personal-finance' | 'crypto' | 'investments' | 'real-estate';
+export type ModuleId =
+  | 'dashboard'
+  | 'personal-finance'
+  | 'crypto'
+  | 'investments'
+  | 'real-estate';
 
 export interface AppModule {
   id: ModuleId;

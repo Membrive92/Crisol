@@ -29,23 +29,40 @@ const nextConfig = {
       },
     ];
   },
-  // Las rutas planas (`/dashboard`, `/transactions`, …) se han movido bajo
-  // `/personal-finance/*` para reflejar la modularización del dominio. Los
-  // 308 preservan el método HTTP y mantienen vivos los bookmarks anteriores.
+  // Las rutas de secciones de personal-finance (`/transactions`, …) se han
+  // movido bajo `/personal-finance/*` para reflejar la modularización del
+  // dominio. Los 308 preservan el método HTTP y mantienen vivos los bookmarks
+  // anteriores.
+  //
+  // El Dashboard ya NO vive bajo personal-finance: es un módulo de nivel
+  // superior que agregará ingresos/gastos de todos los módulos verticales.
+  // Por eso `/personal-finance/dashboard` redirige a `/dashboard`.
   async redirects() {
-    const sections = ['dashboard', 'transactions', 'imports', 'receipts'];
-    return sections.flatMap((section) => [
+    const sections = ['transactions', 'imports', 'receipts'];
+    return [
+      ...sections.flatMap((section) => [
+        {
+          source: `/${section}`,
+          destination: `/personal-finance/${section}`,
+          permanent: true,
+        },
+        {
+          source: `/${section}/:path*`,
+          destination: `/personal-finance/${section}/:path*`,
+          permanent: true,
+        },
+      ]),
       {
-        source: `/${section}`,
-        destination: `/personal-finance/${section}`,
+        source: '/personal-finance/dashboard',
+        destination: '/dashboard',
         permanent: true,
       },
       {
-        source: `/${section}/:path*`,
-        destination: `/personal-finance/${section}/:path*`,
+        source: '/personal-finance/dashboard/:path*',
+        destination: '/dashboard/:path*',
         permanent: true,
       },
-    ]);
+    ];
   },
 };
 

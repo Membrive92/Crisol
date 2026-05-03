@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 export default function HomeRedirectPage() {
   const router = useRouter();
   useEffect(() => {
-    router.replace('/personal-finance/dashboard');
+    router.replace('/dashboard');
   }, [router]);
   return null;
 }

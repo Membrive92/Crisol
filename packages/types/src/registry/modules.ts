@@ -4,12 +4,24 @@ export const PERSONAL_FINANCE_BASE = '/personal-finance';
 
 export const MODULES: readonly AppModule[] = [
   {
+    // Módulo global de agregación: combina ingresos y gastos de TODOS los
+    // módulos verticales (personal-finance, crypto, etc.) en una vista
+    // unificada. Para el MVP sólo hay personal-finance, pero el contrato
+    // ya está listo: la página `/dashboard` consume los endpoints
+    // `/dashboard/*` que el backend extenderá conforme lleguen nuevos
+    // módulos con sus propias tablas.
+    id: 'dashboard',
+    label: 'Dashboard',
+    basePath: '/dashboard',
+    enabled: true,
+    sections: [],
+  },
+  {
     id: 'personal-finance',
     label: 'Finanzas Domésticas',
     basePath: PERSONAL_FINANCE_BASE,
     enabled: true,
     sections: [
-      { key: 'dashboard', label: 'Dashboard', path: `${PERSONAL_FINANCE_BASE}/dashboard` },
       { key: 'analysis', label: 'Análisis', path: `${PERSONAL_FINANCE_BASE}/analysis` },
       { key: 'transactions', label: 'Transacciones', path: `${PERSONAL_FINANCE_BASE}/transactions` },
       { key: 'imports', label: 'Importar', path: `${PERSONAL_FINANCE_BASE}/imports` },
@@ -39,7 +51,7 @@ export const MODULES: readonly AppModule[] = [
   },
 ] as const;
 
-export const DEFAULT_MODULE_ID: ModuleId = 'personal-finance';
+export const DEFAULT_MODULE_ID: ModuleId = 'dashboard';
 
 export function getModule(id: ModuleId): AppModule | undefined {
   return MODULES.find((m) => m.id === id);
