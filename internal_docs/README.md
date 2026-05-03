@@ -87,6 +87,15 @@ Leyenda: ⏳ pendiente · 🚧 en curso · ✅ completada · ❌ bloqueada
 | 7.5  | Analysis sub-tab             | ✅     | —  |
 | 7.6  | Stitch fidelity rewrite      | 🚧     | —  |
 
+### Fase 8 — Multimoneda con conversión global
+
+| Fase | Nombre                       | Estado | PR |
+|------|------------------------------|--------|----|
+| 8.1  | Currency rates backend       | ⏳     | —  |
+| 8.2  | Conversion frontend          | ⏳     | —  |
+
+Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
+
 ---
 
 ## Estructura de este directorio
