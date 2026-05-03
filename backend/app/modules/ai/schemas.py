@@ -8,7 +8,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
 # Los modelos de visión locales son inconsistentes con el formato pese a lo
 # que diga el prompt: a veces devuelven números en formato español (`27,66`)
 # y fechas en `DD/MM/YY`. En vez de luchar con el prompt, normalizamos en el

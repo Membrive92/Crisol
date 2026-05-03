@@ -65,6 +65,14 @@ class Settings(BaseSettings):
     ollama_vision_model: str = "qwen2.5vl:7b"
     ollama_timeout_seconds: int = 120
 
+    # ---------- Frankfurter (exchange rates) ----------
+    # frankfurter.app es un proxy open-source del feed diario del ECB.
+    # No requiere API key. No envía datos del usuario — sólo fechas y
+    # códigos de moneda públicos. Compatible con el principio
+    # "los datos del usuario nunca salen del equipo".
+    frankfurter_base_url: str = "https://api.frankfurter.app"
+    frankfurter_timeout_seconds: int = 10
+
     # ---------- MinIO (blob storage) ----------
     minio_endpoint: str = "localhost:9000"
     minio_access_key: str = "minioadmin"
