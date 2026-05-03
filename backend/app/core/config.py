@@ -66,11 +66,13 @@ class Settings(BaseSettings):
     ollama_timeout_seconds: int = 120
 
     # ---------- Frankfurter (exchange rates) ----------
-    # frankfurter.app es un proxy open-source del feed diario del ECB.
+    # frankfurter.dev es un proxy open-source del feed diario del ECB.
     # No requiere API key. No envía datos del usuario — sólo fechas y
     # códigos de moneda públicos. Compatible con el principio
-    # "los datos del usuario nunca salen del equipo".
-    frankfurter_base_url: str = "https://api.frankfurter.app"
+    # "los datos del usuario nunca salen del equipo". El dominio
+    # `frankfurter.app` original responde 301 al `.dev/v1` desde
+    # primavera 2026; usamos el destino directo para evitar el hop.
+    frankfurter_base_url: str = "https://api.frankfurter.dev/v1"
     frankfurter_timeout_seconds: int = 10
 
     # ---------- MinIO (blob storage) ----------

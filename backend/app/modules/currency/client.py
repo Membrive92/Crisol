@@ -68,6 +68,7 @@ async def fetch_rates(
         async with httpx.AsyncClient(
             base_url=settings.frankfurter_base_url,
             timeout=float(settings.frankfurter_timeout_seconds),
+            follow_redirects=True,
         ) as client:
             response = await client.get(path, params=params)
             response.raise_for_status()
@@ -81,6 +82,10 @@ async def fetch_rates(
             f"frankfurter error {e.response.status_code}"
         ) from e
 
+    if not isinstance(data, dict):
+        raise FrankfurterInvalidResponseError(
+            f"Payload no es un objeto JSON: {data!r:.100}"
+        )
     raw_rates = data.get("rates")
     if not isinstance(raw_rates, dict) or not raw_rates:
         raise FrankfurterInvalidResponseError(
@@ -112,6 +117,7 @@ async def fetch_actual_rate_date(
         async with httpx.AsyncClient(
             base_url=settings.frankfurter_base_url,
             timeout=float(settings.frankfurter_timeout_seconds),
+            follow_redirects=True,
         ) as client:
             response = await client.get(
                 f"/{target_date.isoformat()}",
