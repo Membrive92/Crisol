@@ -1,28 +1,50 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
 import {
   useCategories,
   useDeleteTransaction,
   useTransactions,
+  useUserCurrencies,
 } from '@finanzas/services';
 import type { TransactionListQuery } from '@finanzas/types';
 import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
 
-import { TransactionFilters } from '@/components/transactions/transaction-filters';
+import { StitchSearchToolbar } from '@/components/transactions/stitch-search-toolbar';
+import { StitchTransactionsKpiRow } from '@/components/transactions/stitch-transactions-kpi-row';
 import { TransactionList } from '@/components/transactions/transaction-list';
 import { Button } from '@/components/ui/button';
 import { Pagination } from '@/components/ui/pagination';
+import { PlusIcon } from '@/components/ui/icons';
 
 const PAGE_SIZE = 20;
+const FALLBACK_CURRENCY = 'EUR';
 
 export default function TransactionsPage() {
   const [filters, setFilters] = useState<TransactionListQuery>({
     limit: PAGE_SIZE,
     offset: 0,
   });
+  const [currency, setCurrency] = useState(FALLBACK_CURRENCY);
+  const [currencyHydrated, setCurrencyHydrated] = useState(false);
+
+  const currenciesQuery = useUserCurrencies();
+
+  useEffect(() => {
+    if (currencyHydrated) return;
+    const list = currenciesQuery.data;
+    if (!list) return;
+    if (list.length === 0) {
+      setCurrencyHydrated(true);
+      return;
+    }
+    if (!list.includes(currency)) {
+      setCurrency(list[0] ?? FALLBACK_CURRENCY);
+    }
+    setCurrencyHydrated(true);
+  }, [currenciesQuery.data, currencyHydrated, currency]);
 
   const { data, isLoading, isError, error, isFetching } = useTransactions(filters);
   const { data: categories } = useCategories();
@@ -33,79 +55,109 @@ export default function TransactionsPage() {
   const offset = filters.offset ?? 0;
   const limit = filters.limit ?? PAGE_SIZE;
 
+  // Periodo para los KPIs: el rango activo del filtro o todo el año
+  // actual si no hay rango.
+  const now = new Date();
+  const dateFrom = filters.date_from ?? new Date(now.getFullYear(), 0, 1).toISOString();
+  const dateTo =
+    filters.date_to ?? new Date(now.getFullYear(), 11, 31, 23, 59, 59).toISOString();
+
   function handleDelete(id: string) {
     if (!confirm('¿Eliminar esta transacción?')) return;
     deleteMutation.mutate(id);
   }
 
   return (
-    <div style={{ maxWidth: 1100, margin: '0 auto', padding: spacing.lg }}>
-      <header
+    <div style={{ maxWidth: 1200, margin: '0 auto', padding: spacing.lg }}>
+      {/* Eyebrow bar */}
+      <div
         style={{
           display: 'flex',
-          alignItems: 'flex-end',
+          alignItems: 'center',
           justifyContent: 'space-between',
-          gap: spacing.md,
-          marginBottom: spacing.lg,
-          flexWrap: 'wrap',
+          padding: `${spacing.sm}px 0 ${spacing.md}px`,
         }}
       >
-        <div>
-          <h1
+        <div style={{ display: 'flex', alignItems: 'center', gap: spacing.xs }}>
+          <span
+            aria-hidden
             style={{
-              margin: 0,
-              fontSize: fontSize.xl,
-              fontWeight: fontWeight.bold,
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              backgroundColor: colors.primary,
+            }}
+          />
+          <span
+            style={{
+              fontSize: fontSize.sm,
+              fontWeight: fontWeight.semibold,
               color: colors.text,
-              letterSpacing: '-0.01em',
             }}
           >
             Transacciones
-          </h1>
-          <p
+          </span>
+          <span
             style={{
-              margin: `${spacing.xs}px 0 0 0`,
-              color: colors.textMuted,
               fontSize: fontSize.sm,
+              color: colors.textMuted,
+              marginLeft: spacing.sm,
             }}
           >
             {total} {total === 1 ? 'registro' : 'registros'}
             {isFetching ? ' · actualizando…' : ''}
-          </p>
+          </span>
         </div>
         <Link href="/personal-finance/transactions/new">
-          <Button variant="secondary">+ Nueva</Button>
+          <Button variant="secondary">
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <PlusIcon size={14} />
+              Nueva transacción
+            </span>
+          </Button>
         </Link>
-      </header>
+      </div>
 
-      <TransactionFilters value={filters} onChange={setFilters} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg }}>
+        <StitchTransactionsKpiRow
+          currency={currency}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+        />
 
-      {isLoading ? (
-        <p style={{ color: colors.textMuted }}>Cargando…</p>
-      ) : isError ? (
-        <p style={{ color: colors.danger }}>
-          Error: {error instanceof Error ? error.message : 'desconocido'}
-        </p>
-      ) : (
-        <>
-          <TransactionList
-            items={items}
-            categories={categories ?? []}
-            onDelete={handleDelete}
-            deletingId={
-              deleteMutation.isPending ? (deleteMutation.variables as string) : null
-            }
-          />
+        <StitchSearchToolbar
+          value={filters}
+          onChange={setFilters}
+          categories={categories ?? []}
+        />
 
-          <Pagination
-            total={total}
-            offset={offset}
-            limit={limit}
-            pageItemCount={items.length}
-            onChange={(nextOffset) => setFilters({ ...filters, offset: nextOffset })}
-          />
-        </>
-      )}
+        {isLoading ? (
+          <p style={{ color: colors.textMuted }}>Cargando…</p>
+        ) : isError ? (
+          <p style={{ color: colors.danger }}>
+            Error: {error instanceof Error ? error.message : 'desconocido'}
+          </p>
+        ) : (
+          <>
+            <TransactionList
+              items={items}
+              categories={categories ?? []}
+              onDelete={handleDelete}
+              deletingId={
+                deleteMutation.isPending ? (deleteMutation.variables as string) : null
+              }
+            />
+
+            <Pagination
+              total={total}
+              offset={offset}
+              limit={limit}
+              pageItemCount={items.length}
+              onChange={(nextOffset) => setFilters({ ...filters, offset: nextOffset })}
+            />
+          </>
+        )}
+      </div>
     </div>
   );
 }

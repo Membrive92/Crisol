@@ -1,0 +1,258 @@
+'use client';
+
+import { useState } from 'react';
+
+import type { Category, TransactionListQuery } from '@finanzas/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+
+import {
+  CalendarIcon,
+  FilterIcon,
+  SearchIcon,
+} from '@/components/ui/icons';
+
+export interface StitchSearchToolbarProps {
+  value: TransactionListQuery;
+  onChange: (next: TransactionListQuery) => void;
+  categories: Category[];
+}
+
+/**
+ * Toolbar de la página de Transactions: search bar con icono +
+ * botones "Filtros" y "Este mes" como toggles. "Filtros" expone un
+ * panel desplegable con categoría + rango de fechas. "Este mes" es un
+ * shortcut que rellena `date_from`/`date_to` al rango del mes actual.
+ */
+export function StitchSearchToolbar({
+  value,
+  onChange,
+  categories,
+}: StitchSearchToolbarProps) {
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  function update<K extends keyof TransactionListQuery>(
+    key: K,
+    next: TransactionListQuery[K] | '',
+  ) {
+    onChange({ ...value, [key]: next === '' ? undefined : next, offset: 0 });
+  }
+
+  function applyThisMonth() {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+    onChange({
+      ...value,
+      date_from: start.toISOString(),
+      date_to: end.toISOString(),
+      offset: 0,
+    });
+  }
+
+  const isThisMonthActive =
+    value.date_from?.startsWith(new Date().toISOString().slice(0, 7)) ?? false;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
+      <div style={{ display: 'flex', gap: spacing.sm, flexWrap: 'wrap' }}>
+        <SearchInput
+          value={value.search ?? ''}
+          onChange={(v) => update('search', v)}
+        />
+        <ToolbarButton
+          label="Filtros"
+          icon={<FilterIcon size={16} />}
+          active={filtersOpen}
+          onClick={() => setFiltersOpen((v) => !v)}
+        />
+        <ToolbarButton
+          label="Este mes"
+          icon={<CalendarIcon size={16} />}
+          active={isThisMonthActive}
+          onClick={applyThisMonth}
+        />
+      </div>
+
+      {filtersOpen ? (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+            gap: spacing.md,
+            backgroundColor: colors.surfaceMuted,
+            border: `1px solid ${colors.border}`,
+            borderRadius: radius.md,
+            padding: spacing.md,
+          }}
+        >
+          <FilterSelect
+            label="Categoría"
+            value={value.category_id ?? ''}
+            onChange={(v) => update('category_id', v)}
+          >
+            <option value="">Todas</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </FilterSelect>
+          <FilterDate
+            label="Desde"
+            value={value.date_from?.slice(0, 10) ?? ''}
+            onChange={(v) => update('date_from', v ? `${v}T00:00:00Z` : '')}
+          />
+          <FilterDate
+            label="Hasta"
+            value={value.date_to?.slice(0, 10) ?? ''}
+            onChange={(v) => update('date_to', v ? `${v}T23:59:59Z` : '')}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SearchInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  return (
+    <div style={{ position: 'relative', flex: '1 1 280px' }}>
+      <span
+        aria-hidden
+        style={{
+          position: 'absolute',
+          left: spacing.sm + 4,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          color: colors.textSubtle,
+          display: 'inline-flex',
+          pointerEvents: 'none',
+        }}
+      >
+        <SearchIcon size={16} />
+      </span>
+      <input
+        type="search"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Buscar transacciones, comercios o importes..."
+        style={{
+          width: '100%',
+          padding: `${spacing.sm}px ${spacing.md}px ${spacing.sm}px ${spacing.xl + 4}px`,
+          backgroundColor: colors.surface,
+          color: colors.text,
+          border: `1px solid ${colors.border}`,
+          borderRadius: radius.md,
+          fontSize: fontSize.sm,
+          outline: 'none',
+        }}
+      />
+    </div>
+  );
+}
+
+function ToolbarButton({
+  label,
+  icon,
+  active,
+  onClick,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: spacing.xs,
+        padding: `${spacing.sm}px ${spacing.md}px`,
+        backgroundColor: active ? colors.primarySoft : colors.surfaceMuted,
+        color: active ? colors.primary : colors.textMuted,
+        border: `1px solid ${active ? colors.primary : colors.border}`,
+        borderRadius: radius.md,
+        fontSize: fontSize.sm,
+        fontWeight: fontWeight.semibold,
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function FilterSelect({
+  label,
+  value,
+  onChange,
+  children,
+}: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <span style={{ fontSize: fontSize.xs, fontWeight: fontWeight.medium, color: colors.textMuted }}>
+        {label}
+      </span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          padding: `${spacing.sm}px ${spacing.sm}px`,
+          backgroundColor: colors.surface,
+          color: colors.text,
+          border: `1px solid ${colors.border}`,
+          borderRadius: radius.sm,
+          fontSize: fontSize.sm,
+        }}
+      >
+        {children}
+      </select>
+    </label>
+  );
+}
+
+function FilterDate({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <span style={{ fontSize: fontSize.xs, fontWeight: fontWeight.medium, color: colors.textMuted }}>
+        {label}
+      </span>
+      <input
+        type="date"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          padding: `${spacing.sm}px ${spacing.sm}px`,
+          backgroundColor: colors.surface,
+          color: colors.text,
+          border: `1px solid ${colors.border}`,
+          borderRadius: radius.sm,
+          fontSize: fontSize.sm,
+        }}
+      />
+    </label>
+  );
+}

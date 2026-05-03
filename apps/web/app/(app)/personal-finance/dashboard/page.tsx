@@ -6,27 +6,20 @@ import {
   useDashboardByCategory,
   useDashboardByMonth,
   useDashboardSummary,
-  useDashboardTopExpenses,
   useUserCurrencies,
 } from '@finanzas/services';
 import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
 
 import {
-  CategoryDonut,
-  type DonutKindFilter,
-} from '@/components/dashboard/category-donut';
-import {
   DashboardFilters,
   type DashboardFiltersValue,
 } from '@/components/dashboard/dashboard-filters';
-import { KpiCards } from '@/components/dashboard/kpi-cards';
-import { MonthlyChart } from '@/components/dashboard/monthly-chart';
-import { RecentActivity } from '@/components/dashboard/recent-activity';
-import { TipCard } from '@/components/dashboard/tip-card';
-import { TopExpensesList } from '@/components/dashboard/top-expenses-list';
-import { FabLink } from '@/components/ui/fab';
+import { StitchBalanceChart } from '@/components/dashboard/stitch-balance-chart';
+import { StitchKpiRow } from '@/components/dashboard/stitch-kpi-row';
+import { StitchRecentActivity } from '@/components/dashboard/stitch-recent-activity';
+import { StitchSecondaryMetrics } from '@/components/dashboard/stitch-secondary-metrics';
+import { StitchTipCard } from '@/components/dashboard/stitch-tip-card';
 
-const TOP_EXPENSES_LIMIT = 5;
 const FALLBACK_CURRENCY = 'EUR';
 
 export default function DashboardPage() {
@@ -34,14 +27,10 @@ export default function DashboardPage() {
     currency: FALLBACK_CURRENCY,
     year: new Date().getFullYear(),
   });
-  const [donutKind, setDonutKind] = useState<DonutKindFilter>('all');
   const [currencyHydrated, setCurrencyHydrated] = useState(false);
 
   const currenciesQuery = useUserCurrencies();
 
-  // Una vez sabemos qué monedas tiene el usuario, ajustamos la moneda
-  // del filtro a la primera real (si la fallback no está entre ellas).
-  // Sólo lo hacemos una vez para no pisar la elección manual del user.
   useEffect(() => {
     if (currencyHydrated) return;
     const list = currenciesQuery.data;
@@ -68,30 +57,18 @@ export default function DashboardPage() {
     currency: filters.currency,
     year: filters.year,
   });
-  const byCategoryQuery = useDashboardByCategory({
+  const expensesByCategoryQuery = useDashboardByCategory({
     currency: filters.currency,
     date_from: dateFrom,
     date_to: dateTo,
-    // 'all' = sin filtro de kind: backend devuelve todas las categorías
-    // (income + expense) y el bucket "Sin categoría". Income/Expense lo
-    // restringen como antes.
-    ...(donutKind === 'all' ? {} : { kind: donutKind }),
-  });
-  const topExpensesQuery = useDashboardTopExpenses({
-    currency: filters.currency,
-    date_from: dateFrom,
-    date_to: dateTo,
-    limit: TOP_EXPENSES_LIMIT,
+    kind: 'expense',
   });
 
   const anyError =
-    summaryQuery.isError ||
-    monthlyQuery.isError ||
-    byCategoryQuery.isError ||
-    topExpensesQuery.isError;
+    summaryQuery.isError || monthlyQuery.isError || expensesByCategoryQuery.isError;
 
   return (
-    <div style={{ maxWidth: 1100, margin: '0 auto', padding: spacing.lg }}>
+    <div style={{ maxWidth: 1200, margin: '0 auto', padding: spacing.lg }}>
       <header
         style={{
           display: 'flex',
@@ -131,44 +108,33 @@ export default function DashboardPage() {
         />
       </header>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
-        <KpiCards summary={summaryQuery.data} isLoading={summaryQuery.isLoading} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg }}>
+        <StitchKpiRow summary={summaryQuery.data} isLoading={summaryQuery.isLoading} />
 
         <div
           style={{
             display: 'grid',
             gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)',
             gap: spacing.md,
+            alignItems: 'start',
           }}
         >
-          <MonthlyChart
-            data={monthlyQuery.data}
-            currency={filters.currency}
-            isLoading={monthlyQuery.isLoading}
-          />
-          <RecentActivity />
-        </div>
-
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)',
-            gap: spacing.md,
-          }}
-        >
-          <CategoryDonut
-            data={byCategoryQuery.data}
-            currency={filters.currency}
-            isLoading={byCategoryQuery.isLoading}
-            kind={donutKind}
-            onKindChange={setDonutKind}
-          />
-          <TopExpensesList
-            data={topExpensesQuery.data}
-            currency={filters.currency}
-            isLoading={topExpensesQuery.isLoading}
-          />
-          <TipCard />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
+            <StitchBalanceChart
+              data={monthlyQuery.data ?? []}
+              currency={filters.currency}
+              isLoading={monthlyQuery.isLoading}
+            />
+            <StitchSecondaryMetrics
+              summary={summaryQuery.data}
+              expensesByCategory={expensesByCategoryQuery.data}
+              currency={filters.currency}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
+            <StitchRecentActivity />
+            <StitchTipCard summary={summaryQuery.data} />
+          </div>
         </div>
       </div>
 
@@ -184,11 +150,6 @@ export default function DashboardPage() {
           Error cargando alguna sección del dashboard.
         </p>
       )}
-
-      <FabLink
-        href="/personal-finance/transactions/new"
-        ariaLabel="Añadir transacción"
-      />
     </div>
   );
 }
