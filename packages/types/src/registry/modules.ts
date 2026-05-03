@@ -21,11 +21,15 @@ export const MODULES: readonly AppModule[] = [
     label: 'Finanzas Domésticas',
     basePath: PERSONAL_FINANCE_BASE,
     enabled: true,
+    // Las pestañas primarias del módulo son sólo dos: lectura (Análisis)
+    // y datos (Transacciones). Importar y Tickets son flujos secundarios
+    // de entrada de datos: viven como acciones/CTAs dentro de la página
+    // Transacciones (no como tabs primarias). Mantienen sus rutas
+    // dedicadas (`/personal-finance/imports`, `/.../receipts`) — sólo
+    // dejan de competir con la lista en el chrome.
     sections: [
       { key: 'analysis', label: 'Análisis', path: `${PERSONAL_FINANCE_BASE}/analysis` },
       { key: 'transactions', label: 'Transacciones', path: `${PERSONAL_FINANCE_BASE}/transactions` },
-      { key: 'imports', label: 'Importar', path: `${PERSONAL_FINANCE_BASE}/imports` },
-      { key: 'receipts', label: 'Tickets', path: `${PERSONAL_FINANCE_BASE}/receipts` },
     ],
   },
   {

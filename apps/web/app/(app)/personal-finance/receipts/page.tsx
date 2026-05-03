@@ -27,6 +27,25 @@ export default function ReceiptsPage() {
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: spacing.lg }}>
+      {/* Tickets es un flujo secundario: se llega desde el botón
+          "Capturar ticket" del header de Transacciones. La flecha hacia
+          atrás ancla el contexto y compensa la ausencia de tab primaria. */}
+      <Link
+        href="/personal-finance/transactions"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          marginBottom: spacing.md,
+          color: colors.textMuted,
+          fontSize: fontSize.sm,
+          fontWeight: fontWeight.medium,
+          textDecoration: 'none',
+        }}
+      >
+        ← Volver a Transacciones
+      </Link>
+
       <header
         style={{
           display: 'flex',

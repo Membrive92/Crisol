@@ -17,7 +17,7 @@ import { StitchTransactionsKpiRow } from '@/components/transactions/stitch-trans
 import { TransactionList } from '@/components/transactions/transaction-list';
 import { Button } from '@/components/ui/button';
 import { Pagination } from '@/components/ui/pagination';
-import { PlusIcon } from '@/components/ui/icons';
+import { PlusIcon, ReceiptIcon, UploadIcon } from '@/components/ui/icons';
 
 const PAGE_SIZE = 20;
 
@@ -90,14 +90,37 @@ export default function TransactionsPage() {
             {isFetching ? ' · actualizando…' : ''}
           </span>
         </div>
-        <Link href="/personal-finance/transactions/new">
-          <Button variant="secondary">
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <PlusIcon size={14} />
-              Nueva transacción
-            </span>
-          </Button>
-        </Link>
+        {/* Acciones de entrada de datos. La primaria es "Nueva
+            transacción" (manual). Importar (CSV/XLSX/PDF) y Capturar
+            ticket (foto + IA local) son flujos secundarios — viven aquí
+            porque conceptualmente son "otras formas de añadir
+            transacciones", no pestañas independientes. */}
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: spacing.sm }}>
+          <Link href="/personal-finance/imports">
+            <Button variant="ghost">
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <UploadIcon size={14} />
+                Importar
+              </span>
+            </Button>
+          </Link>
+          <Link href="/personal-finance/receipts">
+            <Button variant="ghost">
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <ReceiptIcon size={14} />
+                Capturar ticket
+              </span>
+            </Button>
+          </Link>
+          <Link href="/personal-finance/transactions/new">
+            <Button variant="secondary">
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <PlusIcon size={14} />
+                Nueva transacción
+              </span>
+            </Button>
+          </Link>
+        </div>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg }}>
