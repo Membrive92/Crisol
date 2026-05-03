@@ -1,9 +1,11 @@
 'use client';
 
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 import type { Receipt } from '@finanzas/types';
-import { colors, fontSize, fontWeight, formatDate, radius, spacing } from '@finanzas/ui';
+import { colors, fontSize, fontWeight, formatDate } from '@finanzas/ui';
+
+import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 
 import { ReceiptStatusBadge } from './status-badge';
 
@@ -12,71 +14,89 @@ export interface ReceiptListProps {
 }
 
 export function ReceiptList({ items }: ReceiptListProps) {
-  if (items.length === 0) {
-    return (
-      <div
-        style={{
-          padding: spacing.xl,
-          textAlign: 'center',
-          color: colors.textMuted,
-          backgroundColor: colors.surfaceMuted,
-          borderRadius: radius.md,
-        }}
-      >
-        Aún no has subido tickets.
-      </div>
-    );
-  }
+  const router = useRouter();
 
-  return (
-    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-      {items.map((r) => {
+  const columns: DataTableColumn<Receipt>[] = [
+    {
+      key: 'date',
+      header: 'Fecha',
+      width: 120,
+      render: (r) => (
+        <span
+          style={{
+            fontSize: fontSize.sm,
+            color: colors.text,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {formatDate(r.created_at)}
+        </span>
+      ),
+    },
+    {
+      key: 'merchant',
+      header: 'Comercio',
+      render: (r) => {
         const merchant = pickMerchant(r);
-        const total = pickTotal(r);
         return (
-          <li
-            key={r.id}
+          <span
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: spacing.md,
-              padding: spacing.md,
-              borderBottom: `1px solid ${colors.border}`,
+              fontSize: fontSize.sm,
+              fontWeight: fontWeight.medium,
+              color: merchant ? colors.text : colors.textSubtle,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              display: 'inline-block',
+              maxWidth: 320,
             }}
           >
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div
-                style={{
-                  fontSize: fontSize.md,
-                  fontWeight: fontWeight.medium,
-                  color: colors.text,
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}
-              >
-                {merchant ?? '(sin comercio)'}
-              </div>
-              <div style={{ fontSize: fontSize.sm, color: colors.textMuted }}>
-                {formatDate(r.created_at)} · {total ?? '—'}
-              </div>
-            </div>
-            <ReceiptStatusBadge status={r.status} />
-            <Link
-              href={{ pathname: `/personal-finance/receipts/${r.id}` }}
-              style={{
-                fontSize: fontSize.sm,
-                fontWeight: fontWeight.medium,
-                color: colors.primary,
-                textDecoration: 'none',
-              }}
-            >
-              Ver →
-            </Link>
-          </li>
+            {merchant ?? '(sin comercio)'}
+          </span>
         );
-      })}
-    </ul>
+      },
+    },
+    {
+      key: 'total',
+      header: 'Total',
+      align: 'right',
+      width: 140,
+      render: (r) => {
+        const total = pickTotal(r);
+        return (
+          <span
+            style={{
+              fontSize: fontSize.sm,
+              fontWeight: fontWeight.semibold,
+              color: total ? colors.text : colors.textSubtle,
+              fontVariantNumeric: 'tabular-nums',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {total ?? '—'}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'status',
+      header: 'Estado',
+      align: 'right',
+      width: 140,
+      render: (r) => <ReceiptStatusBadge status={r.status} />,
+    },
+  ];
+
+  return (
+    <DataTable
+      columns={columns}
+      rows={items}
+      rowKey={(r) => r.id}
+      onRowClick={(r) =>
+        router.push(`/personal-finance/receipts/${r.id}` as never)
+      }
+      emptyMessage="Aún no has subido tickets."
+    />
   );
 }
 
