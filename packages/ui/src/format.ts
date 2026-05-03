@@ -51,6 +51,154 @@ export function fromDateInputValue(value: string): string {
   return new Date(`${value}T00:00:00Z`).toISOString();
 }
 
+// ----- Conversión de moneda (PHASE-8.2) -------------------------------------
+//
+// Las tasas se almacenan EUR→quote (ver módulo backend `currency`). Para
+// convertir entre dos monedas cualesquiera se compone vía EUR:
+//
+//     amount(FROM → TO) = amount × rate(EUR→TO) / rate(EUR→FROM)
+//
+// Si una de las patas no aparece en el mapa devuelto por el backend, la
+// conversión es "missing": el caller decide si pintar el original sin
+// convertir + un badge, o esconder la fila.
+
+export type RatesMap = Record<string, number>;
+
+export interface ConvertAmountResult {
+  value: number;
+  rate: number;
+  missing: boolean;
+}
+
+/**
+ * Convierte un importe entre dos monedas usando un mapa EUR→quote.
+ * - `from === to` → trivial, sin tasa.
+ * - una pata es EUR → directa.
+ * - ninguna es EUR → composición vía EUR.
+ *
+ * Devuelve `{ value, rate, missing }`. Cuando `missing` es true,
+ * `value` es el importe original sin convertir y `rate` es 1.
+ */
+export function convertAmount(
+  amount: number,
+  fromCurrency: string,
+  toCurrency: string,
+  rates: RatesMap,
+): ConvertAmountResult {
+  const from = fromCurrency.toUpperCase();
+  const to = toCurrency.toUpperCase();
+
+  if (!Number.isFinite(amount)) {
+    return { value: amount, rate: 1, missing: true };
+  }
+  if (from === to) {
+    return { value: amount, rate: 1, missing: false };
+  }
+
+  // Si una pata es EUR ya es directa.
+  if (from === 'EUR') {
+    const rate = rates[to];
+    if (!Number.isFinite(rate) || !rate) {
+      return { value: amount, rate: 1, missing: true };
+    }
+    return { value: amount * rate, rate, missing: false };
+  }
+  if (to === 'EUR') {
+    const rate = rates[from];
+    if (!Number.isFinite(rate) || !rate) {
+      return { value: amount, rate: 1, missing: true };
+    }
+    return { value: amount / rate, rate: 1 / rate, missing: false };
+  }
+
+  // Composición vía EUR — necesitamos las dos patas.
+  const fromRate = rates[from];
+  const toRate = rates[to];
+  if (!Number.isFinite(fromRate) || !fromRate || !Number.isFinite(toRate) || !toRate) {
+    return { value: amount, rate: 1, missing: true };
+  }
+  const composed = toRate / fromRate;
+  return { value: amount * composed, rate: composed, missing: false };
+}
+
+export interface FormatConvertedResult {
+  /** String listo para pintar — incluye prefijo `≈` si la conversión es real. */
+  display: string;
+  /** Texto del tooltip explicando origen + tasa. Vacío cuando `from === to`. */
+  tooltip: string;
+  /** Hay conversión real (ni `same` ni `missing`). */
+  isApprox: boolean;
+  /** No hay tasa disponible — el importe se muestra sin convertir. */
+  isMissing: boolean;
+}
+
+/**
+ * Formatea un importe con conversión a la moneda destino.
+ *
+ * - `from === to` → formato simple, sin prefijo `≈` ni tooltip.
+ * - tasa disponible → `"≈ €1.234,56"` con tooltip
+ *   `"USD 1.000,00 a 1,234567 EUR/USD el 2026-04-15"` (la fecha
+ *   sólo aparece si `rateDate` se pasa).
+ * - tasa no disponible → original sin convertir + tooltip `"sin tasa
+ *   disponible"`. El caller puede usar `isMissing` para pintar un
+ *   badge tonal en vez del prefijo.
+ */
+export function formatConverted(
+  amount: string | number,
+  fromCurrency: string,
+  toCurrency: string,
+  rates: RatesMap,
+  locale = 'es-ES',
+  rateDate?: string,
+): FormatConvertedResult {
+  const numeric = typeof amount === 'string' ? Number(amount) : amount;
+  if (!Number.isFinite(numeric)) {
+    return {
+      display: typeof amount === 'string' ? amount : String(amount),
+      tooltip: '',
+      isApprox: false,
+      isMissing: true,
+    };
+  }
+
+  const from = fromCurrency.toUpperCase();
+  const to = toCurrency.toUpperCase();
+
+  if (from === to) {
+    return {
+      display: formatAmount(String(numeric), to, locale),
+      tooltip: '',
+      isApprox: false,
+      isMissing: false,
+    };
+  }
+
+  const { value, rate, missing } = convertAmount(numeric, from, to, rates);
+
+  if (missing) {
+    return {
+      display: formatAmount(String(numeric), from, locale),
+      tooltip: `Sin tasa ${from}→${to} disponible`,
+      isApprox: false,
+      isMissing: true,
+    };
+  }
+
+  // Formato de la tasa: 6 decimales suelen ser suficientes para
+  // monedas mayores; recortamos ceros finales para legibilidad.
+  const rateLabel = rate.toFixed(6).replace(/\.?0+$/, '');
+  const original = formatAmount(String(numeric), from, locale);
+  const dateSuffix = rateDate ? ` el ${rateDate}` : '';
+  const tooltip = `${original} a ${rateLabel} ${to}/${from}${dateSuffix}`;
+
+  return {
+    display: `≈ ${formatAmount(String(value), to, locale)}`,
+    tooltip,
+    isApprox: true,
+    isMissing: false,
+  };
+}
+
 /**
  * Formatea un mes `YYYY-MM` como etiqueta legible (`Abr 2026`).
  * Si el formato es inválido devuelve el valor original.
