@@ -20,6 +20,9 @@
 | `4698c02a5861` | 1.1, 2.1 | Initial schema — `users`, `refresh_tokens`, `categories`, `transactions`. |
 | `7c3a91f4d2b8` | 4.1 | `import_jobs` + `transactions.import_hash` + índice único parcial. |
 | `a91d8f4c2e10` | 5.1 | `receipts` + índices por `user_id` y `transaction_id`. |
+| `d18a4c75b2e9` | 1.1 | `webauthn_credentials` + `webauthn_challenges`. |
+| `b27e391fa4c8` | 1.1 | `webauthn_challenges.user_id` nullable + relax FK para conditional UI. |
+| `c5d28e7f3b91` | 8.1 | `exchange_rates` + carga de snapshot offline embebido. |
 
 ---
 
@@ -113,6 +116,22 @@
 No existe FK formal `transactions.receipt_id → receipts.id` (evita
 ciclo bidireccional); la consistencia la garantiza
 `receipts.service.confirm_receipt`.
+
+### `exchange_rates` (`PHASE-8.1`)
+
+| Columna | Tipo | Notas |
+|---------|------|-------|
+| `rate_date` | `DATE` | PK compuesta. |
+| `base` | `CHAR(3)` | PK compuesta; siempre `'EUR'` por convención. |
+| `quote` | `CHAR(3)` | PK compuesta. |
+| `rate` | `NUMERIC(20, 8)` | precisión amplia; redondeo a 2 dec lo hace `currency.service.convert` con `ROUND_HALF_EVEN`. |
+| `source` | `VARCHAR(32)` | `'frankfurter'` (default) / `'snapshot'` (seed inicial) / `'test'`. |
+| `fetched_at` | `TIMESTAMPTZ` | `server_default=now()`. |
+
+Sin `user_id`: las tasas son datos públicos globales (ECB), no
+aplica aislamiento multi-tenant. Índice secundario
+`ix_exchange_rates_quote_date(quote, rate_date)` para acelerar
+"última tasa conocida para X en una ventana".
 
 ---
 

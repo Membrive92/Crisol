@@ -192,6 +192,29 @@ Reglas:
 
 ---
 
+## Currency (`PHASE-8.1`)
+
+| Método | Ruta | Auth | Body / Query | Response |
+|--------|------|------|--------------|----------|
+| GET    | `/currency/rates` | sí | `?date=YYYY-MM-DD` (def hoy UTC), `?base=EUR` (def `EUR`, 3 letras) | `200` `RatesResponse` `{ rate_date, base, rates: [{ quote, rate }] }` |
+| GET    | `/currency/convert` | sí | `?amount=&from=&to=&date=` (`from`/`to` 3 letras; `date` def hoy UTC) | `200` `ConvertResponse` `{ amount, rate, rate_date, fallback }` |
+
+Reglas:
+- `fallback` ∈ `exact | previous | same | missing`. `same` cuando
+  `from == to`; `missing` cuando no hay tasa ni en la ventana de
+  fallback (14 días) — el endpoint devuelve el importe sin
+  convertir y `rate=1`, no falla con 4xx.
+- Las tasas son datos públicos globales (ECB vía
+  `frankfurter.app`). No se filtra por `user_id`. Se exige
+  autenticación sólo para evitar dejar el endpoint totalmente
+  abierto.
+- Convención `base='EUR'`: las tasas se almacenan EUR→quote y las
+  conversiones X→Y se componen vía EUR en `currency.service`.
+- `amount` es `Decimal` serializado como string. El endpoint lo
+  parsea con `Decimal(...)` y rechaza con 422 si no encaja.
+
+---
+
 ## Convenciones de errores
 
 | Código | Cuándo |

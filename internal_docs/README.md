@@ -91,7 +91,7 @@ Leyenda: ⏳ pendiente · 🚧 en curso · ✅ completada · ❌ bloqueada
 
 | Fase | Nombre                       | Estado | PR |
 |------|------------------------------|--------|----|
-| 8.1  | Currency rates backend       | ⏳     | —  |
+| 8.1  | Currency rates backend       | ✅     | —  |
 | 8.2  | Conversion frontend          | ⏳     | —  |
 
 Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
