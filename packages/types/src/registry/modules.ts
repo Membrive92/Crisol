@@ -10,6 +10,7 @@ export const MODULES: readonly AppModule[] = [
     enabled: true,
     sections: [
       { key: 'dashboard', label: 'Dashboard', path: `${PERSONAL_FINANCE_BASE}/dashboard` },
+      { key: 'analysis', label: 'Análisis', path: `${PERSONAL_FINANCE_BASE}/analysis` },
       { key: 'transactions', label: 'Transacciones', path: `${PERSONAL_FINANCE_BASE}/transactions` },
       { key: 'imports', label: 'Importar', path: `${PERSONAL_FINANCE_BASE}/imports` },
       { key: 'receipts', label: 'Tickets', path: `${PERSONAL_FINANCE_BASE}/receipts` },

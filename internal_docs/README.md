@@ -83,8 +83,8 @@ Leyenda: ⏳ pendiente · 🚧 en curso · ✅ completada · ❌ bloqueada
 | 7.1  | Dashboard bento              | ✅     | —  |
 | 7.2  | Transactions tabla           | ✅     | —  |
 | 7.3  | Imports + Receipts polish    | ✅     | —  |
-| 7.4  | Mobile parity                | 🚧     | —  |
-| 7.5  | Analysis sub-tab (opcional)  | ⏳     | —  |
+| 7.4  | Mobile parity                | ✅     | —  |
+| 7.5  | Analysis sub-tab             | 🚧     | —  |
 
 ---
 
