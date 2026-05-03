@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.modules.ai.router import router as ai_router
 from app.modules.auth.router import router as auth_router
 from app.modules.auth.webauthn.router import router as webauthn_router
+from app.modules.currency.router import router as currency_router
 from app.modules.personal_finance.categories.router import router as categories_router
 from app.modules.personal_finance.dashboard.router import router as dashboard_router
 from app.modules.personal_finance.imports.router import router as imports_router
@@ -34,6 +35,7 @@ app.add_middleware(
 app.include_router(ai_router)
 app.include_router(auth_router)
 app.include_router(webauthn_router)
+app.include_router(currency_router)
 app.include_router(categories_router)
 app.include_router(transactions_router)
 app.include_router(dashboard_router)
