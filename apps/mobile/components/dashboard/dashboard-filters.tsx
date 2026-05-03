@@ -11,9 +11,14 @@ export interface DashboardFiltersValue {
 export interface DashboardFiltersProps {
   value: DashboardFiltersValue;
   onChange: (next: DashboardFiltersValue) => void;
+  /**
+   * Lista de monedas con datos del usuario (de `useUserCurrencies`).
+   * Si está vacía o no se pasa, se cae a `FALLBACK_CURRENCIES`.
+   */
+  currencies?: string[] | undefined;
 }
 
-const CURRENCIES = ['USD', 'EUR'] as const;
+const FALLBACK_CURRENCIES = ['EUR', 'USD'] as const;
 
 function buildYearOptions(): number[] {
   const current = new Date().getFullYear();
@@ -22,9 +27,14 @@ function buildYearOptions(): number[] {
 
 type Picker = 'currency' | 'year' | null;
 
-export function DashboardFilters({ value, onChange }: DashboardFiltersProps) {
+export function DashboardFilters({ value, onChange, currencies }: DashboardFiltersProps) {
   const [picker, setPicker] = useState<Picker>(null);
   const yearOptions = buildYearOptions();
+  const baseCurrencies =
+    currencies && currencies.length > 0 ? currencies : (FALLBACK_CURRENCIES as readonly string[]);
+  const currencyOptions = baseCurrencies.includes(value.currency)
+    ? baseCurrencies
+    : [...baseCurrencies, value.currency];
 
   return (
     <View style={styles.row}>
@@ -43,7 +53,7 @@ export function DashboardFilters({ value, onChange }: DashboardFiltersProps) {
               {picker === 'currency' ? 'Selecciona moneda' : 'Selecciona año'}
             </Text>
             {picker === 'currency' &&
-              CURRENCIES.map((c) => (
+              currencyOptions.map((c) => (
                 <SheetOption
                   key={c}
                   label={c}
@@ -131,5 +141,5 @@ const styles = StyleSheet.create({
   option: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radius.md },
   optionSelected: { backgroundColor: colors.primary },
   optionText: { fontSize: fontSize.md, color: colors.text },
-  optionTextSelected: { color: colors.surface, fontWeight: fontWeight.semibold },
+  optionTextSelected: { color: colors.onPrimary, fontWeight: fontWeight.semibold },
 });

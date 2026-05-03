@@ -1,18 +1,21 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { authApi } from '@finanzas/services';
 import {
+  authApi,
   useDashboardByCategory,
   useDashboardByMonth,
   useDashboardSummary,
   useDashboardTopExpenses,
+  useUserCurrencies,
 } from '@finanzas/services';
 import { useAuthStore } from '@finanzas/store';
-import type { CategoryKind } from '@finanzas/types';
 import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
 
-import { CategoryDonut } from '../../../../components/dashboard/category-donut';
+import {
+  CategoryDonut,
+  type DonutKindFilter,
+} from '../../../../components/dashboard/category-donut';
 import {
   DashboardFilters,
   type DashboardFiltersValue,
@@ -20,16 +23,35 @@ import {
 import { KpiCards } from '../../../../components/dashboard/kpi-cards';
 import { MonthlyChart } from '../../../../components/dashboard/monthly-chart';
 import { TopExpensesList } from '../../../../components/dashboard/top-expenses-list';
+import { FabLink } from '../../../../components/ui/fab';
 
 const TOP_EXPENSES_LIMIT = 5;
+const FALLBACK_CURRENCY = 'EUR';
 
 export default function HomeScreen() {
   const { user, refreshToken, logout: clearAuth } = useAuthStore();
   const [filters, setFilters] = useState<DashboardFiltersValue>({
-    currency: 'USD',
+    currency: FALLBACK_CURRENCY,
     year: new Date().getFullYear(),
   });
-  const [donutKind, setDonutKind] = useState<CategoryKind>('expense');
+  const [donutKind, setDonutKind] = useState<DonutKindFilter>('all');
+  const [currencyHydrated, setCurrencyHydrated] = useState(false);
+
+  const currenciesQuery = useUserCurrencies();
+
+  useEffect(() => {
+    if (currencyHydrated) return;
+    const list = currenciesQuery.data;
+    if (!list) return;
+    if (list.length === 0) {
+      setCurrencyHydrated(true);
+      return;
+    }
+    if (!list.includes(filters.currency)) {
+      setFilters((prev) => ({ ...prev, currency: list[0] ?? FALLBACK_CURRENCY }));
+    }
+    setCurrencyHydrated(true);
+  }, [currenciesQuery.data, currencyHydrated, filters.currency]);
 
   const dateFrom = new Date(filters.year, 0, 1).toISOString();
   const dateTo = new Date(filters.year, 11, 31, 23, 59, 59).toISOString();
@@ -47,7 +69,7 @@ export default function HomeScreen() {
     currency: filters.currency,
     date_from: dateFrom,
     date_to: dateTo,
-    kind: donutKind,
+    ...(donutKind === 'all' ? {} : { kind: donutKind }),
   });
   const topExpensesQuery = useDashboardTopExpenses({
     currency: filters.currency,
@@ -80,44 +102,54 @@ export default function HomeScreen() {
   }
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-    >
-      <View style={styles.header}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.greeting}>Hola, {user?.display_name ?? 'usuario'}</Text>
-          <Text style={styles.subtitle}>Resumen financiero</Text>
+    <View style={styles.container}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+      >
+        <View style={styles.header}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.greeting}>Hola, {user?.display_name ?? 'usuario'}</Text>
+            <Text style={styles.subtitle}>Resumen financiero</Text>
+          </View>
+          <Pressable onPress={handleLogout} style={styles.logoutButton}>
+            <Text style={styles.logoutText}>Salir</Text>
+          </Pressable>
         </View>
-        <Pressable onPress={handleLogout} style={styles.logoutButton}>
-          <Text style={styles.logoutText}>Salir</Text>
-        </Pressable>
-      </View>
 
-      <DashboardFilters value={filters} onChange={setFilters} />
-      <KpiCards summary={summaryQuery.data} isLoading={summaryQuery.isLoading} />
-      <MonthlyChart data={monthlyQuery.data} isLoading={monthlyQuery.isLoading} />
-      <CategoryDonut
-        data={byCategoryQuery.data}
-        currency={filters.currency}
-        isLoading={byCategoryQuery.isLoading}
-        kind={donutKind}
-        onKindChange={setDonutKind}
-      />
-      <TopExpensesList
-        data={topExpensesQuery.data}
-        currency={filters.currency}
-        isLoading={topExpensesQuery.isLoading}
-      />
+        <DashboardFilters
+          value={filters}
+          onChange={setFilters}
+          currencies={currenciesQuery.data}
+        />
+        <KpiCards summary={summaryQuery.data} isLoading={summaryQuery.isLoading} />
+        <MonthlyChart data={monthlyQuery.data} isLoading={monthlyQuery.isLoading} />
+        <CategoryDonut
+          data={byCategoryQuery.data}
+          currency={filters.currency}
+          isLoading={byCategoryQuery.isLoading}
+          kind={donutKind}
+          onKindChange={setDonutKind}
+        />
+        <TopExpensesList
+          data={topExpensesQuery.data}
+          currency={filters.currency}
+          isLoading={topExpensesQuery.isLoading}
+        />
 
-      {(summaryQuery.isError ||
-        monthlyQuery.isError ||
-        byCategoryQuery.isError ||
-        topExpensesQuery.isError) && (
-        <Text style={styles.errorText}>Error cargando alguna sección del dashboard.</Text>
-      )}
-    </ScrollView>
+        {(summaryQuery.isError ||
+          monthlyQuery.isError ||
+          byCategoryQuery.isError ||
+          topExpensesQuery.isError) && (
+          <Text style={styles.errorText}>Error cargando alguna sección del dashboard.</Text>
+        )}
+      </ScrollView>
+
+      <FabLink
+        href="/(modules)/personal-finance/transaction/new"
+        ariaLabel="Añadir transacción"
+      />
+    </View>
   );
 }
 

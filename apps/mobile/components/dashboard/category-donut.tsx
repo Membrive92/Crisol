@@ -1,16 +1,18 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { PieChart } from 'react-native-gifted-charts';
 
-import type { CategoryBreakdownItem, CategoryKind } from '@finanzas/types';
+import type { CategoryBreakdownItem } from '@finanzas/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
 import { formatAmount } from '@finanzas/ui';
+
+export type DonutKindFilter = 'all' | 'income' | 'expense';
 
 export interface CategoryDonutProps {
   data: CategoryBreakdownItem[] | undefined;
   currency: string;
   isLoading: boolean;
-  kind: CategoryKind;
-  onKindChange: (next: CategoryKind) => void;
+  kind: DonutKindFilter;
+  onKindChange: (next: DonutKindFilter) => void;
 }
 
 const PALETTE = [
@@ -46,6 +48,9 @@ export function CategoryDonut({
       <View style={styles.header}>
         <Text style={styles.title}>Por categoría</Text>
         <View style={styles.toggle}>
+          <ToggleButton active={kind === 'all'} onPress={() => onKindChange('all')}>
+            Total
+          </ToggleButton>
           <ToggleButton active={kind === 'expense'} onPress={() => onKindChange('expense')}>
             Gastos
           </ToggleButton>
@@ -142,5 +147,5 @@ const styles = StyleSheet.create({
   toggleButton: { paddingVertical: 4, paddingHorizontal: 10, backgroundColor: colors.surface },
   toggleButtonActive: { backgroundColor: colors.primary },
   toggleText: { fontSize: fontSize.xs, color: colors.text, fontWeight: fontWeight.medium },
-  toggleTextActive: { color: colors.surface },
+  toggleTextActive: { color: colors.onPrimary },
 });
