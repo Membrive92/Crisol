@@ -45,12 +45,15 @@ export function ModuleSections({ module }: ModuleSectionsProps) {
 function SectionTab({ section, active }: { section: ModuleSection; active: boolean }) {
   const [hovered, setHovered] = useState(false);
 
+  // Activo → tinte primario (`primary-soft` bg + `primary` text). Hover
+  // sin azul (`surface`) para diferenciar del estado activo. Inactivo
+  // muted.
   const bg = active
-    ? colors.surfaceMuted
+    ? colors.primarySoft
     : hovered
-      ? colors.surfaceMuted
+      ? colors.surface
       : 'transparent';
-  const fg = active ? colors.text : hovered ? colors.text : colors.textMuted;
+  const fg = active ? colors.primary : hovered ? colors.text : colors.textMuted;
 
   return (
     <Link

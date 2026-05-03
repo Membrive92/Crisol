@@ -1,14 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 
 import {
   useCategories,
   useDeleteTransaction,
   useTransactions,
-  useUserCurrencies,
 } from '@finanzas/services';
+import { useCurrencyStore } from '@finanzas/store';
 import type { TransactionListQuery } from '@finanzas/types';
 import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
 
@@ -20,31 +20,13 @@ import { Pagination } from '@/components/ui/pagination';
 import { PlusIcon } from '@/components/ui/icons';
 
 const PAGE_SIZE = 20;
-const FALLBACK_CURRENCY = 'EUR';
 
 export default function TransactionsPage() {
   const [filters, setFilters] = useState<TransactionListQuery>({
     limit: PAGE_SIZE,
     offset: 0,
   });
-  const [currency, setCurrency] = useState(FALLBACK_CURRENCY);
-  const [currencyHydrated, setCurrencyHydrated] = useState(false);
-
-  const currenciesQuery = useUserCurrencies();
-
-  useEffect(() => {
-    if (currencyHydrated) return;
-    const list = currenciesQuery.data;
-    if (!list) return;
-    if (list.length === 0) {
-      setCurrencyHydrated(true);
-      return;
-    }
-    if (!list.includes(currency)) {
-      setCurrency(list[0] ?? FALLBACK_CURRENCY);
-    }
-    setCurrencyHydrated(true);
-  }, [currenciesQuery.data, currencyHydrated, currency]);
+  const currency = useCurrencyStore((s) => s.currency);
 
   const { data, isLoading, isError, error, isFetching } = useTransactions(filters);
   const { data: categories } = useCategories();

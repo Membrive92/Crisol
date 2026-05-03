@@ -408,3 +408,27 @@ export const HeartPulseIcon = (p: IconProps) => (
     <path d="M3.22 12H9.5l.5-1 2 4.5 2-7 1.5 3.5h5.27" />
   </Icon>
 );
+
+// ──────────────────────────────────────────
+// Avatares / dropdown
+// ──────────────────────────────────────────
+
+export const UserIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+    <circle cx="12" cy="7" r="4" />
+  </Icon>
+);
+
+export const ChevronDownIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <polyline points="6 9 12 15 18 9" />
+  </Icon>
+);
+
+export const UnfoldMoreIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <polyline points="8 18 12 22 16 18" />
+    <polyline points="8 6 12 2 16 6" />
+  </Icon>
+);

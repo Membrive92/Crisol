@@ -1,13 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import {
   useDashboardByCategory,
   useDashboardByMonth,
   useDashboardSummary,
-  useUserCurrencies,
 } from '@finanzas/services';
+import { useCurrencyStore } from '@finanzas/store';
 import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
 
 import { StitchExpenseBreakdown } from '@/components/analysis/stitch-expense-breakdown';
@@ -22,28 +22,9 @@ import { StitchSmartInsights } from '@/components/analysis/stitch-smart-insights
 import { Card } from '@/components/ui/card';
 import { ListIcon } from '@/components/ui/icons';
 
-const FALLBACK_CURRENCY = 'EUR';
-
 export default function AnalysisPage() {
   const [period, setPeriod] = useState<PeriodKey>('year');
-  const [currency, setCurrency] = useState(FALLBACK_CURRENCY);
-  const [currencyHydrated, setCurrencyHydrated] = useState(false);
-
-  const currenciesQuery = useUserCurrencies();
-
-  useEffect(() => {
-    if (currencyHydrated) return;
-    const list = currenciesQuery.data;
-    if (!list) return;
-    if (list.length === 0) {
-      setCurrencyHydrated(true);
-      return;
-    }
-    if (!list.includes(currency)) {
-      setCurrency(list[0] ?? FALLBACK_CURRENCY);
-    }
-    setCurrencyHydrated(true);
-  }, [currenciesQuery.data, currencyHydrated, currency]);
+  const currency = useCurrencyStore((s) => s.currency);
 
   const { dateFrom, dateTo } = useMemo(() => rangeForPeriod(period), [period]);
   const currentYear = new Date().getFullYear();

@@ -6,17 +6,25 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useAuthStore } from '@finanzas/store';
 import { authApi } from '@finanzas/services';
 import { DEFAULT_MODULE_ID, findModuleByPath, getModule } from '@finanzas/types';
-import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
+import { colors, spacing } from '@finanzas/ui';
 
 import { PasskeyPrompt } from '@/components/auth/passkey-prompt';
-import { ModuleSidebar, SIDEBAR_WIDTH } from '@/components/modules/module-sidebar';
-import { BellIcon, LogOutIcon, WalletIcon } from '@/components/ui/icons';
+import { UserMenu } from '@/components/auth/user-menu';
+import { CurrencyMenu } from '@/components/header/currency-menu';
+import {
+  AppSidebar,
+  HEADER_HEIGHT,
+  HEADER_HEIGHT_BARE,
+  SIDEBAR_WIDTH,
+} from '@/components/modules/app-sidebar';
+import { ModuleSections } from '@/components/modules/module-sections';
+import { BellIcon } from '@/components/ui/icons';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { isAuthenticated, isHydrated, accessToken, setTokens, setUser, logout } =
+  const { user, isAuthenticated, isHydrated, accessToken, setTokens, setUser, logout } =
     useAuthStore();
   const [bootstrapping, setBootstrapping] = useState(true);
 
@@ -30,8 +38,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       if (!useAuthStore.getState().user) {
         authApi
           .getMe()
-          .then((user) => {
-            if (!cancelled) setUser(user);
+          .then((u) => {
+            if (!cancelled) setUser(u);
           })
           .catch(() => {
             if (!cancelled) {
@@ -53,9 +61,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         setTokens(tokens.access_token, tokens.refresh_token);
         return authApi.getMe();
       })
-      .then((user) => {
-        if (cancelled || !user) return;
-        setUser(user);
+      .then((u) => {
+        if (cancelled || !u) return;
+        setUser(u);
       })
       .catch(() => {
         if (cancelled) return;
@@ -84,63 +92,73 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     return null;
   }
 
+  const hasSections = !!activeModule && activeModule.sections.length > 0;
+
   return (
     <div style={{ minHeight: '100vh', backgroundColor: colors.background }}>
+      {/* Sidebar fija con lista de MÓDULOS — full height para que el
+          corner top-left de la pantalla pertenezca a la sidebar y no
+          a un hueco del header. */}
+      {activeModule && <AppSidebar active={activeModule} />}
+
+      {/* Header fixed alineado con el contenido (empieza después de la
+          sidebar). Así el corner sidebar-right ↔ header-bottom forma
+          una L limpia en (240, 104). */}
       <header
         style={{
           position: 'fixed',
           top: 0,
-          left: 0,
+          left: SIDEBAR_WIDTH,
           right: 0,
-          height: 64,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: `0 ${spacing.lg}px`,
-          backgroundColor: colors.surface,
+          // Chrome dark unified — el header comparte color con la sidebar
+          // (`background`), no con las cards (`surface`). Esto evita que
+          // la chrome compita visualmente con el contenido elevado.
+          backgroundColor: colors.background,
           borderBottom: `1px solid ${colors.border}`,
           zIndex: 50,
         }}
       >
-        <span
-          style={{
-            fontSize: fontSize.lg,
-            fontWeight: fontWeight.bold,
-            color: colors.text,
-            letterSpacing: '-0.02em',
-            width: SIDEBAR_WIDTH - spacing.lg,
-          }}
-        >
-          Finanzas
-        </span>
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
+            justifyContent: 'flex-end',
             gap: spacing.xs,
-            color: colors.textMuted,
+            padding: `0 ${spacing.lg}px`,
+            height: 56,
+            boxSizing: 'border-box',
           }}
         >
           <IconButton ariaLabel="Notificaciones">
             <BellIcon size={20} />
           </IconButton>
-          <IconButton ariaLabel="Carteras">
-            <WalletIcon size={20} />
-          </IconButton>
+          <CurrencyMenu />
           <ThemeToggle />
-          <IconButton ariaLabel="Cerrar sesión" onClick={handleLogout}>
-            <LogOutIcon size={20} />
-          </IconButton>
+          <UserMenu user={user} onLogout={handleLogout} />
         </div>
-      </header>
 
-      {activeModule && <ModuleSidebar active={activeModule} />}
+        {hasSections && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              padding: `0 ${spacing.lg}px`,
+              height: 48,
+              boxSizing: 'border-box',
+              overflowX: 'auto',
+            }}
+          >
+            <ModuleSections module={activeModule} />
+          </div>
+        )}
+      </header>
 
       <main
         style={{
-          paddingTop: 64,
+          paddingTop: hasSections ? HEADER_HEIGHT : HEADER_HEIGHT_BARE,
           paddingLeft: SIDEBAR_WIDTH,
           minHeight: '100vh',
+          boxSizing: 'border-box',
         }}
       >
         <PasskeyPrompt />

@@ -7,7 +7,8 @@ import {
   fromDateInputValue,
   toDateInputValue,
 } from '@finanzas/ui';
-import { useCategories } from '@finanzas/services';
+import { useCategories, useUserCurrencies } from '@finanzas/services';
+import { useCurrencyStore } from '@finanzas/store';
 import type {
   Category,
   Transaction,
@@ -17,6 +18,10 @@ import type {
 
 import { Button } from '../ui/button';
 import { Select, TextArea, TextInput } from '../ui/field';
+
+// Mismas monedas siempre visibles que en el selector global del header.
+// Mantener sincronizado con `currency-menu.tsx` cuando se amplíe.
+const BASE_CURRENCIES = ['EUR', 'USD'] as const;
 
 export interface TransactionFormValues {
   amount: string;
@@ -34,10 +39,13 @@ export interface TransactionFormProps {
   onCancel?: () => void;
 }
 
-function buildInitialValues(initial?: Transaction): TransactionFormValues {
+function buildInitialValues(
+  initial: Transaction | undefined,
+  defaultCurrency: string,
+): TransactionFormValues {
   return {
     amount: initial?.amount ?? '',
-    currency: initial?.currency ?? 'EUR',
+    currency: initial?.currency ?? defaultCurrency,
     occurred_at: toDateInputValue(initial?.occurred_at ?? new Date().toISOString()),
     category_id: initial?.category_id ?? '',
     description: initial?.description ?? '',
@@ -52,8 +60,22 @@ export function TransactionForm({
   onCancel,
 }: TransactionFormProps) {
   const { data: categories, isLoading: loadingCategories } = useCategories();
-  const [values, setValues] = useState<TransactionFormValues>(() => buildInitialValues(initial));
+  const userCurrencies = useUserCurrencies().data;
+  // Pre-rellenamos con la moneda activa global — el usuario suele
+  // crear transacciones en la moneda con la que está visualizando, y
+  // si no, puede cambiarla en el desplegable.
+  const activeCurrency = useCurrencyStore((s) => s.currency);
+  const [values, setValues] = useState<TransactionFormValues>(() =>
+    buildInitialValues(initial, activeCurrency),
+  );
   const [error, setError] = useState<string | null>(null);
+
+  // Opciones del selector: BASE (EUR + USD) + las que el usuario ya
+  // usa + la actual del form (por si edita una transacción en una
+  // moneda que ya no está en BD por borrados). Sin duplicados.
+  const currencyOptions = Array.from(
+    new Set([...BASE_CURRENCIES, ...(userCurrencies ?? []), values.currency].filter(Boolean)),
+  );
 
   function handleChange<K extends keyof TransactionFormValues>(field: K, value: string) {
     setValues((prev) => ({ ...prev, [field]: value }));
@@ -91,13 +113,17 @@ export function TransactionForm({
         onChange={(e) => handleChange('amount', e.target.value)}
         required
       />
-      <TextInput
+      <Select
         label="Moneda"
-        type="text"
-        maxLength={3}
         value={values.currency}
         onChange={(e) => handleChange('currency', e.target.value)}
-      />
+      >
+        {currencyOptions.map((code) => (
+          <option key={code} value={code}>
+            {code}
+          </option>
+        ))}
+      </Select>
       <TextInput
         label="Fecha"
         type="date"
