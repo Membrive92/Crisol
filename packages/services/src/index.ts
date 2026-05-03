@@ -13,6 +13,12 @@ export { transactionsApi } from './api/endpoints/transactions';
 export { dashboardApi } from './api/endpoints/dashboard';
 export { importsApi, type CreateImportPayload } from './api/endpoints/imports';
 export { receiptsApi } from './api/endpoints/receipts';
+export {
+  currencyApi,
+  type ConvertQuery,
+  type ConvertResponse,
+  type RatesResponse,
+} from './api/endpoints/currency';
 
 export { queryKeys } from './query/keys';
 export {
@@ -45,3 +51,8 @@ export {
   useRejectReceipt,
   useReceiptImage,
 } from './query/hooks/useReceipts';
+export {
+  useExchangeRates,
+  exchangeRatesQueryOptions,
+  type ExchangeRatesResult,
+} from './query/hooks/useCurrency';

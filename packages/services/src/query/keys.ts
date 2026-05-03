@@ -51,6 +51,11 @@ export const queryKeys = {
       [...queryKeys.receipts.all, 'list', normalizeQuery(query)] as const,
     detail: (id: string) => [...queryKeys.receipts.all, 'detail', id] as const,
   },
+  currency: {
+    all: ['currency'] as const,
+    rates: (date: string | undefined) =>
+      [...queryKeys.currency.all, 'rates', date ?? 'today'] as const,
+  },
 } as const;
 
 /**

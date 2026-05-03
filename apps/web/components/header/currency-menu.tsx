@@ -52,6 +52,8 @@ export function CurrencyMenu() {
 
   const currency = useCurrencyStore((s) => s.currency);
   const setCurrency = useCurrencyStore((s) => s.setCurrency);
+  const convertAll = useCurrencyStore((s) => s.convertAll);
+  const setConvertAll = useCurrencyStore((s) => s.setConvertAll);
   const currenciesQuery = useUserCurrencies();
   const userCurrencies = currenciesQuery.data;
 
@@ -169,9 +171,95 @@ export function CurrencyMenu() {
               />
             ))}
           </div>
+
+          {/* Toggle de conversión cross-currency. ON (default) suma
+              todas las monedas convertidas a la activa; OFF mantiene
+              el filtrado pre-PHASE-8.2. */}
+          <div
+            style={{
+              borderTop: `1px solid ${colors.border}`,
+              padding: `${spacing.sm}px ${spacing.md}px`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: spacing.sm,
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span
+                style={{
+                  fontSize: fontSize.sm,
+                  fontWeight: fontWeight.medium,
+                  color: colors.text,
+                }}
+              >
+                Convertir todas las monedas
+              </span>
+              <span
+                style={{
+                  fontSize: fontSize.xs,
+                  color: colors.textSubtle,
+                  marginTop: 2,
+                }}
+              >
+                Suma cross-currency a {currency}.
+              </span>
+            </div>
+            <Toggle
+              checked={convertAll}
+              onChange={setConvertAll}
+              ariaLabel="Convertir todas las monedas"
+            />
+          </div>
         </div>
       )}
     </div>
+  );
+}
+
+function Toggle({
+  checked,
+  onChange,
+  ariaLabel,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  ariaLabel: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={ariaLabel}
+      onClick={() => onChange(!checked)}
+      style={{
+        width: 36,
+        height: 20,
+        borderRadius: 999,
+        border: `1px solid ${checked ? colors.primary : colors.border}`,
+        backgroundColor: checked ? colors.primary : colors.surfaceMuted,
+        position: 'relative',
+        cursor: 'pointer',
+        padding: 0,
+        flex: '0 0 auto',
+        transition: 'background-color 120ms ease, border-color 120ms ease',
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          position: 'absolute',
+          top: 1,
+          left: checked ? 17 : 1,
+          width: 16,
+          height: 16,
+          borderRadius: '50%',
+          backgroundColor: checked ? colors.onPrimary : colors.text,
+          transition: 'left 120ms ease',
+        }}
+      />
+    </button>
   );
 }
 
