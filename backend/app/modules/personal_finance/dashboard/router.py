@@ -1,8 +1,17 @@
 """Router del módulo dashboard.
 
 Todos los endpoints son GET (read-only). El `user_id` viene del JWT vía
-`CurrentUser`. La moneda por defecto es USD (se puede cambiar con
-`?currency=EUR`).
+`CurrentUser`.
+
+Modo de moneda: dos parámetros mutuamente excluyentes (gana
+`target_currency` si llegan ambos).
+
+- `?currency=EUR` (legacy) — filtra por esa moneda y agrega importes
+  crudos. Comportamiento pre-PHASE-8.3.
+- `?target_currency=EUR` (PHASE-8.3) — no filtra; convierte cada
+  transacción al destino con la tasa **del día de su `occurred_at`** y
+  agrega después. Las transacciones sin tasa se cuentan en
+  `unconvertible_count` (sólo `summary` lo expone).
 """
 
 from __future__ import annotations
@@ -35,16 +44,21 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 _DEFAULT_CURRENCY = "USD"
 
 
+def _resolve_currency_params(
+    currency: str | None, target_currency: str | None
+) -> tuple[str | None, str | None]:
+    """Si no llega ninguno, default a `currency=USD` (legacy)."""
+    if target_currency is None and currency is None:
+        return _DEFAULT_CURRENCY, None
+    return currency, target_currency
+
+
 @router.get("/currencies", response_model=list[str])
 async def currencies_endpoint(
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[str]:
-    """Monedas distintas presentes en las transacciones del usuario.
-
-    Sirve para que el frontend arranque el filtro de moneda con un valor
-    real del usuario en vez de hardcodear `USD`/`EUR`.
-    """
+    """Monedas distintas presentes en las transacciones del usuario."""
     return await list_user_currencies(db, user.id)
 
 
@@ -52,15 +66,18 @@ async def currencies_endpoint(
 async def summary_endpoint(
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
-    currency: str = Query(default=_DEFAULT_CURRENCY, min_length=3, max_length=3),
+    currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
+    target_currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
 ) -> SummaryResponse:
     """Balance, ingresos, gastos y total de movimientos."""
+    cur, target = _resolve_currency_params(currency, target_currency)
     return await get_summary(
         db,
         user.id,
-        currency.upper(),
+        currency=cur,
+        target_currency=target,
         date_from=date_from,
         date_to=date_to,
     )
@@ -70,16 +87,19 @@ async def summary_endpoint(
 async def by_category_endpoint(
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
-    currency: str = Query(default=_DEFAULT_CURRENCY, min_length=3, max_length=3),
+    currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
+    target_currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     kind: CategoryKind | None = None,
 ) -> list[CategoryBreakdownItem]:
-    """Totales por categoría (incluye bucket "Sin categoría" si `kind` es None)."""
+    """Totales por categoría."""
+    cur, target = _resolve_currency_params(currency, target_currency)
     return await get_breakdown_by_category(
         db,
         user.id,
-        currency.upper(),
+        currency=cur,
+        target_currency=target,
         date_from=date_from,
         date_to=date_to,
         kind=kind,
@@ -91,26 +111,33 @@ async def by_month_endpoint(
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     year: int = Query(default_factory=lambda: datetime.now().year, ge=1970, le=2999),
-    currency: str = Query(default=_DEFAULT_CURRENCY, min_length=3, max_length=3),
+    currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
+    target_currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
 ) -> list[MonthlyBucket]:
-    """12 buckets mensuales (ingresos, gastos, balance) para el año pedido."""
-    return await get_monthly_breakdown(db, user.id, currency.upper(), year)
+    """12 buckets mensuales para el año."""
+    cur, target = _resolve_currency_params(currency, target_currency)
+    return await get_monthly_breakdown(
+        db, user.id, year=year, currency=cur, target_currency=target
+    )
 
 
 @router.get("/top-expenses", response_model=list[TopExpenseItem])
 async def top_expenses_endpoint(
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
-    currency: str = Query(default=_DEFAULT_CURRENCY, min_length=3, max_length=3),
+    currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
+    target_currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     limit: int = Query(default=10, ge=1, le=50),
 ) -> list[TopExpenseItem]:
-    """Top N gastos ordenados por importe desc."""
+    """Top N gastos por importe (convertido si target_currency)."""
+    cur, target = _resolve_currency_params(currency, target_currency)
     return await get_top_expenses(
         db,
         user.id,
-        currency.upper(),
+        currency=cur,
+        target_currency=target,
         date_from=date_from,
         date_to=date_to,
         limit=limit,

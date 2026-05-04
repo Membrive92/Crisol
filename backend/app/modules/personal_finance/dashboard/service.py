@@ -1,18 +1,29 @@
 """Lógica de negocio del módulo dashboard.
 
-El dashboard es read-only: no comita, no muta, sólo agrega sobre las tablas
-`transactions` y `categories`. El user_id se recibe como parámetro (vía
-`CurrentUser` en el router).
+Read-only: agregaciones sobre `transactions`. El service decide entre
+los dos modos de moneda:
+
+- **legacy** (`currency` filtra): mantiene el contrato anterior a
+  PHASE-8.3 — totales por una sola moneda, sin conversión.
+- **cross-currency** (`target_currency`): convierte cada transacción a
+  la moneda destino con la tasa **del día de su `occurred_at`** (vía
+  `conversion.converted_amount_expr`) y agrega después.
+
+Si llegan ambos parámetros, gana `target_currency` — es el modo
+preferido. Si no llega ninguno, se asume legacy con `_DEFAULT_CURRENCY`.
 """
 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
+from sqlalchemy import Date as SQLDate
+from sqlalchemy import cast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.currency import service as currency_service
 from app.modules.personal_finance.categories.models import CategoryKind
 from app.modules.personal_finance.dashboard import repository
 from app.modules.personal_finance.dashboard.schemas import (
@@ -21,8 +32,62 @@ from app.modules.personal_finance.dashboard.schemas import (
     SummaryResponse,
     TopExpenseItem,
 )
+from app.modules.personal_finance.transactions.models import Transaction
 
 _UNCATEGORIZED_NAME = "Sin categoría"
+
+
+async def _ensure_rates_in_scope(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    target_currency: str,
+    date_from: datetime | None,
+    date_to: datetime | None,
+) -> None:
+    """Antes de agregar en cross-currency, asegura que las tasas para
+    cada día con transacciones existan en BD.
+
+    Sin esta llamada, transacciones históricas (más antiguas que el
+    snapshot embebido + ventana de 14d) quedarían fuera del SUM con
+    `unconvertible_count > 0`. Con ella, el primer request de cada
+    fecha dispara fetch + persist + queda cacheado para siempre.
+    """
+    target = target_currency.upper()
+    query = (
+        select(cast(Transaction.occurred_at, SQLDate))
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.currency != target)
+        .distinct()
+    )
+    if date_from is not None:
+        query = query.where(Transaction.occurred_at >= date_from)
+    if date_to is not None:
+        query = query.where(Transaction.occurred_at <= date_to)
+
+    result = await db.execute(query)
+    dates: list[date] = [row[0] for row in result.all()]
+    if not dates:
+        return
+    await currency_service.ensure_rates_for_dates(db, dates)
+
+
+def _resolve_mode(
+    currency: str | None, target_currency: str | None
+) -> tuple[str | None, str | None, str]:
+    """Devuelve `(legacy_currency, target_currency, displayed_currency)`.
+
+    - Si `target_currency` viene → modo cross-currency. `legacy=None`.
+    - Si sólo `currency` → modo legacy. `target=None`.
+    - Si ninguno → usar `currency` legacy con default upstream.
+    """
+    if target_currency is not None:
+        target = target_currency.upper()
+        return None, target, target
+    if currency is not None:
+        cur = currency.upper()
+        return cur, None, cur
+    return None, None, ""
 
 
 async def list_user_currencies(
@@ -36,37 +101,63 @@ async def list_user_currencies(
 async def get_summary(
     db: AsyncSession,
     user_id: uuid.UUID,
-    currency: str,
     *,
+    currency: str | None = None,
+    target_currency: str | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
 ) -> SummaryResponse:
-    """Balance global (ingresos, gastos, neto) y cuenta de transacciones.
+    """Balance global. Soporta legacy (`currency`) y cross-currency (`target_currency`)."""
+    legacy, target, displayed = _resolve_mode(currency, target_currency)
 
-    Si llegan `date_from` y `date_to`, se calcula además el rango previo
-    de igual longitud (terminando justo antes de `date_from`) para que el
-    frontend pueda pintar deltas vs periodo anterior.
-    """
+    if target is not None:
+        await _ensure_rates_in_scope(
+            db,
+            user_id,
+            target_currency=target,
+            date_from=date_from,
+            date_to=date_to,
+        )
+
     totals = await repository.get_totals_by_kind(
-        db, user_id, currency, date_from=date_from, date_to=date_to
+        db,
+        user_id,
+        currency=legacy,
+        target_currency=target,
+        date_from=date_from,
+        date_to=date_to,
     )
     income = totals.get(CategoryKind.INCOME, Decimal("0"))
     expenses = totals.get(CategoryKind.EXPENSE, Decimal("0"))
     count = await repository.count_transactions(
-        db, user_id, currency, date_from=date_from, date_to=date_to
+        db, user_id, currency=legacy, date_from=date_from, date_to=date_to
+    )
+    unconvertible = (
+        await repository.count_unconvertible(
+            db,
+            user_id,
+            target_currency=target,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        if target is not None
+        else 0
     )
 
     prev_income: Decimal | None = None
     prev_expenses: Decimal | None = None
     prev_balance: Decimal | None = None
     if date_from is not None and date_to is not None:
-        # Periodo previo de la misma duración, terminando justo antes de date_from.
-        # Ej.: rango "2026-01-01..2026-12-31" → previo "2025-01-01..2025-12-31".
         period_length = date_to - date_from
         prev_to = date_from
         prev_from = date_from - period_length
         prev_totals = await repository.get_totals_by_kind(
-            db, user_id, currency, date_from=prev_from, date_to=prev_to
+            db,
+            user_id,
+            currency=legacy,
+            target_currency=target,
+            date_from=prev_from,
+            date_to=prev_to,
         )
         prev_income = prev_totals.get(CategoryKind.INCOME, Decimal("0"))
         prev_expenses = prev_totals.get(CategoryKind.EXPENSE, Decimal("0"))
@@ -77,7 +168,8 @@ async def get_summary(
         expenses=expenses,
         balance=income - expenses,
         transaction_count=count,
-        currency=currency,
+        currency=displayed,
+        unconvertible_count=unconvertible,
         previous_period_income=prev_income,
         previous_period_expenses=prev_expenses,
         previous_period_balance=prev_balance,
@@ -87,15 +179,31 @@ async def get_summary(
 async def get_breakdown_by_category(
     db: AsyncSession,
     user_id: uuid.UUID,
-    currency: str,
     *,
+    currency: str | None = None,
+    target_currency: str | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     kind: CategoryKind | None = None,
 ) -> list[CategoryBreakdownItem]:
-    """Desglose por categoría. Bucket "Sin categoría" si `kind` es None."""
+    """Desglose por categoría."""
+    legacy, target, _ = _resolve_mode(currency, target_currency)
+    if target is not None:
+        await _ensure_rates_in_scope(
+            db,
+            user_id,
+            target_currency=target,
+            date_from=date_from,
+            date_to=date_to,
+        )
     rows = await repository.get_breakdown_by_category(
-        db, user_id, currency, date_from=date_from, date_to=date_to, kind=kind
+        db,
+        user_id,
+        currency=legacy,
+        target_currency=target,
+        date_from=date_from,
+        date_to=date_to,
+        kind=kind,
     )
     items = [
         CategoryBreakdownItem(
@@ -114,11 +222,25 @@ async def get_breakdown_by_category(
 async def get_monthly_breakdown(
     db: AsyncSession,
     user_id: uuid.UUID,
-    currency: str,
+    *,
     year: int,
+    currency: str | None = None,
+    target_currency: str | None = None,
 ) -> list[MonthlyBucket]:
-    """12 buckets (uno por mes) con ingresos, gastos y balance del año pedido."""
-    rows = await repository.get_totals_by_month(db, user_id, currency, year)
+    """12 buckets mensuales para el año."""
+    legacy, target, _ = _resolve_mode(currency, target_currency)
+    if target is not None:
+        # `by-month` cubre el año completo, así que el rango es ese.
+        await _ensure_rates_in_scope(
+            db,
+            user_id,
+            target_currency=target,
+            date_from=datetime(year, 1, 1),
+            date_to=datetime(year, 12, 31, 23, 59, 59),
+        )
+    rows = await repository.get_totals_by_month(
+        db, user_id, year=year, currency=legacy, target_currency=target
+    )
 
     income_per_month: dict[int, Decimal] = {m: Decimal("0") for m in range(1, 13)}
     expenses_per_month: dict[int, Decimal] = {m: Decimal("0") for m in range(1, 13)}
@@ -143,24 +265,42 @@ async def get_monthly_breakdown(
 async def get_top_expenses(
     db: AsyncSession,
     user_id: uuid.UUID,
-    currency: str,
     *,
+    currency: str | None = None,
+    target_currency: str | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     limit: int = 10,
 ) -> list[TopExpenseItem]:
-    """Top N gastos por importe desc dentro del rango."""
+    """Top N gastos por importe convertido desc."""
+    legacy, target, _ = _resolve_mode(currency, target_currency)
+    if target is not None:
+        await _ensure_rates_in_scope(
+            db,
+            user_id,
+            target_currency=target,
+            date_from=date_from,
+            date_to=date_to,
+        )
     rows = await repository.get_top_expenses(
-        db, user_id, currency, date_from=date_from, date_to=date_to, limit=limit
+        db,
+        user_id,
+        currency=legacy,
+        target_currency=target,
+        date_from=date_from,
+        date_to=date_to,
+        limit=limit,
     )
     return [
         TopExpenseItem(
             transaction_id=tx.id,
             description=tx.description,
-            amount=tx.amount,
+            # `converted` viene en moneda destino cuando hay target. En
+            # modo legacy es el amount original.
+            amount=converted if converted is not None else tx.amount,
             occurred_at=tx.occurred_at,
             category_id=tx.category_id,
             category_name=category_name,
         )
-        for tx, category_name in rows
+        for tx, category_name, converted in rows
     ]

@@ -33,6 +33,21 @@ from app.modules.currency.schemas import ConversionResult, RateFallback
 CANONICAL_BASE = "EUR"
 _QUANTIZE = Decimal("0.01")
 
+# Conjunto canónico de monedas que pre-cargamos cuando hacemos un fetch
+# lazy. Coincide con el snapshot embebido y con `CURRENCY_SYMBOL` del
+# `currency-menu.tsx` del frontend. Mantener sincronizado.
+COMMON_QUOTES: tuple[str, ...] = (
+    "USD",
+    "GBP",
+    "JPY",
+    "CHF",
+    "CAD",
+    "AUD",
+    "MXN",
+    "BRL",
+    "CNY",
+)
+
 
 def _normalize(code: str) -> str:
     return code.strip().upper()
@@ -180,6 +195,51 @@ async def refresh_rates(
         for quote, rate in fetched.items()
     ]
     return await repository.upsert_rates(db, rows)
+
+
+async def ensure_rates_for_dates(
+    db: AsyncSession,
+    dates: Iterable[date],
+    *,
+    base: str = CANONICAL_BASE,
+    quotes: Iterable[str] | None = None,
+) -> int:
+    """Garantiza que cada fecha tenga tasas en BD; si no, las trae.
+
+    Pensado para modo cross-currency del dashboard: antes de agregar,
+    rellenamos huecos para las fechas concretas de las transacciones
+    del scope. Best-effort: errores de red por fecha se tragan.
+
+    No re-fetcha si la fecha tiene al menos una tasa con la base
+    canónica dentro del rango exacto, o si hay una tasa anterior
+    suficientemente cercana (la ventana de fallback del repository
+    cubre el caso).
+
+    Devuelve el número de fechas efectivamente fetcheadas (útil para
+    métricas / logs futuros).
+    """
+    base_norm = _normalize(base)
+    quote_list = tuple(quotes) if quotes is not None else COMMON_QUOTES
+
+    fetched = 0
+    for target in sorted(set(dates)):
+        # Si ya hay tasa exacta o reciente (dentro de ventana), saltar.
+        # Usamos USD como canario porque las fechas reales del ECB tienen
+        # USD siempre, y el snapshot también.
+        existing = await repository.get_rate_with_fallback(
+            db, rate_date=target, base=base_norm, quote="USD"
+        )
+        if existing is not None:
+            continue
+        try:
+            await refresh_rates(
+                db, target_date=target, quotes=quote_list, base=base_norm
+            )
+            await db.commit()
+            fetched += 1
+        except (FrankfurterUnavailableError, FrankfurterInvalidResponseError):
+            continue
+    return fetched
 
 
 async def ensure_rate(

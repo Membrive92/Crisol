@@ -20,6 +20,11 @@ class SummaryResponse(BaseModel):
     rango previo de igual longitud (`previous_period_*`) para que el
     frontend pinte deltas vs periodo anterior. Si no hay rango, los
     `previous_*` quedan en `None`.
+
+    En modo `target_currency` (PHASE-8.3), `currency` refleja la moneda
+    destino y `unconvertible_count` indica cuántas transacciones del
+    rango no se pudieron convertir por falta de tasa. En modo legacy
+    `currency` es el filtro y `unconvertible_count` es siempre 0.
     """
 
     income: Decimal
@@ -27,6 +32,7 @@ class SummaryResponse(BaseModel):
     balance: Decimal
     transaction_count: int
     currency: str
+    unconvertible_count: int = 0
     previous_period_income: Decimal | None = None
     previous_period_expenses: Decimal | None = None
     previous_period_balance: Decimal | None = None

@@ -7,6 +7,12 @@ export interface DashboardSummary {
   transaction_count: number;
   currency: string;
   /**
+   * Transacciones del rango que no se pudieron convertir a
+   * `target_currency` por falta de tasa (PHASE-8.3). Sólo es > 0 en
+   * modo cross-currency; en legacy siempre es 0.
+   */
+  unconvertible_count: number;
+  /**
    * Totales del periodo previo de igual longitud (terminando justo antes
    * de `date_from`). El backend los devuelve cuando el caller pasa
    * `date_from` y `date_to`; sin rango, los tres son `null`.

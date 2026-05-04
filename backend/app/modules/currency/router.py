@@ -25,12 +25,6 @@ from app.modules.currency.schemas import (
 
 router = APIRouter(prefix="/currency", tags=["currency"])
 
-# Conjunto que pre-cargamos cuando una fecha pedida no tiene datos.
-# Se solapa con el snapshot embebido + lo que muestra el selector de
-# moneda del frontend; mantener sincronizado con
-# `apps/web/components/header/currency-menu.tsx::CURRENCY_SYMBOL`.
-_COMMON_QUOTES = ("USD", "GBP", "JPY", "CHF", "CAD", "AUD", "MXN", "BRL", "CNY")
-
 # Para fechas más antiguas que esto no triggereamos lazy fetch — un
 # request con `?date=1995-01-01` no debe golpear la API externa. La
 # ventana cubre con margen los rangos del dashboard (1 año + holgura).
@@ -66,7 +60,7 @@ async def _maybe_lazy_fetch(
         await service.refresh_rates(
             db,
             target_date=target_date,
-            quotes=_COMMON_QUOTES,
+            quotes=service.COMMON_QUOTES,
             base=base,
         )
         await db.commit()
