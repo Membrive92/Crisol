@@ -52,13 +52,33 @@ class Transaction(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+    # Soft delete (PHASE-10.1). NULL = activa, timestamp = en papelera.
+    # Las queries del módulo y del dashboard filtran por defecto
+    # `deleted_at IS NULL`; los endpoints `/trash`/restore/purge son los
+    # únicos que ven o tocan filas con valor.
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     __table_args__ = (
+        # Partial unique para dedup de imports — incluye `AND deleted_at
+        # IS NULL` para que un row trasheado no bloquee re-importar la
+        # misma fila desde el fichero original. Si el usuario restaura
+        # la versión trasheada después, puede acabar con un duplicado:
+        # decisión consciente, prima la facilidad de re-import.
         Index(
             "uq_transactions_user_import_hash",
             "user_id",
             "import_hash",
             unique=True,
-            postgresql_where="import_hash IS NOT NULL",
+            postgresql_where="import_hash IS NOT NULL AND deleted_at IS NULL",
+        ),
+        # Partial index sobre user_id sólo para filas activas — todas
+        # las queries de listado/agregación añaden el filtro, así que
+        # mantenemos el índice "delgado".
+        Index(
+            "ix_transactions_user_id_active",
+            "user_id",
+            postgresql_where="deleted_at IS NULL",
         ),
     )

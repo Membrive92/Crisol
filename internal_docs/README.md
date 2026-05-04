@@ -106,6 +106,13 @@ Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
 | 9.1  | Web sidebar como drawer mobile        | ✅     | —  |
 | 9.2  | Análisis screen en mobile             | ✅     | —  |
 
+### Fase 10 — Soft-delete + papelera de transacciones
+
+| Fase | Nombre                                | Estado | PR |
+|------|---------------------------------------|--------|----|
+| 10.1 | Backend soft-delete + endpoints trash | ✅     | —  |
+| 10.2 | Frontend papelera (web + mobile)      | ⏳     | —  |
+
 ---
 
 ## Estructura de este directorio

@@ -60,6 +60,7 @@ async def ensure_rates_for_user_scope(
     query = (
         select(cast(Transaction.occurred_at, SQLDate))
         .where(Transaction.user_id == user_id)
+        .where(Transaction.deleted_at.is_(None))
         .where(Transaction.currency != target)
         .distinct()
     )

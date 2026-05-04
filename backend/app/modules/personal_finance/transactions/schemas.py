@@ -53,6 +53,10 @@ class TransactionResponse(BaseModel):
     receipt_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
+    # NULL en activas. Timestamp en papelera (PHASE-10.1) — el endpoint
+    # `/transactions/trash` rellena este campo; el listado normal lo
+    # devuelve siempre None porque excluye soft-deleted.
+    deleted_at: datetime | None = None
     converted_amount: Decimal | None = None
     converted_currency: str | None = None
 

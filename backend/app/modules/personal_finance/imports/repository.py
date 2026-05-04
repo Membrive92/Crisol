@@ -50,12 +50,20 @@ async def list_jobs(
 async def find_existing_hashes(
     db: AsyncSession, user_id: uuid.UUID, hashes: list[str]
 ) -> set[str]:
-    """Devuelve los hashes que YA existen en transactions del usuario."""
+    """Devuelve los hashes que YA existen en transactions activas del usuario.
+
+    Filtra soft-deleted (PHASE-10.1) para coherencia con el partial
+    unique index `uq_transactions_user_import_hash`, que también
+    excluye `deleted_at IS NOT NULL`. Re-importar una fila cuya
+    versión previa fue trasheada produce una nueva — si el usuario
+    restaura luego, asume el riesgo de duplicado.
+    """
     if not hashes:
         return set()
     result = await db.execute(
         select(Transaction.import_hash).where(
             Transaction.user_id == user_id,
+            Transaction.deleted_at.is_(None),
             Transaction.import_hash.in_(hashes),
         )
     )

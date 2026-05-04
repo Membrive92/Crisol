@@ -24,6 +24,9 @@ from app.modules.personal_finance.transactions.service import (
     delete_transaction,
     get_transaction,
     list_transactions,
+    list_trashed_transactions,
+    purge_transaction,
+    restore_transaction,
     update_transaction,
 )
 
@@ -57,11 +60,12 @@ async def list_endpoint(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> TransactionListResponse:
-    """Lista transacciones con filtros opcionales.
+    """Lista transacciones activas con filtros opcionales.
 
     Si se pasa `target_currency`, cada fila incluye `converted_amount`
     + `converted_currency` (PHASE-8.4) — la UI puede pintar el
     equivalente en moneda activa sin lanzar fetches por fecha.
+    Las soft-deleted (PHASE-10.1) NO aparecen aquí — usar `/trash`.
     """
     items, total = await list_transactions(
         db,
@@ -82,13 +86,38 @@ async def list_endpoint(
     )
 
 
+@router.get("/trash", response_model=TransactionListResponse)
+async def list_trash_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> TransactionListResponse:
+    """Lista las transacciones en papelera del usuario, ordenadas por
+    `deleted_at DESC`. PHASE-10.1.
+
+    Cada fila trae `deleted_at` no-NULL para que la UI pueda pintar
+    "borrada hace X días". Sin filtros adicionales — la papelera es
+    una vista plana de "qué he borrado recientemente".
+    """
+    items, total = await list_trashed_transactions(
+        db, user.id, limit=limit, offset=offset
+    )
+    return TransactionListResponse(
+        items=[TransactionResponse.model_validate(tx) for tx in items],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
 @router.get("/{transaction_id}", response_model=TransactionResponse)
 async def get_endpoint(
     transaction_id: uuid.UUID,
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TransactionResponse:
-    """Obtiene una transacción por ID."""
+    """Obtiene una transacción activa por ID."""
     transaction = await get_transaction(db, transaction_id, user.id)
     return TransactionResponse.model_validate(transaction)
 
@@ -124,7 +153,47 @@ async def delete_endpoint(
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
-    """Elimina una transacción."""
+    """Mueve la transacción a papelera (soft-delete, PHASE-10.1).
+
+    Cambio de comportamiento respecto a pre-PHASE-10.1: ya no destruye.
+    Para borrar definitivamente, usar `DELETE /transactions/{id}/purge`
+    sobre una tx que ya esté en papelera.
+    """
     await delete_transaction(db, transaction_id, user.id)
+    await db.commit()
+    return Response(status_code=204)
+
+
+@router.post("/{transaction_id}/restore", response_model=TransactionResponse)
+async def restore_endpoint(
+    transaction_id: uuid.UUID,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> TransactionResponse:
+    """Saca una transacción de la papelera. PHASE-10.1.
+
+    404 si la transacción no existe o no está en papelera.
+    """
+    transaction = await restore_transaction(db, transaction_id, user.id)
+    await db.commit()
+    return TransactionResponse.model_validate(transaction)
+
+
+@router.delete(
+    "/{transaction_id}/purge", status_code=204, response_class=Response
+)
+async def purge_endpoint(
+    transaction_id: uuid.UUID,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    """Elimina permanente (DELETE real) una transacción que esté EN
+    papelera. PHASE-10.1.
+
+    404 si la transacción no existe o no está en papelera. Para purgar
+    una activa primero hacer `DELETE /transactions/{id}` (soft) y luego
+    purgar.
+    """
+    await purge_transaction(db, transaction_id, user.id)
     await db.commit()
     return Response(status_code=204)

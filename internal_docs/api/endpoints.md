@@ -90,15 +90,18 @@ asociadas conservan `category_id = NULL` (`ON DELETE SET NULL`).
 
 ---
 
-## Transactions (`PHASE-2.1` + `PHASE-8.4`)
+## Transactions (`PHASE-2.1` + `PHASE-8.4` + `PHASE-10.1`)
 
 | Método | Ruta | Auth | Body / Query | Response |
 |--------|------|------|--------------|----------|
-| GET | `/transactions` | sí | `category_id?`, `date_from?`, `date_to?`, `search?`, `target_currency?` (3 letras, PHASE-8.4), `limit` (1..200, def 50), `offset` (def 0) | `200` `{ items, total, limit, offset }` |
-| GET | `/transactions/{id}` | sí | — | `200` `TransactionResponse` |
+| GET | `/transactions` | sí | `category_id?`, `date_from?`, `date_to?`, `search?`, `target_currency?` (3 letras, PHASE-8.4), `limit` (1..200, def 50), `offset` (def 0) | `200` `{ items, total, limit, offset }` (sólo activas) |
+| GET | `/transactions/trash` | sí | `limit` (1..200, def 50), `offset` (def 0) | `200` `{ items, total, limit, offset }` — soft-deleted, `deleted_at DESC` (PHASE-10.1) |
+| GET | `/transactions/{id}` | sí | — | `200` `TransactionResponse` (404 si trasheada) |
 | POST | `/transactions` | sí | `{ amount, occurred_at, category_id?, currency?, description?, source? }` | `201` `TransactionResponse` |
 | PUT | `/transactions/{id}` | sí | `Partial<TransactionCreate>` | `200` `TransactionResponse` |
-| DELETE | `/transactions/{id}` | sí | — | `204` |
+| DELETE | `/transactions/{id}` | sí | — | `204` (soft-delete, PHASE-10.1: mueve a papelera) |
+| POST | `/transactions/{id}/restore` | sí | — | `200` `TransactionResponse` (404 si no está en papelera) — PHASE-10.1 |
+| DELETE | `/transactions/{id}/purge` | sí | — | `204` (DELETE real; 404 si no está en papelera — forzar soft-delete previo) — PHASE-10.1 |
 
 `source`: `manual | import | receipt` (default `manual`). Importes
 positivos; el signo se infiere de `category.kind` en frontend.

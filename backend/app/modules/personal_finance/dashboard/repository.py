@@ -38,10 +38,15 @@ async def list_user_currencies(
     db: AsyncSession,
     user_id: uuid.UUID,
 ) -> list[str]:
-    """Devuelve las monedas distintas en las transacciones del usuario."""
+    """Devuelve las monedas distintas en las transacciones del usuario.
+
+    Excluye soft-deleted (PHASE-10.1) — una moneda que sólo existe en
+    transacciones trasheadas no debe aparecer en el selector global.
+    """
     query = (
         select(Transaction.currency)
         .where(Transaction.user_id == user_id)
+        .where(Transaction.deleted_at.is_(None))
         .distinct()
         .order_by(Transaction.currency)
     )
@@ -59,10 +64,13 @@ def _apply_scope[Q: Select[Any]](
 ) -> Q:
     """Filtros comunes (user_id, opcional currency legacy, rango de fechas).
 
-    Cuando `currency` es None la query NO filtra por moneda — el caller
-    está usando modo `target_currency` y agrega cross-currency.
+    Siempre excluye soft-deleted (PHASE-10.1) — todas las agregaciones
+    del dashboard ignoran transacciones en papelera. Cuando `currency`
+    es None la query NO filtra por moneda — el caller está usando
+    modo `target_currency` y agrega cross-currency.
     """
     query = query.where(Transaction.user_id == user_id)
+    query = query.where(Transaction.deleted_at.is_(None))
     if currency is not None:
         query = query.where(Transaction.currency == currency)
     if date_from is not None:
@@ -237,6 +245,7 @@ async def get_totals_by_month(
         select(month_col, Category.kind, func.coalesce(func.sum(amount), 0))
         .join(Category, Category.id == Transaction.category_id)
         .where(Transaction.user_id == user_id)
+        .where(Transaction.deleted_at.is_(None))
         .where(year_col == year)
         .group_by(month_col, Category.kind)
     )

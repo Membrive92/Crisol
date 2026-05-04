@@ -23,6 +23,7 @@
 | `d18a4c75b2e9` | 1.1 | `webauthn_credentials` + `webauthn_challenges`. |
 | `b27e391fa4c8` | 1.1 | `webauthn_challenges.user_id` nullable + relax FK para conditional UI. |
 | `c5d28e7f3b91` | 8.1 | `exchange_rates` + carga de snapshot offline embebido. |
+| `e4f7c91a8b3d` | 10.1 | `transactions.deleted_at` + partial index `ix_transactions_user_id_active` + recreado `uq_transactions_user_import_hash` con `AND deleted_at IS NULL`. |
 
 ---
 
@@ -63,7 +64,7 @@
 | `kind` | `ENUM('income','expense')` | tipo `categorykind`. |
 | `created_at` / `updated_at` | `TIMESTAMPTZ` | |
 
-### `transactions` (`PHASE-2.1` + `PHASE-4.1`)
+### `transactions` (`PHASE-2.1` + `PHASE-4.1` + `PHASE-10.1`)
 
 | Columna | Tipo | Notas |
 |---------|------|-------|
@@ -78,11 +79,13 @@
 | `receipt_id` | `UUID` NULLABLE | (PHASE-5.1, FK aún no creada). |
 | `import_hash` | `VARCHAR(64)` NULLABLE | SHA-256 — solo presente si `source='import'`. |
 | `created_at` / `updated_at` | `TIMESTAMPTZ` | |
+| `deleted_at` | `TIMESTAMPTZ` NULLABLE | PHASE-10.1. NULL = activa, timestamp = en papelera. |
 
 **Índices**:
 - `ix_transactions_user_id`.
 - `ix_transactions_category_id`.
-- `uq_transactions_user_import_hash` UNIQUE PARTIAL `(user_id, import_hash) WHERE import_hash IS NOT NULL`.
+- `ix_transactions_user_id_active` PARTIAL `(user_id) WHERE deleted_at IS NULL` (PHASE-10.1).
+- `uq_transactions_user_import_hash` UNIQUE PARTIAL `(user_id, import_hash) WHERE import_hash IS NOT NULL AND deleted_at IS NULL` — el `AND deleted_at IS NULL` (PHASE-10.1) permite re-importar una fila cuya versión previa fue trasheada.
 
 ### `import_jobs` (`PHASE-4.1`)
 

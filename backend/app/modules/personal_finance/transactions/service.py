@@ -15,13 +15,22 @@ from app.modules.personal_finance.transactions.repository import (
     create_transaction as persist_transaction,
 )
 from app.modules.personal_finance.transactions.repository import (
-    delete_transaction as remove_transaction,
-)
-from app.modules.personal_finance.transactions.repository import (
     get_transaction_by_id,
 )
 from app.modules.personal_finance.transactions.repository import (
     list_transactions as list_all,
+)
+from app.modules.personal_finance.transactions.repository import (
+    list_trashed_transactions as list_trashed_in_db,
+)
+from app.modules.personal_finance.transactions.repository import (
+    purge_transaction as purge_in_db,
+)
+from app.modules.personal_finance.transactions.repository import (
+    restore_transaction as restore_in_db,
+)
+from app.modules.personal_finance.transactions.repository import (
+    soft_delete_transaction as soft_delete_in_db,
 )
 from app.modules.personal_finance.transactions.schemas import TransactionCreate, TransactionUpdate
 
@@ -38,7 +47,7 @@ async def list_transactions(
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[tuple[Transaction, Decimal | None]], int]:
-    """Lista transacciones del usuario con filtros.
+    """Lista transacciones del usuario con filtros (sólo activas).
 
     Cuando se pasa `target_currency`, dispara el backfill on-demand de
     tasas (mismo helper que el dashboard) antes de listar para que las
@@ -65,14 +74,44 @@ async def list_transactions(
     )
 
 
+async def list_trashed_transactions(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[Transaction], int]:
+    """Lista transacciones del usuario que están en papelera."""
+    return await list_trashed_in_db(db, user_id, limit=limit, offset=offset)
+
+
 async def get_transaction(
     db: AsyncSession, transaction_id: uuid.UUID, user_id: uuid.UUID
 ) -> Transaction:
-    """Obtiene una transacción o lanza 404."""
+    """Obtiene una transacción activa o lanza 404."""
     transaction = await get_transaction_by_id(db, transaction_id, user_id)
     if transaction is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Transacción no encontrada"
+        )
+    return transaction
+
+
+async def get_trashed_transaction(
+    db: AsyncSession, transaction_id: uuid.UUID, user_id: uuid.UUID
+) -> Transaction:
+    """Obtiene una transacción que esté EN PAPELERA o lanza 404.
+
+    Usado por restore/purge — si el caller pide restaurar una tx que ya
+    está activa (o no existe), 404 en lugar de no-op silencioso.
+    """
+    transaction = await get_transaction_by_id(
+        db, transaction_id, user_id, deleted="trashed"
+    )
+    if transaction is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Transacción no encontrada en papelera",
         )
     return transaction
 
@@ -96,7 +135,7 @@ async def create_transaction(
 async def update_transaction(
     db: AsyncSession, transaction_id: uuid.UUID, user_id: uuid.UUID, data: TransactionUpdate
 ) -> Transaction:
-    """Actualiza una transacción existente."""
+    """Actualiza una transacción existente (sólo activas)."""
     transaction = await get_transaction(db, transaction_id, user_id)
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(transaction, field, value)
@@ -107,7 +146,31 @@ async def update_transaction(
 
 async def delete_transaction(
     db: AsyncSession, transaction_id: uuid.UUID, user_id: uuid.UUID
-) -> None:
-    """Elimina una transacción del usuario."""
+) -> Transaction:
+    """Soft-delete: mueve la transacción a papelera (PHASE-10.1).
+
+    Cambio de comportamiento respecto a pre-PHASE-10.1, que hacía
+    DELETE real. La fila sigue existiendo con `deleted_at` no-NULL y
+    deja de aparecer en list/dashboard. Recuperar via `restore`.
+    """
     transaction = await get_transaction(db, transaction_id, user_id)
-    await remove_transaction(db, transaction)
+    return await soft_delete_in_db(db, transaction)
+
+
+async def restore_transaction(
+    db: AsyncSession, transaction_id: uuid.UUID, user_id: uuid.UUID
+) -> Transaction:
+    """Saca una transacción de la papelera (vuelve a estar activa)."""
+    transaction = await get_trashed_transaction(db, transaction_id, user_id)
+    return await restore_in_db(db, transaction)
+
+
+async def purge_transaction(
+    db: AsyncSession, transaction_id: uuid.UUID, user_id: uuid.UUID
+) -> None:
+    """Elimina permanente (DELETE real) una transacción que ya esté
+    en papelera. No se puede purgar una transacción activa — primero
+    soft-delete, luego purge.
+    """
+    transaction = await get_trashed_transaction(db, transaction_id, user_id)
+    await purge_in_db(db, transaction)

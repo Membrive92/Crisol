@@ -12,7 +12,7 @@
 >   (no se tacha) — la phase doc deja la traza histórica.
 > - Si un item se promueve a fase formal, se traslada a
 >   `phases/phase-X.Y-*.md` y se borra de aquí.
-> - Última actualización: 2026-05-04 (PHASE-9.2).
+> - Última actualización: 2026-05-04 (PHASE-10.1).
 
 ---
 
@@ -20,8 +20,10 @@
 
 Si quieres atacar trabajo real (no polish), por orden:
 
-1. **Soft-delete + papelera de transacciones** — destruir sin red de
-   seguridad es la mayor laguna funcional para el usuario.
+1. **PHASE-10.2 — Frontend papelera (web + mobile)** — backend
+   soft-delete cerrado en 10.1; falta la UI para que el usuario vea
+   y use la papelera. Sin ella el cambio de comportamiento del
+   DELETE queda invisible.
 2. **Cron nocturno de tasas (APScheduler)** — el lazy fetch cubre
    "primer uso del día", pero si la app pasa días sin abrirse las
    tasas se quedan atrás.
@@ -67,7 +69,10 @@ Si quieres atacar trabajo real (no polish), por orden:
 
 ### Transactions / categories
 
-- **[PHASE-2.1]** Borrado destructivo. Sin soft-delete ni "papelera".
+- **[PHASE-10.1]** Sin TTL / auto-purge nocturno de papelera. Si
+  crece de forma indefinida, añadir cron en una fase futura.
+- **[PHASE-10.1]** Receipts no soft-delete. Sólo transactions. Si
+  hace falta, replicar el patrón.
 - **[PHASE-2.1]** Search es `ILIKE` simple — sin full-text ni semántico.
 - **[PHASE-2.1]** Sin idempotencia en `POST` (irrelevante hasta que
   haya bulk-create vía API).
