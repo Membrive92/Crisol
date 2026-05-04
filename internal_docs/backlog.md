@@ -12,7 +12,7 @@
 >   (no se tacha) — la phase doc deja la traza histórica.
 > - Si un item se promueve a fase formal, se traslada a
 >   `phases/phase-X.Y-*.md` y se borra de aquí.
-> - Última actualización: 2026-05-04 (PHASE-8.4).
+> - Última actualización: 2026-05-04 (PHASE-9.1).
 
 ---
 
@@ -20,8 +20,9 @@
 
 Si quieres atacar trabajo real (no polish), por orden:
 
-1. **Drawer mobile + paridad pantalla Análisis** — la app móvil está
-   claramente por detrás de la web.
+1. **Análisis screen en mobile (PHASE-9.2)** — la única tab del
+   módulo Personal Finance que falta en la app móvil; los componentes
+   ya existen en `apps/mobile/components/dashboard/`.
 2. **Soft-delete + papelera de transacciones** — destruir sin red de
    seguridad es la mayor laguna funcional para el usuario.
 3. **Cron nocturno de tasas (APScheduler)** — el lazy fetch cubre
@@ -119,8 +120,6 @@ Si quieres atacar trabajo real (no polish), por orden:
   ticket es mala — toca editar manualmente o rechazar y resubir.
 - **[PHASE-7.2]** Description en tabla truncada a 280px — sólo en el
   detalle se ve completo.
-- **[PHASE-7.6]** Sidebar **no es drawer** en mobile (<768px); comprime
-  el contenido en lugar de colapsar.
 - **[PHASE-7.6]** Color e icono per-categoría: las columnas existen en
   BD (`categories.color`, `categories.icon`) pero el selector en UI
   está pendiente — hoy se pinta por `kind`.

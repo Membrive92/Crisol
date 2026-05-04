@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { MODULES, type AppModule } from '@finanzas/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
 
-import { LockIcon, PlusIcon } from '@/components/ui/icons';
+import { LockIcon, PlusIcon, XIcon } from '@/components/ui/icons';
 
 export const SIDEBAR_WIDTH = 240;
 export const HEADER_ROW = 56;
@@ -14,8 +14,17 @@ export const TABS_ROW = 48;
 export const HEADER_HEIGHT = HEADER_ROW + TABS_ROW; // con tabs (módulos con sections)
 export const HEADER_HEIGHT_BARE = HEADER_ROW; // sin tabs (módulos planos como Dashboard)
 
+// Breakpoint single source of truth para el drawer mobile. El layout
+// inyecta media queries con este mismo valor — si cambia, actualizar
+// también `MOBILE_NAV_GLOBAL_STYLES` en `(app)/layout.tsx`.
+export const MOBILE_BREAKPOINT_PX = 768;
+
 interface AppSidebarProps {
   active: AppModule;
+  /** Estado del drawer mobile. En desktop (>=768px) este flag es ignorado por CSS. */
+  mobileOpen?: boolean;
+  /** Handler del botón "cerrar" interno de la sidebar (sólo visible en mobile). */
+  onCloseMobile?: (() => void) | undefined;
 }
 
 /**
@@ -29,9 +38,12 @@ interface AppSidebarProps {
  * etc.) NO viven aquí — viven en la barra superior, vía
  * `<ModuleSections>`.
  */
-export function AppSidebar({ active }: AppSidebarProps) {
+export function AppSidebar({ active, mobileOpen = false, onCloseMobile }: AppSidebarProps) {
   return (
     <aside
+      data-app-sidebar="true"
+      data-mobile-open={mobileOpen ? 'true' : 'false'}
+      aria-hidden={undefined}
       style={{
         position: 'fixed',
         top: 0,
@@ -46,7 +58,10 @@ export function AppSidebar({ active }: AppSidebarProps) {
         borderRight: `1px solid ${colors.border}`,
         display: 'flex',
         flexDirection: 'column',
-        zIndex: 40,
+        // Sube por encima del header (50) y backdrop (45) para que en
+        // modo drawer cubra el chrome al deslizarse. En desktop no
+        // entra en conflicto porque sidebar y header no se solapan.
+        zIndex: 60,
       }}
     >
       {/* Marca — único bloque de branding de la sidebar. Vive en el
@@ -59,6 +74,7 @@ export function AppSidebar({ active }: AppSidebarProps) {
           height: 56,
           display: 'flex',
           alignItems: 'center',
+          justifyContent: 'space-between',
           padding: `0 ${spacing.lg}px`,
           borderBottom: `1px solid ${colors.border}`,
           flex: '0 0 auto',
@@ -74,6 +90,27 @@ export function AppSidebar({ active }: AppSidebarProps) {
         >
           Finanzas
         </span>
+        <button
+          type="button"
+          data-mobile-only="true"
+          aria-label="Cerrar menú"
+          onClick={onCloseMobile}
+          style={{
+            display: 'none', // override en mobile vía media query global
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 36,
+            height: 36,
+            backgroundColor: 'transparent',
+            color: colors.textMuted,
+            border: 'none',
+            borderRadius: 8,
+            cursor: 'pointer',
+            padding: 0,
+          }}
+        >
+          <XIcon size={20} />
+        </button>
       </div>
 
       {/* Lista de módulos */}
