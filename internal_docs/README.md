@@ -11,6 +11,7 @@ ADRs (Architecture Decision Records), catálogo de endpoints y schema de BD.
 - [architecture.md](architecture.md) — arquitectura del sistema
 - [development-spec.md](development-spec.md) — metodología y fases
 - [lessons.md](lessons.md) — errores y reglas aprendidas
+- [backlog.md](backlog.md) — deuda técnica, limitaciones y follow-ups
 - [api/endpoints.md](api/endpoints.md) — catálogo de endpoints
 - [data-model/schema.md](data-model/schema.md) — estado del schema
 - [decisions/](decisions/) — ADRs (decisiones arquitectónicas)
@@ -94,6 +95,7 @@ Leyenda: ⏳ pendiente · 🚧 en curso · ✅ completada · ❌ bloqueada
 | 8.1  | Currency rates backend              | ✅     | —  |
 | 8.2  | Conversion frontend                 | ✅     | —  |
 | 8.3  | Per-transaction conversion in SQL   | ✅     | —  |
+| 8.4  | Transactions cross-currency + polish | ✅     | —  |
 
 Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
 

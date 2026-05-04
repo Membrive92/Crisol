@@ -90,11 +90,11 @@ asociadas conservan `category_id = NULL` (`ON DELETE SET NULL`).
 
 ---
 
-## Transactions (`PHASE-2.1`)
+## Transactions (`PHASE-2.1` + `PHASE-8.4`)
 
 | Método | Ruta | Auth | Body / Query | Response |
 |--------|------|------|--------------|----------|
-| GET | `/transactions` | sí | `category_id?`, `date_from?`, `date_to?`, `search?`, `limit` (1..200, def 50), `offset` (def 0) | `200` `{ items, total, limit, offset }` |
+| GET | `/transactions` | sí | `category_id?`, `date_from?`, `date_to?`, `search?`, `target_currency?` (3 letras, PHASE-8.4), `limit` (1..200, def 50), `offset` (def 0) | `200` `{ items, total, limit, offset }` |
 | GET | `/transactions/{id}` | sí | — | `200` `TransactionResponse` |
 | POST | `/transactions` | sí | `{ amount, occurred_at, category_id?, currency?, description?, source? }` | `201` `TransactionResponse` |
 | PUT | `/transactions/{id}` | sí | `Partial<TransactionCreate>` | `200` `TransactionResponse` |
@@ -102,6 +102,17 @@ asociadas conservan `category_id = NULL` (`ON DELETE SET NULL`).
 
 `source`: `manual | import | receipt` (default `manual`). Importes
 positivos; el signo se infiere de `category.kind` en frontend.
+
+`target_currency` (PHASE-8.4) — cuando se pasa, cada item de la
+respuesta gana `converted_amount: Decimal | null` y
+`converted_currency: string | null` con la conversión a la moneda
+destino usando la tasa **del día de su `occurred_at`** (misma
+política y ventana de fallback de 14 días que el dashboard). El
+endpoint dispara `ensure_rates_for_dates` por cada fecha distinta de
+transacciones del scope antes de listar — backfill on-demand desde
+frankfurter, idéntico al dashboard. `null` cuando no hay tasa
+disponible (la UI puede pintar "≈ —"). En lecturas individuales
+(`GET /transactions/{id}`) y modo legacy ambos campos son `null`.
 
 ---
 
@@ -127,7 +138,7 @@ gana `target_currency` si llegan ambos. Sin ninguno, default a
 | GET | `/dashboard/summary` | `currency` (def `USD` legacy), `target_currency?` (cross-currency), `date_from?`, `date_to?` | `{ income, expenses, balance, transaction_count, currency, unconvertible_count, previous_period_income, previous_period_expenses, previous_period_balance }` |
 | GET | `/dashboard/by-category` | `currency` o `target_currency`, `date_from?`, `date_to?`, `kind?` (`income\|expense`) | `[{ category_id, category_name, category_kind, total, count }]` |
 | GET | `/dashboard/by-month` | `year` (def actual), `currency` o `target_currency` | `[{ month: "YYYY-MM", income, expenses, balance }]` (12 buckets) |
-| GET | `/dashboard/top-expenses` | `currency` o `target_currency`, `date_from?`, `date_to?`, `limit` (1..50, def 10) | `[{ transaction_id, description, amount, occurred_at, category_id, category_name }]` (ordenados por importe convertido desc en cross-currency) |
+| GET | `/dashboard/top-expenses` | `currency` o `target_currency`, `date_from?`, `date_to?`, `limit` (1..50, def 10) | `[{ transaction_id, description, amount, occurred_at, category_id, category_name, original_amount, original_currency }]` (PHASE-8.4: `original_*` siempre presentes; `amount` es el convertido en cross-currency, original en legacy) |
 
 Reglas relevantes:
 - `summary.transaction_count` cuenta todas las transacciones del rango,

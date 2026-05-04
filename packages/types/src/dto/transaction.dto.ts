@@ -22,6 +22,12 @@ export interface TransactionListQuery {
   date_from?: string;
   date_to?: string;
   search?: string;
+  /**
+   * Cuando se pasa, el backend devuelve `converted_amount` +
+   * `converted_currency` por fila (PHASE-8.4). La UI puede pintar el
+   * equivalente en moneda activa sin lanzar fetches por fecha.
+   */
+  target_currency?: string;
   limit?: number;
   offset?: number;
 }

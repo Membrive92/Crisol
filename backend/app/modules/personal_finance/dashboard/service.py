@@ -37,7 +37,7 @@ from app.modules.personal_finance.transactions.models import Transaction
 _UNCATEGORIZED_NAME = "Sin categoría"
 
 
-async def _ensure_rates_in_scope(
+async def ensure_rates_for_user_scope(
     db: AsyncSession,
     user_id: uuid.UUID,
     *,
@@ -52,6 +52,9 @@ async def _ensure_rates_in_scope(
     snapshot embebido + ventana de 14d) quedarían fuera del SUM con
     `unconvertible_count > 0`. Con ella, el primer request de cada
     fecha dispara fetch + persist + queda cacheado para siempre.
+
+    Reusable desde otros módulos (transactions también lo llama antes
+    de listar con `target_currency`).
     """
     target = target_currency.upper()
     query = (
@@ -111,7 +114,7 @@ async def get_summary(
     legacy, target, displayed = _resolve_mode(currency, target_currency)
 
     if target is not None:
-        await _ensure_rates_in_scope(
+        await ensure_rates_for_user_scope(
             db,
             user_id,
             target_currency=target,
@@ -119,29 +122,13 @@ async def get_summary(
             date_to=date_to,
         )
 
-    totals = await repository.get_totals_by_kind(
+    income, expenses, count, unconvertible = await repository.get_summary_aggregates(
         db,
         user_id,
         currency=legacy,
         target_currency=target,
         date_from=date_from,
         date_to=date_to,
-    )
-    income = totals.get(CategoryKind.INCOME, Decimal("0"))
-    expenses = totals.get(CategoryKind.EXPENSE, Decimal("0"))
-    count = await repository.count_transactions(
-        db, user_id, currency=legacy, date_from=date_from, date_to=date_to
-    )
-    unconvertible = (
-        await repository.count_unconvertible(
-            db,
-            user_id,
-            target_currency=target,
-            date_from=date_from,
-            date_to=date_to,
-        )
-        if target is not None
-        else 0
     )
 
     prev_income: Decimal | None = None
@@ -189,7 +176,7 @@ async def get_breakdown_by_category(
     """Desglose por categoría."""
     legacy, target, _ = _resolve_mode(currency, target_currency)
     if target is not None:
-        await _ensure_rates_in_scope(
+        await ensure_rates_for_user_scope(
             db,
             user_id,
             target_currency=target,
@@ -231,7 +218,7 @@ async def get_monthly_breakdown(
     legacy, target, _ = _resolve_mode(currency, target_currency)
     if target is not None:
         # `by-month` cubre el año completo, así que el rango es ese.
-        await _ensure_rates_in_scope(
+        await ensure_rates_for_user_scope(
             db,
             user_id,
             target_currency=target,
@@ -275,7 +262,7 @@ async def get_top_expenses(
     """Top N gastos por importe convertido desc."""
     legacy, target, _ = _resolve_mode(currency, target_currency)
     if target is not None:
-        await _ensure_rates_in_scope(
+        await ensure_rates_for_user_scope(
             db,
             user_id,
             target_currency=target,
@@ -301,6 +288,8 @@ async def get_top_expenses(
             occurred_at=tx.occurred_at,
             category_id=tx.category_id,
             category_name=category_name,
+            original_amount=tx.amount,
+            original_currency=tx.currency,
         )
         for tx, category_name, converted in rows
     ]

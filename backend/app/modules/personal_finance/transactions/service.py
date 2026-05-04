@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.personal_finance.dashboard.service import ensure_rates_for_user_scope
 from app.modules.personal_finance.transactions.models import Transaction
 from app.modules.personal_finance.transactions.repository import (
     create_transaction as persist_transaction,
@@ -32,10 +34,24 @@ async def list_transactions(
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     search: str | None = None,
+    target_currency: str | None = None,
     limit: int = 50,
     offset: int = 0,
-) -> tuple[list[Transaction], int]:
-    """Lista transacciones del usuario con filtros."""
+) -> tuple[list[tuple[Transaction, Decimal | None]], int]:
+    """Lista transacciones del usuario con filtros.
+
+    Cuando se pasa `target_currency`, dispara el backfill on-demand de
+    tasas (mismo helper que el dashboard) antes de listar para que las
+    fechas históricas queden cubiertas.
+    """
+    if target_currency is not None:
+        await ensure_rates_for_user_scope(
+            db,
+            user_id,
+            target_currency=target_currency,
+            date_from=date_from,
+            date_to=date_to,
+        )
     return await list_all(
         db,
         user_id,
@@ -43,6 +59,7 @@ async def list_transactions(
         date_from=date_from,
         date_to=date_to,
         search=search,
+        target_currency=target_currency,
         limit=limit,
         offset=offset,
     )

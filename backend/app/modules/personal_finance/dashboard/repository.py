@@ -23,7 +23,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Select, extract, func, select
+from sqlalchemy import Select, case, extract, func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.personal_finance.categories.models import Category, CategoryKind
@@ -111,16 +111,58 @@ async def get_totals_by_kind(
     return {kind: Decimal(total) for kind, total in result.all()}
 
 
-async def count_transactions(
+async def get_summary_aggregates(
     db: AsyncSession,
     user_id: uuid.UUID,
     *,
     currency: str | None = None,
+    target_currency: str | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
-) -> int:
-    """Cuenta todas las transacciones del scope (independiente de moneda)."""
-    query = select(func.count()).select_from(Transaction)
+) -> tuple[Decimal, Decimal, int, int]:
+    """Una sola query con income, expense, total_count y unconvertible.
+
+    Reemplaza las 3 queries serial pre-PHASE-8.4 (totals_by_kind +
+    count_transactions + count_unconvertible). Las sumas income/expense
+    se computan con `CASE` por categoría sobre el outerjoin (las
+    transacciones sin categoría no contribuyen pero sí se cuentan).
+    El `unconvertible_count` viene como **subquery escalar** dentro
+    del mismo SELECT — sólo consulta cuando hay `target_currency`,
+    en modo legacy es literal `0`.
+    """
+    amount = _amount_expr(target_currency)
+    income_amount = case(
+        (Category.kind == CategoryKind.INCOME, amount), else_=Decimal("0")
+    )
+    expense_amount = case(
+        (Category.kind == CategoryKind.EXPENSE, amount), else_=Decimal("0")
+    )
+
+    if target_currency is not None:
+        unconv_subq = select(func.count()).select_from(Transaction).where(
+            ~amount_is_convertible_expr(target_currency)
+        )
+        unconv_subq = _apply_scope(
+            unconv_subq,
+            user_id=user_id,
+            currency=None,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        unconv_col = unconv_subq.scalar_subquery().label("unconvertible_count")
+    else:
+        unconv_col = literal(0).label("unconvertible_count")
+
+    query = (
+        select(
+            func.coalesce(func.sum(income_amount), Decimal("0")).label("income"),
+            func.coalesce(func.sum(expense_amount), Decimal("0")).label("expense"),
+            func.count(Transaction.id).label("total_count"),
+            unconv_col,
+        )
+        .select_from(Transaction)
+        .outerjoin(Category, Category.id == Transaction.category_id)
+    )
     query = _apply_scope(
         query,
         user_id=user_id,
@@ -128,34 +170,14 @@ async def count_transactions(
         date_from=date_from,
         date_to=date_to,
     )
-    result = await db.execute(query)
-    return int(result.scalar_one())
 
-
-async def count_unconvertible(
-    db: AsyncSession,
-    user_id: uuid.UUID,
-    *,
-    target_currency: str,
-    date_from: datetime | None = None,
-    date_to: datetime | None = None,
-) -> int:
-    """Cuenta transacciones que no se podrían convertir a target.
-
-    Útil para que la UI advierta "X transacciones sin tasa". Sólo
-    relevante en modo `target_currency`.
-    """
-    convertible = amount_is_convertible_expr(target_currency)
-    query = select(func.count()).select_from(Transaction).where(~convertible)
-    query = _apply_scope(
-        query,
-        user_id=user_id,
-        currency=None,  # cross-currency mode, no currency filter
-        date_from=date_from,
-        date_to=date_to,
+    row = (await db.execute(query)).one()
+    return (
+        Decimal(row.income),
+        Decimal(row.expense),
+        int(row.total_count),
+        int(row.unconvertible_count),
     )
-    result = await db.execute(query)
-    return int(result.scalar_one())
 
 
 async def get_breakdown_by_category(

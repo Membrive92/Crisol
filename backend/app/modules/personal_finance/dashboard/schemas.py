@@ -58,7 +58,14 @@ class MonthlyBucket(BaseModel):
 
 
 class TopExpenseItem(BaseModel):
-    """Gasto individual dentro del ranking de mayores gastos."""
+    """Gasto individual dentro del ranking de mayores gastos.
+
+    `amount` es el importe **usado para el ranking** — convertido a la
+    moneda destino en modo cross-currency, original en modo legacy.
+    `original_amount` + `original_currency` (PHASE-8.4) exponen siempre
+    el dato crudo de la transacción para que la UI distinga ambos sin
+    consultar la transacción individual.
+    """
 
     transaction_id: uuid.UUID
     description: str | None
@@ -66,3 +73,5 @@ class TopExpenseItem(BaseModel):
     occurred_at: datetime
     category_id: uuid.UUID | None
     category_name: str | None
+    original_amount: Decimal
+    original_currency: str

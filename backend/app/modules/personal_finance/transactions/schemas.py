@@ -33,7 +33,14 @@ class TransactionUpdate(BaseModel):
 
 
 class TransactionResponse(BaseModel):
-    """Respuesta pública de una transacción."""
+    """Respuesta pública de una transacción.
+
+    `converted_amount` y `converted_currency` se rellenan sólo cuando
+    el caller pasa `?target_currency=` al endpoint de listado: el
+    backend convierte cada fila con la tasa del día de su `occurred_at`
+    y la UI puede pintar el equivalente sin lanzar un fetch por fecha.
+    En modo legacy o lecturas individuales, ambos son `None`.
+    """
 
     id: uuid.UUID
     user_id: uuid.UUID
@@ -46,6 +53,8 @@ class TransactionResponse(BaseModel):
     receipt_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
+    converted_amount: Decimal | None = None
+    converted_currency: str | None = None
 
     model_config = {"from_attributes": True}
 

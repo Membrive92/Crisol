@@ -448,3 +448,194 @@ async def test_legacy_currency_mode_unchanged(
     assert data["unconvertible_count"] == 0
     # transaction_count cuenta TODAS las del scope (filtradas por moneda).
     assert data["transaction_count"] == 1
+
+
+# ---------- top-expenses: original_amount/original_currency (PHASE-8.4) ----------
+
+
+async def test_top_expenses_target_currency_exposes_original(
+    client: AsyncClient,
+    test_engine,  # type: ignore[no-untyped-def]
+) -> None:
+    """top-expenses devuelve `amount` (convertido) + `original_amount`/`original_currency`."""
+    token = await _register(client, "topog@test.com")
+    expense = await _make_category(client, token, name="Gasto", kind="expense")
+
+    await _make_tx(
+        client,
+        token,
+        amount="100",
+        currency="EUR",
+        occurred_at="2026-02-15T12:00:00Z",
+        category_id=expense,
+    )
+    await _seed_rates(
+        test_engine,
+        [(date(2026, 2, 15), "EUR", "USD", "1.20")],
+    )
+
+    r = await client.get(
+        "/dashboard/top-expenses",
+        params={"target_currency": "USD", "limit": 10},
+        headers=_auth(token),
+    )
+    items = r.json()
+    assert len(items) == 1
+    item = items[0]
+    assert Decimal(item["amount"]) == Decimal("120.00000000")  # convertido
+    assert Decimal(item["original_amount"]) == Decimal("100.00")
+    assert item["original_currency"] == "EUR"
+
+
+async def test_top_expenses_legacy_original_equals_amount(
+    client: AsyncClient,
+) -> None:
+    """En modo legacy, original_amount/currency coinciden con amount/currency activos."""
+    token = await _register(client, "topleg@test.com")
+    expense = await _make_category(client, token, name="Gasto", kind="expense")
+    await _make_tx(
+        client,
+        token,
+        amount="42.50",
+        currency="EUR",
+        occurred_at="2026-02-15T12:00:00Z",
+        category_id=expense,
+    )
+
+    r = await client.get(
+        "/dashboard/top-expenses",
+        params={"currency": "EUR", "limit": 10},
+        headers=_auth(token),
+    )
+    items = r.json()
+    assert len(items) == 1
+    assert Decimal(items[0]["amount"]) == Decimal("42.50")
+    assert Decimal(items[0]["original_amount"]) == Decimal("42.50")
+    assert items[0]["original_currency"] == "EUR"
+
+
+# ---------- /transactions con target_currency (PHASE-8.4) ----------
+
+
+async def test_transactions_target_currency_returns_converted_per_row(
+    client: AsyncClient,
+    test_engine,  # type: ignore[no-untyped-def]
+) -> None:
+    """/transactions?target_currency=USD añade converted_amount + converted_currency por fila."""
+    token = await _register(client, "txconv@test.com")
+    expense = await _make_category(client, token, name="Gasto", kind="expense")
+
+    await _make_tx(
+        client,
+        token,
+        amount="100",
+        currency="EUR",
+        occurred_at="2026-02-15T12:00:00Z",
+        category_id=expense,
+    )
+    await _make_tx(
+        client,
+        token,
+        amount="50",
+        currency="EUR",
+        occurred_at="2026-03-15T12:00:00Z",
+        category_id=expense,
+    )
+    await _seed_rates(
+        test_engine,
+        [
+            (date(2026, 2, 15), "EUR", "USD", "1.10"),
+            (date(2026, 3, 15), "EUR", "USD", "1.20"),
+        ],
+    )
+
+    r = await client.get(
+        "/transactions",
+        params={"target_currency": "USD"},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 2
+    # Orden: descendente por occurred_at → primero la del 15-mar.
+    first, second = body["items"][0], body["items"][1]
+    assert first["currency"] == "EUR"
+    assert first["converted_currency"] == "USD"
+    assert Decimal(first["converted_amount"]) == Decimal("60.00000000")  # 50 x 1.20
+    assert Decimal(second["converted_amount"]) == Decimal("110.00000000")  # 100 x 1.10
+
+
+async def test_transactions_legacy_mode_converted_fields_null(
+    client: AsyncClient,
+) -> None:
+    """Sin target_currency, converted_amount y converted_currency vienen como null."""
+    token = await _register(client, "txleg@test.com")
+    expense = await _make_category(client, token, name="Gasto", kind="expense")
+    await _make_tx(
+        client,
+        token,
+        amount="25",
+        currency="EUR",
+        occurred_at="2026-02-15T12:00:00Z",
+        category_id=expense,
+    )
+
+    r = await client.get("/transactions", headers=_auth(token))
+    assert r.status_code == 200
+    item = r.json()["items"][0]
+    assert item["converted_amount"] is None
+    assert item["converted_currency"] is None
+
+
+async def test_transactions_target_currency_missing_rate_yields_null_converted(
+    client: AsyncClient,
+) -> None:
+    """Una fila sin tasa disponible devuelve converted_amount=null pero sigue listada."""
+    token = await _register(client, "txmiss@test.com")
+    expense = await _make_category(client, token, name="Gasto", kind="expense")
+    # Sin sembrar tasas — frankfurter está mockeado a offline (autouse).
+    await _make_tx(
+        client,
+        token,
+        amount="100",
+        currency="EUR",
+        occurred_at="2026-02-15T12:00:00Z",
+        category_id=expense,
+    )
+
+    r = await client.get(
+        "/transactions",
+        params={"target_currency": "USD"},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200
+    item = r.json()["items"][0]
+    assert item["currency"] == "EUR"
+    # converted_amount es null cuando la subquery de la tasa devuelve NULL.
+    assert item["converted_amount"] is None
+
+
+async def test_transactions_target_currency_matches_skips_conversion(
+    client: AsyncClient,
+) -> None:
+    """Tx ya en target → converted_amount == amount sin necesitar tasa."""
+    token = await _register(client, "txmatch@test.com")
+    expense = await _make_category(client, token, name="Gasto", kind="expense")
+    await _make_tx(
+        client,
+        token,
+        amount="42",
+        currency="USD",
+        occurred_at="2026-02-15T12:00:00Z",
+        category_id=expense,
+    )
+
+    r = await client.get(
+        "/transactions",
+        params={"target_currency": "USD"},
+        headers=_auth(token),
+    )
+    item = r.json()["items"][0]
+    assert item["currency"] == "USD"
+    assert item["converted_currency"] == "USD"
+    assert Decimal(item["converted_amount"]) == Decimal("42.00")

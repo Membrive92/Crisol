@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 
 import {
@@ -27,8 +27,18 @@ export default function TransactionsPage() {
     offset: 0,
   });
   const currency = useCurrencyStore((s) => s.currency);
+  const convertAll = useCurrencyStore((s) => s.convertAll);
 
-  const { data, isLoading, isError, error, isFetching } = useTransactions(filters);
+  // PHASE-8.4: cuando el toggle global está ON, pedimos al backend la
+  // conversión per-row con `target_currency`. La tabla recibe
+  // `converted_amount`/`converted_currency` ya hechos y deja de
+  // necesitar `useQueries` por fecha en cliente.
+  const queryParams = useMemo<TransactionListQuery>(
+    () => (convertAll ? { ...filters, target_currency: currency } : filters),
+    [filters, convertAll, currency],
+  );
+
+  const { data, isLoading, isError, error, isFetching } = useTransactions(queryParams);
   const { data: categories } = useCategories();
   const deleteMutation = useDeleteTransaction();
 

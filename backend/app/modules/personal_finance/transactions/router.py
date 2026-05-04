@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
+from app.modules.personal_finance.transactions.models import Transaction
 from app.modules.personal_finance.transactions.schemas import (
     TransactionCreate,
     TransactionListResponse,
@@ -28,6 +30,21 @@ from app.modules.personal_finance.transactions.service import (
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 
+def _build_response(
+    tx: Transaction, converted: Decimal | None, target_currency: str | None
+) -> TransactionResponse:
+    """Construye la respuesta enriqueciendo con la conversión per-row."""
+    payload = TransactionResponse.model_validate(tx)
+    if target_currency is not None and converted is not None:
+        payload = payload.model_copy(
+            update={
+                "converted_amount": converted,
+                "converted_currency": target_currency.upper(),
+            }
+        )
+    return payload
+
+
 @router.get("", response_model=TransactionListResponse)
 async def list_endpoint(
     user: CurrentUser,
@@ -36,10 +53,16 @@ async def list_endpoint(
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     search: str | None = None,
+    target_currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> TransactionListResponse:
-    """Lista transacciones con filtros opcionales."""
+    """Lista transacciones con filtros opcionales.
+
+    Si se pasa `target_currency`, cada fila incluye `converted_amount`
+    + `converted_currency` (PHASE-8.4) — la UI puede pintar el
+    equivalente en moneda activa sin lanzar fetches por fecha.
+    """
     items, total = await list_transactions(
         db,
         user.id,
@@ -47,11 +70,12 @@ async def list_endpoint(
         date_from=date_from,
         date_to=date_to,
         search=search,
+        target_currency=target_currency,
         limit=limit,
         offset=offset,
     )
     return TransactionListResponse(
-        items=[TransactionResponse.model_validate(t) for t in items],
+        items=[_build_response(tx, conv, target_currency) for tx, conv in items],
         total=total,
         limit=limit,
         offset=offset,

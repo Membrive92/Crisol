@@ -40,8 +40,16 @@ export interface MonthlyBucket {
 export interface TopExpenseItem {
   transaction_id: string;
   description: string | null;
+  /**
+   * Importe usado para el ranking. En modo `target_currency` es el
+   * convertido; en legacy coincide con `original_amount`.
+   */
   amount: string;
   occurred_at: string;
   category_id: string | null;
   category_name: string | null;
+  /** Importe original de la transacción, sin convertir (PHASE-8.4). */
+  original_amount: string;
+  /** Moneda original de la transacción (PHASE-8.4). */
+  original_currency: string;
 }
