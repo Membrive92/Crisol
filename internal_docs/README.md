@@ -89,10 +89,11 @@ Leyenda: ⏳ pendiente · 🚧 en curso · ✅ completada · ❌ bloqueada
 
 ### Fase 8 — Multimoneda con conversión global
 
-| Fase | Nombre                       | Estado | PR |
-|------|------------------------------|--------|----|
-| 8.1  | Currency rates backend       | ✅     | —  |
-| 8.2  | Conversion frontend          | ⏳     | —  |
+| Fase | Nombre                              | Estado | PR |
+|------|-------------------------------------|--------|----|
+| 8.1  | Currency rates backend              | ✅     | —  |
+| 8.2  | Conversion frontend                 | ✅     | —  |
+| 8.3  | Per-transaction conversion in SQL   | ✅     | —  |
 
 Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
 

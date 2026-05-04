@@ -105,24 +105,38 @@ positivos; el signo se infiere de `category.kind` en frontend.
 
 ---
 
-## Dashboard (`PHASE-3.1`)
+## Dashboard (`PHASE-3.1` + `PHASE-8.3`)
 
 Todos GET, read-only, agregaciones SUM/COUNT/GROUP BY filtradas por
-`user_id` y por `currency` (default `USD`).
+`user_id`. Modo de moneda: dos parámetros mutuamente excluyentes —
+gana `target_currency` si llegan ambos. Sin ninguno, default a
+`currency=USD` (legacy).
+
+- `?currency=EUR` (legacy) — filtra por esa moneda y agrega importes
+  crudos.
+- `?target_currency=EUR` (`PHASE-8.3`) — no filtra. Convierte cada
+  transacción al destino con la tasa **del día de su `occurred_at`**
+  (subquery correlacionada en `exchange_rates` con ventana de
+  fallback de 14 días) y agrega después. Las transacciones sin tasa
+  disponible se excluyen del SUM y se cuentan en
+  `summary.unconvertible_count`.
 
 | Método | Ruta | Query | Response |
 |--------|------|-------|----------|
 | GET | `/dashboard/currencies` | — | `string[]` con las monedas distintas presentes en las transacciones del usuario (ordenadas alfabéticamente). |
-| GET | `/dashboard/summary` | `currency` (def `USD`), `date_from?`, `date_to?` | `{ income, expenses, balance, transaction_count, currency, previous_period_income, previous_period_expenses, previous_period_balance }` |
-| GET | `/dashboard/by-category` | `currency`, `date_from?`, `date_to?`, `kind?` (`income\|expense`) | `[{ category_id, category_name, category_kind, total, count }]` |
-| GET | `/dashboard/by-month` | `year` (def actual), `currency` | `[{ month: "YYYY-MM", income, expenses, balance }]` (12 buckets) |
-| GET | `/dashboard/top-expenses` | `currency`, `date_from?`, `date_to?`, `limit` (1..50, def 10) | `[{ transaction_id, description, amount, occurred_at, category_id, category_name }]` |
+| GET | `/dashboard/summary` | `currency` (def `USD` legacy), `target_currency?` (cross-currency), `date_from?`, `date_to?` | `{ income, expenses, balance, transaction_count, currency, unconvertible_count, previous_period_income, previous_period_expenses, previous_period_balance }` |
+| GET | `/dashboard/by-category` | `currency` o `target_currency`, `date_from?`, `date_to?`, `kind?` (`income\|expense`) | `[{ category_id, category_name, category_kind, total, count }]` |
+| GET | `/dashboard/by-month` | `year` (def actual), `currency` o `target_currency` | `[{ month: "YYYY-MM", income, expenses, balance }]` (12 buckets) |
+| GET | `/dashboard/top-expenses` | `currency` o `target_currency`, `date_from?`, `date_to?`, `limit` (1..50, def 10) | `[{ transaction_id, description, amount, occurred_at, category_id, category_name }]` (ordenados por importe convertido desc en cross-currency) |
 
 Reglas relevantes:
 - `summary.transaction_count` cuenta todas las transacciones del rango,
   incluso sin categoría.
 - `summary.income` / `expenses` sólo cuentan transacciones con
   categoría (el signo lo decide `category.kind`).
+- `summary.unconvertible_count` (PHASE-8.3) es siempre 0 en modo
+  legacy; en modo cross-currency cuenta las transacciones sin tasa
+  histórica disponible (ni exacta ni en ventana de 14 días).
 - `summary.previous_period_*` se computa cuando llegan `date_from` y
   `date_to`. Es el rango previo de igual longitud, terminando justo
   antes de `date_from` (rango actual `[2026-02-01, 2026-02-28]` →
@@ -134,6 +148,11 @@ Reglas relevantes:
   "Sin categoría" }` que se excluye cuando se filtra por `kind`.
 - `top-expenses` solo devuelve transacciones cuya categoría es
   `expense` (las sin categoría se excluyen).
+- En modo cross-currency, antes de agregar el endpoint dispara un
+  lazy fetch a `frankfurter.dev/v1/{date}` para cada fecha distinta
+  de transacciones del scope que aún no tenga tasa en BD. Tras el
+  primer hit las tasas quedan persistidas y los siguientes requests
+  no triggerean fetch.
 
 ---
 
