@@ -1,8 +1,8 @@
 'use client';
 
-import { useReceipts, useDashboardSummary } from '@finanzas/services';
-import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
-import { formatAmount } from '@finanzas/ui';
+import { useDashboardSummary, useReceipts } from '@finanzas/services';
+import { useCurrencyStore } from '@finanzas/store';
+import { colors, fontSize, fontWeight, formatAmount, spacing } from '@finanzas/ui';
 
 import { Card } from '@/components/ui/card';
 
@@ -14,28 +14,32 @@ export interface StitchTransactionsKpiRowProps {
 
 /**
  * Fila de 4 KPIs sobre la tabla de Transactions, estilo Stitch:
- *  - Income this period (suma del periodo)
+ *  - Income this period
  *  - Expenses this period
  *  - Net Balance (con signo)
- *  - Pending Clear: tickets en estado `pending` que aún no se han
- *    confirmado como transacciones reales.
+ *  - Pending Clear: tickets en estado `pending`.
  *
- * Reusa `useDashboardSummary` para los tres primeros (no hace falta
- * endpoint nuevo) y `useReceipts` para contar pendientes.
+ * PHASE-8.3: cuando el toggle global "Convertir todas las monedas"
+ * está ON, el endpoint `/dashboard/summary` recibe `target_currency`
+ * y agrega cross-currency en SQL convirtiendo cada transacción con la
+ * tasa del día de su `occurred_at`. Cuando está OFF, recibe `currency`
+ * (legacy) y filtra por moneda activa sin conversión.
  */
 export function StitchTransactionsKpiRow({
   currency,
   dateFrom,
   dateTo,
 }: StitchTransactionsKpiRowProps) {
-  const summaryQuery = useDashboardSummary({
-    currency,
-    date_from: dateFrom,
-    date_to: dateTo,
-  });
-  const receiptsQuery = useReceipts({ limit: 100 });
+  const convertAll = useCurrencyStore((s) => s.convertAll);
+  const summaryQuery = useDashboardSummary(
+    convertAll
+      ? { target_currency: currency, date_from: dateFrom, date_to: dateTo }
+      : { currency, date_from: dateFrom, date_to: dateTo },
+  );
 
   const summary = summaryQuery.data;
+
+  const receiptsQuery = useReceipts({ limit: 100 });
   const pendingCount =
     receiptsQuery.data?.items.filter((r) => r.status === 'pending').length ?? 0;
 

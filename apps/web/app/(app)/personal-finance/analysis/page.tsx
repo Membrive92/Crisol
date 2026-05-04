@@ -25,25 +25,38 @@ import { ListIcon } from '@/components/ui/icons';
 export default function AnalysisPage() {
   const [period, setPeriod] = useState<PeriodKey>('year');
   const currency = useCurrencyStore((s) => s.currency);
+  const convertAll = useCurrencyStore((s) => s.convertAll);
 
   const { dateFrom, dateTo } = useMemo(() => rangeForPeriod(period), [period]);
   const currentYear = new Date().getFullYear();
 
-  const summaryQuery = useDashboardSummary({
-    currency,
-    date_from: dateFrom,
-    date_to: dateTo,
-  });
-  const monthlyQuery = useDashboardByMonth({
-    currency,
-    year: currentYear,
-  });
-  const expensesByCategoryQuery = useDashboardByCategory({
-    currency,
-    date_from: dateFrom,
-    date_to: dateTo,
-    kind: 'expense',
-  });
+  // PHASE-8.3: una petición por endpoint con `target_currency` cuando el
+  // toggle global está ON; el backend convierte cada transacción con la
+  // tasa de su día. Con toggle OFF, comportamiento legacy filtrado por
+  // moneda activa sin conversión.
+  const summaryParams = convertAll
+    ? { target_currency: currency, date_from: dateFrom, date_to: dateTo }
+    : { currency, date_from: dateFrom, date_to: dateTo };
+  const monthlyParams = convertAll
+    ? { target_currency: currency, year: currentYear }
+    : { currency, year: currentYear };
+  const byCategoryParams = convertAll
+    ? {
+        target_currency: currency,
+        date_from: dateFrom,
+        date_to: dateTo,
+        kind: 'expense' as const,
+      }
+    : { currency, date_from: dateFrom, date_to: dateTo, kind: 'expense' as const };
+
+  const summaryQuery = useDashboardSummary(summaryParams);
+  const monthlyQuery = useDashboardByMonth(monthlyParams);
+  const expensesByCategoryQuery = useDashboardByCategory(byCategoryParams);
+
+  const summary = summaryQuery.data;
+  const monthly = monthlyQuery.data ?? [];
+  const expensesByCategory = expensesByCategoryQuery.data ?? [];
+  const unconvertible = summary?.unconvertible_count ?? 0;
 
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: spacing.lg }}>
@@ -94,6 +107,18 @@ export default function AnalysisPage() {
             Patrones detallados de ingresos, gastos y categorías ·
             cómputos client-side, sin enviar datos fuera de tu equipo.
           </p>
+          {convertAll && unconvertible > 0 ? (
+            <p
+              style={{
+                margin: `${spacing.xs}px 0 0 0`,
+                color: colors.warning,
+                fontSize: fontSize.xs,
+              }}
+            >
+              ⚠ {unconvertible} {unconvertible === 1 ? 'transacción' : 'transacciones'} sin
+              tasa disponible — quedan fuera del total.
+            </p>
+          ) : null}
         </div>
         <StitchPeriodToggle value={period} onChange={setPeriod} />
       </header>
@@ -108,11 +133,11 @@ export default function AnalysisPage() {
         }}
       >
         <StitchIncomeVsExpenses
-          data={monthlyQuery.data ?? []}
+          data={monthly}
           currency={currency}
           isLoading={monthlyQuery.isLoading}
         />
-        <StitchKeyMetrics summary={summaryQuery.data} currency={currency} />
+        <StitchKeyMetrics summary={summary} currency={currency} />
       </div>
 
       {/* Bento secundario: desglose + insights */}
@@ -125,13 +150,13 @@ export default function AnalysisPage() {
         }}
       >
         <StitchExpenseBreakdown
-          items={expensesByCategoryQuery.data ?? []}
+          items={expensesByCategory}
           currency={currency}
           isLoading={expensesByCategoryQuery.isLoading}
         />
         <StitchSmartInsights
-          summary={summaryQuery.data}
-          expensesByCategory={expensesByCategoryQuery.data}
+          summary={summary}
+          expensesByCategory={expensesByCategory}
           currency={currency}
         />
       </div>

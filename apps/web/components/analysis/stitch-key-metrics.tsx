@@ -43,6 +43,7 @@ export function StitchKeyMetrics({ summary, currency }: StitchKeyMetricsProps) {
         </span>
         <span
           style={{
+            display: 'block',
             fontSize: fontSize.xxl,
             fontWeight: fontWeight.bold,
             color: balance >= 0 ? colors.success : colors.danger,
@@ -99,6 +100,7 @@ export function StitchKeyMetrics({ summary, currency }: StitchKeyMetricsProps) {
         </span>
         <span
           style={{
+            display: 'block',
             fontSize: fontSize.xxl,
             fontWeight: fontWeight.bold,
             color: savingRate !== null && savingRate >= 0 ? colors.primary : colors.danger,
