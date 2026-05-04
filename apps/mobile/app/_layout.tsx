@@ -39,7 +39,7 @@ export default function RootLayout() {
     if (!isAuthenticated && !inAuthGroup) {
       router.replace('/(auth)/login');
     } else if (isAuthenticated && inAuthGroup) {
-      router.replace('/(modules)/personal-finance/(tabs)/home');
+      router.replace('/(modules)/personal-finance/(tabs)/analysis');
     }
   }, [isAuthenticated, isHydrated, segments, refreshToken, setTokens, setUser, logout, router]);
 

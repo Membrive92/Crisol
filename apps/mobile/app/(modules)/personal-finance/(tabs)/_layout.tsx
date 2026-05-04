@@ -18,9 +18,9 @@ export default function TabsLayout() {
       }}
     >
       <Tabs.Screen
-        name="home"
+        name="analysis"
         options={{
-          title: 'Dashboard',
+          title: 'Análisis',
         }}
       />
       <Tabs.Screen

@@ -104,7 +104,7 @@ Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
 | Fase | Nombre                                | Estado | PR |
 |------|---------------------------------------|--------|----|
 | 9.1  | Web sidebar como drawer mobile        | ✅     | —  |
-| 9.2  | Análisis screen en mobile             | ⏳     | —  |
+| 9.2  | Análisis screen en mobile             | ✅     | —  |
 
 ---
 

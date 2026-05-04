@@ -12,7 +12,7 @@
 >   (no se tacha) — la phase doc deja la traza histórica.
 > - Si un item se promueve a fase formal, se traslada a
 >   `phases/phase-X.Y-*.md` y se borra de aquí.
-> - Última actualización: 2026-05-04 (PHASE-9.1).
+> - Última actualización: 2026-05-04 (PHASE-9.2).
 
 ---
 
@@ -20,14 +20,14 @@
 
 Si quieres atacar trabajo real (no polish), por orden:
 
-1. **Análisis screen en mobile (PHASE-9.2)** — la única tab del
-   módulo Personal Finance que falta en la app móvil; los componentes
-   ya existen en `apps/mobile/components/dashboard/`.
-2. **Soft-delete + papelera de transacciones** — destruir sin red de
+1. **Soft-delete + papelera de transacciones** — destruir sin red de
    seguridad es la mayor laguna funcional para el usuario.
-3. **Cron nocturno de tasas (APScheduler)** — el lazy fetch cubre
+2. **Cron nocturno de tasas (APScheduler)** — el lazy fetch cubre
    "primer uso del día", pero si la app pasa días sin abrirse las
    tasas se quedan atrás.
+3. **`useCurrencyStore` cross-platform (AsyncStorage adapter)** —
+   pre-requisito para que mobile herede el toggle `convertAll` y la
+   moneda activa global del web.
 
 ---
 
@@ -130,10 +130,17 @@ Si quieres atacar trabajo real (no polish), por orden:
 
 - **[PHASE-5.2]** Sin captura por cámara. El backend ya lo soporta —
   falta integrar `expo-camera` / `expo-image-picker`.
-- **[PHASE-7.5]** No existe pantalla **Análisis** en mobile (sólo en
-  web). Replicar como sub-fase.
-- **[PHASE-7.4]** Donut de categorías y su leyenda no replicados desde
-  web a mobile.
+- **[PHASE-9.2]** `convertAll` (toggle cross-currency global) sólo
+  existe en web — `useCurrencyStore` persiste en `localStorage`.
+  Pre-requisito: portar el store a `AsyncStorage` cross-platform.
+- **[PHASE-9.2]** `MonthlyChart` ligado a año en curso (la query
+  `useDashboardByMonth` sólo acepta `year`). Si se quiere "últimos
+  12 meses rolling" o rango libre, requiere cambio en backend.
+- **[PHASE-9.2]** `rangeForPeriod` duplicada entre web y mobile (15
+  líneas puras). Mover a `packages/ui` cuando aparezca un tercer caller.
+- **[PHASE-9.2]** `apps/mobile/components/dashboard/dashboard-filters.tsx`
+  quedó sin callers tras PHASE-9.2 (lo reemplazó `currency-picker.tsx`).
+  Eliminar si no resurge necesidad de year picker.
 - **[PHASE-2.2]** Sin date picker nativo — input de texto con formato
   `YYYY-MM-DD`. `@react-native-community/datetimepicker` pendiente.
 - **[PHASE-2.2]** Sin tests de UI mobile (`jest-expo` no configurado).

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
@@ -16,24 +16,32 @@ import {
   CategoryDonut,
   type DonutKindFilter,
 } from '../../../../components/dashboard/category-donut';
-import {
-  DashboardFilters,
-  type DashboardFiltersValue,
-} from '../../../../components/dashboard/dashboard-filters';
+import { CurrencyPicker } from '../../../../components/dashboard/currency-picker';
 import { KpiCards } from '../../../../components/dashboard/kpi-cards';
 import { MonthlyChart } from '../../../../components/dashboard/monthly-chart';
+import {
+  PeriodToggle,
+  rangeForPeriod,
+  type PeriodKey,
+} from '../../../../components/dashboard/period-toggle';
+import { SavingsRateCard } from '../../../../components/dashboard/savings-rate-card';
+import { SmartInsights } from '../../../../components/dashboard/smart-insights';
 import { TopExpensesList } from '../../../../components/dashboard/top-expenses-list';
 import { FabLink } from '../../../../components/ui/fab';
 
 const TOP_EXPENSES_LIMIT = 5;
 const FALLBACK_CURRENCY = 'EUR';
 
-export default function HomeScreen() {
+/**
+ * Pantalla **Análisis** — paridad con `apps/web/app/(app)/personal-finance/analysis`.
+ * Período toggleable Mes/Trimestre/Año, tasa de ahorro, smart insights.
+ * El gráfico mensual sigue ligado al año en curso (`useDashboardByMonth`
+ * sólo acepta `year`).
+ */
+export default function AnalysisScreen() {
   const { user, refreshToken, logout: clearAuth } = useAuthStore();
-  const [filters, setFilters] = useState<DashboardFiltersValue>({
-    currency: FALLBACK_CURRENCY,
-    year: new Date().getFullYear(),
-  });
+  const [currency, setCurrency] = useState(FALLBACK_CURRENCY);
+  const [period, setPeriod] = useState<PeriodKey>('year');
   const [donutKind, setDonutKind] = useState<DonutKindFilter>('all');
   const [currencyHydrated, setCurrencyHydrated] = useState(false);
 
@@ -47,32 +55,32 @@ export default function HomeScreen() {
       setCurrencyHydrated(true);
       return;
     }
-    if (!list.includes(filters.currency)) {
-      setFilters((prev) => ({ ...prev, currency: list[0] ?? FALLBACK_CURRENCY }));
+    if (!list.includes(currency)) {
+      setCurrency(list[0] ?? FALLBACK_CURRENCY);
     }
     setCurrencyHydrated(true);
-  }, [currenciesQuery.data, currencyHydrated, filters.currency]);
+  }, [currenciesQuery.data, currencyHydrated, currency]);
 
-  const dateFrom = new Date(filters.year, 0, 1).toISOString();
-  const dateTo = new Date(filters.year, 11, 31, 23, 59, 59).toISOString();
+  const { dateFrom, dateTo } = useMemo(() => rangeForPeriod(period), [period]);
+  const currentYear = new Date().getFullYear();
 
   const summaryQuery = useDashboardSummary({
-    currency: filters.currency,
+    currency,
     date_from: dateFrom,
     date_to: dateTo,
   });
   const monthlyQuery = useDashboardByMonth({
-    currency: filters.currency,
-    year: filters.year,
+    currency,
+    year: currentYear,
   });
   const byCategoryQuery = useDashboardByCategory({
-    currency: filters.currency,
+    currency,
     date_from: dateFrom,
     date_to: dateTo,
     ...(donutKind === 'all' ? {} : { kind: donutKind }),
   });
   const topExpensesQuery = useDashboardTopExpenses({
-    currency: filters.currency,
+    currency,
     date_from: dateFrom,
     date_to: dateTo,
     limit: TOP_EXPENSES_LIMIT,
@@ -101,6 +109,8 @@ export default function HomeScreen() {
     }
   }
 
+  const expensesByCategory = byCategoryQuery.data ?? [];
+
   return (
     <View style={styles.container}>
       <ScrollView
@@ -110,38 +120,46 @@ export default function HomeScreen() {
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
             <Text style={styles.greeting}>Hola, {user?.display_name ?? 'usuario'}</Text>
-            <Text style={styles.subtitle}>Resumen financiero</Text>
+            <Text style={styles.subtitle}>Análisis financiero</Text>
           </View>
           <Pressable onPress={handleLogout} style={styles.logoutButton}>
             <Text style={styles.logoutText}>Salir</Text>
           </Pressable>
         </View>
 
-        <DashboardFilters
-          value={filters}
-          onChange={setFilters}
+        <CurrencyPicker
+          value={currency}
+          onChange={setCurrency}
           currencies={currenciesQuery.data}
         />
+        <PeriodToggle value={period} onChange={setPeriod} />
+
         <KpiCards summary={summaryQuery.data} isLoading={summaryQuery.isLoading} />
+        <SavingsRateCard summary={summaryQuery.data} />
         <MonthlyChart data={monthlyQuery.data} isLoading={monthlyQuery.isLoading} />
         <CategoryDonut
           data={byCategoryQuery.data}
-          currency={filters.currency}
+          currency={currency}
           isLoading={byCategoryQuery.isLoading}
           kind={donutKind}
           onKindChange={setDonutKind}
         />
         <TopExpensesList
           data={topExpensesQuery.data}
-          currency={filters.currency}
+          currency={currency}
           isLoading={topExpensesQuery.isLoading}
+        />
+        <SmartInsights
+          summary={summaryQuery.data}
+          expensesByCategory={expensesByCategory}
+          currency={currency}
         />
 
         {(summaryQuery.isError ||
           monthlyQuery.isError ||
           byCategoryQuery.isError ||
           topExpensesQuery.isError) && (
-          <Text style={styles.errorText}>Error cargando alguna sección del dashboard.</Text>
+          <Text style={styles.errorText}>Error cargando alguna sección del análisis.</Text>
         )}
       </ScrollView>
 
