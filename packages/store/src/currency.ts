@@ -1,5 +1,7 @@
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
+import { persist } from 'zustand/middleware';
+
+import { storage } from './storage';
 
 export interface CurrencyState {
   currency: string;
@@ -18,11 +20,15 @@ export interface CurrencyState {
 const FALLBACK_CURRENCY = 'EUR';
 
 /**
- * Moneda activa global. Se persiste en localStorage para sobrevivir
- * recargas y se comparte entre Dashboard / Análisis / Transacciones —
- * antes cada página tenía su propio `useState` con la misma lógica de
- * sincronización con `useUserCurrencies`. El selector vive en el header
- * (icono cartera) y al cambiarlo se reflejan todas las pantallas.
+ * Moneda activa global. Se persiste vía adapter cross-platform
+ * (`./storage`): `localStorage` en web, `AsyncStorage` en React
+ * Native — Metro escoge `./storage.native.ts` automáticamente
+ * (PHASE-11.2). Antes de 11.2 importaba `localStorage` directo y
+ * sólo funcionaba en web.
+ *
+ * El selector vive en el header de web (icono cartera) y en el
+ * `CurrencyPicker` de la pantalla Análisis mobile. Al cambiarlo se
+ * reflejan todas las pantallas que consumen el store.
  */
 export const useCurrencyStore = create<CurrencyState>()(
   persist(
@@ -34,7 +40,7 @@ export const useCurrencyStore = create<CurrencyState>()(
     }),
     {
       name: 'finanzas:currency',
-      storage: createJSONStorage(() => localStorage),
+      storage,
       // Bumped al introducir `convertAll` en PHASE-8.2: si un cliente
       // tiene una versión antigua persistida (sin el campo), la inicia
       // con `true` (igual que el default). Sin migración explícita

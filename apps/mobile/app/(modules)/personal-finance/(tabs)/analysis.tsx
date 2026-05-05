@@ -9,7 +9,7 @@ import {
   useDashboardTopExpenses,
   useUserCurrencies,
 } from '@finanzas/services';
-import { useAuthStore } from '@finanzas/store';
+import { useAuthStore, useCurrencyStore } from '@finanzas/store';
 import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
 
 import {
@@ -40,7 +40,11 @@ const FALLBACK_CURRENCY = 'EUR';
  */
 export default function AnalysisScreen() {
   const { user, refreshToken, logout: clearAuth } = useAuthStore();
-  const [currency, setCurrency] = useState(FALLBACK_CURRENCY);
+  // PHASE-11.2: la moneda activa vive en `useCurrencyStore`
+  // (cross-platform vía AsyncStorage). Antes era `useState` local —
+  // se perdía entre sesiones y no se compartía con otras pantallas.
+  const currency = useCurrencyStore((s) => s.currency);
+  const setCurrency = useCurrencyStore((s) => s.setCurrency);
   const [period, setPeriod] = useState<PeriodKey>('year');
   const [donutKind, setDonutKind] = useState<DonutKindFilter>('all');
   const [currencyHydrated, setCurrencyHydrated] = useState(false);
@@ -55,11 +59,13 @@ export default function AnalysisScreen() {
       setCurrencyHydrated(true);
       return;
     }
+    // Sólo sobrescribir el store si la moneda persistida no está
+    // en las del usuario — respeta su selección explícita previa.
     if (!list.includes(currency)) {
       setCurrency(list[0] ?? FALLBACK_CURRENCY);
     }
     setCurrencyHydrated(true);
-  }, [currenciesQuery.data, currencyHydrated, currency]);
+  }, [currenciesQuery.data, currencyHydrated, currency, setCurrency]);
 
   const { dateFrom, dateTo } = useMemo(() => rangeForPeriod(period), [period]);
   const currentYear = new Date().getFullYear();

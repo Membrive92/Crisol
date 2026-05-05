@@ -12,7 +12,7 @@
 >   (no se tacha) — la phase doc deja la traza histórica.
 > - Si un item se promueve a fase formal, se traslada a
 >   `phases/phase-X.Y-*.md` y se borra de aquí.
-> - Última actualización: 2026-05-05 (PHASE-11.1).
+> - Última actualización: 2026-05-05 (PHASE-11.2).
 
 ---
 
@@ -20,16 +20,13 @@
 
 Si quieres atacar trabajo real (no polish), por orden:
 
-1. **PHASE-11.2 — `useCurrencyStore` cross-platform** (AsyncStorage
-   adapter) — pre-requisito para que mobile herede el toggle
-   `convertAll` y la moneda activa global del web.
-2. **PHASE-11.3 — Sistema de toasts global** — el banner web y el
+1. **PHASE-11.3 — Sistema de toasts global** — el banner web y el
    snackbar mobile de "Movido a papelera" son ad-hoc para la
    pantalla de transacciones; otros flujos (imports, receipt
    confirm) siguen sin feedback de éxito.
-3. **PHASE-11.4 — Captura de tickets por cámara mobile** (heredado
-   de PHASE-5.2) — el backend ya lo soporta; falta integrar
-   `expo-camera` / `expo-image-picker`.
+2. **PHASE-11.4 — Captura de tickets por cámara mobile** (heredado
+   de PHASE-5.2) — `expo-image-picker` ya está instalado, falta
+   integrar la pantalla de captura.
 
 ---
 
@@ -132,9 +129,10 @@ Si quieres atacar trabajo real (no polish), por orden:
 
 - **[PHASE-5.2]** Sin captura por cámara. El backend ya lo soporta —
   falta integrar `expo-camera` / `expo-image-picker`.
-- **[PHASE-9.2]** `convertAll` (toggle cross-currency global) sólo
-  existe en web — `useCurrencyStore` persiste en `localStorage`.
-  Pre-requisito: portar el store a `AsyncStorage` cross-platform.
+- **[PHASE-11.2]** `convertAll` (toggle cross-currency global) sigue
+  sólo en web. PHASE-11.2 cerró el adapter cross-platform del store;
+  ahora basta con añadir el toggle en el header de Análisis mobile +
+  consumir `convertAll` en las queries de dashboard mobile.
 - **[PHASE-9.2]** `MonthlyChart` ligado a año en curso (la query
   `useDashboardByMonth` sólo acepta `year`). Si se quiere "últimos
   12 meses rolling" o rango libre, requiere cambio en backend.
