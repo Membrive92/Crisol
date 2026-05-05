@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 
@@ -9,6 +8,7 @@ import {
   useTransactions,
   useTrashedTransactions,
 } from '@finanzas/services';
+import { toast } from '@finanzas/store';
 import type { Category, Transaction } from '@finanzas/types';
 import {
   colors,
@@ -19,8 +19,6 @@ import {
   radius,
   spacing,
 } from '@finanzas/ui';
-
-import { TrashedSnackbar } from '../../../../components/transactions/trashed-snackbar';
 
 function findCategory(categories: Category[], id: string | null): Category | undefined {
   if (!id) return undefined;
@@ -35,7 +33,6 @@ export default function TransactionsScreen() {
   const restoreMutation = useRestoreTransaction();
   const trashCountQuery = useTrashedTransactions({ limit: 1 });
   const trashCount = trashCountQuery.data?.total ?? 0;
-  const [lastDeletedId, setLastDeletedId] = useState<string | null>(null);
 
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
@@ -51,18 +48,23 @@ export default function TransactionsScreen() {
           style: 'destructive',
           onPress: () =>
             deleteMutation.mutate(id, {
-              onSuccess: () => setLastDeletedId(id),
+              onSuccess: () => {
+                // PHASE-11.3: snackbar inline ad-hoc reemplazado por
+                // toast global. La acción Deshacer dispara el restore
+                // y el toast se cierra solo.
+                toast.show({
+                  kind: 'info',
+                  message: 'Transacción movida a papelera.',
+                  action: {
+                    label: 'Deshacer',
+                    onPress: () => restoreMutation.mutate(id),
+                  },
+                });
+              },
             }),
         },
       ],
     );
-  }
-
-  function handleUndo() {
-    if (!lastDeletedId) return;
-    const id = lastDeletedId;
-    setLastDeletedId(null);
-    restoreMutation.mutate(id);
   }
 
   function renderItem({ item }: { item: Transaction }) {
@@ -135,12 +137,6 @@ export default function TransactionsScreen() {
         />
       )}
 
-      <TrashedSnackbar
-        lastDeletedId={lastDeletedId}
-        onUndo={handleUndo}
-        onViewTrash={() => router.push('/(modules)/personal-finance/trash')}
-        isRestoring={restoreMutation.isPending}
-      />
     </View>
   );
 }

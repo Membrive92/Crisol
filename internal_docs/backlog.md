@@ -12,7 +12,7 @@
 >   (no se tacha) — la phase doc deja la traza histórica.
 > - Si un item se promueve a fase formal, se traslada a
 >   `phases/phase-X.Y-*.md` y se borra de aquí.
-> - Última actualización: 2026-05-05 (PHASE-11.2).
+> - Última actualización: 2026-05-05 (PHASE-11.3).
 
 ---
 
@@ -20,13 +20,13 @@
 
 Si quieres atacar trabajo real (no polish), por orden:
 
-1. **PHASE-11.3 — Sistema de toasts global** — el banner web y el
-   snackbar mobile de "Movido a papelera" son ad-hoc para la
-   pantalla de transacciones; otros flujos (imports, receipt
-   confirm) siguen sin feedback de éxito.
-2. **PHASE-11.4 — Captura de tickets por cámara mobile** (heredado
+1. **PHASE-11.4 — Captura de tickets por cámara mobile** (heredado
    de PHASE-5.2) — `expo-image-picker` ya está instalado, falta
-   integrar la pantalla de captura.
+   integrar la pantalla de captura + feedback con toasts (sistema
+   de PHASE-11.3).
+2. **Refactor: imports + receipts confirm usan `toast.show`** —
+   los flujos siguen sin notificación de éxito. Trivial ahora con
+   el sistema global de PHASE-11.3.
 
 ---
 

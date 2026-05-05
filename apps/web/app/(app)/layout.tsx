@@ -21,6 +21,7 @@ import {
 import { ModuleSections } from '@/components/modules/module-sections';
 import { BellIcon, MenuIcon } from '@/components/ui/icons';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
+import { Toaster } from '@/components/ui/toaster';
 
 // Estilos globales del drawer mobile. Se inyectan vía `<style>` porque
 // el layout usa `style={{}}` inline (sin CSS modules ni Tailwind), y
@@ -245,6 +246,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <PasskeyPrompt />
         {children}
       </main>
+
+      <Toaster />
     </div>
   );
 }

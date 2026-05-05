@@ -27,6 +27,7 @@ export type {
   ReceiptLineItem,
   ReceiptStatus,
 } from './models/receipt';
+export type { Toast, ToastAction, ToastInput, ToastKind } from './models/toast';
 
 export type {
   LoginRequest,

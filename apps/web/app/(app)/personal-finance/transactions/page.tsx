@@ -10,13 +10,12 @@ import {
   useTransactions,
   useTrashedTransactions,
 } from '@finanzas/services';
-import { useCurrencyStore } from '@finanzas/store';
+import { toast, useCurrencyStore } from '@finanzas/store';
 import type { TransactionListQuery } from '@finanzas/types';
 import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
 
 import { StitchSearchToolbar } from '@/components/transactions/stitch-search-toolbar';
 import { StitchTransactionsKpiRow } from '@/components/transactions/stitch-transactions-kpi-row';
-import { TrashedBanner } from '@/components/transactions/trashed-banner';
 import { TransactionList } from '@/components/transactions/transaction-list';
 import { Button } from '@/components/ui/button';
 import { Pagination } from '@/components/ui/pagination';
@@ -48,8 +47,6 @@ export default function TransactionsPage() {
   // Conteo de papelera para mostrar badge cuando hay items.
   const trashCountQuery = useTrashedTransactions({ limit: 1 });
   const trashCount = trashCountQuery.data?.total ?? 0;
-  // Última tx soft-deleted en esta sesión — alimenta el banner deshacer.
-  const [lastDeletedId, setLastDeletedId] = useState<string | null>(null);
 
   const total = data?.total ?? 0;
   const items = data?.items ?? [];
@@ -66,15 +63,21 @@ export default function TransactionsPage() {
   function handleDelete(id: string) {
     if (!confirm('¿Mover esta transacción a la papelera?')) return;
     deleteMutation.mutate(id, {
-      onSuccess: () => setLastDeletedId(id),
+      onSuccess: () => {
+        // PHASE-11.3: el banner inline ad-hoc fue reemplazado por un
+        // toast global con acción [Deshacer]. Al pulsar Deshacer se
+        // dispara el restore y el toast se cierra solo (lo gestiona
+        // el ToastCard tras invocar la action).
+        toast.show({
+          kind: 'info',
+          message: 'Transacción movida a papelera.',
+          action: {
+            label: 'Deshacer',
+            onPress: () => restoreMutation.mutate(id),
+          },
+        });
+      },
     });
-  }
-
-  function handleUndo() {
-    if (!lastDeletedId) return;
-    const id = lastDeletedId;
-    setLastDeletedId(null);
-    restoreMutation.mutate(id);
   }
 
   return (
@@ -180,12 +183,6 @@ export default function TransactionsPage() {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg }}>
-        <TrashedBanner
-          lastDeletedId={lastDeletedId}
-          onUndo={handleUndo}
-          isRestoring={restoreMutation.isPending}
-        />
-
         <StitchTransactionsKpiRow
           currency={currency}
           dateFrom={dateFrom}

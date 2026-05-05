@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { authApi } from '@finanzas/services';
 import { useAuthStore } from '@finanzas/store';
 
+import { Toaster } from '../components/ui/toaster';
 import { useAuthInit } from '../lib/auth-provider';
 import { QueryProvider } from '../lib/query-provider';
 
@@ -50,6 +51,7 @@ export default function RootLayout() {
         <Stack.Screen name="(auth)" options={{ headerShown: false }} />
         <Stack.Screen name="(modules)" options={{ headerShown: false }} />
       </Stack>
+      <Toaster />
     </QueryProvider>
   );
 }
