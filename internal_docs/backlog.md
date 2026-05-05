@@ -12,7 +12,7 @@
 >   (no se tacha) — la phase doc deja la traza histórica.
 > - Si un item se promueve a fase formal, se traslada a
 >   `phases/phase-X.Y-*.md` y se borra de aquí.
-> - Última actualización: 2026-05-05 (PHASE-10.2).
+> - Última actualización: 2026-05-05 (PHASE-10.3).
 
 ---
 
@@ -20,18 +20,19 @@
 
 Si quieres atacar trabajo real (no polish), por orden:
 
-1. **PHASE-10.3 — Mobile papelera** — la UI de papelera ya está en
-   web (10.2). Mobile reutiliza los hooks shared y añade pantalla
-   `trash.tsx` + snackbar deshacer.
-2. **Cron nocturno de tasas (APScheduler)** — el lazy fetch cubre
+1. **Cron nocturno de tasas (APScheduler)** — el lazy fetch cubre
    "primer uso del día", pero si la app pasa días sin abrirse las
    tasas se quedan atrás.
-3. **`useCurrencyStore` cross-platform (AsyncStorage adapter)** —
+2. **`useCurrencyStore` cross-platform (AsyncStorage adapter)** —
    pre-requisito para que mobile herede el toggle `convertAll` y la
    moneda activa global del web.
-4. **Sistema de toasts global** — el banner de "Movido a papelera"
-   en la página de transacciones es inline ad-hoc; otros flujos
-   (imports, receipt confirm) siguen sin feedback de éxito.
+3. **Sistema de toasts global** — el banner web y el snackbar mobile
+   de "Movido a papelera" son ad-hoc para la pantalla de
+   transacciones; otros flujos (imports, receipt confirm) siguen sin
+   feedback de éxito.
+4. **Captura de tickets por cámara mobile** (heredado de PHASE-5.2)
+   — el backend ya lo soporta; falta integrar `expo-camera` /
+   `expo-image-picker`.
 
 ---
 

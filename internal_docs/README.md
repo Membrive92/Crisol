@@ -112,7 +112,7 @@ Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
 |------|---------------------------------------|--------|----|
 | 10.1 | Backend soft-delete + endpoints trash | ✅     | —  |
 | 10.2 | Web papelera + capa shared            | ✅     | —  |
-| 10.3 | Mobile papelera                       | ⏳     | —  |
+| 10.3 | Mobile papelera                       | ✅     | —  |
 
 ---
 

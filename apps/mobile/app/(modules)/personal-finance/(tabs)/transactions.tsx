@@ -1,10 +1,13 @@
-import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useState } from 'react';
+import { Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 
 import {
   useCategories,
   useDeleteTransaction,
+  useRestoreTransaction,
   useTransactions,
+  useTrashedTransactions,
 } from '@finanzas/services';
 import type { Category, Transaction } from '@finanzas/types';
 import {
@@ -17,6 +20,8 @@ import {
   spacing,
 } from '@finanzas/ui';
 
+import { TrashedSnackbar } from '../../../../components/transactions/trashed-snackbar';
+
 function findCategory(categories: Category[], id: string | null): Category | undefined {
   if (!id) return undefined;
   return categories.find((c) => c.id === id);
@@ -27,12 +32,37 @@ export default function TransactionsScreen() {
   const { data, isLoading, isError, refetch, isRefetching } = useTransactions({ limit: 50 });
   const { data: categories } = useCategories();
   const deleteMutation = useDeleteTransaction();
+  const restoreMutation = useRestoreTransaction();
+  const trashCountQuery = useTrashedTransactions({ limit: 1 });
+  const trashCount = trashCountQuery.data?.total ?? 0;
+  const [lastDeletedId, setLastDeletedId] = useState<string | null>(null);
 
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
 
-  function handleDelete(id: string) {
-    deleteMutation.mutate(id);
+  function handleDelete(id: string, description: string | null) {
+    Alert.alert(
+      'Mover a papelera',
+      description ? `"${description}" pasará a papelera.` : '¿Mover esta transacción a papelera?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Mover',
+          style: 'destructive',
+          onPress: () =>
+            deleteMutation.mutate(id, {
+              onSuccess: () => setLastDeletedId(id),
+            }),
+        },
+      ],
+    );
+  }
+
+  function handleUndo() {
+    if (!lastDeletedId) return;
+    const id = lastDeletedId;
+    setLastDeletedId(null);
+    restoreMutation.mutate(id);
   }
 
   function renderItem({ item }: { item: Transaction }) {
@@ -47,7 +77,7 @@ export default function TransactionsScreen() {
             params: { id: item.id },
           })
         }
-        onLongPress={() => handleDelete(item.id)}
+        onLongPress={() => handleDelete(item.id, item.description)}
       >
         <View style={styles.rowText}>
           <Text style={styles.description} numberOfLines={1}>
@@ -69,11 +99,23 @@ export default function TransactionsScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerText}>{total} registros</Text>
-        <Link href="/(modules)/personal-finance/transaction/new" asChild>
-          <TouchableOpacity style={styles.addButton}>
-            <Text style={styles.addButtonText}>+ Nueva</Text>
-          </TouchableOpacity>
-        </Link>
+        <View style={styles.headerActions}>
+          <Link href="/(modules)/personal-finance/trash" asChild>
+            <TouchableOpacity style={styles.trashButton}>
+              <Text style={styles.trashButtonText}>Papelera</Text>
+              {trashCount > 0 ? (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{trashCount}</Text>
+                </View>
+              ) : null}
+            </TouchableOpacity>
+          </Link>
+          <Link href="/(modules)/personal-finance/transaction/new" asChild>
+            <TouchableOpacity style={styles.addButton}>
+              <Text style={styles.addButtonText}>+ Nueva</Text>
+            </TouchableOpacity>
+          </Link>
+        </View>
       </View>
 
       {isLoading ? (
@@ -92,6 +134,13 @@ export default function TransactionsScreen() {
           contentContainerStyle={items.length === 0 ? styles.emptyContent : undefined}
         />
       )}
+
+      <TrashedSnackbar
+        lastDeletedId={lastDeletedId}
+        onUndo={handleUndo}
+        onViewTrash={() => router.push('/(modules)/personal-finance/trash')}
+        isRestoring={restoreMutation.isPending}
+      />
     </View>
   );
 }
@@ -108,13 +157,35 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   headerText: { color: colors.textMuted, fontSize: fontSize.sm },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  trashButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  trashButtonText: { color: colors.text, fontSize: fontSize.sm, fontWeight: fontWeight.medium },
+  badge: {
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 5,
+    borderRadius: 9,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: { color: colors.onPrimary, fontSize: 10, fontWeight: fontWeight.bold },
   addButton: {
     backgroundColor: colors.primary,
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
   },
-  addButtonText: { color: colors.surface, fontWeight: fontWeight.semibold as '600' },
+  addButtonText: { color: colors.surface, fontWeight: fontWeight.semibold },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -122,9 +193,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   rowText: { flex: 1, marginRight: spacing.sm },
-  description: { fontSize: fontSize.md, color: colors.text, fontWeight: fontWeight.medium as '500' },
+  description: {
+    fontSize: fontSize.md,
+    color: colors.text,
+    fontWeight: fontWeight.medium,
+  },
   meta: { fontSize: fontSize.sm, color: colors.textMuted, marginTop: 2 },
-  amount: { fontSize: fontSize.md, fontWeight: fontWeight.semibold as '600', color: colors.text },
+  amount: { fontSize: fontSize.md, fontWeight: fontWeight.semibold, color: colors.text },
   amountIncome: { color: colors.income },
   separator: { height: 1, backgroundColor: colors.border },
   placeholder: { padding: spacing.lg, textAlign: 'center', color: colors.textMuted },
