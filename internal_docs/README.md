@@ -114,6 +114,15 @@ Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
 | 10.2 | Web papelera + capa shared            | ✅     | —  |
 | 10.3 | Mobile papelera                       | ✅     | —  |
 
+### Fase 11 — Infra y polish
+
+| Fase | Nombre                                | Estado | PR |
+|------|---------------------------------------|--------|----|
+| 11.1 | Cron nocturno de tasas (APScheduler)  | ✅     | —  |
+| 11.2 | Currency store cross-platform         | ⏳     | —  |
+| 11.3 | Sistema de toasts global              | ⏳     | —  |
+| 11.4 | Cámara mobile para tickets            | ⏳     | —  |
+
 ---
 
 ## Estructura de este directorio

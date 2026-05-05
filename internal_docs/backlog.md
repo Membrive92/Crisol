@@ -12,7 +12,7 @@
 >   (no se tacha) — la phase doc deja la traza histórica.
 > - Si un item se promueve a fase formal, se traslada a
 >   `phases/phase-X.Y-*.md` y se borra de aquí.
-> - Última actualización: 2026-05-05 (PHASE-10.3).
+> - Última actualización: 2026-05-05 (PHASE-11.1).
 
 ---
 
@@ -20,19 +20,16 @@
 
 Si quieres atacar trabajo real (no polish), por orden:
 
-1. **Cron nocturno de tasas (APScheduler)** — el lazy fetch cubre
-   "primer uso del día", pero si la app pasa días sin abrirse las
-   tasas se quedan atrás.
-2. **`useCurrencyStore` cross-platform (AsyncStorage adapter)** —
-   pre-requisito para que mobile herede el toggle `convertAll` y la
-   moneda activa global del web.
-3. **Sistema de toasts global** — el banner web y el snackbar mobile
-   de "Movido a papelera" son ad-hoc para la pantalla de
-   transacciones; otros flujos (imports, receipt confirm) siguen sin
-   feedback de éxito.
-4. **Captura de tickets por cámara mobile** (heredado de PHASE-5.2)
-   — el backend ya lo soporta; falta integrar `expo-camera` /
-   `expo-image-picker`.
+1. **PHASE-11.2 — `useCurrencyStore` cross-platform** (AsyncStorage
+   adapter) — pre-requisito para que mobile herede el toggle
+   `convertAll` y la moneda activa global del web.
+2. **PHASE-11.3 — Sistema de toasts global** — el banner web y el
+   snackbar mobile de "Movido a papelera" son ad-hoc para la
+   pantalla de transacciones; otros flujos (imports, receipt
+   confirm) siguen sin feedback de éxito.
+3. **PHASE-11.4 — Captura de tickets por cámara mobile** (heredado
+   de PHASE-5.2) — el backend ya lo soporta; falta integrar
+   `expo-camera` / `expo-image-picker`.
 
 ---
 
@@ -44,9 +41,6 @@ Si quieres atacar trabajo real (no polish), por orden:
   la query con `limit=4` y consumir `tx.converted_amount` en el
   componente. Decidido fuera de PHASE-8.4 para no convertir vistas
   compactas.
-- **[PHASE-8.1 / 8.2 / 8.3]** Sin cron nocturno de tasas. El lazy
-  fetch cubre "primer uso del día"; si nadie abre la app, las tasas
-  no se refrescan. Añadir APScheduler o equivalente cuando moleste.
 - **[PHASE-8.x]** JPY (y otras monedas sin decimales) redondea a 2.
   La política `quantize` per-currency vive en `currency.service` —
   habrá que añadirla cuando entren datos JPY reales.

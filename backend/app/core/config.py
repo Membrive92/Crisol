@@ -75,6 +75,17 @@ class Settings(BaseSettings):
     frankfurter_base_url: str = "https://api.frankfurter.dev/v1"
     frankfurter_timeout_seconds: int = 10
 
+    # Cron nocturno que dispara `ensure_rates_for_dates([yesterday, today])`
+    # — cubre el lazy fetch para usuarios que pasan días sin abrir la app.
+    # Default activado en prod; tests lo sobrescriben a False vía env para
+    # no acoplar el suite a un timer.
+    enable_currency_cron: bool = True
+    # Hora UTC del job (por defecto 03:00 — frankfurter ya tiene el feed
+    # del ECB del día publicado y la mayoría de zonas horarias están en
+    # ventana baja de tráfico).
+    currency_cron_hour: int = 3
+    currency_cron_minute: int = 0
+
     # ---------- MinIO (blob storage) ----------
     minio_endpoint: str = "localhost:9000"
     minio_access_key: str = "minioadmin"
