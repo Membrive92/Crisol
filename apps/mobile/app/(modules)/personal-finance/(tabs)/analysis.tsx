@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Link } from 'expo-router';
 
 import {
   authApi,
@@ -128,9 +129,16 @@ export default function AnalysisScreen() {
             <Text style={styles.greeting}>Hola, {user?.display_name ?? 'usuario'}</Text>
             <Text style={styles.subtitle}>Análisis financiero</Text>
           </View>
-          <Pressable onPress={handleLogout} style={styles.logoutButton}>
-            <Text style={styles.logoutText}>Salir</Text>
-          </Pressable>
+          <View style={styles.headerActions}>
+            <Link href="/(modules)/personal-finance/budgets" asChild>
+              <Pressable style={styles.headerButton}>
+                <Text style={styles.headerButtonText}>Presupuestos</Text>
+              </Pressable>
+            </Link>
+            <Pressable onPress={handleLogout} style={styles.logoutButton}>
+              <Text style={styles.logoutText}>Salir</Text>
+            </Pressable>
+          </View>
         </View>
 
         <CurrencyPicker
@@ -189,6 +197,19 @@ const styles = StyleSheet.create({
   },
   greeting: { fontSize: fontSize.xl, fontWeight: fontWeight.semibold, color: colors.text },
   subtitle: { fontSize: fontSize.sm, color: colors.textMuted, marginTop: 2 },
+  headerActions: { flexDirection: 'row', gap: spacing.xs, alignItems: 'center' },
+  headerButton: {
+    paddingVertical: 6,
+    paddingHorizontal: spacing.sm,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: 6,
+  },
+  headerButtonText: {
+    fontSize: fontSize.sm,
+    color: colors.text,
+    fontWeight: fontWeight.medium,
+  },
   logoutButton: {
     paddingVertical: 6,
     paddingHorizontal: spacing.sm,

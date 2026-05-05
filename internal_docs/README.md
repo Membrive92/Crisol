@@ -131,7 +131,7 @@ Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
 |------|---------------------------------------|--------|----|
 | 12.1 | Backend (modelo + endpoints + status) | ✅     | —  |
 | 12.2 | Frontend web (ruta + form + lista)    | ✅     | —  |
-| 12.3 | Frontend mobile (pantalla)            | ⏳     | —  |
+| 12.3 | Frontend mobile (pantalla)            | ✅     | —  |
 
 ---
 

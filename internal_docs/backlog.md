@@ -12,7 +12,7 @@
 >   (no se tacha) — la phase doc deja la traza histórica.
 > - Si un item se promueve a fase formal, se traslada a
 >   `phases/phase-X.Y-*.md` y se borra de aquí.
-> - Última actualización: 2026-05-05 (PHASE-12.2).
+> - Última actualización: 2026-05-05 (PHASE-12.3).
 
 ---
 
@@ -20,14 +20,14 @@
 
 Si quieres atacar trabajo real, por orden:
 
-1. **PHASE-12.2 — Frontend web de presupuestos** — backend cerrado
-   en 12.1; falta lista + crear + tarjeta de estado + integración
-   en dashboard.
-2. **PHASE-12.3 — Frontend mobile de presupuestos** — pantalla y
-   tarjetas en Análisis, reusa hooks shared de 12.2.
-3. **PHASE-13 — Detección de subscripciones recurrentes vía IA
+1. **PHASE-13 — Detección de subscripciones recurrentes vía IA
    local** — el módulo `ai/` está listo (cliente Ollama), falta el
    pipeline de análisis sobre transacciones existentes.
+2. **Edición inline de amount en presupuestos** (web + mobile) —
+   los hooks `useUpdateBudget` están listos; falta UI.
+3. **Notificaciones proactivas de budget over** — actualmente sólo
+   visible en GET /budgets/status. Hook tras `transactions.create`
+   o cron nocturno.
 
 ---
 
