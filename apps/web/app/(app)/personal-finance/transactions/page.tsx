@@ -6,7 +6,9 @@ import Link from 'next/link';
 import {
   useCategories,
   useDeleteTransaction,
+  useRestoreTransaction,
   useTransactions,
+  useTrashedTransactions,
 } from '@finanzas/services';
 import { useCurrencyStore } from '@finanzas/store';
 import type { TransactionListQuery } from '@finanzas/types';
@@ -14,6 +16,7 @@ import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
 
 import { StitchSearchToolbar } from '@/components/transactions/stitch-search-toolbar';
 import { StitchTransactionsKpiRow } from '@/components/transactions/stitch-transactions-kpi-row';
+import { TrashedBanner } from '@/components/transactions/trashed-banner';
 import { TransactionList } from '@/components/transactions/transaction-list';
 import { Button } from '@/components/ui/button';
 import { Pagination } from '@/components/ui/pagination';
@@ -41,6 +44,12 @@ export default function TransactionsPage() {
   const { data, isLoading, isError, error, isFetching } = useTransactions(queryParams);
   const { data: categories } = useCategories();
   const deleteMutation = useDeleteTransaction();
+  const restoreMutation = useRestoreTransaction();
+  // Conteo de papelera para mostrar badge cuando hay items.
+  const trashCountQuery = useTrashedTransactions({ limit: 1 });
+  const trashCount = trashCountQuery.data?.total ?? 0;
+  // Última tx soft-deleted en esta sesión — alimenta el banner deshacer.
+  const [lastDeletedId, setLastDeletedId] = useState<string | null>(null);
 
   const total = data?.total ?? 0;
   const items = data?.items ?? [];
@@ -55,8 +64,17 @@ export default function TransactionsPage() {
     filters.date_to ?? new Date(now.getFullYear(), 11, 31, 23, 59, 59).toISOString();
 
   function handleDelete(id: string) {
-    if (!confirm('¿Eliminar esta transacción?')) return;
-    deleteMutation.mutate(id);
+    if (!confirm('¿Mover esta transacción a la papelera?')) return;
+    deleteMutation.mutate(id, {
+      onSuccess: () => setLastDeletedId(id),
+    });
+  }
+
+  function handleUndo() {
+    if (!lastDeletedId) return;
+    const id = lastDeletedId;
+    setLastDeletedId(null);
+    restoreMutation.mutate(id);
   }
 
   return (
@@ -106,6 +124,34 @@ export default function TransactionsPage() {
             porque conceptualmente son "otras formas de añadir
             transacciones", no pestañas independientes. */}
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: spacing.sm }}>
+          <Link href="/personal-finance/trash">
+            <Button variant="ghost">
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                Papelera
+                {trashCount > 0 ? (
+                  <span
+                    aria-label={`${trashCount} en papelera`}
+                    style={{
+                      minWidth: 18,
+                      height: 18,
+                      padding: '0 5px',
+                      borderRadius: 9,
+                      backgroundColor: colors.primary,
+                      color: colors.onPrimary,
+                      fontSize: 10,
+                      fontWeight: fontWeight.bold,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      lineHeight: 1,
+                    }}
+                  >
+                    {trashCount}
+                  </span>
+                ) : null}
+              </span>
+            </Button>
+          </Link>
           <Link href="/personal-finance/imports">
             <Button variant="ghost">
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -134,6 +180,12 @@ export default function TransactionsPage() {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg }}>
+        <TrashedBanner
+          lastDeletedId={lastDeletedId}
+          onUndo={handleUndo}
+          isRestoring={restoreMutation.isPending}
+        />
+
         <StitchTransactionsKpiRow
           currency={currency}
           dateFrom={dateFrom}

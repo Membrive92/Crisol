@@ -13,6 +13,12 @@ export interface Transaction {
   created_at: string;
   updated_at: string;
   /**
+   * Cuándo se soft-deleted (PHASE-10.1). `null` en activas. Timestamp
+   * en filas que vienen del endpoint `/transactions/trash`. La UI lo
+   * usa para pintar "borrada hace X días".
+   */
+  deleted_at: string | null;
+  /**
    * Importe convertido a `converted_currency` con la tasa del día de
    * `occurred_at` (PHASE-8.4). Sólo viene cuando el caller pasa
    * `?target_currency=` al listado; en lecturas individuales y modo

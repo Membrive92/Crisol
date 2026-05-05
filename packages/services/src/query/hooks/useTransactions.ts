@@ -52,6 +52,45 @@ export function useDeleteTransaction() {
   return useMutation<void, Error, string>({
     mutationFn: (id) => transactionsApi.remove(id),
     onSuccess: () => {
+      // Soft-delete (PHASE-10.1) — la fila se va de list/dashboard y
+      // aparece en trash. Invalidamos `transactions.all` (cubre list,
+      // trash y detail) y `dashboard.all` para que summary/top-expenses
+      // se actualicen sin esperar a staleTime.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+    },
+  });
+}
+
+export function useTrashedTransactions(query: { limit?: number; offset?: number } = {}) {
+  return useQuery({
+    queryKey: queryKeys.transactions.trash(query),
+    queryFn: () => transactionsApi.listTrash(query),
+    placeholderData: (previous) => previous,
+  });
+}
+
+export function useRestoreTransaction() {
+  const queryClient = useQueryClient();
+  return useMutation<Transaction, Error, string>({
+    mutationFn: (id) => transactionsApi.restore(id),
+    onSuccess: () => {
+      // Vuelve a list/dashboard, sale de trash. Mismo blast radius
+      // que delete pero al revés.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+    },
+  });
+}
+
+export function usePurgeTransaction() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: (id) => transactionsApi.purge(id),
+    onSuccess: () => {
+      // Sólo afecta a la papelera (la tx ya estaba excluida de list y
+      // dashboard). Aun así invalidamos `transactions.all` para que
+      // el contador y la lista de papelera se refresquen.
       void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
     },
   });

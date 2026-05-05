@@ -26,6 +26,8 @@ export const queryKeys = {
     list: (query: TransactionListQuery = {}) =>
       [...queryKeys.transactions.all, 'list', normalizeQuery(query)] as const,
     detail: (id: string) => [...queryKeys.transactions.all, 'detail', id] as const,
+    trash: (query: { limit?: number; offset?: number } = {}) =>
+      [...queryKeys.transactions.all, 'trash', normalizeQuery(query)] as const,
   },
   dashboard: {
     all: ['dashboard'] as const,

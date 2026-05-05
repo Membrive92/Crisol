@@ -34,4 +34,24 @@ export const transactionsApi = {
   async remove(id: string): Promise<void> {
     await apiClient.delete(`/transactions/${id}`);
   },
+
+  // PHASE-10.1 — papelera (soft-delete).
+  async listTrash(query: { limit?: number; offset?: number } = {}): Promise<TransactionListResponse> {
+    const response = await apiClient.get<TransactionListResponse>(
+      '/transactions/trash',
+      { params: query },
+    );
+    return response.data;
+  },
+
+  async restore(id: string): Promise<Transaction> {
+    const response = await apiClient.post<Transaction>(
+      `/transactions/${id}/restore`,
+    );
+    return response.data;
+  },
+
+  async purge(id: string): Promise<void> {
+    await apiClient.delete(`/transactions/${id}/purge`);
+  },
 };

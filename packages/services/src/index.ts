@@ -34,6 +34,9 @@ export {
   useCreateTransaction,
   useUpdateTransaction,
   useDeleteTransaction,
+  useTrashedTransactions,
+  useRestoreTransaction,
+  usePurgeTransaction,
 } from './query/hooks/useTransactions';
 export {
   useDashboardSummary,
