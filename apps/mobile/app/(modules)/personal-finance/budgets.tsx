@@ -1,12 +1,5 @@
 import { useState } from 'react';
-import {
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack } from 'expo-router';
 
 import {
@@ -16,12 +9,14 @@ import {
   useCategories,
   useCreateBudget,
   useDeleteBudget,
+  useUpdateBudget,
   useUserCurrencies,
 } from '@finanzas/services';
 import { toast } from '@finanzas/store';
 import type { BudgetCreateRequest } from '@finanzas/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
 
+import { BudgetActiveRow } from '../../../components/budgets/budget-active-row';
 import { BudgetFormModal } from '../../../components/budgets/budget-form-modal';
 import { BudgetStatusCard } from '../../../components/budgets/budget-status-card';
 
@@ -37,6 +32,7 @@ export default function BudgetsScreen() {
   const budgetsQuery = useBudgets();
   const statusQuery = useBudgetStatus();
   const createMutation = useCreateBudget();
+  const updateMutation = useUpdateBudget();
   const deleteMutation = useDeleteBudget();
   const [formOpen, setFormOpen] = useState(false);
 
@@ -74,6 +70,24 @@ export default function BudgetsScreen() {
     );
   }
 
+  function handleSaveAmount(id: string, amount: string) {
+    return new Promise<void>((resolve) => {
+      updateMutation.mutate(
+        { id, data: { amount } },
+        {
+          onSuccess: () => {
+            toast.success('Importe actualizado.');
+            resolve();
+          },
+          onError: (err) => {
+            toast.error(formatApiError(err, 'Error al actualizar el importe.'));
+            resolve();
+          },
+        },
+      );
+    });
+  }
+
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ title: 'Presupuestos' }} />
@@ -104,32 +118,18 @@ export default function BudgetsScreen() {
               Presupuestos activos
             </Text>
             {budgets.map((b) => {
-              const cat = (categories ?? []).find((c) => c.id === b.category_id);
-              const label = cat?.name ?? 'Global';
               const busy =
-                deleteMutation.isPending && deleteMutation.variables === b.id;
+                (deleteMutation.isPending && deleteMutation.variables === b.id) ||
+                (updateMutation.isPending && updateMutation.variables?.id === b.id);
               return (
-                <View key={b.id} style={styles.row}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.rowTitle}>{label}</Text>
-                    <Text style={styles.rowMeta}>
-                      {b.amount} {b.currency} / mes · desde {b.effective_from}
-                    </Text>
-                  </View>
-                  <Pressable
-                    onPress={() => handleDelete(b.id, label)}
-                    disabled={busy}
-                    style={({ pressed }) => [
-                      styles.closeButton,
-                      pressed && { opacity: 0.7 },
-                      busy && { opacity: 0.5 },
-                    ]}
-                  >
-                    <Text style={styles.closeButtonText}>
-                      {busy ? 'Cerrando…' : 'Cerrar'}
-                    </Text>
-                  </Pressable>
-                </View>
+                <BudgetActiveRow
+                  key={b.id}
+                  budget={b}
+                  categories={categories ?? []}
+                  onSave={handleSaveAmount}
+                  onDelete={handleDelete}
+                  busy={busy}
+                />
               );
             })}
           </>
@@ -178,35 +178,6 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     color: colors.textMuted,
     textAlign: 'center',
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
-    gap: spacing.sm,
-  },
-  rowTitle: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.semibold,
-    color: colors.text,
-  },
-  rowMeta: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: 2 },
-  closeButton: {
-    paddingVertical: 6,
-    paddingHorizontal: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.sm,
-  },
-  closeButtonText: {
-    fontSize: fontSize.xs,
-    fontWeight: fontWeight.semibold,
-    color: colors.danger,
   },
   fab: {
     position: 'absolute',

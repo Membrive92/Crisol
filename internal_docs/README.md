@@ -141,6 +141,18 @@ Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
 | 13.2 | Frontend web                           | ✅     | —  |
 | 13.3 | Frontend mobile                        | ✅     | —  |
 
+### Fase 14 — Polish y refinamiento
+
+| Fase | Nombre                                       | Estado | PR |
+|------|----------------------------------------------|--------|----|
+| 14.1 | Edición inline amount presupuestos           | ✅     | —  |
+| 14.2 | Sección "Descartadas" en subscriptions UI    | ⏳     | —  |
+| 14.3 | Date picker nativo mobile                    | ⏳     | —  |
+| 14.4 | `convertAll` toggle en mobile                | ⏳     | —  |
+| 14.5 | Notificaciones proactivas budget over        | ⏳     | —  |
+| 14.6 | Cobertura UI mobile                          | ⏳     | —  |
+| 14.7 | Detector IA Ollama para subscripciones       | ⏳     | —  |
+
 ---
 
 ## Estructura de este directorio

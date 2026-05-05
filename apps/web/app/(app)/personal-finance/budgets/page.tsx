@@ -6,14 +6,15 @@ import {
   useBudgets,
   useCreateBudget,
   useDeleteBudget,
+  useUpdateBudget,
 } from '@finanzas/services';
 import { toast } from '@finanzas/store';
 import type { BudgetCreateRequest } from '@finanzas/types';
 import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
 
 import { BudgetForm } from '@/components/budgets/budget-form';
+import { BudgetRow } from '@/components/budgets/budget-row';
 import { BudgetStatusCard } from '@/components/budgets/budget-status-card';
-import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 
 export default function BudgetsPage() {
@@ -22,6 +23,7 @@ export default function BudgetsPage() {
   const budgetsQuery = useBudgets();
   const statusQuery = useBudgetStatus();
   const createMutation = useCreateBudget();
+  const updateMutation = useUpdateBudget();
   const deleteMutation = useDeleteBudget();
 
   const budgets = budgetsQuery.data ?? [];
@@ -47,6 +49,24 @@ export default function BudgetsPage() {
       onSuccess: () => toast.success('Presupuesto cerrado.'),
       onError: (err) =>
         toast.error(formatApiError(err, 'Error al cerrar el presupuesto.')),
+    });
+  }
+
+  function handleSaveAmount(id: string, amount: string) {
+    return new Promise<void>((resolve) => {
+      updateMutation.mutate(
+        { id, data: { amount } },
+        {
+          onSuccess: () => {
+            toast.success('Importe actualizado.');
+            resolve();
+          },
+          onError: (err) => {
+            toast.error(formatApiError(err, 'Error al actualizar el importe.'));
+            resolve();
+          },
+        },
+      );
     });
   }
 
@@ -131,46 +151,19 @@ export default function BudgetsPage() {
           <Card style={{ padding: 0 }}>
             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
               {budgets.map((b, idx) => {
-                const cat = (categories ?? []).find((c) => c.id === b.category_id);
+                const busy =
+                  (deleteMutation.isPending && deleteMutation.variables === b.id) ||
+                  (updateMutation.isPending && updateMutation.variables?.id === b.id);
                 return (
-                  <li
+                  <BudgetRow
                     key={b.id}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: spacing.md,
-                      borderTop: idx === 0 ? 'none' : `1px solid ${colors.border}`,
-                    }}
-                  >
-                    <div>
-                      <span
-                        style={{
-                          fontSize: fontSize.sm,
-                          fontWeight: fontWeight.semibold,
-                          color: colors.text,
-                          display: 'block',
-                        }}
-                      >
-                        {cat?.name ?? 'Global'}
-                      </span>
-                      <span style={{ fontSize: fontSize.xs, color: colors.textMuted }}>
-                        {b.amount} {b.currency} / mes · vigente desde {b.effective_from}
-                      </span>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      onClick={() => handleDelete(b.id)}
-                      disabled={
-                        deleteMutation.isPending && deleteMutation.variables === b.id
-                      }
-                      style={{ color: colors.danger, borderColor: colors.border }}
-                    >
-                      {deleteMutation.isPending && deleteMutation.variables === b.id
-                        ? 'Cerrando…'
-                        : 'Cerrar'}
-                    </Button>
-                  </li>
+                    budget={b}
+                    categories={categories ?? []}
+                    onSave={handleSaveAmount}
+                    onDelete={handleDelete}
+                    busy={busy}
+                    withTopBorder={idx > 0}
+                  />
                 );
               })}
             </ul>

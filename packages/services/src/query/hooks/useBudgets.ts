@@ -44,10 +44,15 @@ export function useCreateBudget() {
   });
 }
 
-export function useUpdateBudget(id: string) {
+export interface UpdateBudgetVariables {
+  id: string;
+  data: BudgetUpdateRequest;
+}
+
+export function useUpdateBudget() {
   const queryClient = useQueryClient();
-  return useMutation<Budget, Error, BudgetUpdateRequest>({
-    mutationFn: (data) => budgetsApi.update(id, data),
+  return useMutation<Budget, Error, UpdateBudgetVariables>({
+    mutationFn: ({ id, data }) => budgetsApi.update(id, data),
     onSuccess: (updated) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.budgets.all });
       queryClient.setQueryData(queryKeys.budgets.detail(updated.id), updated);
