@@ -12,6 +12,8 @@ import {
 import type { BudgetCreateRequest, Category } from '@finanzas/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
 
+import { DateInput } from '../ui/date-input';
+
 export interface BudgetFormModalProps {
   visible: boolean;
   categories: Category[];
@@ -133,15 +135,11 @@ export function BudgetFormModal({
               </View>
             </View>
 
-            <View>
-              <Text style={styles.label}>Vigente desde (YYYY-MM-DD)</Text>
-              <TextInput
-                style={styles.input}
-                value={effectiveFrom}
-                onChangeText={setEffectiveFrom}
-                placeholder="2026-05-01"
-              />
-            </View>
+            <DateInput
+              label="Vigente desde"
+              value={effectiveFrom}
+              onChange={setEffectiveFrom}
+            />
 
             {error ? <Text style={styles.error}>{error}</Text> : null}
           </ScrollView>

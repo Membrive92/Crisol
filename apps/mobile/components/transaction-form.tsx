@@ -18,6 +18,8 @@ import {
   toDateInputValue,
 } from '@finanzas/ui';
 
+import { DateInput } from './ui/date-input';
+
 interface TransactionFormValues {
   amount: string;
   currency: string;
@@ -100,14 +102,13 @@ export function TransactionForm({
         autoCapitalize="characters"
       />
 
-      <Text style={styles.label}>Fecha (YYYY-MM-DD)</Text>
-      <TextInput
-        style={styles.input}
-        value={values.occurred_at}
-        onChangeText={(v) => update('occurred_at', v)}
-        placeholder="2026-04-16"
-        placeholderTextColor={colors.textSubtle}
-      />
+      <View style={{ marginBottom: spacing.md }}>
+        <DateInput
+          label="Fecha"
+          value={values.occurred_at}
+          onChange={(v) => update('occurred_at', v)}
+        />
+      </View>
 
       <Text style={styles.label}>Categoría</Text>
       <View style={styles.categoryList}>

@@ -19,6 +19,8 @@ import {
   toDateInputValue,
 } from '@finanzas/ui';
 
+import { DateInput } from './ui/date-input';
+
 export interface ReceiptCaptureFormProps {
   extraction: ReceiptExtraction | Record<string, unknown>;
   submitting?: boolean;
@@ -123,13 +125,13 @@ export function ReceiptCaptureForm({
         maxLength={3}
       />
 
-      <Text style={styles.label}>Fecha (YYYY-MM-DD)</Text>
-      <TextInput
-        style={styles.input}
-        value={values.occurred_at}
-        onChangeText={(v) => handleChange('occurred_at', v)}
-        placeholder="2026-04-15"
-      />
+      <View style={{ marginBottom: spacing.md }}>
+        <DateInput
+          label="Fecha"
+          value={values.occurred_at}
+          onChange={(v) => handleChange('occurred_at', v)}
+        />
+      </View>
 
       <Text style={styles.label}>Descripción</Text>
       <TextInput
