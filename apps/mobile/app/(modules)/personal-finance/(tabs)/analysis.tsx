@@ -135,6 +135,11 @@ export default function AnalysisScreen() {
                 <Text style={styles.headerButtonText}>Presupuestos</Text>
               </Pressable>
             </Link>
+            <Link href="/(modules)/personal-finance/subscriptions" asChild>
+              <Pressable style={styles.headerButton}>
+                <Text style={styles.headerButtonText}>Subscripciones</Text>
+              </Pressable>
+            </Link>
             <Pressable onPress={handleLogout} style={styles.logoutButton}>
               <Text style={styles.logoutText}>Salir</Text>
             </Pressable>
