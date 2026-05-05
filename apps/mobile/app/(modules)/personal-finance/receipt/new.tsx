@@ -16,6 +16,7 @@ import {
   useExtractReceipt,
   useRejectReceipt,
 } from '@finanzas/services';
+import { toast } from '@finanzas/store';
 import type { Receipt, ReceiptConfirmRequest, ReceiptExtraction } from '@finanzas/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
 
@@ -66,7 +67,9 @@ export default function NewReceiptScreen() {
   async function handlePickFromLibrary() {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('Permiso necesario', 'Concede acceso a la galería para subir tickets.');
+      // PHASE-11.4: errores no bloqueantes pasan por toast; Alert
+      // se reserva para confirms destructivos (handleReject).
+      toast.warning('Concede acceso a la galería para subir tickets.');
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -82,7 +85,7 @@ export default function NewReceiptScreen() {
   async function handleTakePhoto() {
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('Permiso necesario', 'Concede acceso a la cámara para capturar tickets.');
+      toast.warning('Concede acceso a la cámara para capturar tickets.');
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
@@ -104,21 +107,40 @@ export default function NewReceiptScreen() {
           setStagedReceipt(data.receipt);
           setStagedExtraction(data.extraction);
         },
+        onError: (err) => {
+          toast.error(
+            err instanceof Error
+              ? `Error al analizar: ${err.message}`
+              : 'No se pudo analizar el ticket. ¿Está Ollama corriendo?',
+          );
+        },
       });
     } catch (err) {
-      Alert.alert('Error', err instanceof Error ? err.message : 'No se pudo leer la imagen');
+      toast.error(err instanceof Error ? err.message : 'No se pudo leer la imagen');
     }
   }
 
   function handleConfirm(payload: ReceiptConfirmRequest) {
     if (!stagedReceipt) return;
     confirmMutation.mutate(payload, {
-      onSuccess: () => router.replace('/(modules)/personal-finance/(tabs)/receipts'),
+      onSuccess: () => {
+        toast.success('Ticket añadido como transacción.');
+        router.replace('/(modules)/personal-finance/(tabs)/receipts');
+      },
+      onError: (err) => {
+        toast.error(
+          err instanceof Error
+            ? `Error al confirmar: ${err.message}`
+            : 'Error al confirmar el ticket.',
+        );
+      },
     });
   }
 
   function handleReject() {
     if (!stagedReceipt) return;
+    // Mantenemos Alert nativo para el confirm destructivo — bloqueante
+    // a propósito, no es un toast pasivo.
     Alert.alert('Rechazar ticket', '¿Seguro? La transacción no se creará.', [
       { text: 'Cancelar', style: 'cancel' },
       {
@@ -126,7 +148,17 @@ export default function NewReceiptScreen() {
         style: 'destructive',
         onPress: () =>
           rejectMutation.mutate(undefined, {
-            onSuccess: () => router.replace('/(modules)/personal-finance/(tabs)/receipts'),
+            onSuccess: () => {
+              toast.info('Ticket rechazado.');
+              router.replace('/(modules)/personal-finance/(tabs)/receipts');
+            },
+            onError: (err) => {
+              toast.error(
+                err instanceof Error
+                  ? `Error al rechazar: ${err.message}`
+                  : 'Error al rechazar el ticket.',
+              );
+            },
           }),
       },
     ]);
@@ -159,14 +191,6 @@ export default function NewReceiptScreen() {
             <Image source={{ uri: picked.uri }} style={styles.preview} />
           ) : null}
 
-          {extractMutation.isError ? (
-            <Text style={styles.errorText}>
-              {extractMutation.error instanceof Error
-                ? extractMutation.error.message
-                : 'Error al extraer'}
-            </Text>
-          ) : null}
-
           <TouchableOpacity
             style={[
               styles.primaryButton,
@@ -183,16 +207,12 @@ export default function NewReceiptScreen() {
         </View>
       ) : (
         <View style={styles.card}>
+          {/* `errorMessage` se gestiona via toast (PHASE-11.4); el prop
+              opcional del form sigue disponible para errores locales
+              de validación si en el futuro hace falta. */}
           <ReceiptCaptureForm
             extraction={stagedExtraction}
             submitting={confirmMutation.isPending || rejectMutation.isPending}
-            errorMessage={
-              confirmMutation.isError
-                ? confirmMutation.error instanceof Error
-                  ? confirmMutation.error.message
-                  : 'Error al confirmar'
-                : null
-            }
             onSubmit={handleConfirm}
             onReject={handleReject}
           />
@@ -265,10 +285,5 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     marginBottom: spacing.md,
     backgroundColor: colors.surfaceMuted,
-  },
-  errorText: {
-    color: colors.danger,
-    fontSize: fontSize.sm,
-    marginBottom: spacing.sm,
   },
 });

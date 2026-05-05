@@ -12,21 +12,26 @@
 >   (no se tacha) — la phase doc deja la traza histórica.
 > - Si un item se promueve a fase formal, se traslada a
 >   `phases/phase-X.Y-*.md` y se borra de aquí.
-> - Última actualización: 2026-05-05 (PHASE-11.3).
+> - Última actualización: 2026-05-05 (PHASE-11.4).
 
 ---
 
 ## Top candidatos prácticos
 
-Si quieres atacar trabajo real (no polish), por orden:
+Si quieres atacar trabajo real, por orden:
 
-1. **PHASE-11.4 — Captura de tickets por cámara mobile** (heredado
-   de PHASE-5.2) — `expo-image-picker` ya está instalado, falta
-   integrar la pantalla de captura + feedback con toasts (sistema
-   de PHASE-11.3).
-2. **Refactor: imports + receipts confirm usan `toast.show`** —
+1. **Refactor: imports + receipts confirm web usan `toast.show`** —
    los flujos siguen sin notificación de éxito. Trivial ahora con
-   el sistema global de PHASE-11.3.
+   el sistema global de PHASE-11.3 (≈30 min).
+2. **Test setup mobile (`jest-expo`)** — heredado del backlog desde
+   PHASE-2.2; ahora hay 4 fases con UI mobile sin tests
+   (analysis, transactions, trash, capture).
+3. **Modelo de presupuestos por categoría** con alertas — feature
+   nuevo grande; el primero que añade lógica analítica además del
+   dashboard read-only.
+4. **Detección de subscripciones recurrentes vía IA local** — el
+   módulo `ai/` está listo (cliente Ollama), falta el pipeline de
+   análisis sobre transacciones existentes.
 
 ---
 
