@@ -143,6 +143,36 @@ Política "uno activo por (user, category)" se valida en service
 Sin unique constraint en BD por flexibilidad futura (overlapping
 budgets parciales / temporales).
 
+### `subscriptions` (`PHASE-13.1`)
+
+| Columna | Tipo | Notas |
+|---------|------|-------|
+| `id` | `UUID` PK | |
+| `user_id` | `UUID` FK → `users.id` `ON DELETE CASCADE` | índice. |
+| `merchant` | `VARCHAR(60)` | normalizado (lowercase + alfanumérico, 30 chars). Parte de la huella. |
+| `raw_description` | `TEXT` | sample legible para mostrar al usuario. |
+| `amount` | `NUMERIC(14,2)` | parte de la huella. |
+| `currency` | `CHAR(3)` | parte de la huella. |
+| `cadence_days` | `INTEGER` | 7 / 14 / 30 / 90 / 180 / 365 (canónico). Parte de la huella. |
+| `next_due` | `DATE` | `last_seen_at + cadence_days`. |
+| `status` | `ENUM('pending','confirmed','dismissed')` | tipo `subscriptionstatus`. Default `pending`. |
+| `category_id` | `UUID` FK → `categories.id` `ON DELETE SET NULL` | sugerida (la más común entre los matches). |
+| `first_seen_at` / `last_seen_at` | `DATE` | rango observado del patrón. |
+| `occurrence_count` | `INTEGER` | nº de transacciones que matchean. |
+| `confidence` | `FLOAT` | `1 - std/mean` clamped [0,1]. |
+| `created_at` / `updated_at` | `TIMESTAMPTZ` | |
+
+**Índices**:
+- `ix_subscriptions_user_id`.
+- `ix_subscriptions_merchant`.
+- `ix_subscriptions_status`.
+
+Política de re-detección: el service busca por huella (merchant +
+amount + currency + cadence). Match → refresca datos derivados sin
+tocar `status`/`category_id`. No match → crea como `pending`. Una
+`dismissed` con misma huella sólo se refresca → no se vuelve a
+sugerir al usuario.
+
 ### `exchange_rates` (`PHASE-8.1`)
 
 | Columna | Tipo | Notas |

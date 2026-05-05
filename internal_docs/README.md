@@ -133,6 +133,14 @@ Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
 | 12.2 | Frontend web (ruta + form + lista)    | ✅     | —  |
 | 12.3 | Frontend mobile (pantalla)            | ✅     | —  |
 
+### Fase 13 — Detección de subscripciones recurrentes
+
+| Fase | Nombre                                 | Estado | PR |
+|------|----------------------------------------|--------|----|
+| 13.1 | Backend (modelo + heurística + cron)   | ✅     | —  |
+| 13.2 | Frontend web                           | ⏳     | —  |
+| 13.3 | Frontend mobile                        | ⏳     | —  |
+
 ---
 
 ## Estructura de este directorio

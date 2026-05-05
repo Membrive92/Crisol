@@ -12,7 +12,7 @@
 >   (no se tacha) — la phase doc deja la traza histórica.
 > - Si un item se promueve a fase formal, se traslada a
 >   `phases/phase-X.Y-*.md` y se borra de aquí.
-> - Última actualización: 2026-05-05 (PHASE-12.3).
+> - Última actualización: 2026-05-05 (PHASE-13.1).
 
 ---
 

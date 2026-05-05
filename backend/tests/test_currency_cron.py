@@ -11,16 +11,23 @@ from app.core import scheduler as scheduler_module
 from app.core.config import settings
 
 
-def test_create_scheduler_returns_none_when_disabled() -> None:
-    """Con el flag off no se crea scheduler — útil para tests/cron externo."""
-    with patch.object(settings, "enable_currency_cron", False):
+def test_create_scheduler_returns_none_when_all_disabled() -> None:
+    """Con todos los flags off no se crea scheduler — útil para tests."""
+    with (
+        patch.object(settings, "enable_currency_cron", False),
+        patch.object(settings, "enable_subscriptions_cron", False),
+    ):
         assert scheduler_module.create_scheduler() is None
 
 
 def test_create_scheduler_registers_currency_job_when_enabled() -> None:
-    """Con el flag on, el job de refresh de tasas queda registrado y el
-    scheduler NO se arranca (la responsabilidad de start() es del lifespan)."""
-    with patch.object(settings, "enable_currency_cron", True):
+    """Con el flag de currency on (y subscriptions off para aislar), el job
+    de refresh de tasas queda registrado y el scheduler NO se arranca
+    (la responsabilidad de start() es del lifespan)."""
+    with (
+        patch.object(settings, "enable_currency_cron", True),
+        patch.object(settings, "enable_subscriptions_cron", False),
+    ):
         scheduler = scheduler_module.create_scheduler()
     assert scheduler is not None
     job = scheduler.get_job(scheduler_module.CURRENCY_REFRESH_JOB_ID)

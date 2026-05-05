@@ -194,6 +194,35 @@ de gasto. Excluye soft-deleted (PHASE-10.1).
 
 ---
 
+## Subscriptions (`PHASE-13.1`)
+
+Subscripciones recurrentes detectadas automáticamente a partir de
+patrones de transacciones (mismo merchant + amount + currency con
+cadencia regular en últimos 6 meses). Sin IA por ahora — heurística
+basada en agrupación + análisis de gaps.
+
+| Método | Ruta | Auth | Body / Query | Response |
+|--------|------|------|--------------|----------|
+| GET    | `/subscriptions` | sí | `status?` (`pending\|confirmed\|dismissed`) | `200 SubscriptionResponse[]` ordenado `next_due ASC` |
+| POST   | `/subscriptions/scan` | sí | — | `200 { created, updated, total_active_after }`. Re-ejecuta el detector ahora; el cron diario (04:00 UTC) hace lo mismo automáticamente. |
+| GET    | `/subscriptions/{id}` | sí | — | `200 SubscriptionResponse` |
+| POST   | `/subscriptions/{id}/confirm` | sí | — | `200 SubscriptionResponse`. Marca como `confirmed`. Una `dismissed` confirmada se reactiva. |
+| POST   | `/subscriptions/{id}/dismiss` | sí | — | `200 SubscriptionResponse`. El detector NO la vuelve a sugerir aunque siga el patrón. |
+| DELETE | `/subscriptions/{id}` | sí | — | `204`. Si el patrón persiste, el siguiente scan la vuelve a crear como `pending`. |
+
+`SubscriptionResponse`: `{ id, user_id, merchant (normalizado),
+raw_description (sample legible), amount, currency, cadence_days
+(7/14/30/90/180/365), next_due, status, category_id, first_seen_at,
+last_seen_at, occurrence_count, confidence (0..1), created_at,
+updated_at }`.
+
+Cadencias detectadas: semanal (7±1), quincenal (14±1), mensual
+(30±5), trimestral (90±5), semestral (180±10), anual (365±10).
+Mínimo 3 ocurrencias en 180 días, desviación relativa de gaps
+≤ 30%. Lookback fijo en 180 días (no expuesto como param).
+
+---
+
 ## Imports (`PHASE-4.1`, `PHASE-4.3`)
 
 | Método | Ruta | Auth | Body / Query | Response |
