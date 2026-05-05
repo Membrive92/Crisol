@@ -58,6 +58,12 @@ export const queryKeys = {
     rates: (date: string | undefined) =>
       [...queryKeys.currency.all, 'rates', date ?? 'today'] as const,
   },
+  budgets: {
+    all: ['budgets'] as const,
+    list: () => [...queryKeys.budgets.all, 'list'] as const,
+    detail: (id: string) => [...queryKeys.budgets.all, 'detail', id] as const,
+    status: () => [...queryKeys.budgets.all, 'status'] as const,
+  },
 } as const;
 
 /**

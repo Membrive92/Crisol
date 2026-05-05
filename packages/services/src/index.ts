@@ -11,6 +11,7 @@ export { passkeysApi, type PasskeyResponse } from './api/endpoints/passkeys';
 export { categoriesApi } from './api/endpoints/categories';
 export { transactionsApi } from './api/endpoints/transactions';
 export { dashboardApi } from './api/endpoints/dashboard';
+export { budgetsApi } from './api/endpoints/budgets';
 export { importsApi, type CreateImportPayload } from './api/endpoints/imports';
 export { receiptsApi } from './api/endpoints/receipts';
 export {
@@ -59,3 +60,11 @@ export {
   exchangeRatesQueryOptions,
   type ExchangeRatesResult,
 } from './query/hooks/useCurrency';
+export {
+  useBudgets,
+  useBudget,
+  useBudgetStatus,
+  useCreateBudget,
+  useUpdateBudget,
+  useDeleteBudget,
+} from './query/hooks/useBudgets';

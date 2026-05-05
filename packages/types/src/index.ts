@@ -28,6 +28,12 @@ export type {
   ReceiptStatus,
 } from './models/receipt';
 export type { Toast, ToastAction, ToastInput, ToastKind } from './models/toast';
+export type {
+  Budget,
+  BudgetStatus,
+  BudgetStatusItem,
+  BudgetStatusResponse,
+} from './models/budget';
 
 export type {
   LoginRequest,
@@ -63,3 +69,5 @@ export type {
   ReceiptListQuery,
   ReceiptListResponse,
 } from './dto/receipt.dto';
+
+export type { BudgetCreateRequest, BudgetUpdateRequest } from './dto/budget.dto';
