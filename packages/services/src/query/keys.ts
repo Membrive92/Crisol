@@ -64,6 +64,13 @@ export const queryKeys = {
     detail: (id: string) => [...queryKeys.budgets.all, 'detail', id] as const,
     status: () => [...queryKeys.budgets.all, 'status'] as const,
   },
+  subscriptions: {
+    all: ['subscriptions'] as const,
+    list: (status?: string) =>
+      [...queryKeys.subscriptions.all, 'list', status ?? 'any'] as const,
+    detail: (id: string) =>
+      [...queryKeys.subscriptions.all, 'detail', id] as const,
+  },
 } as const;
 
 /**

@@ -34,6 +34,11 @@ export type {
   BudgetStatusItem,
   BudgetStatusResponse,
 } from './models/budget';
+export type {
+  Subscription,
+  SubscriptionStatus,
+  SubscriptionScanResponse,
+} from './models/subscription';
 
 export type {
   LoginRequest,

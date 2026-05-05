@@ -12,6 +12,10 @@ export { categoriesApi } from './api/endpoints/categories';
 export { transactionsApi } from './api/endpoints/transactions';
 export { dashboardApi } from './api/endpoints/dashboard';
 export { budgetsApi } from './api/endpoints/budgets';
+export {
+  subscriptionsApi,
+  type SubscriptionListQuery,
+} from './api/endpoints/subscriptions';
 export { importsApi, type CreateImportPayload } from './api/endpoints/imports';
 export { receiptsApi } from './api/endpoints/receipts';
 export {
@@ -68,3 +72,11 @@ export {
   useUpdateBudget,
   useDeleteBudget,
 } from './query/hooks/useBudgets';
+export {
+  useSubscriptions,
+  useSubscription,
+  useScanSubscriptions,
+  useConfirmSubscription,
+  useDismissSubscription,
+  useDeleteSubscription,
+} from './query/hooks/useSubscriptions';
