@@ -12,7 +12,7 @@ export default [
     },
   },
   {
-    files: ['babel.config.js', 'metro.config.js'],
+    files: ['babel.config.js', 'metro.config.js', 'jest.config.js'],
     languageOptions: {
       globals: {
         ...globals.node,

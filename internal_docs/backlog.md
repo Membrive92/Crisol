@@ -12,7 +12,7 @@
 >   (no se tacha) — la phase doc deja la traza histórica.
 > - Si un item se promueve a fase formal, se traslada a
 >   `phases/phase-X.Y-*.md` y se borra de aquí.
-> - Última actualización: 2026-05-05 (PHASE-11.5).
+> - Última actualización: 2026-05-05 (PHASE-11.6).
 
 ---
 
@@ -20,13 +20,10 @@
 
 Si quieres atacar trabajo real, por orden:
 
-1. **PHASE-11.6 — Test setup mobile (`jest-expo`)** — heredado del
-   backlog desde PHASE-2.2; ahora hay 4 fases con UI mobile sin
-   tests (analysis, transactions, trash, capture).
-2. **PHASE-12 — Modelo de presupuestos por categoría** con alertas —
+1. **PHASE-12 — Modelo de presupuestos por categoría** con alertas —
    feature nuevo grande; el primero que añade lógica analítica
    además del dashboard read-only.
-3. **PHASE-13 — Detección de subscripciones recurrentes vía IA
+2. **PHASE-13 — Detección de subscripciones recurrentes vía IA
    local** — el módulo `ai/` está listo (cliente Ollama), falta el
    pipeline de análisis sobre transacciones existentes.
 
@@ -145,7 +142,9 @@ Si quieres atacar trabajo real, por orden:
   Eliminar si no resurge necesidad de year picker.
 - **[PHASE-2.2]** Sin date picker nativo — input de texto con formato
   `YYYY-MM-DD`. `@react-native-community/datetimepicker` pendiente.
-- **[PHASE-2.2]** Sin tests de UI mobile (`jest-expo` no configurado).
+- **[PHASE-11.6]** Cobertura UI mobile mínima — `jest-expo` ya
+  configurado y un test smoke (Toaster), pero pantallas
+  (`analysis`, `transactions`, `trash`, `receipt/new`) sin tests.
 - **[PHASE-2.2]** Pull-to-refresh: web no tiene equivalente — depende
   de `staleTime` para revalidar.
 

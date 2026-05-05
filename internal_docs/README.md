@@ -123,7 +123,7 @@ Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
 | 11.3 | Sistema de toasts global              | ✅     | —  |
 | 11.4 | Polish flujo captura mobile (toasts)  | ✅     | —  |
 | 11.5 | Imports + receipts confirm web a toasts | ✅   | —  |
-| 11.6 | Test setup mobile (`jest-expo`)       | ⏳     | —  |
+| 11.6 | Test setup mobile (`jest-expo`)       | ✅     | —  |
 
 ---
 
