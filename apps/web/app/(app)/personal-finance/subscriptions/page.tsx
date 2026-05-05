@@ -1,5 +1,7 @@
 'use client';
 
+import { useState } from 'react';
+
 import {
   formatApiError,
   useCategories,
@@ -20,13 +22,16 @@ export default function SubscriptionsPage() {
   const { data: categories } = useCategories();
   const pendingQuery = useSubscriptions({ status: 'pending' });
   const confirmedQuery = useSubscriptions({ status: 'confirmed' });
+  const dismissedQuery = useSubscriptions({ status: 'dismissed' });
   const scanMutation = useScanSubscriptions();
   const confirmMutation = useConfirmSubscription();
   const dismissMutation = useDismissSubscription();
   const deleteMutation = useDeleteSubscription();
+  const [showDismissed, setShowDismissed] = useState(false);
 
   const pending = pendingQuery.data ?? [];
   const confirmed = confirmedQuery.data ?? [];
+  const dismissed = dismissedQuery.data ?? [];
 
   function handleScan() {
     scanMutation.mutate(undefined, {
@@ -42,6 +47,15 @@ export default function SubscriptionsPage() {
     confirmMutation.mutate(id, {
       onSuccess: () => toast.success('Subscripción confirmada.'),
       onError: (err) => toast.error(formatApiError(err, 'Error al confirmar.')),
+    });
+  }
+
+  /** Reactiva una dismissed → confirmed (PHASE-13.1: el confirm de
+   * una dismissed la reactiva). */
+  function handleReactivate(id: string) {
+    confirmMutation.mutate(id, {
+      onSuccess: () => toast.success('Subscripción reactivada.'),
+      onError: (err) => toast.error(formatApiError(err, 'Error al reactivar.')),
     });
   }
 
@@ -165,7 +179,7 @@ export default function SubscriptionsPage() {
       </section>
 
       {confirmed.length > 0 ? (
-        <section>
+        <section style={{ marginBottom: spacing.xl }}>
           <h2 style={sectionHeaderStyle}>Confirmadas</h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
             {confirmed.map((sub) => (
@@ -182,6 +196,56 @@ export default function SubscriptionsPage() {
               />
             ))}
           </div>
+        </section>
+      ) : null}
+
+      {dismissed.length > 0 ? (
+        <section>
+          <button
+            type="button"
+            onClick={() => setShowDismissed((v) => !v)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              cursor: 'pointer',
+              color: colors.textMuted,
+              fontSize: fontSize.sm,
+              fontWeight: fontWeight.medium,
+              marginBottom: showDismissed ? spacing.md : 0,
+            }}
+            aria-expanded={showDismissed}
+          >
+            <span aria-hidden style={{ fontSize: fontSize.xs }}>
+              {showDismissed ? '▾' : '▸'}
+            </span>
+            Descartadas ({dismissed.length})
+          </button>
+          {showDismissed ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
+              {dismissed.map((sub) => (
+                <SubscriptionCard
+                  key={sub.id}
+                  subscription={sub}
+                  categories={categories ?? []}
+                  primaryAction={{
+                    label: 'Reactivar',
+                    onClick: () => handleReactivate(sub.id),
+                    busy: confirmingId === sub.id,
+                  }}
+                  secondaryAction={{
+                    label: 'Eliminar',
+                    onClick: () => handleDelete(sub.id),
+                    busy: deletingId === sub.id,
+                    danger: true,
+                  }}
+                />
+              ))}
+            </div>
+          ) : null}
         </section>
       ) : null}
     </div>

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack } from 'expo-router';
 
@@ -25,13 +26,16 @@ export default function SubscriptionsScreen() {
   const { data: categories } = useCategories();
   const pendingQuery = useSubscriptions({ status: 'pending' });
   const confirmedQuery = useSubscriptions({ status: 'confirmed' });
+  const dismissedQuery = useSubscriptions({ status: 'dismissed' });
   const scanMutation = useScanSubscriptions();
   const confirmMutation = useConfirmSubscription();
   const dismissMutation = useDismissSubscription();
   const deleteMutation = useDeleteSubscription();
+  const [showDismissed, setShowDismissed] = useState(false);
 
   const pending = pendingQuery.data ?? [];
   const confirmed = confirmedQuery.data ?? [];
+  const dismissed = dismissedQuery.data ?? [];
 
   function handleScan() {
     scanMutation.mutate(undefined, {
@@ -47,6 +51,14 @@ export default function SubscriptionsScreen() {
     confirmMutation.mutate(id, {
       onSuccess: () => toast.success('Subscripción confirmada.'),
       onError: (err) => toast.error(formatApiError(err, 'Error al confirmar.')),
+    });
+  }
+
+  function handleReactivate(id: string) {
+    // PHASE-13.1: confirm sobre una dismissed la reactiva.
+    confirmMutation.mutate(id, {
+      onSuccess: () => toast.success('Subscripción reactivada.'),
+      onError: (err) => toast.error(formatApiError(err, 'Error al reactivar.')),
     });
   }
 
@@ -161,6 +173,44 @@ export default function SubscriptionsScreen() {
             ))}
           </>
         ) : null}
+
+        {dismissed.length > 0 ? (
+          <View style={{ marginTop: spacing.lg }}>
+            <Pressable
+              onPress={() => setShowDismissed((v) => !v)}
+              style={({ pressed }) => [
+                styles.toggleButton,
+                pressed && { opacity: 0.7 },
+              ]}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: showDismissed }}
+            >
+              <Text style={styles.toggleText}>
+                {showDismissed ? '▾' : '▸'} Descartadas ({dismissed.length})
+              </Text>
+            </Pressable>
+            {showDismissed
+              ? dismissed.map((sub) => (
+                  <SubscriptionCard
+                    key={sub.id}
+                    subscription={sub}
+                    categories={categories ?? []}
+                    primaryAction={{
+                      label: 'Reactivar',
+                      onPress: () => handleReactivate(sub.id),
+                      busy: confirmingId === sub.id,
+                    }}
+                    secondaryAction={{
+                      label: 'Eliminar',
+                      onPress: () => handleDelete(sub.id, sub.raw_description),
+                      busy: deletingId === sub.id,
+                      danger: true,
+                    }}
+                  />
+                ))
+              : null}
+          </View>
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -205,5 +255,15 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     color: colors.textMuted,
     textAlign: 'center',
+  },
+  toggleButton: {
+    paddingVertical: spacing.xs,
+    marginBottom: spacing.sm,
+    alignSelf: 'flex-start',
+  },
+  toggleText: {
+    fontSize: fontSize.sm,
+    color: colors.textMuted,
+    fontWeight: fontWeight.medium,
   },
 });

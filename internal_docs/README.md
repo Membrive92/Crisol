@@ -146,7 +146,7 @@ Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
 | Fase | Nombre                                       | Estado | PR |
 |------|----------------------------------------------|--------|----|
 | 14.1 | Edición inline amount presupuestos           | ✅     | —  |
-| 14.2 | Sección "Descartadas" en subscriptions UI    | ⏳     | —  |
+| 14.2 | Sección "Descartadas" en subscriptions UI    | ✅     | —  |
 | 14.3 | Date picker nativo mobile                    | ⏳     | —  |
 | 14.4 | `convertAll` toggle en mobile                | ⏳     | —  |
 | 14.5 | Notificaciones proactivas budget over        | ⏳     | —  |
