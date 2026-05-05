@@ -12,7 +12,7 @@
 >   (no se tacha) — la phase doc deja la traza histórica.
 > - Si un item se promueve a fase formal, se traslada a
 >   `phases/phase-X.Y-*.md` y se borra de aquí.
-> - Última actualización: 2026-05-05 (PHASE-11.4).
+> - Última actualización: 2026-05-05 (PHASE-11.5).
 
 ---
 
@@ -20,18 +20,15 @@
 
 Si quieres atacar trabajo real, por orden:
 
-1. **Refactor: imports + receipts confirm web usan `toast.show`** —
-   los flujos siguen sin notificación de éxito. Trivial ahora con
-   el sistema global de PHASE-11.3 (≈30 min).
-2. **Test setup mobile (`jest-expo`)** — heredado del backlog desde
-   PHASE-2.2; ahora hay 4 fases con UI mobile sin tests
-   (analysis, transactions, trash, capture).
-3. **Modelo de presupuestos por categoría** con alertas — feature
-   nuevo grande; el primero que añade lógica analítica además del
-   dashboard read-only.
-4. **Detección de subscripciones recurrentes vía IA local** — el
-   módulo `ai/` está listo (cliente Ollama), falta el pipeline de
-   análisis sobre transacciones existentes.
+1. **PHASE-11.6 — Test setup mobile (`jest-expo`)** — heredado del
+   backlog desde PHASE-2.2; ahora hay 4 fases con UI mobile sin
+   tests (analysis, transactions, trash, capture).
+2. **PHASE-12 — Modelo de presupuestos por categoría** con alertas —
+   feature nuevo grande; el primero que añade lógica analítica
+   además del dashboard read-only.
+3. **PHASE-13 — Detección de subscripciones recurrentes vía IA
+   local** — el módulo `ai/` está listo (cliente Ollama), falta el
+   pipeline de análisis sobre transacciones existentes.
 
 ---
 

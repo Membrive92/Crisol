@@ -3,6 +3,7 @@
 import { useState } from 'react';
 
 import { useCreateImport } from '@finanzas/services';
+import { toast } from '@finanzas/store';
 import type { ImportColumnMappings, ImportJob } from '@finanzas/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
 
@@ -49,6 +50,17 @@ export default function NewImportPage() {
         onSuccess: (job) => {
           setResult(job);
           setStep('result');
+          // PHASE-11.5: la step "Resultado" ya pinta el desglose
+          // (ok / skipped / failed); el toast añade un confirm
+          // global para el usuario que ya ha pasado de pantalla.
+          toast.success(`Importación completada: ${job.rows_ok} filas añadidas.`);
+        },
+        onError: (err) => {
+          // El MappingStep también pinta el error inline (contexto del
+          // form); el toast lo refuerza por si el usuario no lo ve.
+          toast.error(
+            err instanceof Error ? `Error al importar: ${err.message}` : 'Error al importar',
+          );
         },
       },
     );

@@ -3,6 +3,7 @@
 import { useParams, useRouter } from 'next/navigation';
 
 import { useConfirmReceipt, useReceipt, useRejectReceipt } from '@finanzas/services';
+import { toast } from '@finanzas/store';
 import type { ReceiptConfirmRequest } from '@finanzas/types';
 import { colors, fontSize, formatDate, spacing } from '@finanzas/ui';
 
@@ -27,14 +28,36 @@ export default function ReceiptDetailPage() {
   function handleConfirm(payload: ReceiptConfirmRequest) {
     if (!receipt) return;
     confirmMutation.mutate(payload, {
-      onSuccess: () => router.push('/personal-finance/receipts'),
+      onSuccess: () => {
+        toast.success('Ticket añadido como transacción.');
+        router.push('/personal-finance/receipts');
+      },
+      onError: (err) => {
+        toast.error(
+          err instanceof Error
+            ? `Error al confirmar: ${err.message}`
+            : 'Error al confirmar el ticket.',
+        );
+      },
     });
   }
 
   function handleReject() {
     if (!receipt) return;
     if (!confirm('¿Rechazar este ticket? La transacción no se creará.')) return;
-    rejectMutation.mutate();
+    rejectMutation.mutate(undefined, {
+      onSuccess: () => {
+        toast.info('Ticket rechazado.');
+        router.push('/personal-finance/receipts');
+      },
+      onError: (err) => {
+        toast.error(
+          err instanceof Error
+            ? `Error al rechazar: ${err.message}`
+            : 'Error al rechazar el ticket.',
+        );
+      },
+    });
   }
 
   return (
@@ -80,13 +103,6 @@ export default function ReceiptDetailPage() {
                 <ReceiptConfirmForm
                   extraction={receipt.extraction}
                   submitting={confirmMutation.isPending || rejectMutation.isPending}
-                  errorMessage={
-                    confirmMutation.isError
-                      ? confirmMutation.error instanceof Error
-                        ? confirmMutation.error.message
-                        : 'Error al confirmar'
-                      : null
-                  }
                   onSubmit={handleConfirm}
                   onReject={handleReject}
                 />

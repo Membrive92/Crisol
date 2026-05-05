@@ -4,11 +4,11 @@ import { useState, type ChangeEvent } from 'react';
 import { useRouter } from 'next/navigation';
 
 import {
-  formatApiError,
   useConfirmReceipt,
   useExtractReceipt,
   useRejectReceipt,
 } from '@finanzas/services';
+import { toast } from '@finanzas/store';
 import type { Receipt, ReceiptConfirmRequest, ReceiptExtraction } from '@finanzas/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
 
@@ -71,13 +71,34 @@ export default function NewReceiptPage() {
         setStagedReceipt(data.receipt);
         setStagedExtraction(data.extraction);
       },
+      onError: (err) => {
+        // PHASE-11.5: error de extracción al toast — antes era un
+        // <div> rojo inline que el usuario podía perder al hacer
+        // scroll. La causa #1 en dev es Ollama no corriendo, lo
+        // sugerimos cuando el mensaje no aporta detalle.
+        toast.error(
+          err instanceof Error
+            ? `Error al analizar: ${err.message}`
+            : 'No se pudo analizar el ticket. ¿Está Ollama corriendo?',
+        );
+      },
     });
   }
 
   function handleConfirm(payload: ReceiptConfirmRequest) {
     if (!stagedReceipt) return;
     confirmMutation.mutate(payload, {
-      onSuccess: () => router.push('/personal-finance/receipts'),
+      onSuccess: () => {
+        toast.success('Ticket añadido como transacción.');
+        router.push('/personal-finance/receipts');
+      },
+      onError: (err) => {
+        toast.error(
+          err instanceof Error
+            ? `Error al confirmar: ${err.message}`
+            : 'Error al confirmar el ticket.',
+        );
+      },
     });
   }
 
@@ -85,7 +106,17 @@ export default function NewReceiptPage() {
     if (!stagedReceipt) return;
     if (!confirm('¿Rechazar este ticket? La transacción no se creará.')) return;
     rejectMutation.mutate(undefined, {
-      onSuccess: () => router.push('/personal-finance/receipts'),
+      onSuccess: () => {
+        toast.info('Ticket rechazado.');
+        router.push('/personal-finance/receipts');
+      },
+      onError: (err) => {
+        toast.error(
+          err instanceof Error
+            ? `Error al rechazar: ${err.message}`
+            : 'Error al rechazar el ticket.',
+        );
+      },
     });
   }
 
@@ -186,14 +217,12 @@ export default function NewReceiptPage() {
             />
           ) : null}
 
+          {/* `uploadError` (validación local: tipo / tamaño) se queda
+              inline porque es contexto del input. Errores de
+              extracción (red / Ollama) se muestran via toast. */}
           {uploadError ? (
             <div style={{ color: colors.danger, fontSize: fontSize.sm, marginBottom: spacing.sm }}>
               {uploadError}
-            </div>
-          ) : null}
-          {extractMutation.isError ? (
-            <div style={{ color: colors.danger, fontSize: fontSize.sm, marginBottom: spacing.sm }}>
-              {formatApiError(extractMutation.error, 'Error al extraer')}
             </div>
           ) : null}
 
@@ -205,16 +234,12 @@ export default function NewReceiptPage() {
         </Card>
       ) : (
         <Card style={{ padding: spacing.lg }}>
+          {/* PHASE-11.5: confirm/reject errors van por toast; el prop
+              `errorMessage` queda opcional en el form para futuras
+              validaciones locales que tengan sentido inline. */}
           <ReceiptConfirmForm
             extraction={stagedExtraction}
             submitting={confirmMutation.isPending || rejectMutation.isPending}
-            errorMessage={
-              confirmMutation.isError
-                ? confirmMutation.error instanceof Error
-                  ? confirmMutation.error.message
-                  : 'Error al confirmar'
-                : null
-            }
             onSubmit={handleConfirm}
             onReject={handleReject}
           />
