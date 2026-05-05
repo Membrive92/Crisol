@@ -125,6 +125,14 @@ Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
 | 11.5 | Imports + receipts confirm web a toasts | ✅   | —  |
 | 11.6 | Test setup mobile (`jest-expo`)       | ✅     | —  |
 
+### Fase 12 — Presupuestos por categoría
+
+| Fase | Nombre                                | Estado | PR |
+|------|---------------------------------------|--------|----|
+| 12.1 | Backend (modelo + endpoints + status) | ✅     | —  |
+| 12.2 | Frontend web (ruta + dashboard card)  | ⏳     | —  |
+| 12.3 | Frontend mobile (pantalla + análisis) | ⏳     | —  |
+
 ---
 
 ## Estructura de este directorio

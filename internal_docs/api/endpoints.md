@@ -170,6 +170,30 @@ Reglas relevantes:
 
 ---
 
+## Budgets (`PHASE-12.1`)
+
+Presupuestos mensuales por categoría (o globales). El status compara
+spent del mes actual UTC contra el límite y devuelve `ok | warning |
+over` (umbrales 80% / 100%).
+
+| Método | Ruta | Auth | Body / Query | Response |
+|--------|------|------|--------------|----------|
+| GET    | `/budgets` | sí | — | `200 BudgetResponse[]` (sólo activos: `effective_to IS NULL OR >= today`) |
+| GET    | `/budgets/status` | sí | — | `200 { items: BudgetStatusItem[], month_start, month_end }` |
+| GET    | `/budgets/{id}` | sí | — | `200 BudgetResponse` |
+| POST   | `/budgets` | sí | `{ category_id?, amount, currency, effective_from }` | `201 BudgetResponse`. `409` si ya hay activo para esa categoría (o global) |
+| PUT    | `/budgets/{id}` | sí | `{ amount?, currency? }` | `200 BudgetResponse`. `effective_from` y `category_id` son inmutables |
+| DELETE | `/budgets/{id}` | sí | — | `204`. Cierra (`effective_to=today`); si ya estaba cerrado en pasado, DELETE real |
+
+`BudgetStatusItem`: `{ budget, spent_this_month, remaining,
+percent_used, status: 'ok'|'warning'|'over' }`. `spent_this_month`
+es la suma de `Transaction.amount` activas en el mes calendario UTC
+actual con `kind='expense'`, mismo currency que el budget. Para
+budgets globales (`category_id IS NULL`) suma todas las categorías
+de gasto. Excluye soft-deleted (PHASE-10.1).
+
+---
+
 ## Imports (`PHASE-4.1`, `PHASE-4.3`)
 
 | Método | Ruta | Auth | Body / Query | Response |

@@ -24,6 +24,7 @@
 | `b27e391fa4c8` | 1.1 | `webauthn_challenges.user_id` nullable + relax FK para conditional UI. |
 | `c5d28e7f3b91` | 8.1 | `exchange_rates` + carga de snapshot offline embebido. |
 | `e4f7c91a8b3d` | 10.1 | `transactions.deleted_at` + partial index `ix_transactions_user_id_active` + recreado `uq_transactions_user_import_hash` con `AND deleted_at IS NULL`. |
+| `f8b3c91d4e22` | 12.1 | `budgets` (presupuestos mensuales por categoría) + índices por `user_id` y `category_id`. |
 
 ---
 
@@ -119,6 +120,28 @@
 No existe FK formal `transactions.receipt_id → receipts.id` (evita
 ciclo bidireccional); la consistencia la garantiza
 `receipts.service.confirm_receipt`.
+
+### `budgets` (`PHASE-12.1`)
+
+| Columna | Tipo | Notas |
+|---------|------|-------|
+| `id` | `UUID` PK | |
+| `user_id` | `UUID` FK → `users.id` `ON DELETE CASCADE` | índice. |
+| `category_id` | `UUID` FK → `categories.id` `ON DELETE SET NULL` | índice, nullable. NULL = budget global del mes. |
+| `amount` | `NUMERIC(14,2)` | límite mensual. |
+| `currency` | `CHAR(3)` | ISO 4217. Default `EUR`. |
+| `effective_from` | `DATE` | cuándo empieza a aplicar. |
+| `effective_to` | `DATE` NULLABLE | NULL = vigente. |
+| `created_at` / `updated_at` | `TIMESTAMPTZ` | |
+
+**Índices**:
+- `ix_budgets_user_id`.
+- `ix_budgets_category_id`.
+
+Política "uno activo por (user, category)" se valida en service
+(409 en POST si hay otro con `effective_to IS NULL OR >= today`).
+Sin unique constraint en BD por flexibilidad futura (overlapping
+budgets parciales / temporales).
 
 ### `exchange_rates` (`PHASE-8.1`)
 
