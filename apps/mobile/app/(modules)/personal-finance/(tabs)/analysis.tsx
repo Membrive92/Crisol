@@ -46,6 +46,12 @@ export default function AnalysisScreen() {
   // se perdía entre sesiones y no se compartía con otras pantallas.
   const currency = useCurrencyStore((s) => s.currency);
   const setCurrency = useCurrencyStore((s) => s.setCurrency);
+  // PHASE-14.4: convertAll vive en el mismo store cross-platform
+  // (PHASE-11.2). Cuando ON, las queries del dashboard pasan
+  // `target_currency` y el backend convierte cada tx con la tasa de
+  // su día (mismo flujo que web).
+  const convertAll = useCurrencyStore((s) => s.convertAll);
+  const setConvertAll = useCurrencyStore((s) => s.setConvertAll);
   const [period, setPeriod] = useState<PeriodKey>('year');
   const [donutKind, setDonutKind] = useState<DonutKindFilter>('all');
   const [currencyHydrated, setCurrencyHydrated] = useState(false);
@@ -71,27 +77,46 @@ export default function AnalysisScreen() {
   const { dateFrom, dateTo } = useMemo(() => rangeForPeriod(period), [period]);
   const currentYear = new Date().getFullYear();
 
-  const summaryQuery = useDashboardSummary({
-    currency,
-    date_from: dateFrom,
-    date_to: dateTo,
-  });
-  const monthlyQuery = useDashboardByMonth({
-    currency,
-    year: currentYear,
-  });
-  const byCategoryQuery = useDashboardByCategory({
-    currency,
-    date_from: dateFrom,
-    date_to: dateTo,
-    ...(donutKind === 'all' ? {} : { kind: donutKind }),
-  });
-  const topExpensesQuery = useDashboardTopExpenses({
-    currency,
-    date_from: dateFrom,
-    date_to: dateTo,
-    limit: TOP_EXPENSES_LIMIT,
-  });
+  // PHASE-14.4: cuando convertAll=true pedimos `target_currency` y el
+  // backend convierte cada tx con la tasa de su día. Cuando false,
+  // comportamiento legacy filtrado por moneda activa.
+  const summaryParams = convertAll
+    ? { target_currency: currency, date_from: dateFrom, date_to: dateTo }
+    : { currency, date_from: dateFrom, date_to: dateTo };
+  const monthlyParams = convertAll
+    ? { target_currency: currency, year: currentYear }
+    : { currency, year: currentYear };
+  const byCategoryParams = convertAll
+    ? {
+        target_currency: currency,
+        date_from: dateFrom,
+        date_to: dateTo,
+        ...(donutKind === 'all' ? {} : { kind: donutKind }),
+      }
+    : {
+        currency,
+        date_from: dateFrom,
+        date_to: dateTo,
+        ...(donutKind === 'all' ? {} : { kind: donutKind }),
+      };
+  const topExpensesParams = convertAll
+    ? {
+        target_currency: currency,
+        date_from: dateFrom,
+        date_to: dateTo,
+        limit: TOP_EXPENSES_LIMIT,
+      }
+    : {
+        currency,
+        date_from: dateFrom,
+        date_to: dateTo,
+        limit: TOP_EXPENSES_LIMIT,
+      };
+
+  const summaryQuery = useDashboardSummary(summaryParams);
+  const monthlyQuery = useDashboardByMonth(monthlyParams);
+  const byCategoryQuery = useDashboardByCategory(byCategoryParams);
+  const topExpensesQuery = useDashboardTopExpenses(topExpensesParams);
 
   const refreshing =
     summaryQuery.isFetching ||
@@ -146,11 +171,32 @@ export default function AnalysisScreen() {
           </View>
         </View>
 
-        <CurrencyPicker
-          value={currency}
-          onChange={setCurrency}
-          currencies={currenciesQuery.data}
-        />
+        <View style={styles.currencyRow}>
+          <CurrencyPicker
+            value={currency}
+            onChange={setCurrency}
+            currencies={currenciesQuery.data}
+          />
+          <Pressable
+            onPress={() => setConvertAll(!convertAll)}
+            style={({ pressed }) => [
+              styles.convertChip,
+              convertAll && styles.convertChipActive,
+              pressed && { opacity: 0.7 },
+            ]}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: convertAll }}
+          >
+            <Text
+              style={[
+                styles.convertChipText,
+                convertAll && styles.convertChipTextActive,
+              ]}
+            >
+              {convertAll ? '✓ Convertir todo' : 'Convertir todo'}
+            </Text>
+          </Pressable>
+        </View>
         <PeriodToggle value={period} onChange={setPeriod} />
 
         <KpiCards summary={summaryQuery.data} isLoading={summaryQuery.isLoading} />
@@ -203,6 +249,34 @@ const styles = StyleSheet.create({
   greeting: { fontSize: fontSize.xl, fontWeight: fontWeight.semibold, color: colors.text },
   subtitle: { fontSize: fontSize.sm, color: colors.textMuted, marginTop: 2 },
   headerActions: { flexDirection: 'row', gap: spacing.xs, alignItems: 'center' },
+  currencyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  convertChip: {
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    borderRadius: 999,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  convertChipActive: {
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primary,
+  },
+  convertChipText: {
+    fontSize: fontSize.sm,
+    color: colors.text,
+    fontWeight: fontWeight.medium,
+  },
+  convertChipTextActive: {
+    color: colors.primary,
+    fontWeight: fontWeight.semibold,
+  },
   headerButton: {
     paddingVertical: 6,
     paddingHorizontal: spacing.sm,
