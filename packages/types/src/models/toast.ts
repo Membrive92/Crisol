@@ -29,6 +29,13 @@ export interface Toast {
    * por click en X o por código). Defaults los aplica el store.
    */
   dismissAfterMs: number;
+  /**
+   * Llave de deduplicación (PHASE-15.1). Si dos toasts comparten
+   * `dedupKey`, el segundo reemplaza al primero en la queue (mismo
+   * spot, mensaje y dismissAfterMs reseteado). `undefined` =
+   * sin dedup (comportamiento clásico, cada show apila).
+   */
+  dedupKey?: string;
 }
 
 /** Input público al `toast.show(...)` — el store rellena `id` y `dismissAfterMs` por defecto. */
@@ -37,4 +44,6 @@ export interface ToastInput {
   message: string;
   action?: ToastAction;
   dismissAfterMs?: number;
+  /** Ver `Toast.dedupKey`. */
+  dedupKey?: string;
 }

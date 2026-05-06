@@ -153,6 +153,13 @@ Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
 | 14.6 | Cobertura UI mobile                          | ✅     | —  |
 | 14.7 | Detector subscripciones — fusión por prefijo | ✅     | —  |
 
+### Fase 15 — Polish ronda 2
+
+| Fase | Nombre                                       | Estado | PR |
+|------|----------------------------------------------|--------|----|
+| 15.1 | Dedup de toasts repetidos                    | ✅     | —  |
+| 15.2 | Pause / cancel para subscripciones           | ⏳     | —  |
+
 ---
 
 ## Estructura de este directorio

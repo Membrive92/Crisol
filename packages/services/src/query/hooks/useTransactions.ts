@@ -44,11 +44,14 @@ export function useCreateTransaction() {
       // para el toast.
       const alert = created.budget_alert;
       if (alert) {
-        if (alert.status === 'over') {
-          toast.error(alert.next_due_label);
-        } else {
-          toast.warning(alert.next_due_label);
-        }
+        // PHASE-15.1: dedupKey por budget evita spam si el usuario
+        // crea varias txs seguidas en la misma categoría — el toast
+        // se reemplaza en su sitio en lugar de apilarse.
+        toast.show({
+          kind: alert.status === 'over' ? 'error' : 'warning',
+          message: alert.next_due_label,
+          dedupKey: `budget:${alert.budget_id}`,
+        });
       }
     },
   });

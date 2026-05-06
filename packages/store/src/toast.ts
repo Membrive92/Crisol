@@ -60,8 +60,27 @@ export const useToastStore = create<ToastState>()((set) => ({
       message: input.message,
       ...(input.action ? { action: input.action } : {}),
       dismissAfterMs,
+      ...(input.dedupKey ? { dedupKey: input.dedupKey } : {}),
     };
-    set((state) => ({ toasts: [...state.toasts, toast] }));
+    // PHASE-15.1: si llega con dedupKey, reemplaza el toast
+    // existente con el mismo dedupKey en lugar de apilar otro. El
+    // nuevo toast hereda el spot del viejo (no salta al final) — UX
+    // estable para alerts repetidas (ej. "Comida está al 95%" tras
+    // 3 transacciones consecutivas).
+    set((state) => {
+      if (!input.dedupKey) {
+        return { toasts: [...state.toasts, toast] };
+      }
+      const idx = state.toasts.findIndex(
+        (t) => t.dedupKey === input.dedupKey,
+      );
+      if (idx === -1) {
+        return { toasts: [...state.toasts, toast] };
+      }
+      const next = [...state.toasts];
+      next[idx] = toast;
+      return { toasts: next };
+    });
     return id;
   },
 

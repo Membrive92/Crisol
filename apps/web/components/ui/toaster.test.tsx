@@ -94,4 +94,31 @@ describe('Toaster + useToastStore', () => {
     const stored = useToastStore.getState().toasts.find((t) => t.id === id);
     expect(stored?.dismissAfterMs).toBe(8000);
   });
+
+  it('dedupKey reemplaza el toast existente en su sitio (PHASE-15.1)', () => {
+    render(<Toaster />);
+    act(() => {
+      toast.show({ kind: 'warning', message: 'Comida 80%', dedupKey: 'b:1' });
+      toast.show({ kind: 'warning', message: 'Otro', dedupKey: 'other' });
+    });
+    expect(useToastStore.getState().toasts).toHaveLength(2);
+    act(() => {
+      toast.show({ kind: 'error', message: 'Comida 105%', dedupKey: 'b:1' });
+    });
+    const queue = useToastStore.getState().toasts;
+    expect(queue).toHaveLength(2); // sin acumular
+    expect(queue.find((t) => t.dedupKey === 'b:1')?.message).toBe('Comida 105%');
+    expect(queue.find((t) => t.dedupKey === 'b:1')?.kind).toBe('error');
+    // El "other" sigue en su posición original.
+    expect(queue[1]?.dedupKey).toBe('other');
+  });
+
+  it('sin dedupKey los toasts se apilan como antes', () => {
+    render(<Toaster />);
+    act(() => {
+      toast.show({ kind: 'success', message: 'A' });
+      toast.show({ kind: 'success', message: 'A' }); // mismo mensaje, sin dedupKey
+    });
+    expect(useToastStore.getState().toasts).toHaveLength(2);
+  });
 });
