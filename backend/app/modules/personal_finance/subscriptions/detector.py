@@ -63,6 +63,12 @@ DEFAULT_LOOKBACK_DAYS = 180
 # Longitud máxima del merchant normalizado.
 MERCHANT_MAX_LEN = 30
 
+# PHASE-14.7: longitud mínima de prefijo común para considerar dos
+# grupos como el mismo merchant. "netflixsuscrip" + "netflixcom"
+# comparten "netflix" (7 chars) → match. "spotify" + "spaceshop"
+# comparten "sp" → no match. 6 es un punto medio razonable.
+MIN_COMMON_PREFIX = 6
+
 
 def normalize_merchant(description: str | None) -> str:
     """Lowercase + sólo `[a-z0-9]` + primeros 30 chars.
@@ -221,6 +227,13 @@ async def detect_for_user(
             (occurred_at.date(), description or "", category_id)
         )
 
+    # PHASE-14.7: fusionar grupos con prefijo común grande +
+    # mismo amount + mismo currency. Captura "NETFLIX.COM" /
+    # "NETFLIX PREMIUM" / "PRO_NETFLIX" como mismo merchant sin
+    # necesitar IA. La fusión preserva el merchant del grupo
+    # más grande (más representativo) y concatena occurrences.
+    grouped = _merge_by_common_prefix(grouped)
+
     candidates: list[Candidate] = []
     for (merchant, amount, currency), occurrences in grouped.items():
         candidate = _detect_in_group(
@@ -232,3 +245,63 @@ async def detect_for_user(
         if candidate is not None:
             candidates.append(candidate)
     return candidates
+
+
+def _common_prefix(a: str, b: str) -> int:
+    """Longitud del prefijo común entre dos strings."""
+    n = min(len(a), len(b))
+    i = 0
+    while i < n and a[i] == b[i]:
+        i += 1
+    return i
+
+
+def _merge_by_common_prefix(
+    grouped: dict[tuple[str, Decimal, str], list[tuple[date, str, uuid.UUID | None]]],
+) -> dict[tuple[str, Decimal, str], list[tuple[date, str, uuid.UUID | None]]]:
+    """Fusiona grupos cuyo merchant comparta `MIN_COMMON_PREFIX`+
+    chars Y mismo amount Y mismo currency.
+
+    Algoritmo: agrupa por (amount, currency), ordena los merchants
+    de cada bucket por longitud descendente (los más largos primero
+    — preferimos preservar nombres más específicos como llave). Por
+    cada pareja con prefijo común suficientemente largo, fusiona el
+    más corto en el más largo. Es un solo pase O(n²) por bucket;
+    para volúmenes esperados (< 100 grupos por user) trivial.
+    """
+    by_amount: dict[
+        tuple[Decimal, str], list[tuple[str, list[tuple[date, str, uuid.UUID | None]]]]
+    ] = defaultdict(list)
+    for (merchant, amount, currency), occurrences in grouped.items():
+        by_amount[(amount, currency)].append((merchant, occurrences))
+
+    merged: dict[
+        tuple[str, Decimal, str], list[tuple[date, str, uuid.UUID | None]]
+    ] = {}
+    for (amount, currency), entries in by_amount.items():
+        # Sort por len(merchant) desc — el más largo se queda como llave.
+        entries.sort(key=lambda e: -len(e[0]))
+        # `parents[i]` apunta al index "absorbedor" del grupo i.
+        parents = list(range(len(entries)))
+        for i in range(len(entries)):
+            if parents[i] != i:
+                continue
+            merchant_i = entries[i][0]
+            for j in range(i + 1, len(entries)):
+                if parents[j] != j:
+                    continue
+                merchant_j = entries[j][0]
+                if _common_prefix(merchant_i, merchant_j) >= MIN_COMMON_PREFIX:
+                    parents[j] = i
+
+        # Construir el resultado fusionado.
+        for i, (merchant_i, occ_i) in enumerate(entries):
+            if parents[i] != i:
+                continue
+            occ_combined = list(occ_i)
+            for j in range(i + 1, len(entries)):
+                if parents[j] == i:
+                    occ_combined.extend(entries[j][1])
+            merged[(merchant_i, amount, currency)] = occ_combined
+
+    return merged
