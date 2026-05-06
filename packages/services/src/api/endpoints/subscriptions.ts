@@ -44,6 +44,27 @@ export const subscriptionsApi = {
     return response.data;
   },
 
+  async pause(id: string): Promise<Subscription> {
+    const response = await apiClient.post<Subscription>(
+      `/subscriptions/${id}/pause`,
+    );
+    return response.data;
+  },
+
+  async resume(id: string): Promise<Subscription> {
+    const response = await apiClient.post<Subscription>(
+      `/subscriptions/${id}/resume`,
+    );
+    return response.data;
+  },
+
+  async cancel(id: string): Promise<Subscription> {
+    const response = await apiClient.post<Subscription>(
+      `/subscriptions/${id}/cancel`,
+    );
+    return response.data;
+  },
+
   async remove(id: string): Promise<void> {
     await apiClient.delete(`/subscriptions/${id}`);
   },

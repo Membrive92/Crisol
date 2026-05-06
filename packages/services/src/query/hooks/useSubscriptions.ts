@@ -69,4 +69,34 @@ export function useDeleteSubscription() {
   });
 }
 
+export function usePauseSubscription() {
+  const queryClient = useQueryClient();
+  return useMutation<Subscription, Error, string>({
+    mutationFn: (id) => subscriptionsApi.pause(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.subscriptions.all });
+    },
+  });
+}
+
+export function useResumeSubscription() {
+  const queryClient = useQueryClient();
+  return useMutation<Subscription, Error, string>({
+    mutationFn: (id) => subscriptionsApi.resume(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.subscriptions.all });
+    },
+  });
+}
+
+export function useCancelSubscription() {
+  const queryClient = useQueryClient();
+  return useMutation<Subscription, Error, string>({
+    mutationFn: (id) => subscriptionsApi.cancel(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.subscriptions.all });
+    },
+  });
+}
+
 export type { SubscriptionListQuery, SubscriptionStatus };

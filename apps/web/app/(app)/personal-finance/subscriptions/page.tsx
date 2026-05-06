@@ -4,10 +4,13 @@ import { useState } from 'react';
 
 import {
   formatApiError,
+  useCancelSubscription,
   useCategories,
   useConfirmSubscription,
   useDeleteSubscription,
   useDismissSubscription,
+  usePauseSubscription,
+  useResumeSubscription,
   useScanSubscriptions,
   useSubscriptions,
 } from '@finanzas/services';
@@ -22,15 +25,23 @@ export default function SubscriptionsPage() {
   const { data: categories } = useCategories();
   const pendingQuery = useSubscriptions({ status: 'pending' });
   const confirmedQuery = useSubscriptions({ status: 'confirmed' });
+  const pausedQuery = useSubscriptions({ status: 'paused' });
+  const cancelledQuery = useSubscriptions({ status: 'cancelled' });
   const dismissedQuery = useSubscriptions({ status: 'dismissed' });
   const scanMutation = useScanSubscriptions();
   const confirmMutation = useConfirmSubscription();
   const dismissMutation = useDismissSubscription();
+  const pauseMutation = usePauseSubscription();
+  const resumeMutation = useResumeSubscription();
+  const cancelMutation = useCancelSubscription();
   const deleteMutation = useDeleteSubscription();
   const [showDismissed, setShowDismissed] = useState(false);
+  const [showCancelled, setShowCancelled] = useState(false);
 
   const pending = pendingQuery.data ?? [];
   const confirmed = confirmedQuery.data ?? [];
+  const paused = pausedQuery.data ?? [];
+  const cancelled = cancelledQuery.data ?? [];
   const dismissed = dismissedQuery.data ?? [];
 
   function handleScan() {
@@ -61,15 +72,44 @@ export default function SubscriptionsPage() {
 
   function handleDismiss(id: string) {
     dismissMutation.mutate(id, {
-      onSuccess: () => toast.info('Subscripción descartada — no se volverá a sugerir.'),
+      onSuccess: () =>
+        toast.info('Subscripción descartada — no se volverá a sugerir.'),
       onError: (err) => toast.error(formatApiError(err, 'Error al descartar.')),
+    });
+  }
+
+  function handlePause(id: string) {
+    pauseMutation.mutate(id, {
+      onSuccess: () => toast.info('Subscripción pausada.'),
+      onError: (err) => toast.error(formatApiError(err, 'Error al pausar.')),
+    });
+  }
+
+  function handleResume(id: string) {
+    resumeMutation.mutate(id, {
+      onSuccess: () => toast.success('Subscripción reanudada.'),
+      onError: (err) => toast.error(formatApiError(err, 'Error al reanudar.')),
+    });
+  }
+
+  function handleCancel(id: string) {
+    if (
+      !confirm(
+        'Marcar la subscripción como cancelada (ya no la tienes activa). ¿Continuar?',
+      )
+    ) {
+      return;
+    }
+    cancelMutation.mutate(id, {
+      onSuccess: () => toast.info('Subscripción cancelada.'),
+      onError: (err) => toast.error(formatApiError(err, 'Error al cancelar.')),
     });
   }
 
   function handleDelete(id: string) {
     if (
       !confirm(
-        'Eliminar esta subscripción confirmada. Si el patrón persiste, volverá a aparecer como pendiente en el próximo escaneo. ¿Continuar?',
+        'Eliminar esta subscripción. Si el patrón persiste, volverá a aparecer como pendiente en el próximo escaneo. ¿Continuar?',
       )
     ) {
       return;
@@ -85,6 +125,15 @@ export default function SubscriptionsPage() {
     : null;
   const dismissingId = dismissMutation.isPending
     ? (dismissMutation.variables as string)
+    : null;
+  const pausingId = pauseMutation.isPending
+    ? (pauseMutation.variables as string)
+    : null;
+  const resumingId = resumeMutation.isPending
+    ? (resumeMutation.variables as string)
+    : null;
+  const cancellingId = cancelMutation.isPending
+    ? (cancelMutation.variables as string)
     : null;
   const deletingId = deleteMutation.isPending
     ? (deleteMutation.variables as string)
@@ -187,10 +236,15 @@ export default function SubscriptionsPage() {
                 key={sub.id}
                 subscription={sub}
                 categories={categories ?? []}
+                primaryAction={{
+                  label: 'Pausar',
+                  onClick: () => handlePause(sub.id),
+                  busy: pausingId === sub.id,
+                }}
                 secondaryAction={{
-                  label: 'Eliminar',
-                  onClick: () => handleDelete(sub.id),
-                  busy: deletingId === sub.id,
+                  label: 'Cancelar',
+                  onClick: () => handleCancel(sub.id),
+                  busy: cancellingId === sub.id,
                   danger: true,
                 }}
               />
@@ -199,24 +253,78 @@ export default function SubscriptionsPage() {
         </section>
       ) : null}
 
+      {paused.length > 0 ? (
+        <section style={{ marginBottom: spacing.xl }}>
+          <h2 style={sectionHeaderStyle}>Pausadas</h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
+            {paused.map((sub) => (
+              <SubscriptionCard
+                key={sub.id}
+                subscription={sub}
+                categories={categories ?? []}
+                primaryAction={{
+                  label: 'Reanudar',
+                  onClick: () => handleResume(sub.id),
+                  busy: resumingId === sub.id,
+                }}
+                secondaryAction={{
+                  label: 'Cancelar',
+                  onClick: () => handleCancel(sub.id),
+                  busy: cancellingId === sub.id,
+                  danger: true,
+                }}
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {cancelled.length > 0 ? (
+        <section style={{ marginBottom: spacing.lg }}>
+          <button
+            type="button"
+            onClick={() => setShowCancelled((v) => !v)}
+            style={collapseToggleStyle}
+            aria-expanded={showCancelled}
+          >
+            <span aria-hidden style={{ fontSize: fontSize.xs }}>
+              {showCancelled ? '▾' : '▸'}
+            </span>
+            Canceladas ({cancelled.length})
+          </button>
+          {showCancelled ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: spacing.sm,
+                marginTop: spacing.md,
+              }}
+            >
+              {cancelled.map((sub) => (
+                <SubscriptionCard
+                  key={sub.id}
+                  subscription={sub}
+                  categories={categories ?? []}
+                  secondaryAction={{
+                    label: 'Eliminar',
+                    onClick: () => handleDelete(sub.id),
+                    busy: deletingId === sub.id,
+                    danger: true,
+                  }}
+                />
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
       {dismissed.length > 0 ? (
         <section>
           <button
             type="button"
             onClick={() => setShowDismissed((v) => !v)}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              background: 'none',
-              border: 'none',
-              padding: 0,
-              cursor: 'pointer',
-              color: colors.textMuted,
-              fontSize: fontSize.sm,
-              fontWeight: fontWeight.medium,
-              marginBottom: showDismissed ? spacing.md : 0,
-            }}
+            style={collapseToggleStyle}
             aria-expanded={showDismissed}
           >
             <span aria-hidden style={{ fontSize: fontSize.xs }}>
@@ -225,7 +333,14 @@ export default function SubscriptionsPage() {
             Descartadas ({dismissed.length})
           </button>
           {showDismissed ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: spacing.sm,
+                marginTop: spacing.md,
+              }}
+            >
               {dismissed.map((sub) => (
                 <SubscriptionCard
                   key={sub.id}
@@ -258,4 +373,17 @@ const sectionHeaderStyle: React.CSSProperties = {
   color: colors.text,
   marginTop: 0,
   marginBottom: spacing.md,
+};
+
+const collapseToggleStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  background: 'none',
+  border: 'none',
+  padding: 0,
+  cursor: 'pointer',
+  color: colors.textMuted,
+  fontSize: fontSize.sm,
+  fontWeight: fontWeight.medium,
 };

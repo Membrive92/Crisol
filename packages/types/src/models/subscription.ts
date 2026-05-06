@@ -6,7 +6,12 @@
  * (no timestamp completo).
  */
 
-export type SubscriptionStatus = 'pending' | 'confirmed' | 'dismissed';
+export type SubscriptionStatus =
+  | 'pending'
+  | 'confirmed'
+  | 'paused'
+  | 'cancelled'
+  | 'dismissed';
 
 export interface Subscription {
   id: string;

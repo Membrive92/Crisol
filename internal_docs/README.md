@@ -158,7 +158,7 @@ Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
 | Fase | Nombre                                       | Estado | PR |
 |------|----------------------------------------------|--------|----|
 | 15.1 | Dedup de toasts repetidos                    | ✅     | —  |
-| 15.2 | Pause / cancel para subscripciones           | ⏳     | —  |
+| 15.2 | Pause / cancel para subscripciones           | ✅     | —  |
 
 ---
 

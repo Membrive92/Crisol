@@ -79,4 +79,7 @@ export {
   useConfirmSubscription,
   useDismissSubscription,
   useDeleteSubscription,
+  usePauseSubscription,
+  useResumeSubscription,
+  useCancelSubscription,
 } from './query/hooks/useSubscriptions';

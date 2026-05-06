@@ -78,6 +78,65 @@ async def dismiss_subscription(
     return sub
 
 
+async def pause_subscription(
+    db: AsyncSession, subscription_id: uuid.UUID, user_id: uuid.UUID
+) -> Subscription:
+    """Marca como paused (PHASE-15.2). Sólo desde confirmed; otros
+    estados producen 409 — pausar una pending o dismissed no tiene
+    semántica clara."""
+    sub = await get_subscription(db, subscription_id, user_id)
+    if sub.status != SubscriptionStatus.CONFIRMED:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=(
+                "Sólo se puede pausar una subscripción confirmada. "
+                f"Estado actual: {sub.status}."
+            ),
+        )
+    sub.status = SubscriptionStatus.PAUSED
+    await db.flush()
+    await db.refresh(sub)
+    return sub
+
+
+async def resume_subscription(
+    db: AsyncSession, subscription_id: uuid.UUID, user_id: uuid.UUID
+) -> Subscription:
+    """Reanuda paused → confirmed (PHASE-15.2)."""
+    sub = await get_subscription(db, subscription_id, user_id)
+    if sub.status != SubscriptionStatus.PAUSED:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=(
+                "Sólo se puede reanudar una subscripción pausada. "
+                f"Estado actual: {sub.status}."
+            ),
+        )
+    sub.status = SubscriptionStatus.CONFIRMED
+    await db.flush()
+    await db.refresh(sub)
+    return sub
+
+
+async def cancel_subscription(
+    db: AsyncSession, subscription_id: uuid.UUID, user_id: uuid.UUID
+) -> Subscription:
+    """Marca como cancelled (PHASE-15.2). Aceptable desde
+    pending/confirmed/paused. Una dismissed no se cancela — ya está
+    fuera del flujo. cancelled bloquea re-sugestion igual que
+    dismissed (find_by_fingerprint matchea sin tocar status)."""
+    sub = await get_subscription(db, subscription_id, user_id)
+    if sub.status == SubscriptionStatus.DISMISSED:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="Una subscripción descartada no se puede cancelar.",
+        )
+    sub.status = SubscriptionStatus.CANCELLED
+    await db.flush()
+    await db.refresh(sub)
+    return sub
+
+
 async def delete_subscription(
     db: AsyncSession, subscription_id: uuid.UUID, user_id: uuid.UUID
 ) -> None:

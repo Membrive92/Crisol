@@ -16,11 +16,14 @@ from app.modules.personal_finance.subscriptions.schemas import (
     SubscriptionResponse,
 )
 from app.modules.personal_finance.subscriptions.service import (
+    cancel_subscription,
     confirm_subscription,
     delete_subscription,
     dismiss_subscription,
     get_subscription,
     list_subscriptions,
+    pause_subscription,
+    resume_subscription,
     scan_for_user,
 )
 
@@ -91,6 +94,51 @@ async def dismiss_endpoint(
 ) -> SubscriptionResponse:
     """Marca como `dismissed`. El detector NO la volverá a sugerir."""
     sub = await dismiss_subscription(db, subscription_id, user.id)
+    await db.commit()
+    return SubscriptionResponse.model_validate(sub)
+
+
+@router.post(
+    "/{subscription_id}/pause", response_model=SubscriptionResponse
+)
+async def pause_endpoint(
+    subscription_id: uuid.UUID,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SubscriptionResponse:
+    """Pausa temporal — `confirmed` → `paused` (PHASE-15.2). 409
+    desde cualquier otro estado."""
+    sub = await pause_subscription(db, subscription_id, user.id)
+    await db.commit()
+    return SubscriptionResponse.model_validate(sub)
+
+
+@router.post(
+    "/{subscription_id}/resume", response_model=SubscriptionResponse
+)
+async def resume_endpoint(
+    subscription_id: uuid.UUID,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SubscriptionResponse:
+    """Reanuda — `paused` → `confirmed` (PHASE-15.2). 409 si no
+    está paused."""
+    sub = await resume_subscription(db, subscription_id, user.id)
+    await db.commit()
+    return SubscriptionResponse.model_validate(sub)
+
+
+@router.post(
+    "/{subscription_id}/cancel", response_model=SubscriptionResponse
+)
+async def cancel_endpoint(
+    subscription_id: uuid.UUID,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SubscriptionResponse:
+    """Marca como `cancelled` (PHASE-15.2). Aceptable desde
+    pending/confirmed/paused. 409 desde dismissed."""
+    sub = await cancel_subscription(db, subscription_id, user.id)
     await db.commit()
     return SubscriptionResponse.model_validate(sub)
 

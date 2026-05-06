@@ -17,15 +17,22 @@ class SubscriptionStatus(enum.StrEnum):
     """Estado de una subscripción detectada.
 
     `pending` → el detector la propuso, falta confirmar.
-    `confirmed` → el usuario aceptó; aparece en su lista activa y
-                  alimenta futuras alertas / recordatorios.
-    `dismissed` → el usuario la rechazó (falso positivo); el detector
-                  NO la volverá a sugerir aunque vuelva a haber
-                  transacciones que matcheen el patrón.
+    `confirmed` → el usuario aceptó; subscripción activa.
+    `paused` (PHASE-15.2) → temporalmente inactiva; el usuario la
+                pausa sin descartarla. Mismo bloqueo de re-sugestion
+                que confirmed.
+    `cancelled` (PHASE-15.2) → el usuario canceló la subscripción
+                real (cerró su cuenta). NO es lo mismo que dismissed:
+                cancelled = "sí era subscripción, ya no la tengo";
+                dismissed = "el detector se equivocó".
+    `dismissed` → el detector se equivocó (falso positivo); NO se
+                  volverá a sugerir aunque siga el patrón.
     """
 
     PENDING = "pending"
     CONFIRMED = "confirmed"
+    PAUSED = "paused"
+    CANCELLED = "cancelled"
     DISMISSED = "dismissed"
 
 

@@ -4,10 +4,13 @@ import { Stack } from 'expo-router';
 
 import {
   formatApiError,
+  useCancelSubscription,
   useCategories,
   useConfirmSubscription,
   useDeleteSubscription,
   useDismissSubscription,
+  usePauseSubscription,
+  useResumeSubscription,
   useScanSubscriptions,
   useSubscriptions,
 } from '@finanzas/services';
@@ -27,14 +30,22 @@ export default function SubscriptionsScreen() {
   const pendingQuery = useSubscriptions({ status: 'pending' });
   const confirmedQuery = useSubscriptions({ status: 'confirmed' });
   const dismissedQuery = useSubscriptions({ status: 'dismissed' });
+  const pausedQuery = useSubscriptions({ status: 'paused' });
+  const cancelledQuery = useSubscriptions({ status: 'cancelled' });
   const scanMutation = useScanSubscriptions();
   const confirmMutation = useConfirmSubscription();
   const dismissMutation = useDismissSubscription();
+  const pauseMutation = usePauseSubscription();
+  const resumeMutation = useResumeSubscription();
+  const cancelMutation = useCancelSubscription();
   const deleteMutation = useDeleteSubscription();
   const [showDismissed, setShowDismissed] = useState(false);
+  const [showCancelled, setShowCancelled] = useState(false);
 
   const pending = pendingQuery.data ?? [];
   const confirmed = confirmedQuery.data ?? [];
+  const paused = pausedQuery.data ?? [];
+  const cancelled = cancelledQuery.data ?? [];
   const dismissed = dismissedQuery.data ?? [];
 
   function handleScan() {
@@ -69,6 +80,40 @@ export default function SubscriptionsScreen() {
     });
   }
 
+  function handlePause(id: string) {
+    pauseMutation.mutate(id, {
+      onSuccess: () => toast.info('Subscripción pausada.'),
+      onError: (err) => toast.error(formatApiError(err, 'Error al pausar.')),
+    });
+  }
+
+  function handleResume(id: string) {
+    resumeMutation.mutate(id, {
+      onSuccess: () => toast.success('Subscripción reanudada.'),
+      onError: (err) => toast.error(formatApiError(err, 'Error al reanudar.')),
+    });
+  }
+
+  function handleCancel(id: string, label: string) {
+    Alert.alert(
+      'Cancelar subscripción',
+      `Marca "${label}" como cancelada (ya no la tienes activa).`,
+      [
+        { text: 'Volver', style: 'cancel' },
+        {
+          text: 'Cancelar',
+          style: 'destructive',
+          onPress: () =>
+            cancelMutation.mutate(id, {
+              onSuccess: () => toast.info('Subscripción cancelada.'),
+              onError: (err) =>
+                toast.error(formatApiError(err, 'Error al cancelar.')),
+            }),
+        },
+      ],
+    );
+  }
+
   function handleDelete(id: string, label: string) {
     Alert.alert(
       'Eliminar subscripción',
@@ -94,6 +139,15 @@ export default function SubscriptionsScreen() {
     : null;
   const dismissingId = dismissMutation.isPending
     ? (dismissMutation.variables as string)
+    : null;
+  const pausingId = pauseMutation.isPending
+    ? (pauseMutation.variables as string)
+    : null;
+  const resumingId = resumeMutation.isPending
+    ? (resumeMutation.variables as string)
+    : null;
+  const cancellingId = cancelMutation.isPending
+    ? (cancelMutation.variables as string)
     : null;
   const deletingId = deleteMutation.isPending
     ? (deleteMutation.variables as string)
@@ -163,15 +217,79 @@ export default function SubscriptionsScreen() {
                 key={sub.id}
                 subscription={sub}
                 categories={categories ?? []}
+                primaryAction={{
+                  label: 'Pausar',
+                  onPress: () => handlePause(sub.id),
+                  busy: pausingId === sub.id,
+                }}
                 secondaryAction={{
-                  label: 'Eliminar',
-                  onPress: () => handleDelete(sub.id, sub.raw_description),
-                  busy: deletingId === sub.id,
+                  label: 'Cancelar',
+                  onPress: () => handleCancel(sub.id, sub.raw_description),
+                  busy: cancellingId === sub.id,
                   danger: true,
                 }}
               />
             ))}
           </>
+        ) : null}
+
+        {paused.length > 0 ? (
+          <>
+            <Text style={[styles.sectionHeading, { marginTop: spacing.lg }]}>
+              Pausadas
+            </Text>
+            {paused.map((sub) => (
+              <SubscriptionCard
+                key={sub.id}
+                subscription={sub}
+                categories={categories ?? []}
+                primaryAction={{
+                  label: 'Reanudar',
+                  onPress: () => handleResume(sub.id),
+                  busy: resumingId === sub.id,
+                }}
+                secondaryAction={{
+                  label: 'Cancelar',
+                  onPress: () => handleCancel(sub.id, sub.raw_description),
+                  busy: cancellingId === sub.id,
+                  danger: true,
+                }}
+              />
+            ))}
+          </>
+        ) : null}
+
+        {cancelled.length > 0 ? (
+          <View style={{ marginTop: spacing.lg }}>
+            <Pressable
+              onPress={() => setShowCancelled((v) => !v)}
+              style={({ pressed }) => [
+                styles.toggleButton,
+                pressed && { opacity: 0.7 },
+              ]}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: showCancelled }}
+            >
+              <Text style={styles.toggleText}>
+                {showCancelled ? '▾' : '▸'} Canceladas ({cancelled.length})
+              </Text>
+            </Pressable>
+            {showCancelled
+              ? cancelled.map((sub) => (
+                  <SubscriptionCard
+                    key={sub.id}
+                    subscription={sub}
+                    categories={categories ?? []}
+                    secondaryAction={{
+                      label: 'Eliminar',
+                      onPress: () => handleDelete(sub.id, sub.raw_description),
+                      busy: deletingId === sub.id,
+                      danger: true,
+                    }}
+                  />
+                ))
+              : null}
+          </View>
         ) : null}
 
         {dismissed.length > 0 ? (
