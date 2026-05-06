@@ -193,6 +193,9 @@ importers:
 
   packages/services:
     dependencies:
+      '@finanzas/store':
+        specifier: workspace:*
+        version: link:../store
       '@finanzas/types':
         specifier: workspace:*
         version: link:../types

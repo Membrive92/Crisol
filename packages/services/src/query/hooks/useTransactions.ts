@@ -6,6 +6,10 @@ import type {
   TransactionListQuery,
   TransactionUpdateRequest,
 } from '@finanzas/types';
+// PHASE-14.5: el hook dispara un toast cuando la respuesta del POST
+// trae `budget_alert`. La store de toasts es cross-platform y
+// `toast.warning` / `toast.error` ya tienen palette por kind.
+import { toast } from '@finanzas/store';
 
 import { transactionsApi } from '../../api/endpoints/transactions';
 import { queryKeys } from '../keys';
@@ -30,8 +34,22 @@ export function useCreateTransaction() {
   const queryClient = useQueryClient();
   return useMutation<Transaction, Error, TransactionCreateRequest>({
     mutationFn: (data) => transactionsApi.create(data),
-    onSuccess: () => {
+    onSuccess: (created) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
+      // Crear afecta budgets — invalidamos el grupo entero para que
+      // los status cards refresquen sin esperar al staleTime.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.budgets.all });
+      // PHASE-14.5: notificación proactiva si la nueva tx empuja a
+      // warning/over. El backend prepara `next_due_label` listo
+      // para el toast.
+      const alert = created.budget_alert;
+      if (alert) {
+        if (alert.status === 'over') {
+          toast.error(alert.next_due_label);
+        } else {
+          toast.warning(alert.next_due_label);
+        }
+      }
     },
   });
 }

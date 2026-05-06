@@ -5,10 +5,31 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from app.modules.personal_finance.transactions.models import TransactionSource
+
+
+class BudgetAlertSchema(BaseModel):
+    """Alerta de presupuesto en estado warning/over (PHASE-14.5).
+
+    Devuelta en `TransactionResponse.budget_alert` cuando una nueva
+    tx empuja la categoría afectada al límite. `None` si no hay
+    budget aplicable o si está en `ok`.
+    """
+
+    budget_id: uuid.UUID
+    category_id: uuid.UUID | None
+    status: Literal["warning", "over"]
+    percent_used: float
+    spent_this_month: Decimal
+    amount: Decimal
+    currency: str
+    next_due_label: str = Field(
+        description="Texto legible para el toast: 'Comida está al 95%' o similar."
+    )
 
 
 class TransactionCreate(BaseModel):
@@ -59,6 +80,10 @@ class TransactionResponse(BaseModel):
     deleted_at: datetime | None = None
     converted_amount: Decimal | None = None
     converted_currency: str | None = None
+    # PHASE-14.5: sólo viene en la respuesta del POST cuando la tx
+    # creada empuja la categoría a warning/over. None en cualquier
+    # otro endpoint (list, get, put).
+    budget_alert: BudgetAlertSchema | None = None
 
     model_config = {"from_attributes": True}
 

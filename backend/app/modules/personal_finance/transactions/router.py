@@ -12,8 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
+from app.modules.personal_finance.budgets.service import get_alert_for_category
+from app.modules.personal_finance.categories.repository import (
+    get_category_by_id,
+)
 from app.modules.personal_finance.transactions.models import Transaction
 from app.modules.personal_finance.transactions.schemas import (
+    BudgetAlertSchema,
     TransactionCreate,
     TransactionListResponse,
     TransactionResponse,
@@ -128,10 +133,49 @@ async def create_endpoint(
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TransactionResponse:
-    """Crea una nueva transacción."""
+    """Crea una nueva transacción.
+
+    PHASE-14.5: si la nueva tx empuja la categoría afectada (o el
+    budget global) a warning/over, la respuesta lleva
+    `budget_alert: BudgetAlertSchema` para que el cliente lance una
+    notificación proactiva. `None` cuando no hay budget activo o el
+    estado sigue en `ok`.
+    """
     transaction = await create_transaction(db, user.id, body)
+    await db.flush()
+    alert = await get_alert_for_category(
+        db, user.id, category_id=transaction.category_id
+    )
     await db.commit()
-    return TransactionResponse.model_validate(transaction)
+
+    payload = TransactionResponse.model_validate(transaction)
+    if alert is not None:
+        cat_label: str
+        if alert.budget.category_id is None:
+            cat_label = "Presupuesto global"
+        else:
+            cat = await get_category_by_id(
+                db, alert.budget.category_id, user.id
+            )
+            cat_label = cat.name if cat is not None else "Categoría"
+        message = (
+            f"{cat_label} está al {alert.percent_used:.0f}% del presupuesto."
+        )
+        payload = payload.model_copy(
+            update={
+                "budget_alert": BudgetAlertSchema(
+                    budget_id=alert.budget.id,
+                    category_id=alert.budget.category_id,
+                    status=alert.status,
+                    percent_used=alert.percent_used,
+                    spent_this_month=alert.spent_this_month,
+                    amount=alert.budget.amount,
+                    currency=alert.budget.currency,
+                    next_due_label=message,
+                )
+            }
+        )
+    return payload
 
 
 @router.put("/{transaction_id}", response_model=TransactionResponse)

@@ -1,5 +1,25 @@
 export type TransactionSource = 'manual' | 'import' | 'receipt';
 
+/**
+ * Alert proactiva de presupuesto que viene en la respuesta del POST
+ * /transactions cuando la nueva tx empuja la categoría afectada (o
+ * el budget global) a `warning|over` (PHASE-14.5).
+ *
+ * Sólo presente en `Transaction.budget_alert` cuando el endpoint POST
+ * la emite. Lecturas (list, get, put) lo dejan en `null`.
+ */
+export interface BudgetAlert {
+  budget_id: string;
+  category_id: string | null;
+  status: 'warning' | 'over';
+  percent_used: number;
+  spent_this_month: string;
+  amount: string;
+  currency: string;
+  /** Mensaje legible listo para toast: "Comida está al 85% del presupuesto." */
+  next_due_label: string;
+}
+
 export interface Transaction {
   id: string;
   user_id: string;
@@ -27,4 +47,10 @@ export interface Transaction {
    */
   converted_amount: string | null;
   converted_currency: string | null;
+  /**
+   * Alert proactiva (PHASE-14.5). Sólo presente en la respuesta del
+   * POST /transactions cuando la nueva tx empuja la categoría a
+   * warning/over. `null` siempre en lecturas y cuando no aplica.
+   */
+  budget_alert?: BudgetAlert | null;
 }

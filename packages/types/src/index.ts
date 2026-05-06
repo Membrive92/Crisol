@@ -8,7 +8,7 @@ export {
   findModuleByPath,
 } from './registry/modules';
 export type { Category, CategoryKind } from './models/category';
-export type { Transaction, TransactionSource } from './models/transaction';
+export type { BudgetAlert, Transaction, TransactionSource } from './models/transaction';
 export type {
   DashboardSummary,
   CategoryBreakdownItem,

@@ -157,6 +157,59 @@ async def close_budget(
     await db.refresh(budget)
 
 
+async def get_alert_for_category(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    category_id: uuid.UUID | None,
+) -> BudgetStatusItem | None:
+    """Devuelve `BudgetStatusItem` para el budget activo de una
+    categoría sólo si está en `warning|over`. `None` en `ok` o sin
+    budget. PHASE-14.5 — usado tras crear una transacción para
+    notificar proactivamente.
+
+    Búsqueda: primero el budget de la categoría exacta (si tx tiene
+    categoría); si no encuentra, prueba el global. Si la tx no tiene
+    categoría, sólo el global.
+    """
+    today = _today_utc()
+    candidates: list[uuid.UUID | None] = []
+    if category_id is not None:
+        candidates.append(category_id)
+    candidates.append(None)
+
+    for candidate_cat in candidates:
+        budget = await get_active_budget_for_category(
+            db, user_id, category_id=candidate_cat, today=today
+        )
+        if budget is None:
+            continue
+        month_start, month_end = _month_bounds_utc(today)
+        spent = await sum_expenses_in_period(
+            db,
+            user_id,
+            currency=budget.currency,
+            month_start=month_start,
+            month_end=month_end,
+            category_id=budget.category_id,
+        )
+        amount = Decimal(budget.amount)
+        if amount <= 0:
+            continue
+        percent_used = float(spent / amount * Decimal("100"))
+        status = _classify_status(percent_used)
+        if status == "ok":
+            continue
+        return BudgetStatusItem(
+            budget=budget,
+            spent_this_month=spent,
+            remaining=amount - spent,
+            percent_used=round(percent_used, 2),
+            status=status,
+        )
+    return None
+
+
 async def get_budgets_status(
     db: AsyncSession, user_id: uuid.UUID
 ) -> BudgetStatusResponse:
