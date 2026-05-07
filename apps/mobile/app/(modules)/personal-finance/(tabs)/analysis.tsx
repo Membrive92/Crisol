@@ -201,7 +201,11 @@ export default function AnalysisScreen() {
 
         <KpiCards summary={summaryQuery.data} isLoading={summaryQuery.isLoading} />
         <SavingsRateCard summary={summaryQuery.data} />
-        <MonthlyChart data={monthlyQuery.data} isLoading={monthlyQuery.isLoading} />
+        <MonthlyChart
+          data={monthlyQuery.data}
+          isLoading={monthlyQuery.isLoading}
+          currency={currency}
+        />
         <CategoryDonut
           data={byCategoryQuery.data}
           currency={currency}

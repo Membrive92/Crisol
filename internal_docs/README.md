@@ -179,7 +179,7 @@ Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
 | Fase | Nombre                                       | Estado | PR |
 |------|----------------------------------------------|--------|----|
 | 18.1 | Web — Recharts (balance + i/e + donut)       | ✅     | —  |
-| 18.2 | Mobile — Victory Native (mismo set)          | ⏳     | —  |
+| 18.2 | Mobile — react-native-gifted-charts (polish) | ✅     | —  |
 
 ---
 
