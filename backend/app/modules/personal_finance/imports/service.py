@@ -25,6 +25,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.ai import service as ai_service
 from app.modules.ai.exceptions import AiError
 from app.modules.personal_finance.categories.models import Category
+from app.modules.personal_finance.fixed_expenses.reconciliation import (
+    reconcile_with_expected,
+)
 from app.modules.personal_finance.imports.models import ImportJob, ImportJobStatus
 from app.modules.personal_finance.imports.parser import (
     NoTablesInPdfError,
@@ -157,8 +160,25 @@ async def run_import(
     skipped_in_batch = len(parsed) - len(deduped)
 
     inserted = 0
+    reconciled = 0
     for p in deduped:
         if p.import_hash in existing:
+            continue
+        # PHASE-17.3: si una tx `expected` casa con esta fila, en
+        # lugar de crear duplicada le asignamos el `import_hash` y
+        # actualizamos su descripción. Cuenta como reconciliación,
+        # no como inserción.
+        match = await reconcile_with_expected(
+            db,
+            user_id,
+            occurred_at=p.occurred_at,
+            amount=p.amount,
+            currency=currency.upper(),
+            description=p.description,
+            import_hash=p.import_hash,
+        )
+        if match is not None:
+            reconciled += 1
             continue
         db.add(
             Transaction(
@@ -174,9 +194,12 @@ async def run_import(
         )
         inserted += 1
 
-    skipped_existing = len(deduped) - inserted
+    skipped_existing = len(deduped) - inserted - reconciled
 
-    job.rows_ok = inserted
+    # PHASE-17.3: las filas reconciliadas se cuentan como `rows_ok`
+    # porque desde la perspectiva del usuario son tx nuevas en su
+    # lista (las `expected` ahora tienen `import_hash`).
+    job.rows_ok = inserted + reconciled
     job.rows_failed = len(errors)
     job.rows_skipped = skipped_in_batch + skipped_existing
     job.error_log = errors

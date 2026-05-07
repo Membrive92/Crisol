@@ -234,7 +234,15 @@ Mínimo 3 ocurrencias en 180 días, desviación relativa de gaps
 
 ---
 
-## Imports (`PHASE-4.1`, `PHASE-4.3`)
+## Imports (`PHASE-4.1`, `PHASE-4.3`, `PHASE-17.3`)
+
+PHASE-17.3 — el pipeline reconcilia con tx `source=expected`
+existentes antes de crear duplicadas. Si una fila del CSV tiene
+mismo `amount + currency`, `occurred_at` ±3 días y prefijo común
+de `description ≥ 6 chars`, se asigna el `import_hash` a la
+`expected` (que pasa a estar conciliada con el banco) en lugar de
+crear una nueva. Las reconciliadas se cuentan en `rows_ok`.
+
 
 | Método | Ruta | Auth | Body / Query | Response |
 |--------|------|------|--------------|----------|
