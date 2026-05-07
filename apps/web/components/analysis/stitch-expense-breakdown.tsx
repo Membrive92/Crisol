@@ -1,8 +1,10 @@
 'use client';
 
+import { useState } from 'react';
+import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
+
 import type { CategoryBreakdownItem } from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
-import { formatAmount } from '@finanzas/ui';
+import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@finanzas/ui';
 
 import { iconForCategoryName } from '@/lib/category-icons';
 import { Card } from '@/components/ui/card';
@@ -15,11 +17,28 @@ export interface StitchExpenseBreakdownProps {
   topN?: number | undefined;
 }
 
-const ROW_PALETTE = [colors.primary, colors.warning, colors.success, colors.danger, colors.text, colors.textMuted];
+const SLICE_PALETTE = [
+  colors.primary,
+  colors.warning,
+  colors.success,
+  colors.danger,
+  colors.text,
+  colors.borderStrong,
+];
+
+interface Slice {
+  id: string;
+  label: string;
+  value: number;
+  color: string;
+  pct: number;
+  isOther: boolean;
+}
 
 /**
- * Lista vertical de gastos por categoría con icono, label, importe,
- * porcentaje y barra de progreso. Top N + "Otros (k)" agrupa la cola.
+ * Donut de gastos por categoría — Recharts (PHASE-18.1). Top N + "Otros"
+ * agrupado, leyenda lateral con icono + amount + porcentaje, centro con
+ * el total. Hover resalta el slice y aumenta su radio.
  */
 export function StitchExpenseBreakdown({
   items,
@@ -33,6 +52,29 @@ export function StitchExpenseBreakdown({
   const rest = sorted.slice(topN);
   const restTotal = rest.reduce((acc, x) => acc + Number(x.total), 0);
   const empty = !isLoading && total === 0;
+
+  const slices: Slice[] = [
+    ...top.map((item, idx) => ({
+      id: item.category_id ?? `_no_cat_${item.category_name}`,
+      label: item.category_name,
+      value: Number(item.total),
+      color: SLICE_PALETTE[idx % SLICE_PALETTE.length] ?? colors.primary,
+      pct: total > 0 ? (Number(item.total) / total) * 100 : 0,
+      isOther: false,
+    })),
+  ];
+  if (rest.length > 0) {
+    slices.push({
+      id: '_other',
+      label: `Otros (${rest.length})`,
+      value: restTotal,
+      color: colors.borderStrong,
+      pct: total > 0 ? (restTotal / total) * 100 : 0,
+      isOther: true,
+    });
+  }
+
+  const [activeId, setActiveId] = useState<string | null>(null);
 
   return (
     <Card style={{ padding: spacing.lg }}>
@@ -60,7 +102,7 @@ export function StitchExpenseBreakdown({
             color: colors.textMuted,
           }}
         >
-          {top.length + (rest.length > 0 ? 1 : 0)} categorías
+          {slices.length} {slices.length === 1 ? 'categoría' : 'categorías'}
         </span>
       </header>
 
@@ -69,76 +111,130 @@ export function StitchExpenseBreakdown({
           Sin gastos en el periodo.
         </p>
       ) : (
-        <ul
+        <div
           style={{
-            listStyle: 'none',
-            margin: 0,
-            padding: 0,
             display: 'flex',
-            flexDirection: 'column',
-            gap: spacing.md,
+            gap: spacing.lg,
+            alignItems: 'center',
+            flexWrap: 'wrap',
           }}
         >
-          {top.map((item, idx) => {
-            const Icon = iconForCategoryName(item.category_name);
-            const color = ROW_PALETTE[idx % ROW_PALETTE.length] ?? colors.primary;
-            return (
-              <Row
-                key={item.category_id ?? `_no_cat_${item.category_name}`}
-                Icon={Icon}
-                label={item.category_name}
-                value={Number(item.total)}
-                total={total}
-                color={color}
+          <div style={{ position: 'relative', width: 220, height: 220, flex: '0 0 auto' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={slices}
+                  dataKey="value"
+                  nameKey="label"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={62}
+                  outerRadius={92}
+                  paddingAngle={2}
+                  isAnimationActive
+                  animationDuration={500}
+                  onMouseEnter={(_, idx) => setActiveId(slices[idx]?.id ?? null)}
+                  onMouseLeave={() => setActiveId(null)}
+                  stroke={colors.surface}
+                  strokeWidth={2}
+                >
+                  {slices.map((s) => (
+                    <Cell
+                      key={s.id}
+                      fill={s.color}
+                      fillOpacity={activeId === null || activeId === s.id ? 1 : 0.45}
+                      style={{ transition: 'fill-opacity 120ms ease' }}
+                    />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                pointerEvents: 'none',
+              }}
+            >
+              <span style={{ fontSize: fontSize.xs, color: colors.textMuted }}>Total</span>
+              <span
+                style={{
+                  fontSize: fontSize.lg,
+                  fontWeight: fontWeight.semibold,
+                  color: colors.text,
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {formatAmount(String(total.toFixed(2)), currency)}
+              </span>
+            </div>
+          </div>
+
+          <ul
+            style={{
+              flex: '1 1 220px',
+              listStyle: 'none',
+              margin: 0,
+              padding: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: spacing.sm,
+            }}
+          >
+            {slices.map((s) => (
+              <LegendRow
+                key={s.id}
+                slice={s}
                 currency={currency}
+                hovered={activeId === s.id}
+                onHover={(hovered) => setActiveId(hovered ? s.id : null)}
               />
-            );
-          })}
-          {rest.length > 0 ? (
-            <Row
-              Icon={FolderIcon}
-              label={`Otros (${rest.length})`}
-              value={restTotal}
-              total={total}
-              color={colors.borderStrong}
-              currency={currency}
-              muted
-            />
-          ) : null}
-        </ul>
+            ))}
+          </ul>
+        </div>
       )}
     </Card>
   );
 }
 
-function Row({
-  Icon,
-  label,
-  value,
-  total,
-  color,
+function LegendRow({
+  slice,
   currency,
-  muted = false,
+  hovered,
+  onHover,
 }: {
-  Icon: React.ComponentType<{ size?: number | undefined }>;
-  label: string;
-  value: number;
-  total: number;
-  color: string;
+  slice: Slice;
   currency: string;
-  muted?: boolean;
+  hovered: boolean;
+  onHover: (next: boolean) => void;
 }) {
-  const pct = total > 0 ? (value / total) * 100 : 0;
+  const Icon = slice.isOther ? FolderIcon : iconForCategoryName(slice.label);
   return (
-    <li style={{ display: 'flex', alignItems: 'center', gap: spacing.md }}>
-      <div
+    <li
+      onMouseEnter={() => onHover(true)}
+      onMouseLeave={() => onHover(false)}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: spacing.sm,
+        padding: `${spacing.xs}px ${spacing.sm}px`,
+        borderRadius: radius.sm,
+        backgroundColor: hovered ? colors.surfaceMuted : 'transparent',
+        transition: 'background-color 120ms ease',
+      }}
+    >
+      <span
         aria-hidden
         style={{
-          width: 40,
-          height: 40,
+          width: 32,
+          height: 32,
           borderRadius: radius.sm,
           backgroundColor: colors.surfaceMuted,
-          color: muted ? colors.textMuted : color,
+          color: slice.isOther ? colors.textMuted : slice.color,
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -146,60 +242,46 @@ function Row({
           border: `1px solid ${colors.border}`,
         }}
       >
-        <Icon size={20} />
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            gap: spacing.sm,
-            marginBottom: 4,
-          }}
-        >
-          <span
-            style={{
-              fontSize: fontSize.sm,
-              fontWeight: fontWeight.semibold,
-              color: muted ? colors.textMuted : colors.text,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
-          >
-            {label}
-          </span>
-          <span
-            style={{
-              fontSize: fontSize.sm,
-              fontWeight: fontWeight.semibold,
-              color: muted ? colors.textMuted : colors.text,
-              fontVariantNumeric: 'tabular-nums',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {formatAmount(String(value.toFixed(2)), currency)} · {pct.toFixed(0)}%
-          </span>
-        </div>
-        <div
-          style={{
-            width: '100%',
-            height: 6,
-            backgroundColor: colors.surfaceMuted,
-            borderRadius: 3,
-            overflow: 'hidden',
-          }}
-        >
-          <div
-            style={{
-              width: `${pct}%`,
-              height: '100%',
-              backgroundColor: color,
-              transition: 'width 200ms ease',
-            }}
-          />
-        </div>
-      </div>
+        <Icon size={16} />
+      </span>
+      <span
+        style={{
+          flex: 1,
+          minWidth: 0,
+          fontSize: fontSize.sm,
+          fontWeight: fontWeight.medium,
+          color: slice.isOther ? colors.textMuted : colors.text,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+      >
+        {slice.label}
+      </span>
+      <span
+        style={{
+          fontSize: fontSize.sm,
+          fontWeight: fontWeight.semibold,
+          color: slice.isOther ? colors.textMuted : colors.text,
+          fontVariantNumeric: 'tabular-nums',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {formatAmount(String(slice.value.toFixed(2)), currency)}
+      </span>
+      <span
+        style={{
+          fontSize: 11,
+          color: colors.textMuted,
+          fontVariantNumeric: 'tabular-nums',
+          whiteSpace: 'nowrap',
+          minWidth: 36,
+          textAlign: 'right',
+        }}
+      >
+        {slice.pct.toFixed(0)}%
+      </span>
     </li>
   );
 }
+

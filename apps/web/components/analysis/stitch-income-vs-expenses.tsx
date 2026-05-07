@@ -1,10 +1,18 @@
 'use client';
 
-import { useState } from 'react';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Legend,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 
 import type { MonthlyBucket } from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
-import { formatAmount } from '@finanzas/ui';
+import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@finanzas/ui';
 
 import { Card } from '@/components/ui/card';
 
@@ -16,21 +24,33 @@ export interface StitchIncomeVsExpensesProps {
   isLoading: boolean;
 }
 
+interface ChartRow {
+  month: string;
+  monthLabel: string;
+  income: number;
+  expenses: number;
+}
+
 /**
- * Bar chart Income vs Expenses al estilo Stitch — barras apiladas
- * por mes (ingreso encima, gasto debajo), 12 buckets, sin libs
- * externas. Hover muestra los valores absolutos.
+ * Bar chart agrupado Ingresos vs Gastos — Recharts (PHASE-18.1).
+ * Dos barras por mes lado a lado, eje Y formateado, leyenda persistente
+ * y tooltip pulido.
  */
 export function StitchIncomeVsExpenses({
   data,
   currency,
   isLoading,
 }: StitchIncomeVsExpensesProps) {
-  const max = Math.max(
-    ...data.map((b) => Math.max(Number(b.income), Number(b.expenses))),
-    1,
-  );
-  const empty = !isLoading && data.every((b) => Number(b.income) === 0 && Number(b.expenses) === 0);
+  const chartData: ChartRow[] = data.map((b) => {
+    const monthIdx = parseInt(b.month.slice(5, 7), 10) - 1;
+    return {
+      month: b.month,
+      monthLabel: SHORT_MONTHS[monthIdx] ?? b.month,
+      income: Number(b.income),
+      expenses: Number(b.expenses),
+    };
+  });
+  const empty = !isLoading && chartData.every((b) => b.income === 0 && b.expenses === 0);
 
   return (
     <Card style={{ padding: spacing.lg }}>
@@ -50,12 +70,8 @@ export function StitchIncomeVsExpenses({
             color: colors.text,
           }}
         >
-          Income vs Expenses
+          Ingresos vs Gastos
         </h3>
-        <div style={{ display: 'flex', alignItems: 'center', gap: spacing.md }}>
-          <Legend color={colors.success} label="Ingresos" />
-          <Legend color={colors.danger} label="Gastos" />
-        </div>
       </header>
 
       {empty ? (
@@ -63,157 +79,131 @@ export function StitchIncomeVsExpenses({
           Sin datos en el periodo.
         </p>
       ) : (
-        <>
-          <div
-            style={{
-              position: 'relative',
-              height: 240,
-              display: 'flex',
-              alignItems: 'flex-end',
-              gap: 6,
-            }}
+        <ResponsiveContainer width="100%" height={280}>
+          <BarChart
+            data={chartData}
+            margin={{ top: 8, right: 8, bottom: 0, left: 8 }}
+            barCategoryGap="20%"
+            barGap={2}
           >
-            {/* Líneas de cuadrícula */}
-            <div
-              aria-hidden
-              style={{
-                position: 'absolute',
-                inset: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-                pointerEvents: 'none',
-                opacity: 0.15,
+            <CartesianGrid strokeDasharray="3 3" stroke={colors.border} vertical={false} />
+            <XAxis
+              dataKey="monthLabel"
+              tick={{ fontSize: 11, fill: colors.textMuted, fontWeight: 500 }}
+              axisLine={{ stroke: colors.border }}
+              tickLine={false}
+              interval={0}
+            />
+            <YAxis
+              tickFormatter={(v: number) => formatCompact(v, currency)}
+              tick={{ fontSize: 11, fill: colors.textMuted }}
+              axisLine={false}
+              tickLine={false}
+              width={64}
+            />
+            <Tooltip
+              cursor={{ fill: colors.surfaceMuted, opacity: 0.6 }}
+              content={({ active, payload }) => {
+                if (!active || !payload || payload.length === 0) return null;
+                const firstRow = payload[0]?.payload as ChartRow | undefined;
+                if (!firstRow) return null;
+                const entries = payload.map((p) => ({
+                  name: typeof p.name === 'string' ? p.name : String(p.name ?? ''),
+                  value: typeof p.value === 'number' ? p.value : 0,
+                  color: typeof p.color === 'string' ? p.color : colors.text,
+                }));
+                return (
+                  <ComparisonTooltip
+                    monthLabel={firstRow.monthLabel}
+                    entries={entries}
+                    currency={currency}
+                  />
+                );
               }}
-            >
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} style={{ borderTop: `1px dashed ${colors.text}` }} />
-              ))}
-            </div>
-
-            {data.map((bucket) => (
-              <BucketBar
-                key={bucket.month}
-                income={Number(bucket.income)}
-                expenses={Number(bucket.expenses)}
-                max={max}
-                currency={currency}
-              />
-            ))}
-          </div>
-          <div style={{ display: 'flex', marginTop: spacing.sm, paddingLeft: 4 }}>
-            {data.map((bucket) => {
-              const monthIdx = parseInt(bucket.month.slice(5, 7), 10) - 1;
-              return (
-                <span
-                  key={bucket.month}
-                  style={{
-                    flex: 1,
-                    textAlign: 'center',
-                    fontSize: fontSize.xs,
-                    color: colors.textSubtle,
-                  }}
-                >
-                  {SHORT_MONTHS[monthIdx] ?? bucket.month}
-                </span>
-              );
-            })}
-          </div>
-        </>
+              animationDuration={120}
+            />
+            <Legend
+              wrapperStyle={{
+                paddingTop: spacing.sm,
+                fontSize: fontSize.xs,
+                color: colors.textMuted,
+              }}
+              iconType="circle"
+              iconSize={10}
+            />
+            <Bar
+              dataKey="income"
+              name="Ingresos"
+              fill={colors.success}
+              radius={[3, 3, 0, 0]}
+              animationDuration={400}
+            />
+            <Bar
+              dataKey="expenses"
+              name="Gastos"
+              fill={colors.danger}
+              radius={[3, 3, 0, 0]}
+              animationDuration={400}
+            />
+          </BarChart>
+        </ResponsiveContainer>
       )}
     </Card>
   );
 }
 
-function BucketBar({
-  income,
-  expenses,
-  max,
-  currency,
-}: {
-  income: number;
-  expenses: number;
-  max: number;
+interface ComparisonTooltipProps {
+  monthLabel: string;
+  entries: readonly { name: string; value: number; color: string }[];
   currency: string;
-}) {
-  const [hovered, setHovered] = useState(false);
-  const incomePct = (income / max) * 100;
-  const expensePct = (expenses / max) * 100;
+}
 
+function ComparisonTooltip({ monthLabel, entries, currency }: ComparisonTooltipProps) {
   return (
     <div
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
       style={{
-        flex: 1,
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'flex-end',
-        gap: 2,
-        position: 'relative',
-        cursor: 'default',
+        backgroundColor: colors.surface,
+        border: `1px solid ${colors.border}`,
+        borderRadius: radius.sm,
+        padding: `${spacing.xs}px ${spacing.sm}px`,
+        minWidth: 140,
+        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.32)',
       }}
     >
-      {hovered ? (
-        <span
+      <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 4 }}>
+        {monthLabel}
+      </div>
+      {entries.map((entry) => (
+        <div
+          key={entry.name || String(entry.value)}
           style={{
-            position: 'absolute',
-            top: -50,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            backgroundColor: colors.surface,
-            border: `1px solid ${colors.border}`,
-            borderRadius: radius.sm,
-            padding: '6px 10px',
-            fontSize: 11,
-            color: colors.text,
-            whiteSpace: 'nowrap',
-            zIndex: 5,
-            pointerEvents: 'none',
-            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.32)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: spacing.sm,
+            fontSize: fontSize.sm,
+            fontWeight: fontWeight.medium,
+            color: entry.color,
+            fontVariantNumeric: 'tabular-nums',
           }}
         >
-          <div style={{ color: colors.success }}>+ {formatAmount(String(income.toFixed(2)), currency)}</div>
-          <div style={{ color: colors.danger }}>− {formatAmount(String(expenses.toFixed(2)), currency)}</div>
-        </span>
-      ) : null}
-      <div
-        style={{
-          height: `${incomePct}%`,
-          backgroundColor: hovered ? colors.success : `${colors.success}33`,
-          borderTopLeftRadius: 3,
-          borderTopRightRadius: 3,
-          transition: 'background-color 120ms ease',
-          minHeight: income > 0 ? 2 : 0,
-        }}
-      />
-      <div
-        style={{
-          height: `${expensePct}%`,
-          backgroundColor: hovered ? colors.danger : `${colors.danger}33`,
-          borderBottomLeftRadius: 3,
-          borderBottomRightRadius: 3,
-          transition: 'background-color 120ms ease',
-          minHeight: expenses > 0 ? 2 : 0,
-        }}
-      />
+          <span>{entry.name}</span>
+          <span>{formatAmount(String(entry.value.toFixed(2)), currency)}</span>
+        </div>
+      ))}
     </div>
   );
 }
 
-function Legend({ color, label }: { color: string; label: string }) {
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-      <span
-        style={{
-          width: 10,
-          height: 10,
-          borderRadius: '50%',
-          backgroundColor: color,
-        }}
-      />
-      <span style={{ fontSize: fontSize.xs, color: colors.textMuted }}>{label}</span>
-    </span>
-  );
+function formatCompact(value: number, currency: string): string {
+  const symbol = currency === 'EUR' ? '€' : currency === 'USD' ? '$' : currency;
+  const abs = Math.abs(value);
+  const sign = value < 0 ? '-' : '';
+  if (abs === 0) return `0 ${symbol}`;
+  if (abs < 1000) return `${sign}${Math.round(abs)} ${symbol}`;
+  if (abs < 1_000_000) {
+    const v = abs / 1000;
+    return `${sign}${v.toFixed(v < 10 ? 1 : 0)}k ${symbol}`.replace('.', ',');
+  }
+  const v = abs / 1_000_000;
+  return `${sign}${v.toFixed(v < 10 ? 1 : 0)}M ${symbol}`.replace('.', ',');
 }

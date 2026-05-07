@@ -174,6 +174,13 @@ Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
 | 17.2 | Auto-post de gastos fijos confirmados        | ✅     | —  |
 | 17.3 | Reconciliación de imports con `expected`     | ✅     | —  |
 
+### Fase 18 — Charting library
+
+| Fase | Nombre                                       | Estado | PR |
+|------|----------------------------------------------|--------|----|
+| 18.1 | Web — Recharts (balance + i/e + donut)       | ✅     | —  |
+| 18.2 | Mobile — Victory Native (mismo set)          | ⏳     | —  |
+
 ---
 
 ## Estructura de este directorio
