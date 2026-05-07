@@ -54,6 +54,7 @@ export function BudgetFormModal({
   const [amount, setAmount] = useState<string>('');
   const [currency, setCurrency] = useState<string>(currencies?.[0] ?? DEFAULT_CURRENCY);
   const [effectiveFrom, setEffectiveFrom] = useState<string>(todayISO());
+  const [convertOther, setConvertOther] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const expenseCategories = categories.filter((c) => c.kind === 'expense');
@@ -76,6 +77,7 @@ export function BudgetFormModal({
       amount: trimmed,
       currency: currency.toUpperCase(),
       effective_from: effectiveFrom,
+      convert_other_currencies: convertOther,
     });
   }
 
@@ -140,6 +142,34 @@ export function BudgetFormModal({
               value={effectiveFrom}
               onChange={setEffectiveFrom}
             />
+
+            <Pressable
+              onPress={() => setConvertOther((v) => !v)}
+              style={({ pressed }) => [
+                styles.toggleRow,
+                pressed && { opacity: 0.7 },
+              ]}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: convertOther }}
+            >
+              <View
+                style={[
+                  styles.checkbox,
+                  convertOther && styles.checkboxActive,
+                ]}
+              >
+                {convertOther ? <Text style={styles.checkmark}>✓</Text> : null}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.toggleLabel}>
+                  Sumar transacciones en otras monedas
+                </Text>
+                <Text style={styles.toggleHint}>
+                  Convierte cada gasto a {currency.toUpperCase()} con la
+                  tasa del día.
+                </Text>
+              </View>
+            </Pressable>
 
             {error ? <Text style={styles.error}>{error}</Text> : null}
           </ScrollView>
@@ -247,6 +277,43 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   chipText: { fontSize: fontSize.xs, color: colors.text },
   chipTextActive: { color: colors.onPrimary, fontWeight: fontWeight.semibold },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  checkboxActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  checkmark: {
+    color: colors.onPrimary,
+    fontSize: 14,
+    lineHeight: 14,
+    fontWeight: fontWeight.bold,
+  },
+  toggleLabel: {
+    fontSize: fontSize.sm,
+    color: colors.text,
+    fontWeight: fontWeight.medium,
+  },
+  toggleHint: {
+    fontSize: fontSize.xs,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
   error: { color: colors.danger, fontSize: fontSize.sm },
   actions: {
     flexDirection: 'row',

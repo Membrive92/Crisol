@@ -15,6 +15,7 @@ function makeBudget(overrides: Partial<Budget> = {}): Budget {
     currency: 'EUR',
     effective_from: '2026-05-01',
     effective_to: null,
+    convert_other_currencies: false,
     created_at: '2026-05-01T00:00:00Z',
     updated_at: '2026-05-01T00:00:00Z',
     ...overrides,

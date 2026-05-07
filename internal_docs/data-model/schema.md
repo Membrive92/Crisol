@@ -25,6 +25,7 @@
 | `c5d28e7f3b91` | 8.1 | `exchange_rates` + carga de snapshot offline embebido. |
 | `e4f7c91a8b3d` | 10.1 | `transactions.deleted_at` + partial index `ix_transactions_user_id_active` + recreado `uq_transactions_user_import_hash` con `AND deleted_at IS NULL`. |
 | `f8b3c91d4e22` | 12.1 | `budgets` (presupuestos mensuales por categoría) + índices por `user_id` y `category_id`. |
+| `c54e9b3a7d18` | 16   | `budgets.convert_other_currencies` (BOOLEAN, default FALSE) — opt-in para sumar gasto en otras monedas convertido. |
 
 ---
 
@@ -132,6 +133,7 @@ ciclo bidireccional); la consistencia la garantiza
 | `currency` | `CHAR(3)` | ISO 4217. Default `EUR`. |
 | `effective_from` | `DATE` | cuándo empieza a aplicar. |
 | `effective_to` | `DATE` NULLABLE | NULL = vigente. |
+| `convert_other_currencies` | `BOOLEAN` | default `FALSE`. PHASE-16. Si `TRUE`, el SUM de status convierte txs en otras monedas a `currency` con `converted_amount_expr` (tasa del día de la tx); las txs sin tasa se cuentan en `unconvertible_count` de la respuesta. |
 | `created_at` / `updated_at` | `TIMESTAMPTZ` | |
 
 **Índices**:

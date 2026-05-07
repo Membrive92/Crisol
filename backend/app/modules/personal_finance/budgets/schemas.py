@@ -19,6 +19,8 @@ class BudgetCreate(BaseModel):
     amount: Decimal = Field(decimal_places=2, ge=Decimal("0.01"))
     currency: str = Field(default="EUR", min_length=3, max_length=3)
     effective_from: date
+    # PHASE-16: opt-in cross-currency.
+    convert_other_currencies: bool = False
 
 
 class BudgetUpdate(BaseModel):
@@ -32,6 +34,7 @@ class BudgetUpdate(BaseModel):
 
     amount: Decimal | None = Field(default=None, decimal_places=2, ge=Decimal("0.01"))
     currency: str | None = Field(default=None, min_length=3, max_length=3)
+    convert_other_currencies: bool | None = None
 
 
 class BudgetResponse(BaseModel):
@@ -44,6 +47,7 @@ class BudgetResponse(BaseModel):
     currency: str
     effective_from: date
     effective_to: date | None
+    convert_other_currencies: bool
     created_at: datetime
     updated_at: datetime
 
@@ -59,6 +63,11 @@ class BudgetStatusItem(BaseModel):
     globales (`category_id IS NULL`) suma todas las categorías de
     `kind='expense'`.
 
+    Si `budget.convert_other_currencies=True` (PHASE-16), suma
+    también txs en otras monedas convertidas a `budget.currency` con
+    la tasa del día de la tx; las txs sin tasa disponible se
+    excluyen de la suma y se reportan en `unconvertible_count`.
+
     `percent_used` puede pasar de 100; el frontend lo cap en barra
     de progreso pero el dato crudo es informativo.
 
@@ -73,6 +82,10 @@ class BudgetStatusItem(BaseModel):
     remaining: Decimal
     percent_used: float
     status: BudgetStatus
+    # PHASE-16: número de txs en otras monedas que se quedaron fuera
+    # del SUM por falta de tasa. Siempre 0 cuando convert_other_currencies
+    # es False (no se intenta convertir).
+    unconvertible_count: int = 0
 
 
 class BudgetStatusResponse(BaseModel):

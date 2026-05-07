@@ -11,9 +11,12 @@ export interface BudgetCreateRequest {
   currency: string;
   /** ISO date `YYYY-MM-DD`. */
   effective_from: string;
+  /** PHASE-16: opt-in cross-currency. Default `false` en backend. */
+  convert_other_currencies?: boolean;
 }
 
 export interface BudgetUpdateRequest {
   amount?: string;
   currency?: string;
+  convert_other_currencies?: boolean;
 }

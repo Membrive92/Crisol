@@ -15,6 +15,7 @@ function makeItem(overrides: Partial<BudgetStatusItem> = {}): BudgetStatusItem {
       currency: 'EUR',
       effective_from: '2026-05-01',
       effective_to: null,
+      convert_other_currencies: false,
       created_at: '2026-05-01T00:00:00Z',
       updated_at: '2026-05-01T00:00:00Z',
     },
@@ -22,6 +23,7 @@ function makeItem(overrides: Partial<BudgetStatusItem> = {}): BudgetStatusItem {
     remaining: '240.00',
     percent_used: 20,
     status: 'ok',
+    unconvertible_count: 0,
     ...overrides,
   };
 }

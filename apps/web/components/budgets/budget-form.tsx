@@ -45,6 +45,7 @@ export function BudgetForm({
   const [amount, setAmount] = useState<string>('');
   const [currency, setCurrency] = useState<string>(currencies?.[0] ?? DEFAULT_CURRENCY);
   const [effectiveFrom, setEffectiveFrom] = useState<string>(todayISO());
+  const [convertOther, setConvertOther] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const expenseCategories = categories.filter((c) => c.kind === 'expense');
@@ -67,6 +68,7 @@ export function BudgetForm({
       amount: trimmed,
       currency: currency.toUpperCase(),
       effective_from: effectiveFrom,
+      convert_other_currencies: convertOther,
     });
   }
 
@@ -125,6 +127,36 @@ export function BudgetForm({
           style={inputStyle}
         />
       </div>
+
+      {/* PHASE-16: opt-in cross-currency. Off por defecto — el usuario
+          típico tiene todo en su moneda local; el toggle lo activa
+          quien sí mezcla monedas (gastos de viaje, suscripciones USD…). */}
+      <label
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: spacing.sm,
+          fontSize: fontSize.sm,
+          color: colors.text,
+          cursor: 'pointer',
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={convertOther}
+          onChange={(e) => setConvertOther(e.target.checked)}
+          style={{ marginTop: 3 }}
+        />
+        <span style={{ lineHeight: 1.4 }}>
+          Sumar transacciones en otras monedas
+          <br />
+          <span style={{ fontSize: fontSize.xs, color: colors.textMuted }}>
+            Cuando está activado, las transacciones en otras monedas se
+            convierten a {currency.toUpperCase()} con la tasa del día de
+            cada gasto.
+          </span>
+        </span>
+      </label>
 
       {error ? (
         <div style={{ color: colors.danger, fontSize: fontSize.sm }}>{error}</div>

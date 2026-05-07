@@ -86,6 +86,14 @@ export function BudgetStatusCard({ item, categories }: BudgetStatusCardProps) {
           </Text>
         </Text>
       </View>
+
+      {item.unconvertible_count > 0 ? (
+        <Text style={styles.unconvertible}>
+          ≈ {item.unconvertible_count}{' '}
+          {item.unconvertible_count === 1 ? 'transacción' : 'transacciones'}{' '}
+          sin tasa
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -139,4 +147,9 @@ const styles = StyleSheet.create({
   },
   footerText: { fontSize: fontSize.xs, color: colors.textMuted },
   footerStrong: { color: colors.text, fontWeight: fontWeight.semibold },
+  unconvertible: {
+    marginTop: spacing.xs,
+    fontSize: fontSize.xs,
+    color: colors.warning,
+  },
 });

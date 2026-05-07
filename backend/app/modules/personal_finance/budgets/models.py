@@ -6,7 +6,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -44,6 +44,14 @@ class Budget(Base):
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
     effective_from: Mapped[date] = mapped_column(Date, nullable=False)
     effective_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # PHASE-16: opt-in cross-currency. Default False mantiene el
+    # comportamiento histórico (suma sólo txs de la misma currency).
+    # True hace que el status convierta cada tx a `currency` con la
+    # tasa del día de su `occurred_at`. Las txs sin tasa disponible
+    # se cuentan en `unconvertible_count`.
+    convert_other_currencies: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

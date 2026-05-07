@@ -18,6 +18,13 @@ export interface Budget {
   effective_from: string;
   /** ISO date o null (vigente). */
   effective_to: string | null;
+  /**
+   * PHASE-16: opt-in cross-currency. Cuando `true`, el status del
+   * budget suma también las txs en otras monedas convirtiéndolas a
+   * `currency` con la tasa del día de la tx. `false` (default)
+   * mantiene el comportamiento legacy (sólo misma currency).
+   */
+  convert_other_currencies: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -29,6 +36,12 @@ export interface BudgetStatusItem {
   /** 0..∞ — frontend cap a 100 en barra de progreso si es necesario. */
   percent_used: number;
   status: BudgetStatus;
+  /**
+   * PHASE-16: nº de txs en otras monedas que se quedaron fuera del
+   * SUM por falta de tasa disponible. Siempre 0 cuando
+   * `budget.convert_other_currencies` es false.
+   */
+  unconvertible_count: number;
 }
 
 export interface BudgetStatusResponse {

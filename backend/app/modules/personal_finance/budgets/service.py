@@ -28,6 +28,7 @@ from app.modules.personal_finance.budgets.schemas import (
     BudgetStatusResponse,
     BudgetUpdate,
 )
+from app.modules.personal_finance.dashboard.service import ensure_rates_for_user_scope
 
 WARNING_THRESHOLD = 80.0
 OVER_THRESHOLD = 100.0
@@ -109,6 +110,7 @@ async def create_budget(
         amount=data.amount,
         currency=data.currency.upper(),
         effective_from=data.effective_from,
+        convert_other_currencies=data.convert_other_currencies,
     )
     return await persist_budget(db, budget)
 
@@ -185,13 +187,25 @@ async def get_alert_for_category(
         if budget is None:
             continue
         month_start, month_end = _month_bounds_utc(today)
-        spent = await sum_expenses_in_period(
+        # PHASE-16: si el budget tiene cross-currency on, asegura
+        # que las tasas de las fechas relevantes están en BD antes
+        # de hacer la SUM convertida.
+        if budget.convert_other_currencies:
+            await ensure_rates_for_user_scope(
+                db,
+                user_id,
+                target_currency=budget.currency,
+                date_from=month_start,
+                date_to=month_end,
+            )
+        spent, unconv = await sum_expenses_in_period(
             db,
             user_id,
             currency=budget.currency,
             month_start=month_start,
             month_end=month_end,
             category_id=budget.category_id,
+            convert_other_currencies=budget.convert_other_currencies,
         )
         amount = Decimal(budget.amount)
         if amount <= 0:
@@ -206,6 +220,7 @@ async def get_alert_for_category(
             remaining=amount - spent,
             percent_used=round(percent_used, 2),
             status=status,
+            unconvertible_count=unconv,
         )
     return None
 
@@ -225,15 +240,28 @@ async def get_budgets_status(
     month_start, month_end = _month_bounds_utc(today)
 
     budgets = await list_active_budgets(db, user_id, today=today)
+    # PHASE-16: si algún budget tiene cross-currency on, backfilleamos
+    # las tasas para el rango del mes — single call cubre todos los
+    # budgets cross-currency del usuario en este request.
+    for currency in {b.currency for b in budgets if b.convert_other_currencies}:
+        await ensure_rates_for_user_scope(
+            db,
+            user_id,
+            target_currency=currency,
+            date_from=month_start,
+            date_to=month_end,
+        )
+
     items: list[BudgetStatusItem] = []
     for budget in budgets:
-        spent = await sum_expenses_in_period(
+        spent, unconv = await sum_expenses_in_period(
             db,
             user_id,
             currency=budget.currency,
             month_start=month_start,
             month_end=month_end,
             category_id=budget.category_id,
+            convert_other_currencies=budget.convert_other_currencies,
         )
         amount = Decimal(budget.amount)
         remaining = amount - spent
@@ -245,6 +273,7 @@ async def get_budgets_status(
                 remaining=remaining,
                 percent_used=round(percent_used, 2),
                 status=_classify_status(percent_used),
+                unconvertible_count=unconv,
             )
         )
     return BudgetStatusResponse(

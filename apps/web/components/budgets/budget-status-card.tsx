@@ -131,6 +131,21 @@ export function BudgetStatusCard({ item, categories }: BudgetStatusCardProps) {
           </strong>
         </span>
       </div>
+
+      {item.unconvertible_count > 0 ? (
+        <div
+          style={{
+            marginTop: spacing.xs,
+            fontSize: fontSize.xs,
+            color: colors.warning,
+          }}
+          title="Estas transacciones se quedaron fuera del cálculo porque no hay tasa de cambio disponible para su día."
+        >
+          ≈ {item.unconvertible_count}{' '}
+          {item.unconvertible_count === 1 ? 'transacción' : 'transacciones'}{' '}
+          sin tasa
+        </div>
+      ) : null}
     </Card>
   );
 }

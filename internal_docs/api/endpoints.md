@@ -181,16 +181,21 @@ over` (umbrales 80% / 100%).
 | GET    | `/budgets` | sí | — | `200 BudgetResponse[]` (sólo activos: `effective_to IS NULL OR >= today`) |
 | GET    | `/budgets/status` | sí | — | `200 { items: BudgetStatusItem[], month_start, month_end }` |
 | GET    | `/budgets/{id}` | sí | — | `200 BudgetResponse` |
-| POST   | `/budgets` | sí | `{ category_id?, amount, currency, effective_from }` | `201 BudgetResponse`. `409` si ya hay activo para esa categoría (o global) |
-| PUT    | `/budgets/{id}` | sí | `{ amount?, currency? }` | `200 BudgetResponse`. `effective_from` y `category_id` son inmutables |
+| POST   | `/budgets` | sí | `{ category_id?, amount, currency, effective_from, convert_other_currencies? }` | `201 BudgetResponse`. `409` si ya hay activo para esa categoría (o global). PHASE-16: `convert_other_currencies` default `false` |
+| PUT    | `/budgets/{id}` | sí | `{ amount?, currency?, convert_other_currencies? }` | `200 BudgetResponse`. `effective_from` y `category_id` son inmutables. PHASE-16: el flag se puede toggle |
 | DELETE | `/budgets/{id}` | sí | — | `204`. Cierra (`effective_to=today`); si ya estaba cerrado en pasado, DELETE real |
 
 `BudgetStatusItem`: `{ budget, spent_this_month, remaining,
-percent_used, status: 'ok'|'warning'|'over' }`. `spent_this_month`
-es la suma de `Transaction.amount` activas en el mes calendario UTC
-actual con `kind='expense'`, mismo currency que el budget. Para
-budgets globales (`category_id IS NULL`) suma todas las categorías
-de gasto. Excluye soft-deleted (PHASE-10.1).
+percent_used, status: 'ok'|'warning'|'over', unconvertible_count }`.
+`spent_this_month` es la suma de `Transaction.amount` activas en el
+mes calendario UTC actual con `kind='expense'`. Si
+`budget.convert_other_currencies = false` (default) sólo suma txs
+de la misma `currency` y `unconvertible_count` es siempre `0`. Si
+`= true` (PHASE-16), suma todas las txs de gasto convertidas a
+`budget.currency` con la tasa del día de cada tx; las que no tienen
+tasa disponible quedan fuera del SUM y se cuentan en
+`unconvertible_count`. Para budgets globales (`category_id IS NULL`)
+suma todas las categorías de gasto. Excluye soft-deleted (PHASE-10.1).
 
 ---
 
