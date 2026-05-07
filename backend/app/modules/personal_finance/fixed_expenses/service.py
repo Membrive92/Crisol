@@ -1,9 +1,10 @@
 """Lógica de negocio del módulo fixed_expenses (PHASE-13.1,
-renombrado en PHASE-17.1)."""
+renombrado en PHASE-17.1, autopost en PHASE-17.2)."""
 
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, date, datetime, timedelta
 
 from fastapi import HTTPException
 from fastapi import status as http_status
@@ -23,11 +24,20 @@ from app.modules.personal_finance.fixed_expenses.repository import (
 from app.modules.personal_finance.fixed_expenses.repository import (
     find_by_fingerprint,
     get_fixed_expense_by_id,
+    list_due_for_autopost,
 )
 from app.modules.personal_finance.fixed_expenses.repository import (
     list_fixed_expenses as list_in_db,
 )
-from app.modules.personal_finance.fixed_expenses.schemas import ScanResponse
+from app.modules.personal_finance.fixed_expenses.schemas import (
+    AutopostResponse,
+    FixedExpenseUpdate,
+    ScanResponse,
+)
+from app.modules.personal_finance.transactions.models import (
+    Transaction,
+    TransactionSource,
+)
 
 
 async def list_fixed_expenses(
@@ -138,6 +148,22 @@ async def cancel_fixed_expense(
     return item
 
 
+async def update_fixed_expense(
+    db: AsyncSession,
+    fixed_expense_id: uuid.UUID,
+    user_id: uuid.UUID,
+    data: FixedExpenseUpdate,
+) -> FixedExpense:
+    """Actualiza campos editables (`auto_post` por ahora)."""
+    item = await get_fixed_expense(db, fixed_expense_id, user_id)
+    payload = data.model_dump(exclude_unset=True)
+    for field, value in payload.items():
+        setattr(item, field, value)
+    await db.flush()
+    await db.refresh(item)
+    return item
+
+
 async def delete_fixed_expense(
     db: AsyncSession, fixed_expense_id: uuid.UUID, user_id: uuid.UUID
 ) -> None:
@@ -147,6 +173,66 @@ async def delete_fixed_expense(
     """
     item = await get_fixed_expense(db, fixed_expense_id, user_id)
     await remove_fixed_expense(db, item)
+
+
+def _today_utc() -> date:
+    """Hoy en UTC (coherente con el cron y con `next_due` que es un
+    `DATE` sin timezone)."""
+    return datetime.now(UTC).date()
+
+
+async def autopost_due_for_user(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    today: date | None = None,
+) -> AutopostResponse:
+    """Crea transacciones `source=expected` para todos los gastos
+    fijos `auto_post=True confirmed` cuyo `next_due` ya llegó (o
+    pasó) y avanza su `next_due` un ciclo (PHASE-17.2).
+
+    Si la fecha de hoy ya está varios ciclos por delante de
+    `next_due` (caso: el usuario activó autopost hace meses pero
+    sin transacciones reales en medio), avanzamos paso a paso
+    creando una tx por cada ciclo perdido — coherente con la
+    semántica "cada ciclo posteo una". Cap a 12 ciclos por
+    seguridad para evitar avalanchas si los datos vienen mal.
+
+    `today` se pasa explícitamente para tests deterministas; en
+    runtime usa UTC.
+    """
+    today = today or _today_utc()
+    items = await list_due_for_autopost(db, user_id, today=today)
+
+    created = 0
+    advanced = 0
+    MAX_BACKFILL_CYCLES = 12
+    for item in items:
+        cycles = 0
+        while item.next_due <= today and cycles < MAX_BACKFILL_CYCLES:
+            tx = Transaction(
+                user_id=user_id,
+                category_id=item.category_id,
+                amount=item.amount,
+                currency=item.currency,
+                # Se postea como datetime UTC al inicio del día para que
+                # caiga en el calendario del mes correcto independientemente
+                # de la TZ del cliente.
+                occurred_at=datetime.combine(item.next_due, datetime.min.time()).replace(
+                    tzinfo=UTC,
+                ),
+                description=item.raw_description,
+                source=TransactionSource.EXPECTED,
+            )
+            db.add(tx)
+            item.next_due = item.next_due + timedelta(days=item.cadence_days)
+            created += 1
+            cycles += 1
+        if cycles > 0:
+            advanced += 1
+
+    await db.flush()
+    return AutopostResponse(created=created, advanced=advanced)
 
 
 async def scan_for_user(

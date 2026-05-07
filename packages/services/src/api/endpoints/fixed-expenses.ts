@@ -10,6 +10,15 @@ export interface FixedExpenseListQuery {
   status?: FixedExpenseStatus;
 }
 
+export interface FixedExpenseUpdatePayload {
+  auto_post?: boolean;
+}
+
+export interface AutopostResponse {
+  created: number;
+  advanced: number;
+}
+
 export const fixedExpensesApi = {
   async list(query: FixedExpenseListQuery = {}): Promise<FixedExpense[]> {
     const response = await apiClient.get<FixedExpense[]>('/fixed-expenses', {
@@ -23,9 +32,24 @@ export const fixedExpensesApi = {
     return response.data;
   },
 
+  async update(id: string, data: FixedExpenseUpdatePayload): Promise<FixedExpense> {
+    const response = await apiClient.put<FixedExpense>(
+      `/fixed-expenses/${id}`,
+      data,
+    );
+    return response.data;
+  },
+
   async scan(): Promise<FixedExpenseScanResponse> {
     const response = await apiClient.post<FixedExpenseScanResponse>(
       '/fixed-expenses/scan',
+    );
+    return response.data;
+  },
+
+  async autopost(): Promise<AutopostResponse> {
+    const response = await apiClient.post<AutopostResponse>(
+      '/fixed-expenses/autopost',
     );
     return response.data;
   },

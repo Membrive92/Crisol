@@ -4,6 +4,7 @@ import { useState } from 'react';
 
 import {
   formatApiError,
+  useAutopostFixedExpenses,
   useCancelFixedExpense,
   useCategories,
   useConfirmFixedExpense,
@@ -13,6 +14,7 @@ import {
   usePauseFixedExpense,
   useResumeFixedExpense,
   useScanFixedExpenses,
+  useUpdateFixedExpense,
 } from '@finanzas/services';
 import { toast } from '@finanzas/store';
 import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
@@ -29,6 +31,8 @@ export default function FixedExpensesPage() {
   const cancelledQuery = useFixedExpenses({ status: 'cancelled' });
   const dismissedQuery = useFixedExpenses({ status: 'dismissed' });
   const scanMutation = useScanFixedExpenses();
+  const autopostMutation = useAutopostFixedExpenses();
+  const updateMutation = useUpdateFixedExpense();
   const confirmMutation = useConfirmFixedExpense();
   const dismissMutation = useDismissFixedExpense();
   const pauseMutation = usePauseFixedExpense();
@@ -52,6 +56,36 @@ export default function FixedExpensesPage() {
         ),
       onError: (err) => toast.error(formatApiError(err, 'Error al re-escanear.')),
     });
+  }
+
+  function handleAutopost() {
+    autopostMutation.mutate(undefined, {
+      onSuccess: (res) =>
+        res.created === 0
+          ? toast.info('No había gastos fijos vencidos pendientes.')
+          : toast.success(
+              `Auto-añadidas ${res.created} ${
+                res.created === 1 ? 'transacción' : 'transacciones'
+              }.`,
+            ),
+      onError: (err) => toast.error(formatApiError(err, 'Error al auto-añadir.')),
+    });
+  }
+
+  function handleToggleAutoPost(id: string, next: boolean) {
+    updateMutation.mutate(
+      { id, data: { auto_post: next } },
+      {
+        onSuccess: () =>
+          toast.info(
+            next
+              ? 'Auto-añadir activado para este gasto.'
+              : 'Auto-añadir desactivado.',
+          ),
+        onError: (err) =>
+          toast.error(formatApiError(err, 'Error al cambiar el flag.')),
+      },
+    );
   }
 
   function handleConfirm(id: string) {
@@ -178,13 +212,22 @@ export default function FixedExpensesPage() {
             "Re-escanear" para forzar la detección ahora.
           </p>
         </div>
-        <Button
-          onClick={handleScan}
-          disabled={scanMutation.isPending}
-          variant="secondary"
-        >
-          {scanMutation.isPending ? 'Escaneando…' : 'Re-escanear'}
-        </Button>
+        <div style={{ display: 'inline-flex', gap: spacing.sm }}>
+          <Button
+            onClick={handleAutopost}
+            disabled={autopostMutation.isPending}
+            variant="secondary"
+          >
+            {autopostMutation.isPending ? 'Auto-añadiendo…' : 'Auto-añadir vencidos'}
+          </Button>
+          <Button
+            onClick={handleScan}
+            disabled={scanMutation.isPending}
+            variant="secondary"
+          >
+            {scanMutation.isPending ? 'Escaneando…' : 'Re-escanear'}
+          </Button>
+        </div>
       </header>
 
       <section style={{ marginBottom: spacing.xl }}>
@@ -237,6 +280,12 @@ export default function FixedExpensesPage() {
                 key={item.id}
                 fixedExpense={item}
                 categories={categories ?? []}
+                onToggleAutoPost={handleToggleAutoPost}
+                autoPostBusy={
+                  updateMutation.isPending &&
+                  (updateMutation.variables as { id: string } | undefined)?.id ===
+                    item.id
+                }
                 primaryAction={{
                   label: 'Pausar',
                   onClick: () => handlePause(item.id),

@@ -14,7 +14,9 @@ export { dashboardApi } from './api/endpoints/dashboard';
 export { budgetsApi } from './api/endpoints/budgets';
 export {
   fixedExpensesApi,
+  type AutopostResponse,
   type FixedExpenseListQuery,
+  type FixedExpenseUpdatePayload,
 } from './api/endpoints/fixed-expenses';
 export { importsApi, type CreateImportPayload } from './api/endpoints/imports';
 export { receiptsApi } from './api/endpoints/receipts';
@@ -76,6 +78,8 @@ export {
   useFixedExpenses,
   useFixedExpense,
   useScanFixedExpenses,
+  useAutopostFixedExpenses,
+  useUpdateFixedExpense,
   useConfirmFixedExpense,
   useDismissFixedExpense,
   useDeleteFixedExpense,

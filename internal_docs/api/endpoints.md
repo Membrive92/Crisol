@@ -212,6 +212,8 @@ ahora — heurística basada en agrupación + análisis de gaps.
 | GET    | `/fixed-expenses` | sí | `status?` (`pending\|confirmed\|paused\|cancelled\|dismissed`) | `200 FixedExpenseResponse[]` ordenado `next_due ASC` |
 | POST   | `/fixed-expenses/scan` | sí | — | `200 { created, updated, total_active_after }`. Re-ejecuta el detector ahora; el cron diario (04:00 UTC) hace lo mismo automáticamente. |
 | GET    | `/fixed-expenses/{id}` | sí | — | `200 FixedExpenseResponse` |
+| PUT    | `/fixed-expenses/{id}` | sí | `{ auto_post? }` | `200 FixedExpenseResponse`. PHASE-17.2 — toggle del flag opt-in de autoposteo. |
+| POST   | `/fixed-expenses/autopost` | sí | — | `200 { created, advanced }`. PHASE-17.2 — fuerza el cron de autoposteo manualmente; el cron diario lo ejecuta automáticamente 30min después del scan. |
 | POST   | `/fixed-expenses/{id}/confirm` | sí | — | `200 FixedExpenseResponse`. Marca como `confirmed`. Uno `dismissed` confirmado se reactiva. |
 | POST   | `/fixed-expenses/{id}/dismiss` | sí | — | `200 FixedExpenseResponse`. El detector NO lo vuelve a sugerir aunque siga el patrón. |
 | POST   | `/fixed-expenses/{id}/pause` | sí | — | `200 FixedExpenseResponse`. `confirmed` → `paused`. 409 desde otros estados (PHASE-15.2). |

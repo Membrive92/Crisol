@@ -7,6 +7,7 @@ const LABELS: Record<TransactionSource, string> = {
   manual: 'Manual',
   import: 'Importado',
   receipt: 'Ticket',
+  expected: 'Esperada',
 };
 
 interface Palette {
@@ -20,6 +21,8 @@ function paletteFor(source: TransactionSource): Palette {
       return { bg: colors.primarySoft, fg: colors.primary };
     case 'receipt':
       return { bg: colors.successSoft, fg: colors.success };
+    case 'expected':
+      return { bg: colors.warningSoft, fg: colors.warning };
     case 'manual':
     default:
       return { bg: colors.surfaceMuted, fg: colors.textMuted };

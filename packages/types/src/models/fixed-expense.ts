@@ -36,6 +36,8 @@ export interface FixedExpense {
   occurrence_count: number;
   /** 0..1. Frontend lo presenta como `Math.round(confidence * 100)%`. */
   confidence: number;
+  /** PHASE-17.2 — si true, el cron diario crea una tx `expected` en `next_due`. */
+  auto_post: boolean;
   created_at: string;
   updated_at: string;
 }

@@ -29,10 +29,21 @@ class FixedExpenseResponse(BaseModel):
     last_seen_at: date
     occurrence_count: int
     confidence: float
+    auto_post: bool
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class FixedExpenseUpdate(BaseModel):
+    """Campos editables de un gasto fijo (PHASE-17.2).
+
+    Por ahora sólo `auto_post` — el resto es derivado del detector
+    o lifecycle vía endpoints específicos (confirm/pause/cancel/...).
+    """
+
+    auto_post: bool | None = None
 
 
 class ScanResponse(BaseModel):
@@ -46,3 +57,17 @@ class ScanResponse(BaseModel):
     created: int
     updated: int
     total_active_after: int
+
+
+class AutopostResponse(BaseModel):
+    """Resultado del cron de autoposteo (PHASE-17.2).
+
+    `created` = transacciones `source=expected` creadas. `advanced`
+    = nº de gastos fijos cuyo `next_due` se actualizó (uno por
+    transacción creada). Para volúmenes esperados (< 50 fixed
+    expenses por user) son iguales — los separamos por si en el
+    futuro autopost falla parcialmente.
+    """
+
+    created: int
+    advanced: int

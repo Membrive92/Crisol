@@ -22,6 +22,7 @@ function makeItem(overrides: Partial<FixedExpense> = {}): FixedExpense {
     last_seen_at: '2026-05-15',
     occurrence_count: 4,
     confidence: 0.97,
+    auto_post: false,
     created_at: '2026-05-15T00:00:00Z',
     updated_at: '2026-05-15T00:00:00Z',
     ...overrides,

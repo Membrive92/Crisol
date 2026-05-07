@@ -21,6 +21,9 @@ export interface FixedExpenseCardProps {
   primaryAction?: { label: string; onClick: () => void; busy?: boolean };
   /** Acción secundaria (Descartar para pending, Cancelar para confirmed, etc.). */
   secondaryAction?: { label: string; onClick: () => void; busy?: boolean; danger?: boolean };
+  /** PHASE-17.2 — toggle de auto-post. Sólo se muestra cuando el caller pasa el handler. */
+  onToggleAutoPost?: (id: string, next: boolean) => void;
+  autoPostBusy?: boolean;
 }
 
 const CADENCE_LABEL: Record<number, string> = {
@@ -47,6 +50,8 @@ export function FixedExpenseCard({
   categories,
   primaryAction,
   secondaryAction,
+  onToggleAutoPost,
+  autoPostBusy,
 }: FixedExpenseCardProps) {
   const category = findCategory(categories, item.category_id);
   const cadenceLabel = CADENCE_LABEL[item.cadence_days] ?? `${item.cadence_days}d`;
@@ -113,6 +118,30 @@ export function FixedExpenseCard({
           </strong>{' '}
           · {item.occurrence_count}{' '}
           {item.occurrence_count === 1 ? 'cargo' : 'cargos'} detectados
+          {onToggleAutoPost ? (
+            <>
+              {' · '}
+              <label
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  cursor: autoPostBusy ? 'wait' : 'pointer',
+                  color: item.auto_post ? colors.primary : colors.textMuted,
+                  fontWeight: item.auto_post ? fontWeight.semibold : fontWeight.medium,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={item.auto_post}
+                  onChange={(e) => onToggleAutoPost(item.id, e.target.checked)}
+                  disabled={autoPostBusy}
+                  style={{ margin: 0 }}
+                />
+                Auto-añadir
+              </label>
+            </>
+          ) : null}
         </div>
         <div style={{ display: 'inline-flex', gap: spacing.xs }}>
           {secondaryAction ? (

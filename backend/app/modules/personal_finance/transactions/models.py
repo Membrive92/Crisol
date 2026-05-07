@@ -14,11 +14,20 @@ from app.core.database import Base
 
 
 class TransactionSource(enum.StrEnum):
-    """Origen de la transacción."""
+    """Origen de la transacción.
+
+    `expected` (PHASE-17.2) lo emite el cron de autoposteo de
+    `fixed_expenses` cuando un gasto fijo confirmado con
+    `auto_post=True` llega a su `next_due`. La reconciliación con
+    imports (PHASE-17.3) puede asignarle `import_hash` si después
+    el banco confirma el cargo — la `source` se queda `expected`,
+    el `import_hash` no nulo es el indicador de "conciliada".
+    """
 
     MANUAL = "manual"
     IMPORT = "import"
     RECEIPT = "receipt"
+    EXPECTED = "expected"
 
 
 class Transaction(Base):

@@ -7,7 +7,9 @@ import type {
 } from '@finanzas/types';
 
 import {
+  type AutopostResponse,
   type FixedExpenseListQuery,
+  type FixedExpenseUpdatePayload,
   fixedExpensesApi,
 } from '../../api/endpoints/fixed-expenses';
 import { queryKeys } from '../keys';
@@ -34,6 +36,32 @@ export function useScanFixedExpenses() {
     mutationFn: () => fixedExpensesApi.scan(),
     onSuccess: () => {
       // Scan puede crear/refrescar todo — invalida el grupo entero.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.fixedExpenses.all });
+    },
+  });
+}
+
+export function useAutopostFixedExpenses() {
+  const queryClient = useQueryClient();
+  return useMutation<AutopostResponse, Error, void>({
+    mutationFn: () => fixedExpensesApi.autopost(),
+    onSuccess: () => {
+      // Autopost crea transacciones y avanza next_due — invalida ambos.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.fixedExpenses.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
+    },
+  });
+}
+
+export function useUpdateFixedExpense() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    FixedExpense,
+    Error,
+    { id: string; data: FixedExpenseUpdatePayload }
+  >({
+    mutationFn: ({ id, data }) => fixedExpensesApi.update(id, data),
+    onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.fixedExpenses.all });
     },
   });

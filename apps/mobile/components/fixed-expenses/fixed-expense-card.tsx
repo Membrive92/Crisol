@@ -23,6 +23,9 @@ export interface FixedExpenseCardProps {
   categories: Category[];
   primaryAction?: FixedExpenseCardAction;
   secondaryAction?: FixedExpenseCardAction;
+  /** PHASE-17.2 — toggle auto-post. Si se pasa el handler, aparece un check. */
+  onToggleAutoPost?: (id: string, next: boolean) => void;
+  autoPostBusy?: boolean;
 }
 
 const CADENCE_LABEL: Record<number, string> = {
@@ -50,6 +53,8 @@ export function FixedExpenseCard({
   categories,
   primaryAction,
   secondaryAction,
+  onToggleAutoPost,
+  autoPostBusy,
 }: FixedExpenseCardProps) {
   const category = findCategory(categories, item.category_id);
   const cadenceLabel = CADENCE_LABEL[item.cadence_days] ?? `${item.cadence_days}d`;
@@ -71,6 +76,35 @@ export function FixedExpenseCard({
       </View>
 
       <View style={styles.divider} />
+
+      {onToggleAutoPost ? (
+        <Pressable
+          onPress={() => onToggleAutoPost(item.id, !item.auto_post)}
+          disabled={autoPostBusy}
+          style={({ pressed }) => [
+            styles.autoPostRow,
+            pressed && { opacity: 0.7 },
+            autoPostBusy && { opacity: 0.5 },
+          ]}
+        >
+          <View
+            style={[
+              styles.checkbox,
+              item.auto_post && styles.checkboxActive,
+            ]}
+          >
+            {item.auto_post ? <Text style={styles.checkmark}>✓</Text> : null}
+          </View>
+          <Text
+            style={[
+              styles.autoPostLabel,
+              item.auto_post && { color: colors.primary, fontWeight: fontWeight.semibold },
+            ]}
+          >
+            Auto-añadir cada {CADENCE_LABEL[item.cadence_days]?.toLowerCase() ?? 'ciclo'}
+          </Text>
+        </Pressable>
+      ) : null}
 
       <View style={styles.footer}>
         <Text style={styles.footerText} numberOfLines={2}>
@@ -180,4 +214,34 @@ const styles = StyleSheet.create({
   },
   pressed: { opacity: 0.7 },
   disabled: { opacity: 0.5 },
+  autoPostRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
+  },
+  checkbox: {
+    width: 16,
+    height: 16,
+    borderRadius: 3,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+  },
+  checkboxActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  checkmark: {
+    color: colors.onPrimary,
+    fontSize: 11,
+    fontWeight: fontWeight.bold,
+    lineHeight: 14,
+  },
+  autoPostLabel: {
+    fontSize: fontSize.xs,
+    color: colors.textMuted,
+  },
 });

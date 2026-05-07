@@ -13,7 +13,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -82,6 +82,14 @@ class FixedExpense(Base):
     last_seen_at: Mapped[date] = mapped_column(Date, nullable=False)
     occurrence_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    # PHASE-17.2: si True, el cron diario crea una tx `source=expected`
+    # cuando `next_due` cae en o antes de hoy y avanza `next_due` un
+    # ciclo. Off por defecto al confirmar — el usuario lo activa
+    # explícitamente para los gastos fijos seguros (hipoteca, gym,
+    # Netflix); para cargos variables (luz/gas) lo deja off.
+    auto_post: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

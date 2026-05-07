@@ -4,6 +4,7 @@ PHASE-17.1)."""
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -84,3 +85,29 @@ async def delete_fixed_expense(db: AsyncSession, fixed_expense: FixedExpense) ->
     """DELETE real."""
     await db.delete(fixed_expense)
     await db.flush()
+
+
+async def list_due_for_autopost(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    today: date,
+) -> list[FixedExpense]:
+    """Gastos fijos con `auto_post=True`, status `confirmed` y
+    `next_due <= today` (PHASE-17.2).
+
+    `paused` y `cancelled` quedan fuera — el flag `auto_post` puede
+    seguir on en BD pero el lifecycle gana: una hipoteca pausada no
+    se postea hasta que el usuario la reanude. `pending` también
+    queda fuera — primero hay que confirmar.
+    """
+    query = (
+        select(FixedExpense)
+        .where(FixedExpense.user_id == user_id)
+        .where(FixedExpense.auto_post.is_(True))
+        .where(FixedExpense.status == FixedExpenseStatus.CONFIRMED)
+        .where(FixedExpense.next_due <= today)
+        .order_by(FixedExpense.next_due.asc())
+    )
+    result = await db.execute(query)
+    return list(result.scalars().all())

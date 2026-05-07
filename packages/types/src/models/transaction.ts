@@ -1,4 +1,4 @@
-export type TransactionSource = 'manual' | 'import' | 'receipt';
+export type TransactionSource = 'manual' | 'import' | 'receipt' | 'expected';
 
 /**
  * Alert proactiva de presupuesto que viene en la respuesta del POST

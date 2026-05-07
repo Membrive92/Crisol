@@ -4,6 +4,7 @@ import { Stack } from 'expo-router';
 
 import {
   formatApiError,
+  useAutopostFixedExpenses,
   useCancelFixedExpense,
   useCategories,
   useConfirmFixedExpense,
@@ -13,6 +14,7 @@ import {
   usePauseFixedExpense,
   useResumeFixedExpense,
   useScanFixedExpenses,
+  useUpdateFixedExpense,
 } from '@finanzas/services';
 import { toast } from '@finanzas/store';
 import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
@@ -34,6 +36,8 @@ export default function FixedExpensesScreen() {
   const pausedQuery = useFixedExpenses({ status: 'paused' });
   const cancelledQuery = useFixedExpenses({ status: 'cancelled' });
   const scanMutation = useScanFixedExpenses();
+  const autopostMutation = useAutopostFixedExpenses();
+  const updateMutation = useUpdateFixedExpense();
   const confirmMutation = useConfirmFixedExpense();
   const dismissMutation = useDismissFixedExpense();
   const pauseMutation = usePauseFixedExpense();
@@ -57,6 +61,32 @@ export default function FixedExpensesScreen() {
         ),
       onError: (err) => toast.error(formatApiError(err, 'Error al re-escanear.')),
     });
+  }
+
+  function handleAutopost() {
+    autopostMutation.mutate(undefined, {
+      onSuccess: (res) =>
+        res.created === 0
+          ? toast.info('No había gastos fijos vencidos.')
+          : toast.success(
+              `Auto-añadidas ${res.created} ${
+                res.created === 1 ? 'transacción' : 'transacciones'
+              }.`,
+            ),
+      onError: (err) => toast.error(formatApiError(err, 'Error al auto-añadir.')),
+    });
+  }
+
+  function handleToggleAutoPost(id: string, next: boolean) {
+    updateMutation.mutate(
+      { id, data: { auto_post: next } },
+      {
+        onSuccess: () =>
+          toast.info(next ? 'Auto-añadir activado.' : 'Auto-añadir desactivado.'),
+        onError: (err) =>
+          toast.error(formatApiError(err, 'Error al cambiar el flag.')),
+      },
+    );
   }
 
   function handleConfirm(id: string) {
@@ -166,19 +196,34 @@ export default function FixedExpensesScreen() {
           forzarlo ahora.
         </Text>
 
-        <Pressable
-          onPress={handleScan}
-          disabled={scanMutation.isPending}
-          style={({ pressed }) => [
-            styles.scanButton,
-            pressed && { opacity: 0.7 },
-            scanMutation.isPending && { opacity: 0.5 },
-          ]}
-        >
-          <Text style={styles.scanButtonText}>
-            {scanMutation.isPending ? 'Escaneando…' : 'Re-escanear'}
-          </Text>
-        </Pressable>
+        <View style={styles.actionsRow}>
+          <Pressable
+            onPress={handleAutopost}
+            disabled={autopostMutation.isPending}
+            style={({ pressed }) => [
+              styles.scanButton,
+              pressed && { opacity: 0.7 },
+              autopostMutation.isPending && { opacity: 0.5 },
+            ]}
+          >
+            <Text style={styles.scanButtonText}>
+              {autopostMutation.isPending ? 'Auto-añadiendo…' : 'Auto-añadir vencidos'}
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={handleScan}
+            disabled={scanMutation.isPending}
+            style={({ pressed }) => [
+              styles.scanButton,
+              pressed && { opacity: 0.7 },
+              scanMutation.isPending && { opacity: 0.5 },
+            ]}
+          >
+            <Text style={styles.scanButtonText}>
+              {scanMutation.isPending ? 'Escaneando…' : 'Re-escanear'}
+            </Text>
+          </Pressable>
+        </View>
 
         <Text style={styles.sectionHeading}>Sugeridos</Text>
         {pendingQuery.isLoading ? (
@@ -220,6 +265,12 @@ export default function FixedExpensesScreen() {
                 key={item.id}
                 fixedExpense={item}
                 categories={categories ?? []}
+                onToggleAutoPost={handleToggleAutoPost}
+                autoPostBusy={
+                  updateMutation.isPending &&
+                  (updateMutation.variables as { id: string } | undefined)?.id ===
+                    item.id
+                }
                 primaryAction={{
                   label: 'Pausar',
                   onPress: () => handlePause(item.id),
@@ -341,15 +392,19 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.md, paddingBottom: spacing.xxl },
   intro: { fontSize: fontSize.sm, color: colors.textMuted, marginBottom: spacing.md },
+  actionsRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    flexWrap: 'wrap',
+    marginBottom: spacing.lg,
+  },
   scanButton: {
-    alignSelf: 'flex-start',
     paddingVertical: spacing.xs,
     paddingHorizontal: spacing.md,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.primary,
     backgroundColor: 'transparent',
-    marginBottom: spacing.lg,
   },
   scanButtonText: {
     color: colors.primary,

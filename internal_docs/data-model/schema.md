@@ -27,6 +27,7 @@
 | `f8b3c91d4e22` | 12.1 | `budgets` (presupuestos mensuales por categoría) + índices por `user_id` y `category_id`. |
 | `c54e9b3a7d18` | 16   | `budgets.convert_other_currencies` (BOOLEAN, default FALSE) — opt-in para sumar gasto en otras monedas convertido. |
 | `d72f1a5e8b29` | 17.1 | rename `subscriptions` → `fixed_expenses` (tabla, índices, enum `subscriptionstatus` → `fixedexpensestatus`). |
+| `e8c34a9b1d52` | 17.2 | `fixed_expenses.auto_post` (BOOLEAN, default FALSE) + `transactionsource.expected`. |
 
 ---
 
@@ -167,6 +168,7 @@ hipotecas, préstamos, gym, seguros…).
 | `first_seen_at` / `last_seen_at` | `DATE` | rango observado del patrón. |
 | `occurrence_count` | `INTEGER` | nº de transacciones que matchean. |
 | `confidence` | `FLOAT` | `1 - std/mean` clamped [0,1]. |
+| `auto_post` | `BOOLEAN` | default `FALSE`. PHASE-17.2. Si `TRUE` y `status=confirmed`, el cron diario crea una tx `source=expected` cuando `next_due ≤ today` y avanza `next_due += cadence_days`. |
 | `created_at` / `updated_at` | `TIMESTAMPTZ` | |
 
 **Índices**:
@@ -219,6 +221,6 @@ transactions.receipt_id  → UUID sin FK formal (consistencia en service).
 | Nombre | Valores |
 |--------|---------|
 | `categorykind` | `INCOME`, `EXPENSE` |
-| `transactionsource` | `MANUAL`, `IMPORT`, `RECEIPT` |
+| `transactionsource` | `MANUAL`, `IMPORT`, `RECEIPT`, `EXPECTED` |
 | `importjobstatus` | `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED` |
 | `receiptstatus` | `PENDING`, `CONFIRMED`, `REJECTED` |

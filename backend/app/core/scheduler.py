@@ -34,6 +34,7 @@ logger = logging.getLogger("app.scheduler")
 # evitar duplicados si el scheduler se re-arranca por hot reload.
 CURRENCY_REFRESH_JOB_ID = "refresh_currency_rates"
 FIXED_EXPENSES_SCAN_JOB_ID = "scan_fixed_expenses"
+FIXED_EXPENSES_AUTOPOST_JOB_ID = "autopost_fixed_expenses"
 
 
 def _today_utc() -> date:
@@ -71,6 +72,49 @@ async def refresh_currency_rates_job() -> None:
         # Best-effort — si falla un día, el siguiente lo reintenta. Un
         # error no debe tirar el scheduler ni el proceso.
         logger.exception("currency cron failed")
+    finally:
+        await engine.dispose()
+
+
+async def autopost_fixed_expenses_job() -> None:
+    """Crea transacciones `expected` para gastos fijos `auto_post` due
+    (PHASE-17.2). Itera usuarios activos; errores por usuario no
+    tiran el job.
+    """
+    engine = create_async_engine(settings.database_url, future=True)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with session_factory() as db:
+            user_ids = (
+                await db.execute(select(User.id).where(User.is_active.is_(True)))
+            ).scalars().all()
+            total_created = 0
+            for uid in user_ids:
+                try:
+                    # Import lazy: módulo de dominio importado dentro del
+                    # job para evitar acoplar el scheduler con la lógica
+                    # de personal_finance en su import path.
+                    from app.modules.personal_finance.fixed_expenses import (
+                        service as fixed_expenses_service,
+                    )
+
+                    result = await fixed_expenses_service.autopost_due_for_user(
+                        db, uid
+                    )
+                    await db.commit()
+                    total_created += result.created
+                except Exception:
+                    await db.rollback()
+                    logger.exception(
+                        "fixed_expenses autopost failed for user_id=%s", uid
+                    )
+        logger.info(
+            "fixed_expenses autopost cron: %s users, %s txs created",
+            len(user_ids),
+            total_created,
+        )
+    except Exception:
+        logger.exception("fixed_expenses autopost cron failed at top level")
     finally:
         await engine.dispose()
 
@@ -151,6 +195,20 @@ def create_scheduler() -> AsyncIOScheduler | None:
                 timezone=UTC,
             ),
             id=FIXED_EXPENSES_SCAN_JOB_ID,
+            replace_existing=True,
+            misfire_grace_time=60 * 60,
+        )
+        # PHASE-17.2: autopost corre 30min después del scan diario
+        # — si el scan refresca next_due, autopost ya ve la fecha
+        # nueva. Ambos sólo activos cuando el flag está on.
+        scheduler.add_job(
+            autopost_fixed_expenses_job,
+            trigger=CronTrigger(
+                hour=settings.fixed_expenses_cron_hour,
+                minute=(settings.fixed_expenses_cron_minute + 30) % 60,
+                timezone=UTC,
+            ),
+            id=FIXED_EXPENSES_AUTOPOST_JOB_ID,
             replace_existing=True,
             misfire_grace_time=60 * 60,
         )

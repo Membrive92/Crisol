@@ -17,10 +17,13 @@ from app.core.database import get_db
 from app.core.deps import CurrentUser
 from app.modules.personal_finance.fixed_expenses.models import FixedExpenseStatus
 from app.modules.personal_finance.fixed_expenses.schemas import (
+    AutopostResponse,
     FixedExpenseResponse,
+    FixedExpenseUpdate,
     ScanResponse,
 )
 from app.modules.personal_finance.fixed_expenses.service import (
+    autopost_due_for_user,
     cancel_fixed_expense,
     confirm_fixed_expense,
     delete_fixed_expense,
@@ -30,6 +33,7 @@ from app.modules.personal_finance.fixed_expenses.service import (
     pause_fixed_expense,
     resume_fixed_expense,
     scan_for_user,
+    update_fixed_expense,
 )
 
 router = APIRouter(prefix="/fixed-expenses", tags=["fixed-expenses"])
@@ -64,6 +68,24 @@ async def scan_endpoint(
     return result
 
 
+@router.post("/autopost", response_model=AutopostResponse)
+async def autopost_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AutopostResponse:
+    """Fuerza el autoposteo manual (PHASE-17.2).
+
+    El cron diario lo hace automáticamente, pero este endpoint
+    permite al usuario disparar el flujo (útil para tests y para
+    "ya empieza el mes, postea lo de hoy"). Crea transacciones
+    `source=expected` para los gastos fijos confirmados con
+    `auto_post=True` cuyo `next_due` ya llegó.
+    """
+    result = await autopost_due_for_user(db, user.id)
+    await db.commit()
+    return result
+
+
 @router.get("/{fixed_expense_id}", response_model=FixedExpenseResponse)
 async def get_endpoint(
     fixed_expense_id: uuid.UUID,
@@ -72,6 +94,22 @@ async def get_endpoint(
 ) -> FixedExpenseResponse:
     """Obtiene un gasto fijo por ID."""
     item = await get_fixed_expense(db, fixed_expense_id, user.id)
+    return FixedExpenseResponse.model_validate(item)
+
+
+@router.put("/{fixed_expense_id}", response_model=FixedExpenseResponse)
+async def update_endpoint(
+    fixed_expense_id: uuid.UUID,
+    data: FixedExpenseUpdate,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> FixedExpenseResponse:
+    """Actualiza campos editables (PHASE-17.2). Por ahora sólo
+    `auto_post` — el resto del lifecycle pasa por endpoints
+    específicos.
+    """
+    item = await update_fixed_expense(db, fixed_expense_id, user.id, data)
+    await db.commit()
     return FixedExpenseResponse.model_validate(item)
 
 
