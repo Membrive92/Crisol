@@ -35,7 +35,7 @@ from app.modules.personal_finance.budgets.models import Budget  # noqa: F401
 from app.modules.personal_finance.categories.models import Category  # noqa: F401
 from app.modules.personal_finance.imports.models import ImportJob  # noqa: F401
 from app.modules.personal_finance.receipts.models import Receipt  # noqa: F401
-from app.modules.personal_finance.subscriptions.models import Subscription  # noqa: F401
+from app.modules.personal_finance.fixed_expenses.models import FixedExpense  # noqa: F401
 from app.modules.personal_finance.transactions.models import Transaction  # noqa: F401
 from app.modules.users.models import User  # noqa: F401
 

@@ -160,9 +160,9 @@ export default function AnalysisScreen() {
                 <Text style={styles.headerButtonText}>Presupuestos</Text>
               </Pressable>
             </Link>
-            <Link href="/(modules)/personal-finance/subscriptions" asChild>
+            <Link href="/(modules)/personal-finance/fixed-expenses" asChild>
               <Pressable style={styles.headerButton}>
-                <Text style={styles.headerButtonText}>Subscripciones</Text>
+                <Text style={styles.headerButtonText}>Gastos fijos</Text>
               </Pressable>
             </Link>
             <Pressable onPress={handleLogout} style={styles.logoutButton}>

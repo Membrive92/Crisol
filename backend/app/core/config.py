@@ -86,14 +86,15 @@ class Settings(BaseSettings):
     currency_cron_hour: int = 3
     currency_cron_minute: int = 0
 
-    # Cron diario de detección de subscripciones (PHASE-13.1). Itera
-    # todos los usuarios activos y persiste candidatos como `pending`.
-    # Default activado en prod; tests lo apagan vía env.
-    enable_subscriptions_cron: bool = True
+    # Cron diario de detección de gastos fijos (PHASE-13.1, renombrado
+    # PHASE-17.1). Itera todos los usuarios activos y persiste
+    # candidatos como `pending`. Default activado en prod; tests lo
+    # apagan vía env.
+    enable_fixed_expenses_cron: bool = True
     # Por defecto 04:00 UTC — después del cron de tasas para que un
     # scan use tasas frescas si en el futuro la detección las usa.
-    subscriptions_cron_hour: int = 4
-    subscriptions_cron_minute: int = 0
+    fixed_expenses_cron_hour: int = 4
+    fixed_expenses_cron_minute: int = 0
 
     # ---------- MinIO (blob storage) ----------
     minio_endpoint: str = "localhost:9000"

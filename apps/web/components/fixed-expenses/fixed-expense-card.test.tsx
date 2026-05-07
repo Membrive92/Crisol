@@ -2,11 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-import type { Category, Subscription } from '@finanzas/types';
+import type { Category, FixedExpense } from '@finanzas/types';
 
-import { SubscriptionCard } from './subscription-card';
+import { FixedExpenseCard } from './fixed-expense-card';
 
-function makeSub(overrides: Partial<Subscription> = {}): Subscription {
+function makeItem(overrides: Partial<FixedExpense> = {}): FixedExpense {
   return {
     id: 's-1',
     user_id: 'u-1',
@@ -41,9 +41,9 @@ const categories: Category[] = [
   },
 ];
 
-describe('SubscriptionCard', () => {
+describe('FixedExpenseCard', () => {
   it('pinta description, amount, cadencia y categoría', () => {
-    render(<SubscriptionCard subscription={makeSub()} categories={categories} />);
+    render(<FixedExpenseCard fixedExpense={makeItem()} categories={categories} />);
     expect(screen.getByText('NETFLIX.COM')).toBeDefined();
     expect(screen.getByText(/Mensual/)).toBeDefined();
     expect(screen.getByText(/Streaming/)).toBeDefined();
@@ -54,8 +54,8 @@ describe('SubscriptionCard', () => {
     const user = userEvent.setup();
     const onClick = vi.fn();
     render(
-      <SubscriptionCard
-        subscription={makeSub()}
+      <FixedExpenseCard
+        fixedExpense={makeItem()}
         categories={categories}
         primaryAction={{ label: 'Confirmar', onClick }}
       />,
@@ -68,8 +68,8 @@ describe('SubscriptionCard', () => {
     const user = userEvent.setup();
     const onClick = vi.fn();
     render(
-      <SubscriptionCard
-        subscription={makeSub()}
+      <FixedExpenseCard
+        fixedExpense={makeItem()}
         categories={categories}
         secondaryAction={{ label: 'Descartar', onClick }}
       />,
@@ -79,14 +79,14 @@ describe('SubscriptionCard', () => {
   });
 
   it('muestra "Sin categoría" cuando category_id es null', () => {
-    const sub = makeSub({ category_id: null });
-    render(<SubscriptionCard subscription={sub} categories={categories} />);
+    const item = makeItem({ category_id: null });
+    render(<FixedExpenseCard fixedExpense={item} categories={categories} />);
     expect(screen.getByText(/Sin categoría/)).toBeDefined();
   });
 
   it('cadencia anual se muestra como "Anual"', () => {
-    const sub = makeSub({ cadence_days: 365 });
-    render(<SubscriptionCard subscription={sub} categories={categories} />);
+    const item = makeItem({ cadence_days: 365 });
+    render(<FixedExpenseCard fixedExpense={item} categories={categories} />);
     expect(screen.getByText(/Anual/)).toBeDefined();
   });
 });

@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import type { Category, Subscription } from '@finanzas/types';
+import type { Category, FixedExpense } from '@finanzas/types';
 import {
   colors,
   fontSize,
@@ -11,18 +11,18 @@ import {
   spacing,
 } from '@finanzas/ui';
 
-export interface SubscriptionCardAction {
+export interface FixedExpenseCardAction {
   label: string;
   onPress: () => void;
   busy?: boolean;
   danger?: boolean;
 }
 
-export interface SubscriptionCardProps {
-  subscription: Subscription;
+export interface FixedExpenseCardProps {
+  fixedExpense: FixedExpense;
   categories: Category[];
-  primaryAction?: SubscriptionCardAction;
-  secondaryAction?: SubscriptionCardAction;
+  primaryAction?: FixedExpenseCardAction;
+  secondaryAction?: FixedExpenseCardAction;
 }
 
 const CADENCE_LABEL: Record<number, string> = {
@@ -40,34 +40,34 @@ function findCategory(categories: Category[], id: string | null): Category | und
 }
 
 /**
- * Card de subscripción mobile equivalente a la versión web. Misma
+ * Card de gasto fijo mobile equivalente a la versión web. Misma
  * propuesta: callers controlan acciones vía primaryAction /
  * secondaryAction props (Confirmar+Descartar para pending,
- * Eliminar para confirmed).
+ * Pausar+Cancelar para confirmed, etc.).
  */
-export function SubscriptionCard({
-  subscription: sub,
+export function FixedExpenseCard({
+  fixedExpense: item,
   categories,
   primaryAction,
   secondaryAction,
-}: SubscriptionCardProps) {
-  const category = findCategory(categories, sub.category_id);
-  const cadenceLabel = CADENCE_LABEL[sub.cadence_days] ?? `${sub.cadence_days}d`;
-  const confidencePct = Math.round(sub.confidence * 100);
+}: FixedExpenseCardProps) {
+  const category = findCategory(categories, item.category_id);
+  const cadenceLabel = CADENCE_LABEL[item.cadence_days] ?? `${item.cadence_days}d`;
+  const confidencePct = Math.round(item.confidence * 100);
 
   return (
     <View style={styles.card}>
       <View style={styles.header}>
         <View style={{ flex: 1, marginRight: spacing.sm }}>
           <Text style={styles.title} numberOfLines={1}>
-            {sub.raw_description}
+            {item.raw_description}
           </Text>
           <Text style={styles.meta}>
             {cadenceLabel} · {category?.name ?? 'Sin categoría'} · confianza{' '}
             {confidencePct}%
           </Text>
         </View>
-        <Text style={styles.amount}>{formatAmount(sub.amount, sub.currency)}</Text>
+        <Text style={styles.amount}>{formatAmount(item.amount, item.currency)}</Text>
       </View>
 
       <View style={styles.divider} />
@@ -75,10 +75,10 @@ export function SubscriptionCard({
       <View style={styles.footer}>
         <Text style={styles.footerText} numberOfLines={2}>
           Próximo cargo:{' '}
-          <Text style={styles.footerStrong}>{formatDate(sub.next_due)}</Text>
+          <Text style={styles.footerStrong}>{formatDate(item.next_due)}</Text>
           {' · '}
-          {sub.occurrence_count}{' '}
-          {sub.occurrence_count === 1 ? 'cargo' : 'cargos'}
+          {item.occurrence_count}{' '}
+          {item.occurrence_count === 1 ? 'cargo' : 'cargos'}
         </Text>
         <View style={styles.actions}>
           {secondaryAction ? (

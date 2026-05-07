@@ -7,7 +7,7 @@ from decimal import Decimal
 
 from httpx import AsyncClient
 
-from app.modules.personal_finance.subscriptions.detector import (
+from app.modules.personal_finance.fixed_expenses.detector import (
     _common_prefix,
     _merge_by_common_prefix,
 )
@@ -103,7 +103,7 @@ async def test_scan_merges_descriptions_with_common_prefix(
 ) -> None:
     """Crear 4 cargos mensuales alternando descripciones tipo
     "NETFLIX.COM" y "Netflix Premium" → el detector las trata como
-    una única subscription."""
+    un único gasto fijo."""
     token, cat_id = await _setup_user(client, "pf1@example.com")
     today = date.today()
 
@@ -129,12 +129,12 @@ async def test_scan_merges_descriptions_with_common_prefix(
             headers=_auth(token),
         )
 
-    r = await client.post("/subscriptions/scan", headers=_auth(token))
+    r = await client.post("/fixed-expenses/scan", headers=_auth(token))
     body = r.json()
-    # Pre-PHASE-14.7 hubieran sido 4 subscripciones distintas.
+    # Pre-PHASE-14.7 hubieran sido 4 gastos fijos distintos.
     # Ahora se funden a 1.
     assert body["created"] == 1
 
-    items = (await client.get("/subscriptions", headers=_auth(token))).json()
+    items = (await client.get("/fixed-expenses", headers=_auth(token))).json()
     assert len(items) == 1
     assert items[0]["occurrence_count"] == 4

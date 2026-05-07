@@ -1,4 +1,5 @@
-"""Tests de pause/resume/cancel para subscripciones (PHASE-15.2)."""
+"""Tests de pause/resume/cancel para gastos fijos (PHASE-15.2,
+renombrado en PHASE-17.1)."""
 
 from __future__ import annotations
 
@@ -42,8 +43,8 @@ async def _create_pending_sub(client: AsyncClient, token: str, cat_id: str) -> s
             },
             headers=_auth(token),
         )
-    await client.post("/subscriptions/scan", headers=_auth(token))
-    return (await client.get("/subscriptions", headers=_auth(token))).json()[0]["id"]
+    await client.post("/fixed-expenses/scan", headers=_auth(token))
+    return (await client.get("/fixed-expenses", headers=_auth(token))).json()[0]["id"]
 
 
 async def test_pause_only_from_confirmed(client: AsyncClient) -> None:
@@ -53,15 +54,15 @@ async def test_pause_only_from_confirmed(client: AsyncClient) -> None:
 
     # Pending → 409.
     r_pending = await client.post(
-        f"/subscriptions/{sid}/pause", headers=_auth(token)
+        f"/fixed-expenses/{sid}/pause", headers=_auth(token)
     )
     assert r_pending.status_code == 409
 
     # Confirmar primero.
-    await client.post(f"/subscriptions/{sid}/confirm", headers=_auth(token))
+    await client.post(f"/fixed-expenses/{sid}/confirm", headers=_auth(token))
 
     # Confirmed → pause OK.
-    r = await client.post(f"/subscriptions/{sid}/pause", headers=_auth(token))
+    r = await client.post(f"/fixed-expenses/{sid}/pause", headers=_auth(token))
     assert r.status_code == 200
     assert r.json()["status"] == "paused"
 
@@ -69,17 +70,17 @@ async def test_pause_only_from_confirmed(client: AsyncClient) -> None:
 async def test_resume_only_from_paused(client: AsyncClient) -> None:
     token, cat_id = await _setup_user(client, "pc2@example.com")
     sid = await _create_pending_sub(client, token, cat_id)
-    await client.post(f"/subscriptions/{sid}/confirm", headers=_auth(token))
+    await client.post(f"/fixed-expenses/{sid}/confirm", headers=_auth(token))
 
     # Confirmed → resume → 409 (no está paused).
     r_conf = await client.post(
-        f"/subscriptions/{sid}/resume", headers=_auth(token)
+        f"/fixed-expenses/{sid}/resume", headers=_auth(token)
     )
     assert r_conf.status_code == 409
 
     # Pause + resume.
-    await client.post(f"/subscriptions/{sid}/pause", headers=_auth(token))
-    r = await client.post(f"/subscriptions/{sid}/resume", headers=_auth(token))
+    await client.post(f"/fixed-expenses/{sid}/pause", headers=_auth(token))
+    r = await client.post(f"/fixed-expenses/{sid}/resume", headers=_auth(token))
     assert r.status_code == 200
     assert r.json()["status"] == "confirmed"
 
@@ -89,23 +90,23 @@ async def test_cancel_from_pending_confirmed_paused(client: AsyncClient) -> None
     # Desde pending.
     token1, cat1 = await _setup_user(client, "pc3a@example.com")
     sid1 = await _create_pending_sub(client, token1, cat1)
-    r1 = await client.post(f"/subscriptions/{sid1}/cancel", headers=_auth(token1))
+    r1 = await client.post(f"/fixed-expenses/{sid1}/cancel", headers=_auth(token1))
     assert r1.status_code == 200
     assert r1.json()["status"] == "cancelled"
 
     # Desde confirmed.
     token2, cat2 = await _setup_user(client, "pc3b@example.com")
     sid2 = await _create_pending_sub(client, token2, cat2)
-    await client.post(f"/subscriptions/{sid2}/confirm", headers=_auth(token2))
-    r2 = await client.post(f"/subscriptions/{sid2}/cancel", headers=_auth(token2))
+    await client.post(f"/fixed-expenses/{sid2}/confirm", headers=_auth(token2))
+    r2 = await client.post(f"/fixed-expenses/{sid2}/cancel", headers=_auth(token2))
     assert r2.json()["status"] == "cancelled"
 
     # Desde paused.
     token3, cat3 = await _setup_user(client, "pc3c@example.com")
     sid3 = await _create_pending_sub(client, token3, cat3)
-    await client.post(f"/subscriptions/{sid3}/confirm", headers=_auth(token3))
-    await client.post(f"/subscriptions/{sid3}/pause", headers=_auth(token3))
-    r3 = await client.post(f"/subscriptions/{sid3}/cancel", headers=_auth(token3))
+    await client.post(f"/fixed-expenses/{sid3}/confirm", headers=_auth(token3))
+    await client.post(f"/fixed-expenses/{sid3}/pause", headers=_auth(token3))
+    r3 = await client.post(f"/fixed-expenses/{sid3}/cancel", headers=_auth(token3))
     assert r3.json()["status"] == "cancelled"
 
 
@@ -113,8 +114,8 @@ async def test_cancel_blocked_from_dismissed(client: AsyncClient) -> None:
     """Una dismissed no se cancela — 409."""
     token, cat_id = await _setup_user(client, "pc4@example.com")
     sid = await _create_pending_sub(client, token, cat_id)
-    await client.post(f"/subscriptions/{sid}/dismiss", headers=_auth(token))
-    r = await client.post(f"/subscriptions/{sid}/cancel", headers=_auth(token))
+    await client.post(f"/fixed-expenses/{sid}/dismiss", headers=_auth(token))
+    r = await client.post(f"/fixed-expenses/{sid}/cancel", headers=_auth(token))
     assert r.status_code == 409
 
 
@@ -123,13 +124,13 @@ async def test_paused_blocks_re_suggestion(client: AsyncClient) -> None:
     crea nueva pending."""
     token, cat_id = await _setup_user(client, "pc5@example.com")
     sid = await _create_pending_sub(client, token, cat_id)
-    await client.post(f"/subscriptions/{sid}/confirm", headers=_auth(token))
-    await client.post(f"/subscriptions/{sid}/pause", headers=_auth(token))
+    await client.post(f"/fixed-expenses/{sid}/confirm", headers=_auth(token))
+    await client.post(f"/fixed-expenses/{sid}/pause", headers=_auth(token))
 
-    r = await client.post("/subscriptions/scan", headers=_auth(token))
+    r = await client.post("/fixed-expenses/scan", headers=_auth(token))
     body = r.json()
     assert body["created"] == 0  # no duplica
 
-    items = (await client.get("/subscriptions", headers=_auth(token))).json()
+    items = (await client.get("/fixed-expenses", headers=_auth(token))).json()
     assert len(items) == 1
     assert items[0]["status"] == "paused"  # status preservado

@@ -35,10 +35,10 @@ export type {
   BudgetStatusResponse,
 } from './models/budget';
 export type {
-  Subscription,
-  SubscriptionStatus,
-  SubscriptionScanResponse,
-} from './models/subscription';
+  FixedExpense,
+  FixedExpenseStatus,
+  FixedExpenseScanResponse,
+} from './models/fixed-expense';
 
 export type {
   LoginRequest,

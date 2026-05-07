@@ -31,7 +31,7 @@ export const MODULES: readonly AppModule[] = [
       { key: 'analysis', label: 'Análisis', path: `${PERSONAL_FINANCE_BASE}/analysis` },
       { key: 'transactions', label: 'Transacciones', path: `${PERSONAL_FINANCE_BASE}/transactions` },
       { key: 'budgets', label: 'Presupuestos', path: `${PERSONAL_FINANCE_BASE}/budgets` },
-      { key: 'subscriptions', label: 'Subscripciones', path: `${PERSONAL_FINANCE_BASE}/subscriptions` },
+      { key: 'fixed-expenses', label: 'Gastos fijos', path: `${PERSONAL_FINANCE_BASE}/fixed-expenses` },
     ],
   },
   {

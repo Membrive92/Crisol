@@ -1,4 +1,5 @@
-"""Detector heurístico de subscripciones recurrentes (PHASE-13.1).
+"""Detector heurístico de gastos fijos recurrentes (PHASE-13.1,
+renombrado en PHASE-17.1).
 
 Sin IA por ahora — pura inspección de patrones de transacciones.
 Si los resultados son malos en producción, una sub-fase futura

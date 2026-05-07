@@ -1,4 +1,5 @@
-"""Schemas Pydantic del módulo subscriptions (PHASE-13.1)."""
+"""Schemas Pydantic del módulo fixed_expenses (PHASE-13.1, renombrado
+en PHASE-17.1)."""
 
 from __future__ import annotations
 
@@ -8,11 +9,11 @@ from decimal import Decimal
 
 from pydantic import BaseModel
 
-from app.modules.personal_finance.subscriptions.models import SubscriptionStatus
+from app.modules.personal_finance.fixed_expenses.models import FixedExpenseStatus
 
 
-class SubscriptionResponse(BaseModel):
-    """Respuesta pública de una subscripción."""
+class FixedExpenseResponse(BaseModel):
+    """Respuesta pública de un gasto fijo."""
 
     id: uuid.UUID
     user_id: uuid.UUID
@@ -22,7 +23,7 @@ class SubscriptionResponse(BaseModel):
     currency: str
     cadence_days: int
     next_due: date
-    status: SubscriptionStatus
+    status: FixedExpenseStatus
     category_id: uuid.UUID | None
     first_seen_at: date
     last_seen_at: date
@@ -38,7 +39,7 @@ class ScanResponse(BaseModel):
     """Resultado de un scan manual.
 
     `created` y `updated` separan candidatos nuevos (que el usuario
-    debe revisar) vs subscripciones existentes con datos refrescados
+    debe revisar) vs gastos fijos existentes con datos refrescados
     (next_due, occurrence_count, last_seen_at).
     """
 

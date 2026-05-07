@@ -19,7 +19,7 @@ from app.modules.personal_finance.categories.router import router as categories_
 from app.modules.personal_finance.dashboard.router import router as dashboard_router
 from app.modules.personal_finance.imports.router import router as imports_router
 from app.modules.personal_finance.receipts.router import router as receipts_router
-from app.modules.personal_finance.subscriptions.router import router as subscriptions_router
+from app.modules.personal_finance.fixed_expenses.router import router as fixed_expenses_router
 from app.modules.personal_finance.transactions.router import router as transactions_router
 
 
@@ -68,7 +68,7 @@ app.include_router(categories_router)
 app.include_router(transactions_router)
 app.include_router(dashboard_router)
 app.include_router(budgets_router)
-app.include_router(subscriptions_router)
+app.include_router(fixed_expenses_router)
 app.include_router(imports_router)
 app.include_router(receipts_router)
 

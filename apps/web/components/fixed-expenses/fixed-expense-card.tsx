@@ -1,6 +1,6 @@
 'use client';
 
-import type { Category, Subscription } from '@finanzas/types';
+import type { Category, FixedExpense } from '@finanzas/types';
 import {
   colors,
   fontSize,
@@ -14,12 +14,12 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 
-export interface SubscriptionCardProps {
-  subscription: Subscription;
+export interface FixedExpenseCardProps {
+  fixedExpense: FixedExpense;
   categories: Category[];
-  /** Acción primaria (Confirmar para pending, Eliminar para confirmed). */
+  /** Acción primaria (Confirmar para pending, Pausar para confirmed, etc.). */
   primaryAction?: { label: string; onClick: () => void; busy?: boolean };
-  /** Acción secundaria (Descartar para pending, etc.). */
+  /** Acción secundaria (Descartar para pending, Cancelar para confirmed, etc.). */
   secondaryAction?: { label: string; onClick: () => void; busy?: boolean; danger?: boolean };
 }
 
@@ -38,19 +38,19 @@ function findCategory(categories: Category[], id: string | null): Category | und
 }
 
 /**
- * Card de una subscripción detectada. Reusable entre las secciones
- * pending/confirmed/dismissed — los callers controlan qué acciones
- * ofrecer.
+ * Card de un gasto fijo detectado. Reusable entre las secciones
+ * pending/confirmed/paused/cancelled/dismissed — los callers
+ * controlan qué acciones ofrecer.
  */
-export function SubscriptionCard({
-  subscription: sub,
+export function FixedExpenseCard({
+  fixedExpense: item,
   categories,
   primaryAction,
   secondaryAction,
-}: SubscriptionCardProps) {
-  const category = findCategory(categories, sub.category_id);
-  const cadenceLabel = CADENCE_LABEL[sub.cadence_days] ?? `${sub.cadence_days}d`;
-  const confidencePct = Math.round(sub.confidence * 100);
+}: FixedExpenseCardProps) {
+  const category = findCategory(categories, item.category_id);
+  const cadenceLabel = CADENCE_LABEL[item.cadence_days] ?? `${item.cadence_days}d`;
+  const confidencePct = Math.round(item.confidence * 100);
 
   return (
     <Card style={{ padding: spacing.md }}>
@@ -75,7 +75,7 @@ export function SubscriptionCard({
               whiteSpace: 'nowrap',
             }}
           >
-            {sub.raw_description}
+            {item.raw_description}
           </span>
           <span style={{ fontSize: fontSize.xs, color: colors.textMuted }}>
             {cadenceLabel} · {category?.name ?? 'Sin categoría'} · confianza{' '}
@@ -91,7 +91,7 @@ export function SubscriptionCard({
             whiteSpace: 'nowrap',
           }}
         >
-          {formatAmount(sub.amount, sub.currency)}
+          {formatAmount(item.amount, item.currency)}
         </span>
       </div>
 
@@ -109,10 +109,10 @@ export function SubscriptionCard({
         <div style={{ fontSize: fontSize.xs, color: colors.textMuted }}>
           Próximo cargo:{' '}
           <strong style={{ color: colors.text, fontWeight: fontWeight.medium }}>
-            {formatDate(sub.next_due)}
+            {formatDate(item.next_due)}
           </strong>{' '}
-          · {sub.occurrence_count}{' '}
-          {sub.occurrence_count === 1 ? 'cargo' : 'cargos'} detectados
+          · {item.occurrence_count}{' '}
+          {item.occurrence_count === 1 ? 'cargo' : 'cargos'} detectados
         </div>
         <div style={{ display: 'inline-flex', gap: spacing.xs }}>
           {secondaryAction ? (

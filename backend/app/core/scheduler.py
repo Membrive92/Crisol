@@ -1,9 +1,10 @@
-"""Scheduler de jobs background del backend (PHASE-11.1, ext. PHASE-13.1).
+"""Scheduler de jobs background del backend (PHASE-11.1, ext. PHASE-13.1,
+renombrado PHASE-17.1).
 
 Infraestructura cross-cutting — vive en `core/` porque cualquier módulo
 de dominio puede registrar jobs aquí. Jobs actuales:
 - Refresh nocturno de exchange rates (PHASE-11.1).
-- Scan diario de subscripciones recurrentes (PHASE-13.1).
+- Scan diario de gastos fijos recurrentes (PHASE-13.1).
 
 Decisión: APScheduler en lugar de Celery beat / cron del SO. Ver
 `internal_docs/decisions/0002-apscheduler.md`.
@@ -24,7 +25,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import settings
 from app.modules.currency import service as currency_service
-from app.modules.personal_finance.subscriptions import service as subscriptions_service
+from app.modules.personal_finance.fixed_expenses import service as fixed_expenses_service
 from app.modules.users.models import User
 
 logger = logging.getLogger("app.scheduler")
@@ -32,7 +33,7 @@ logger = logging.getLogger("app.scheduler")
 # IDs estables de los jobs — usados para inspección desde tests y para
 # evitar duplicados si el scheduler se re-arranca por hot reload.
 CURRENCY_REFRESH_JOB_ID = "refresh_currency_rates"
-SUBSCRIPTIONS_SCAN_JOB_ID = "scan_subscriptions"
+FIXED_EXPENSES_SCAN_JOB_ID = "scan_fixed_expenses"
 
 
 def _today_utc() -> date:
@@ -74,10 +75,10 @@ async def refresh_currency_rates_job() -> None:
         await engine.dispose()
 
 
-async def scan_subscriptions_job() -> None:
-    """Re-ejecuta el detector de subscripciones para cada usuario activo.
+async def scan_fixed_expenses_job() -> None:
+    """Re-ejecuta el detector de gastos fijos para cada usuario activo.
 
-    Itera `users` y llama a `subscriptions.service.scan_for_user` por
+    Itera `users` y llama a `fixed_expenses.service.scan_for_user` por
     cada uno. Errores por usuario individual NO tiran el job — se
     loguean y se sigue al siguiente.
     """
@@ -92,23 +93,23 @@ async def scan_subscriptions_job() -> None:
             total_updated = 0
             for uid in user_ids:
                 try:
-                    result = await subscriptions_service.scan_for_user(db, uid)
+                    result = await fixed_expenses_service.scan_for_user(db, uid)
                     await db.commit()
                     total_created += result.created
                     total_updated += result.updated
                 except Exception:
                     await db.rollback()
                     logger.exception(
-                        "subscriptions scan failed for user_id=%s", uid
+                        "fixed_expenses scan failed for user_id=%s", uid
                     )
         logger.info(
-            "subscriptions cron: %s users scanned, %s created, %s updated",
+            "fixed_expenses cron: %s users scanned, %s created, %s updated",
             len(user_ids),
             total_created,
             total_updated,
         )
     except Exception:
-        logger.exception("subscriptions cron failed at top level")
+        logger.exception("fixed_expenses cron failed at top level")
     finally:
         await engine.dispose()
 
@@ -117,13 +118,13 @@ def create_scheduler() -> AsyncIOScheduler | None:
     """Crea (sin arrancar) el scheduler con los jobs configurados.
 
     Devuelve `None` cuando NO hay flags activos (currency ni
-    subscriptions) — útil para tests y para entornos donde el cron
+    fixed_expenses) — útil para tests y para entornos donde el cron
     lo gestiona algo externo.
 
     Cada job se registra con `replace_existing=True` para que un
     arranque tras hot reload no acumule duplicados.
     """
-    if not (settings.enable_currency_cron or settings.enable_subscriptions_cron):
+    if not (settings.enable_currency_cron or settings.enable_fixed_expenses_cron):
         return None
 
     scheduler = AsyncIOScheduler(timezone=UTC)
@@ -141,15 +142,15 @@ def create_scheduler() -> AsyncIOScheduler | None:
             misfire_grace_time=60 * 60,
         )
 
-    if settings.enable_subscriptions_cron:
+    if settings.enable_fixed_expenses_cron:
         scheduler.add_job(
-            scan_subscriptions_job,
+            scan_fixed_expenses_job,
             trigger=CronTrigger(
-                hour=settings.subscriptions_cron_hour,
-                minute=settings.subscriptions_cron_minute,
+                hour=settings.fixed_expenses_cron_hour,
+                minute=settings.fixed_expenses_cron_minute,
                 timezone=UTC,
             ),
-            id=SUBSCRIPTIONS_SCAN_JOB_ID,
+            id=FIXED_EXPENSES_SCAN_JOB_ID,
             replace_existing=True,
             misfire_grace_time=60 * 60,
         )

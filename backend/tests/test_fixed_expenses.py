@@ -1,4 +1,5 @@
-"""Tests del módulo subscriptions (PHASE-13.1)."""
+"""Tests del módulo fixed_expenses (PHASE-13.1, renombrado en
+PHASE-17.1)."""
 
 from __future__ import annotations
 
@@ -7,7 +8,7 @@ from decimal import Decimal
 
 from httpx import AsyncClient
 
-from app.modules.personal_finance.subscriptions.detector import (
+from app.modules.personal_finance.fixed_expenses.detector import (
     Candidate,
     _detect_in_group,
     normalize_merchant,
@@ -76,7 +77,7 @@ def test_detect_picks_monthly_cadence_with_high_confidence() -> None:
 
 
 def test_detect_rejects_irregular_cadence() -> None:
-    """Gaps muy desiguales no deberían quedar como subscription."""
+    """Gaps muy desiguales no deberían quedar como gasto fijo."""
     occurrences = [
         _occ(date(2026, 1, 1)),
         _occ(date(2026, 1, 5)),  # 4 días
@@ -158,20 +159,20 @@ async def _insert_recurring(
         )
 
 
-async def test_scan_creates_pending_subscription_from_recurring_txs(
+async def test_scan_creates_pending_fixed_expense_from_recurring_txs(
     client: AsyncClient,
 ) -> None:
     token, cat_id = await _setup_user(client, "sub1@example.com")
     await _insert_recurring(client, token, cat_id, months_back=4)
 
-    r = await client.post("/subscriptions/scan", headers=_auth(token))
+    r = await client.post("/fixed-expenses/scan", headers=_auth(token))
     assert r.status_code == 200
     body = r.json()
     assert body["created"] == 1
     assert body["updated"] == 0
     assert body["total_active_after"] == 1
 
-    r_list = await client.get("/subscriptions", headers=_auth(token))
+    r_list = await client.get("/fixed-expenses", headers=_auth(token))
     items = r_list.json()
     assert len(items) == 1
     assert items[0]["merchant"] == "netflixcom"
@@ -181,13 +182,13 @@ async def test_scan_creates_pending_subscription_from_recurring_txs(
     assert items[0]["category_id"] == cat_id
 
 
-async def test_scan_refreshes_existing_subscription_without_duplicating(
+async def test_scan_refreshes_existing_fixed_expense_without_duplicating(
     client: AsyncClient,
 ) -> None:
     """Re-ejecutar scan no crea duplicado si la huella coincide."""
     token, cat_id = await _setup_user(client, "sub2@example.com")
     await _insert_recurring(client, token, cat_id, months_back=4)
-    await client.post("/subscriptions/scan", headers=_auth(token))
+    await client.post("/fixed-expenses/scan", headers=_auth(token))
 
     # Inserto otra ocurrencia (la del mes que viene → sigue siendo el
     # mismo merchant + amount → mismo fingerprint).
@@ -204,38 +205,38 @@ async def test_scan_refreshes_existing_subscription_without_duplicating(
         headers=_auth(token),
     )
 
-    r = await client.post("/subscriptions/scan", headers=_auth(token))
+    r = await client.post("/fixed-expenses/scan", headers=_auth(token))
     body = r.json()
     assert body["created"] == 0
     assert body["updated"] == 1
 
-    r_list = await client.get("/subscriptions", headers=_auth(token))
+    r_list = await client.get("/fixed-expenses", headers=_auth(token))
     items = r_list.json()
     assert len(items) == 1
     assert items[0]["occurrence_count"] == 5
 
 
 async def test_dismiss_prevents_re_suggestion(client: AsyncClient) -> None:
-    """Una subscripción dismissed sigue ahí pero no vuelve a aparecer
+    """Un gasto fijo dismissed sigue ahí pero no vuelve a aparecer
     como pending tras un nuevo scan (porque su fingerprint matchea y
     sólo se refresca sin tocar status)."""
     token, cat_id = await _setup_user(client, "sub3@example.com")
     await _insert_recurring(client, token, cat_id, months_back=4)
-    await client.post("/subscriptions/scan", headers=_auth(token))
+    await client.post("/fixed-expenses/scan", headers=_auth(token))
 
-    r_list = await client.get("/subscriptions", headers=_auth(token))
+    r_list = await client.get("/fixed-expenses", headers=_auth(token))
     sid = r_list.json()[0]["id"]
 
     r_dismiss = await client.post(
-        f"/subscriptions/{sid}/dismiss", headers=_auth(token)
+        f"/fixed-expenses/{sid}/dismiss", headers=_auth(token)
     )
     assert r_dismiss.status_code == 200
     assert r_dismiss.json()["status"] == "dismissed"
 
     # Re-scan: dismissed no se reactiva.
-    await client.post("/subscriptions/scan", headers=_auth(token))
+    await client.post("/fixed-expenses/scan", headers=_auth(token))
     r_pending = await client.get(
-        "/subscriptions", params={"status": "pending"}, headers=_auth(token)
+        "/fixed-expenses", params={"status": "pending"}, headers=_auth(token)
     )
     assert r_pending.json() == []
 
@@ -243,10 +244,10 @@ async def test_dismiss_prevents_re_suggestion(client: AsyncClient) -> None:
 async def test_confirm_sets_status_to_confirmed(client: AsyncClient) -> None:
     token, cat_id = await _setup_user(client, "sub4@example.com")
     await _insert_recurring(client, token, cat_id, months_back=4)
-    await client.post("/subscriptions/scan", headers=_auth(token))
-    sid = (await client.get("/subscriptions", headers=_auth(token))).json()[0]["id"]
+    await client.post("/fixed-expenses/scan", headers=_auth(token))
+    sid = (await client.get("/fixed-expenses", headers=_auth(token))).json()[0]["id"]
 
-    r = await client.post(f"/subscriptions/{sid}/confirm", headers=_auth(token))
+    r = await client.post(f"/fixed-expenses/{sid}/confirm", headers=_auth(token))
     assert r.json()["status"] == "confirmed"
 
 
@@ -255,27 +256,27 @@ async def test_user_isolation(client: AsyncClient) -> None:
     token_b, _ = await _setup_user(client, "subB@example.com")
 
     await _insert_recurring(client, token_a, cat_a, months_back=4)
-    await client.post("/subscriptions/scan", headers=_auth(token_a))
+    await client.post("/fixed-expenses/scan", headers=_auth(token_a))
 
-    # B no ve la subscripción de A.
-    r_b = await client.get("/subscriptions", headers=_auth(token_b))
+    # B no ve el gasto fijo de A.
+    r_b = await client.get("/fixed-expenses", headers=_auth(token_b))
     assert r_b.json() == []
 
-    sid = (await client.get("/subscriptions", headers=_auth(token_a))).json()[0]["id"]
-    r_b_get = await client.get(f"/subscriptions/{sid}", headers=_auth(token_b))
+    sid = (await client.get("/fixed-expenses", headers=_auth(token_a))).json()[0]["id"]
+    r_b_get = await client.get(f"/fixed-expenses/{sid}", headers=_auth(token_b))
     assert r_b_get.status_code == 404
 
 
-async def test_delete_purges_subscription(client: AsyncClient) -> None:
+async def test_delete_purges_fixed_expense(client: AsyncClient) -> None:
     token, cat_id = await _setup_user(client, "sub5@example.com")
     await _insert_recurring(client, token, cat_id, months_back=4)
-    await client.post("/subscriptions/scan", headers=_auth(token))
-    sid = (await client.get("/subscriptions", headers=_auth(token))).json()[0]["id"]
+    await client.post("/fixed-expenses/scan", headers=_auth(token))
+    sid = (await client.get("/fixed-expenses", headers=_auth(token))).json()[0]["id"]
 
-    r = await client.delete(f"/subscriptions/{sid}", headers=_auth(token))
+    r = await client.delete(f"/fixed-expenses/{sid}", headers=_auth(token))
     assert r.status_code == 204
 
-    r_get = await client.get(f"/subscriptions/{sid}", headers=_auth(token))
+    r_get = await client.get(f"/fixed-expenses/{sid}", headers=_auth(token))
     assert r_get.status_code == 404
 
 

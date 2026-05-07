@@ -199,23 +199,27 @@ suma todas las categorías de gasto. Excluye soft-deleted (PHASE-10.1).
 
 ---
 
-## Subscriptions (`PHASE-13.1`)
+## Fixed expenses (`PHASE-13.1`, renombrado en `PHASE-17.1`)
 
-Subscripciones recurrentes detectadas automáticamente a partir de
-patrones de transacciones (mismo merchant + amount + currency con
-cadencia regular en últimos 6 meses). Sin IA por ahora — heurística
-basada en agrupación + análisis de gaps.
+Antes "subscriptions". Gastos fijos recurrentes (suscripciones,
+hipotecas, préstamos, gym, seguros…) detectados automáticamente
+a partir de patrones de transacciones (mismo merchant + amount +
+currency con cadencia regular en últimos 6 meses). Sin IA por
+ahora — heurística basada en agrupación + análisis de gaps.
 
 | Método | Ruta | Auth | Body / Query | Response |
 |--------|------|------|--------------|----------|
-| GET    | `/subscriptions` | sí | `status?` (`pending\|confirmed\|dismissed`) | `200 SubscriptionResponse[]` ordenado `next_due ASC` |
-| POST   | `/subscriptions/scan` | sí | — | `200 { created, updated, total_active_after }`. Re-ejecuta el detector ahora; el cron diario (04:00 UTC) hace lo mismo automáticamente. |
-| GET    | `/subscriptions/{id}` | sí | — | `200 SubscriptionResponse` |
-| POST   | `/subscriptions/{id}/confirm` | sí | — | `200 SubscriptionResponse`. Marca como `confirmed`. Una `dismissed` confirmada se reactiva. |
-| POST   | `/subscriptions/{id}/dismiss` | sí | — | `200 SubscriptionResponse`. El detector NO la vuelve a sugerir aunque siga el patrón. |
-| DELETE | `/subscriptions/{id}` | sí | — | `204`. Si el patrón persiste, el siguiente scan la vuelve a crear como `pending`. |
+| GET    | `/fixed-expenses` | sí | `status?` (`pending\|confirmed\|paused\|cancelled\|dismissed`) | `200 FixedExpenseResponse[]` ordenado `next_due ASC` |
+| POST   | `/fixed-expenses/scan` | sí | — | `200 { created, updated, total_active_after }`. Re-ejecuta el detector ahora; el cron diario (04:00 UTC) hace lo mismo automáticamente. |
+| GET    | `/fixed-expenses/{id}` | sí | — | `200 FixedExpenseResponse` |
+| POST   | `/fixed-expenses/{id}/confirm` | sí | — | `200 FixedExpenseResponse`. Marca como `confirmed`. Uno `dismissed` confirmado se reactiva. |
+| POST   | `/fixed-expenses/{id}/dismiss` | sí | — | `200 FixedExpenseResponse`. El detector NO lo vuelve a sugerir aunque siga el patrón. |
+| POST   | `/fixed-expenses/{id}/pause` | sí | — | `200 FixedExpenseResponse`. `confirmed` → `paused`. 409 desde otros estados (PHASE-15.2). |
+| POST   | `/fixed-expenses/{id}/resume` | sí | — | `200 FixedExpenseResponse`. `paused` → `confirmed`. 409 si no está paused (PHASE-15.2). |
+| POST   | `/fixed-expenses/{id}/cancel` | sí | — | `200 FixedExpenseResponse`. Aceptable desde pending/confirmed/paused. 409 desde dismissed (PHASE-15.2). |
+| DELETE | `/fixed-expenses/{id}` | sí | — | `204`. Si el patrón persiste, el siguiente scan lo vuelve a crear como `pending`. |
 
-`SubscriptionResponse`: `{ id, user_id, merchant (normalizado),
+`FixedExpenseResponse`: `{ id, user_id, merchant (normalizado),
 raw_description (sample legible), amount, currency, cadence_days
 (7/14/30/90/180/365), next_due, status, category_id, first_seen_at,
 last_seen_at, occurrence_count, confidence (0..1), created_at,

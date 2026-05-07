@@ -166,6 +166,14 @@ Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
 |------|----------------------------------------------|--------|----|
 | 16   | Opt-in flag `convert_other_currencies`       | ✅     | —  |
 
+### Fase 17 — Gastos fijos (rename + autoposting)
+
+| Fase | Nombre                                       | Estado | PR |
+|------|----------------------------------------------|--------|----|
+| 17.1 | Rename `subscriptions` → `fixed_expenses`    | ✅     | —  |
+| 17.2 | Auto-post de gastos fijos confirmados        | ⏳     | —  |
+| 17.3 | Reconciliación de imports con `expected`     | ⏳     | —  |
+
 ---
 
 ## Estructura de este directorio

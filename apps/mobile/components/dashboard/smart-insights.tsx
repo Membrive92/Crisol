@@ -36,7 +36,7 @@ export function SmartInsights({ summary, expensesByCategory, currency }: SmartIn
       )}
       <View style={styles.comingSoon}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.comingSoonTitle}>Subscripciones recurrentes</Text>
+          <Text style={styles.comingSoonTitle}>Gastos fijos recurrentes</Text>
           <Text style={styles.comingSoonSubtitle}>
             Detección automática de cargos periódicos.
           </Text>

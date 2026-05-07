@@ -1,4 +1,10 @@
-"""Modelo ORM de subscripciones detectadas (PHASE-13.1)."""
+"""Modelo ORM de gastos fijos detectados (PHASE-13.1, renombrado en
+PHASE-17.1).
+
+Antes "subscriptions" — ahora "fixed_expenses" para reflejar que el
+área cubre cualquier gasto recurrente con cantidad estable
+(suscripciones, hipotecas, préstamos, cuotas de gym, seguros…).
+"""
 
 from __future__ import annotations
 
@@ -13,18 +19,19 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 
 
-class SubscriptionStatus(enum.StrEnum):
-    """Estado de una subscripción detectada.
+class FixedExpenseStatus(enum.StrEnum):
+    """Estado de un gasto fijo detectado.
 
-    `pending` → el detector la propuso, falta confirmar.
-    `confirmed` → el usuario aceptó; subscripción activa.
-    `paused` (PHASE-15.2) → temporalmente inactiva; el usuario la
-                pausa sin descartarla. Mismo bloqueo de re-sugestion
+    `pending` → el detector lo propuso, falta confirmar.
+    `confirmed` → el usuario aceptó; gasto fijo activo.
+    `paused` (PHASE-15.2) → temporalmente inactivo; el usuario lo
+                pausa sin descartarlo. Mismo bloqueo de re-sugestion
                 que confirmed.
-    `cancelled` (PHASE-15.2) → el usuario canceló la subscripción
-                real (cerró su cuenta). NO es lo mismo que dismissed:
-                cancelled = "sí era subscripción, ya no la tengo";
-                dismissed = "el detector se equivocó".
+    `cancelled` (PHASE-15.2) → el usuario canceló el gasto fijo
+                real (cerró su cuenta / saldó el préstamo). NO es lo
+                mismo que dismissed: cancelled = "sí era un gasto
+                fijo, ya no lo tengo"; dismissed = "el detector se
+                equivocó".
     `dismissed` → el detector se equivocó (falso positivo); NO se
                   volverá a sugerir aunque siga el patrón.
     """
@@ -36,13 +43,13 @@ class SubscriptionStatus(enum.StrEnum):
     DISMISSED = "dismissed"
 
 
-class Subscription(Base):
-    """Subscripción periódica detectada a partir de transacciones.
+class FixedExpense(Base):
+    """Gasto fijo recurrente detectado a partir de transacciones.
 
     Los campos identificativos (merchant + amount + currency +
     cadence_days) forman la "huella" del patrón. El detector usa esa
-    huella para reconocer subscripciones existentes en re-scans en
-    lugar de duplicarlas.
+    huella para reconocer gastos fijos existentes en re-scans en
+    lugar de duplicarlos.
 
     `confidence` ∈ [0,1] mide cuán regular es la cadencia (1 =
     cadencia perfecta sin desviación, 0 = caótica). Lo emite el
@@ -50,7 +57,7 @@ class Subscription(Base):
     reforzarlo en una sub-fase futura.
     """
 
-    __tablename__ = "subscriptions"
+    __tablename__ = "fixed_expenses"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -58,20 +65,14 @@ class Subscription(Base):
         nullable=False,
         index=True,
     )
-    # Normalizado (lowercase + strip non-alphanumeric, primeros 30 chars).
-    # Forma parte de la huella usada para reconocer matches en re-scans.
     merchant: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
-    # Sample sin normalizar — el frontend lo muestra como label legible
-    # mientras `merchant` queda interno.
     raw_description: Mapped[str] = mapped_column(Text, nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
-    # Cadencia típica de los matches (~30 mensual, ~365 anual, etc.).
     cadence_days: Mapped[int] = mapped_column(Integer, nullable=False)
-    # Próxima ejecución estimada (last_seen_at + cadence_days).
     next_due: Mapped[date] = mapped_column(Date, nullable=False)
-    status: Mapped[SubscriptionStatus] = mapped_column(
-        nullable=False, default=SubscriptionStatus.PENDING, index=True
+    status: Mapped[FixedExpenseStatus] = mapped_column(
+        nullable=False, default=FixedExpenseStatus.PENDING, index=True
     )
     category_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("categories.id", ondelete="SET NULL"),

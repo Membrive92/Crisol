@@ -1,10 +1,10 @@
 import { fireEvent, render } from '@testing-library/react-native';
 
-import type { Category, Subscription } from '@finanzas/types';
+import type { Category, FixedExpense } from '@finanzas/types';
 
-import { SubscriptionCard } from './subscription-card';
+import { FixedExpenseCard } from './fixed-expense-card';
 
-function makeSub(overrides: Partial<Subscription> = {}): Subscription {
+function makeItem(overrides: Partial<FixedExpense> = {}): FixedExpense {
   return {
     id: 's-1',
     user_id: 'u-1',
@@ -39,10 +39,10 @@ const categories: Category[] = [
   },
 ];
 
-describe('SubscriptionCard (mobile)', () => {
+describe('FixedExpenseCard (mobile)', () => {
   it('pinta description, cadencia legible y categoría', () => {
     const { getByText } = render(
-      <SubscriptionCard subscription={makeSub()} categories={categories} />,
+      <FixedExpenseCard fixedExpense={makeItem()} categories={categories} />,
     );
     expect(getByText('NETFLIX.COM')).toBeTruthy();
     expect(getByText(/Mensual/)).toBeTruthy();
@@ -52,8 +52,8 @@ describe('SubscriptionCard (mobile)', () => {
 
   it('cadencia 365 → "Anual"', () => {
     const { getByText } = render(
-      <SubscriptionCard
-        subscription={makeSub({ cadence_days: 365 })}
+      <FixedExpenseCard
+        fixedExpense={makeItem({ cadence_days: 365 })}
         categories={categories}
       />,
     );
@@ -62,8 +62,8 @@ describe('SubscriptionCard (mobile)', () => {
 
   it('Sin categoría cuando category_id es null', () => {
     const { getByText } = render(
-      <SubscriptionCard
-        subscription={makeSub({ category_id: null })}
+      <FixedExpenseCard
+        fixedExpense={makeItem({ category_id: null })}
         categories={categories}
       />,
     );
@@ -73,8 +73,8 @@ describe('SubscriptionCard (mobile)', () => {
   it('primaryAction.onPress se llama al tap', () => {
     const onPress = jest.fn();
     const { getByText } = render(
-      <SubscriptionCard
-        subscription={makeSub()}
+      <FixedExpenseCard
+        fixedExpense={makeItem()}
         categories={categories}
         primaryAction={{ label: 'Confirmar', onPress }}
       />,
@@ -86,8 +86,8 @@ describe('SubscriptionCard (mobile)', () => {
   it('secondaryAction.onPress se llama al tap', () => {
     const onPress = jest.fn();
     const { getByText } = render(
-      <SubscriptionCard
-        subscription={makeSub()}
+      <FixedExpenseCard
+        fixedExpense={makeItem()}
         categories={categories}
         secondaryAction={{ label: 'Descartar', onPress }}
       />,

@@ -4,37 +4,37 @@ import { useState } from 'react';
 
 import {
   formatApiError,
-  useCancelSubscription,
+  useCancelFixedExpense,
   useCategories,
-  useConfirmSubscription,
-  useDeleteSubscription,
-  useDismissSubscription,
-  usePauseSubscription,
-  useResumeSubscription,
-  useScanSubscriptions,
-  useSubscriptions,
+  useConfirmFixedExpense,
+  useDeleteFixedExpense,
+  useDismissFixedExpense,
+  useFixedExpenses,
+  usePauseFixedExpense,
+  useResumeFixedExpense,
+  useScanFixedExpenses,
 } from '@finanzas/services';
 import { toast } from '@finanzas/store';
 import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
 
-import { SubscriptionCard } from '@/components/subscriptions/subscription-card';
+import { FixedExpenseCard } from '@/components/fixed-expenses/fixed-expense-card';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 
-export default function SubscriptionsPage() {
+export default function FixedExpensesPage() {
   const { data: categories } = useCategories();
-  const pendingQuery = useSubscriptions({ status: 'pending' });
-  const confirmedQuery = useSubscriptions({ status: 'confirmed' });
-  const pausedQuery = useSubscriptions({ status: 'paused' });
-  const cancelledQuery = useSubscriptions({ status: 'cancelled' });
-  const dismissedQuery = useSubscriptions({ status: 'dismissed' });
-  const scanMutation = useScanSubscriptions();
-  const confirmMutation = useConfirmSubscription();
-  const dismissMutation = useDismissSubscription();
-  const pauseMutation = usePauseSubscription();
-  const resumeMutation = useResumeSubscription();
-  const cancelMutation = useCancelSubscription();
-  const deleteMutation = useDeleteSubscription();
+  const pendingQuery = useFixedExpenses({ status: 'pending' });
+  const confirmedQuery = useFixedExpenses({ status: 'confirmed' });
+  const pausedQuery = useFixedExpenses({ status: 'paused' });
+  const cancelledQuery = useFixedExpenses({ status: 'cancelled' });
+  const dismissedQuery = useFixedExpenses({ status: 'dismissed' });
+  const scanMutation = useScanFixedExpenses();
+  const confirmMutation = useConfirmFixedExpense();
+  const dismissMutation = useDismissFixedExpense();
+  const pauseMutation = usePauseFixedExpense();
+  const resumeMutation = useResumeFixedExpense();
+  const cancelMutation = useCancelFixedExpense();
+  const deleteMutation = useDeleteFixedExpense();
   const [showDismissed, setShowDismissed] = useState(false);
   const [showCancelled, setShowCancelled] = useState(false);
 
@@ -48,7 +48,7 @@ export default function SubscriptionsPage() {
     scanMutation.mutate(undefined, {
       onSuccess: (res) =>
         toast.success(
-          `Re-escaneado: ${res.created} nuevas, ${res.updated} actualizadas.`,
+          `Re-escaneado: ${res.created} nuevos, ${res.updated} actualizados.`,
         ),
       onError: (err) => toast.error(formatApiError(err, 'Error al re-escanear.')),
     });
@@ -56,16 +56,16 @@ export default function SubscriptionsPage() {
 
   function handleConfirm(id: string) {
     confirmMutation.mutate(id, {
-      onSuccess: () => toast.success('Subscripción confirmada.'),
+      onSuccess: () => toast.success('Gasto fijo confirmado.'),
       onError: (err) => toast.error(formatApiError(err, 'Error al confirmar.')),
     });
   }
 
-  /** Reactiva una dismissed → confirmed (PHASE-13.1: el confirm de
-   * una dismissed la reactiva). */
+  /** Reactiva un dismissed → confirmed (PHASE-13.1: el confirm de
+   * uno dismissed lo reactiva). */
   function handleReactivate(id: string) {
     confirmMutation.mutate(id, {
-      onSuccess: () => toast.success('Subscripción reactivada.'),
+      onSuccess: () => toast.success('Gasto fijo reactivado.'),
       onError: (err) => toast.error(formatApiError(err, 'Error al reactivar.')),
     });
   }
@@ -73,21 +73,21 @@ export default function SubscriptionsPage() {
   function handleDismiss(id: string) {
     dismissMutation.mutate(id, {
       onSuccess: () =>
-        toast.info('Subscripción descartada — no se volverá a sugerir.'),
+        toast.info('Gasto fijo descartado — no se volverá a sugerir.'),
       onError: (err) => toast.error(formatApiError(err, 'Error al descartar.')),
     });
   }
 
   function handlePause(id: string) {
     pauseMutation.mutate(id, {
-      onSuccess: () => toast.info('Subscripción pausada.'),
+      onSuccess: () => toast.info('Gasto fijo pausado.'),
       onError: (err) => toast.error(formatApiError(err, 'Error al pausar.')),
     });
   }
 
   function handleResume(id: string) {
     resumeMutation.mutate(id, {
-      onSuccess: () => toast.success('Subscripción reanudada.'),
+      onSuccess: () => toast.success('Gasto fijo reanudado.'),
       onError: (err) => toast.error(formatApiError(err, 'Error al reanudar.')),
     });
   }
@@ -95,13 +95,13 @@ export default function SubscriptionsPage() {
   function handleCancel(id: string) {
     if (
       !confirm(
-        'Marcar la subscripción como cancelada (ya no la tienes activa). ¿Continuar?',
+        'Marcar el gasto fijo como cancelado (ya no lo tienes activo). ¿Continuar?',
       )
     ) {
       return;
     }
     cancelMutation.mutate(id, {
-      onSuccess: () => toast.info('Subscripción cancelada.'),
+      onSuccess: () => toast.info('Gasto fijo cancelado.'),
       onError: (err) => toast.error(formatApiError(err, 'Error al cancelar.')),
     });
   }
@@ -109,13 +109,13 @@ export default function SubscriptionsPage() {
   function handleDelete(id: string) {
     if (
       !confirm(
-        'Eliminar esta subscripción. Si el patrón persiste, volverá a aparecer como pendiente en el próximo escaneo. ¿Continuar?',
+        'Eliminar este gasto fijo. Si el patrón persiste, volverá a aparecer como pendiente en el próximo escaneo. ¿Continuar?',
       )
     ) {
       return;
     }
     deleteMutation.mutate(id, {
-      onSuccess: () => toast.success('Subscripción eliminada.'),
+      onSuccess: () => toast.success('Gasto fijo eliminado.'),
       onError: (err) => toast.error(formatApiError(err, 'Error al eliminar.')),
     });
   }
@@ -162,7 +162,7 @@ export default function SubscriptionsPage() {
               lineHeight: 1.1,
             }}
           >
-            Subscripciones
+            Gastos fijos
           </h1>
           <p
             style={{
@@ -171,9 +171,10 @@ export default function SubscriptionsPage() {
               fontSize: fontSize.sm,
             }}
           >
-            Detectadas automáticamente a partir de tus transacciones
-            recurrentes (heurística local, sin enviar datos fuera del
-            equipo). El detector se ejecuta cada noche; pulsa
+            Gastos recurrentes con cantidad estable detectados a partir
+            de tus transacciones (suscripciones, hipotecas, préstamos,
+            cuotas de gym, seguros…). Heurística local — los datos no
+            salen del equipo. El detector se ejecuta cada noche; pulsa
             "Re-escanear" para forzar la detección ahora.
           </p>
         </div>
@@ -187,7 +188,7 @@ export default function SubscriptionsPage() {
       </header>
 
       <section style={{ marginBottom: spacing.xl }}>
-        <h2 style={sectionHeaderStyle}>Sugeridas (revisa y confirma)</h2>
+        <h2 style={sectionHeaderStyle}>Sugeridos (revisa y confirma)</h2>
         {pendingQuery.isLoading ? (
           <p style={{ color: colors.textMuted }}>Cargando…</p>
         ) : pending.length === 0 ? (
@@ -206,20 +207,20 @@ export default function SubscriptionsPage() {
           </Card>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
-            {pending.map((sub) => (
-              <SubscriptionCard
-                key={sub.id}
-                subscription={sub}
+            {pending.map((item) => (
+              <FixedExpenseCard
+                key={item.id}
+                fixedExpense={item}
                 categories={categories ?? []}
                 primaryAction={{
                   label: 'Confirmar',
-                  onClick: () => handleConfirm(sub.id),
-                  busy: confirmingId === sub.id,
+                  onClick: () => handleConfirm(item.id),
+                  busy: confirmingId === item.id,
                 }}
                 secondaryAction={{
                   label: 'Descartar',
-                  onClick: () => handleDismiss(sub.id),
-                  busy: dismissingId === sub.id,
+                  onClick: () => handleDismiss(item.id),
+                  busy: dismissingId === item.id,
                 }}
               />
             ))}
@@ -229,22 +230,22 @@ export default function SubscriptionsPage() {
 
       {confirmed.length > 0 ? (
         <section style={{ marginBottom: spacing.xl }}>
-          <h2 style={sectionHeaderStyle}>Confirmadas</h2>
+          <h2 style={sectionHeaderStyle}>Confirmados</h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
-            {confirmed.map((sub) => (
-              <SubscriptionCard
-                key={sub.id}
-                subscription={sub}
+            {confirmed.map((item) => (
+              <FixedExpenseCard
+                key={item.id}
+                fixedExpense={item}
                 categories={categories ?? []}
                 primaryAction={{
                   label: 'Pausar',
-                  onClick: () => handlePause(sub.id),
-                  busy: pausingId === sub.id,
+                  onClick: () => handlePause(item.id),
+                  busy: pausingId === item.id,
                 }}
                 secondaryAction={{
                   label: 'Cancelar',
-                  onClick: () => handleCancel(sub.id),
-                  busy: cancellingId === sub.id,
+                  onClick: () => handleCancel(item.id),
+                  busy: cancellingId === item.id,
                   danger: true,
                 }}
               />
@@ -255,22 +256,22 @@ export default function SubscriptionsPage() {
 
       {paused.length > 0 ? (
         <section style={{ marginBottom: spacing.xl }}>
-          <h2 style={sectionHeaderStyle}>Pausadas</h2>
+          <h2 style={sectionHeaderStyle}>Pausados</h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
-            {paused.map((sub) => (
-              <SubscriptionCard
-                key={sub.id}
-                subscription={sub}
+            {paused.map((item) => (
+              <FixedExpenseCard
+                key={item.id}
+                fixedExpense={item}
                 categories={categories ?? []}
                 primaryAction={{
                   label: 'Reanudar',
-                  onClick: () => handleResume(sub.id),
-                  busy: resumingId === sub.id,
+                  onClick: () => handleResume(item.id),
+                  busy: resumingId === item.id,
                 }}
                 secondaryAction={{
                   label: 'Cancelar',
-                  onClick: () => handleCancel(sub.id),
-                  busy: cancellingId === sub.id,
+                  onClick: () => handleCancel(item.id),
+                  busy: cancellingId === item.id,
                   danger: true,
                 }}
               />
@@ -290,7 +291,7 @@ export default function SubscriptionsPage() {
             <span aria-hidden style={{ fontSize: fontSize.xs }}>
               {showCancelled ? '▾' : '▸'}
             </span>
-            Canceladas ({cancelled.length})
+            Cancelados ({cancelled.length})
           </button>
           {showCancelled ? (
             <div
@@ -301,15 +302,15 @@ export default function SubscriptionsPage() {
                 marginTop: spacing.md,
               }}
             >
-              {cancelled.map((sub) => (
-                <SubscriptionCard
-                  key={sub.id}
-                  subscription={sub}
+              {cancelled.map((item) => (
+                <FixedExpenseCard
+                  key={item.id}
+                  fixedExpense={item}
                   categories={categories ?? []}
                   secondaryAction={{
                     label: 'Eliminar',
-                    onClick: () => handleDelete(sub.id),
-                    busy: deletingId === sub.id,
+                    onClick: () => handleDelete(item.id),
+                    busy: deletingId === item.id,
                     danger: true,
                   }}
                 />
@@ -330,7 +331,7 @@ export default function SubscriptionsPage() {
             <span aria-hidden style={{ fontSize: fontSize.xs }}>
               {showDismissed ? '▾' : '▸'}
             </span>
-            Descartadas ({dismissed.length})
+            Descartados ({dismissed.length})
           </button>
           {showDismissed ? (
             <div
@@ -341,20 +342,20 @@ export default function SubscriptionsPage() {
                 marginTop: spacing.md,
               }}
             >
-              {dismissed.map((sub) => (
-                <SubscriptionCard
-                  key={sub.id}
-                  subscription={sub}
+              {dismissed.map((item) => (
+                <FixedExpenseCard
+                  key={item.id}
+                  fixedExpense={item}
                   categories={categories ?? []}
                   primaryAction={{
                     label: 'Reactivar',
-                    onClick: () => handleReactivate(sub.id),
-                    busy: confirmingId === sub.id,
+                    onClick: () => handleReactivate(item.id),
+                    busy: confirmingId === item.id,
                   }}
                   secondaryAction={{
                     label: 'Eliminar',
-                    onClick: () => handleDelete(sub.id),
-                    busy: deletingId === sub.id,
+                    onClick: () => handleDelete(item.id),
+                    busy: deletingId === item.id,
                     danger: true,
                   }}
                 />

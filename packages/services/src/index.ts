@@ -13,9 +13,9 @@ export { transactionsApi } from './api/endpoints/transactions';
 export { dashboardApi } from './api/endpoints/dashboard';
 export { budgetsApi } from './api/endpoints/budgets';
 export {
-  subscriptionsApi,
-  type SubscriptionListQuery,
-} from './api/endpoints/subscriptions';
+  fixedExpensesApi,
+  type FixedExpenseListQuery,
+} from './api/endpoints/fixed-expenses';
 export { importsApi, type CreateImportPayload } from './api/endpoints/imports';
 export { receiptsApi } from './api/endpoints/receipts';
 export {
@@ -73,13 +73,13 @@ export {
   useDeleteBudget,
 } from './query/hooks/useBudgets';
 export {
-  useSubscriptions,
-  useSubscription,
-  useScanSubscriptions,
-  useConfirmSubscription,
-  useDismissSubscription,
-  useDeleteSubscription,
-  usePauseSubscription,
-  useResumeSubscription,
-  useCancelSubscription,
-} from './query/hooks/useSubscriptions';
+  useFixedExpenses,
+  useFixedExpense,
+  useScanFixedExpenses,
+  useConfirmFixedExpense,
+  useDismissFixedExpense,
+  useDeleteFixedExpense,
+  usePauseFixedExpense,
+  useResumeFixedExpense,
+  useCancelFixedExpense,
+} from './query/hooks/useFixedExpenses';

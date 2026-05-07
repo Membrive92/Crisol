@@ -26,6 +26,7 @@
 | `e4f7c91a8b3d` | 10.1 | `transactions.deleted_at` + partial index `ix_transactions_user_id_active` + recreado `uq_transactions_user_import_hash` con `AND deleted_at IS NULL`. |
 | `f8b3c91d4e22` | 12.1 | `budgets` (presupuestos mensuales por categoría) + índices por `user_id` y `category_id`. |
 | `c54e9b3a7d18` | 16   | `budgets.convert_other_currencies` (BOOLEAN, default FALSE) — opt-in para sumar gasto en otras monedas convertido. |
+| `d72f1a5e8b29` | 17.1 | rename `subscriptions` → `fixed_expenses` (tabla, índices, enum `subscriptionstatus` → `fixedexpensestatus`). |
 
 ---
 
@@ -145,7 +146,11 @@ Política "uno activo por (user, category)" se valida en service
 Sin unique constraint en BD por flexibilidad futura (overlapping
 budgets parciales / temporales).
 
-### `subscriptions` (`PHASE-13.1`)
+### `fixed_expenses` (`PHASE-13.1`, renombrado en `PHASE-17.1`)
+
+Antes `subscriptions`. Renombrado para reflejar que el área cubre
+cualquier gasto recurrente con cantidad estable (suscripciones,
+hipotecas, préstamos, gym, seguros…).
 
 | Columna | Tipo | Notas |
 |---------|------|-------|
@@ -157,7 +162,7 @@ budgets parciales / temporales).
 | `currency` | `CHAR(3)` | parte de la huella. |
 | `cadence_days` | `INTEGER` | 7 / 14 / 30 / 90 / 180 / 365 (canónico). Parte de la huella. |
 | `next_due` | `DATE` | `last_seen_at + cadence_days`. |
-| `status` | `ENUM('pending','confirmed','dismissed')` | tipo `subscriptionstatus`. Default `pending`. |
+| `status` | `ENUM('pending','confirmed','paused','cancelled','dismissed')` | tipo `fixedexpensestatus`. Default `pending`. |
 | `category_id` | `UUID` FK → `categories.id` `ON DELETE SET NULL` | sugerida (la más común entre los matches). |
 | `first_seen_at` / `last_seen_at` | `DATE` | rango observado del patrón. |
 | `occurrence_count` | `INTEGER` | nº de transacciones que matchean. |
@@ -165,9 +170,9 @@ budgets parciales / temporales).
 | `created_at` / `updated_at` | `TIMESTAMPTZ` | |
 
 **Índices**:
-- `ix_subscriptions_user_id`.
-- `ix_subscriptions_merchant`.
-- `ix_subscriptions_status`.
+- `ix_fixed_expenses_user_id`.
+- `ix_fixed_expenses_merchant`.
+- `ix_fixed_expenses_status`.
 
 Política de re-detección: el service busca por huella (merchant +
 amount + currency + cadence). Match → refresca datos derivados sin

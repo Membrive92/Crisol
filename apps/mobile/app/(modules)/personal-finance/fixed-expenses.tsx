@@ -4,41 +4,42 @@ import { Stack } from 'expo-router';
 
 import {
   formatApiError,
-  useCancelSubscription,
+  useCancelFixedExpense,
   useCategories,
-  useConfirmSubscription,
-  useDeleteSubscription,
-  useDismissSubscription,
-  usePauseSubscription,
-  useResumeSubscription,
-  useScanSubscriptions,
-  useSubscriptions,
+  useConfirmFixedExpense,
+  useDeleteFixedExpense,
+  useDismissFixedExpense,
+  useFixedExpenses,
+  usePauseFixedExpense,
+  useResumeFixedExpense,
+  useScanFixedExpenses,
 } from '@finanzas/services';
 import { toast } from '@finanzas/store';
 import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
 
-import { SubscriptionCard } from '../../../components/subscriptions/subscription-card';
+import { FixedExpenseCard } from '../../../components/fixed-expenses/fixed-expense-card';
 
 /**
- * Pantalla mobile de subscripciones (PHASE-13.3). Reusa hooks
- * shared de PHASE-13.2. Layout: header con descripción y botón
- * Re-escanear, sección Sugeridas (pendientes) con [Confirmar] /
- * [Descartar], sección Confirmadas con [Eliminar].
+ * Pantalla mobile de gastos fijos (PHASE-13.3, renombrado en PHASE-17.1).
+ * Reusa hooks shared. Layout: header con descripción y botón
+ * Re-escanear, sección Sugeridos (pendientes) con [Confirmar] /
+ * [Descartar], Confirmados con [Pausar]/[Cancelar], y secciones
+ * colapsables Cancelados/Descartados.
  */
-export default function SubscriptionsScreen() {
+export default function FixedExpensesScreen() {
   const { data: categories } = useCategories();
-  const pendingQuery = useSubscriptions({ status: 'pending' });
-  const confirmedQuery = useSubscriptions({ status: 'confirmed' });
-  const dismissedQuery = useSubscriptions({ status: 'dismissed' });
-  const pausedQuery = useSubscriptions({ status: 'paused' });
-  const cancelledQuery = useSubscriptions({ status: 'cancelled' });
-  const scanMutation = useScanSubscriptions();
-  const confirmMutation = useConfirmSubscription();
-  const dismissMutation = useDismissSubscription();
-  const pauseMutation = usePauseSubscription();
-  const resumeMutation = useResumeSubscription();
-  const cancelMutation = useCancelSubscription();
-  const deleteMutation = useDeleteSubscription();
+  const pendingQuery = useFixedExpenses({ status: 'pending' });
+  const confirmedQuery = useFixedExpenses({ status: 'confirmed' });
+  const dismissedQuery = useFixedExpenses({ status: 'dismissed' });
+  const pausedQuery = useFixedExpenses({ status: 'paused' });
+  const cancelledQuery = useFixedExpenses({ status: 'cancelled' });
+  const scanMutation = useScanFixedExpenses();
+  const confirmMutation = useConfirmFixedExpense();
+  const dismissMutation = useDismissFixedExpense();
+  const pauseMutation = usePauseFixedExpense();
+  const resumeMutation = useResumeFixedExpense();
+  const cancelMutation = useCancelFixedExpense();
+  const deleteMutation = useDeleteFixedExpense();
   const [showDismissed, setShowDismissed] = useState(false);
   const [showCancelled, setShowCancelled] = useState(false);
 
@@ -52,7 +53,7 @@ export default function SubscriptionsScreen() {
     scanMutation.mutate(undefined, {
       onSuccess: (res) =>
         toast.success(
-          `Re-escaneado: ${res.created} nuevas, ${res.updated} actualizadas.`,
+          `Re-escaneado: ${res.created} nuevos, ${res.updated} actualizados.`,
         ),
       onError: (err) => toast.error(formatApiError(err, 'Error al re-escanear.')),
     });
@@ -60,44 +61,44 @@ export default function SubscriptionsScreen() {
 
   function handleConfirm(id: string) {
     confirmMutation.mutate(id, {
-      onSuccess: () => toast.success('Subscripción confirmada.'),
+      onSuccess: () => toast.success('Gasto fijo confirmado.'),
       onError: (err) => toast.error(formatApiError(err, 'Error al confirmar.')),
     });
   }
 
   function handleReactivate(id: string) {
-    // PHASE-13.1: confirm sobre una dismissed la reactiva.
+    // PHASE-13.1: confirm sobre uno dismissed lo reactiva.
     confirmMutation.mutate(id, {
-      onSuccess: () => toast.success('Subscripción reactivada.'),
+      onSuccess: () => toast.success('Gasto fijo reactivado.'),
       onError: (err) => toast.error(formatApiError(err, 'Error al reactivar.')),
     });
   }
 
   function handleDismiss(id: string) {
     dismissMutation.mutate(id, {
-      onSuccess: () => toast.info('Descartada — no se volverá a sugerir.'),
+      onSuccess: () => toast.info('Descartado — no se volverá a sugerir.'),
       onError: (err) => toast.error(formatApiError(err, 'Error al descartar.')),
     });
   }
 
   function handlePause(id: string) {
     pauseMutation.mutate(id, {
-      onSuccess: () => toast.info('Subscripción pausada.'),
+      onSuccess: () => toast.info('Gasto fijo pausado.'),
       onError: (err) => toast.error(formatApiError(err, 'Error al pausar.')),
     });
   }
 
   function handleResume(id: string) {
     resumeMutation.mutate(id, {
-      onSuccess: () => toast.success('Subscripción reanudada.'),
+      onSuccess: () => toast.success('Gasto fijo reanudado.'),
       onError: (err) => toast.error(formatApiError(err, 'Error al reanudar.')),
     });
   }
 
   function handleCancel(id: string, label: string) {
     Alert.alert(
-      'Cancelar subscripción',
-      `Marca "${label}" como cancelada (ya no la tienes activa).`,
+      'Cancelar gasto fijo',
+      `Marca "${label}" como cancelado (ya no lo tienes activo).`,
       [
         { text: 'Volver', style: 'cancel' },
         {
@@ -105,7 +106,7 @@ export default function SubscriptionsScreen() {
           style: 'destructive',
           onPress: () =>
             cancelMutation.mutate(id, {
-              onSuccess: () => toast.info('Subscripción cancelada.'),
+              onSuccess: () => toast.info('Gasto fijo cancelado.'),
               onError: (err) =>
                 toast.error(formatApiError(err, 'Error al cancelar.')),
             }),
@@ -116,7 +117,7 @@ export default function SubscriptionsScreen() {
 
   function handleDelete(id: string, label: string) {
     Alert.alert(
-      'Eliminar subscripción',
+      'Eliminar gasto fijo',
       `"${label}" desaparecerá. Si el patrón persiste, volverá a aparecer como pendiente en el próximo escaneo.`,
       [
         { text: 'Cancelar', style: 'cancel' },
@@ -125,7 +126,7 @@ export default function SubscriptionsScreen() {
           style: 'destructive',
           onPress: () =>
             deleteMutation.mutate(id, {
-              onSuccess: () => toast.success('Subscripción eliminada.'),
+              onSuccess: () => toast.success('Gasto fijo eliminado.'),
               onError: (err) =>
                 toast.error(formatApiError(err, 'Error al eliminar.')),
             }),
@@ -155,12 +156,14 @@ export default function SubscriptionsScreen() {
 
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ title: 'Subscripciones' }} />
+      <Stack.Screen options={{ title: 'Gastos fijos' }} />
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.intro}>
-          Detectadas a partir de tus transacciones recurrentes (heurística
-          local, sin enviar datos fuera). El detector se ejecuta cada noche;
-          pulsa "Re-escanear" para forzarlo ahora.
+          Detectados a partir de tus transacciones recurrentes (heurística
+          local, sin enviar datos fuera). Suscripciones, hipotecas,
+          préstamos, gym, seguros — cualquier gasto con patrón estable.
+          El detector se ejecuta cada noche; pulsa "Re-escanear" para
+          forzarlo ahora.
         </Text>
 
         <Pressable
@@ -177,7 +180,7 @@ export default function SubscriptionsScreen() {
           </Text>
         </Pressable>
 
-        <Text style={styles.sectionHeading}>Sugeridas</Text>
+        <Text style={styles.sectionHeading}>Sugeridos</Text>
         {pendingQuery.isLoading ? (
           <Text style={styles.placeholder}>Cargando…</Text>
         ) : pending.length === 0 ? (
@@ -188,20 +191,20 @@ export default function SubscriptionsScreen() {
             </Text>
           </View>
         ) : (
-          pending.map((sub) => (
-            <SubscriptionCard
-              key={sub.id}
-              subscription={sub}
+          pending.map((item) => (
+            <FixedExpenseCard
+              key={item.id}
+              fixedExpense={item}
               categories={categories ?? []}
               primaryAction={{
                 label: 'Confirmar',
-                onPress: () => handleConfirm(sub.id),
-                busy: confirmingId === sub.id,
+                onPress: () => handleConfirm(item.id),
+                busy: confirmingId === item.id,
               }}
               secondaryAction={{
                 label: 'Descartar',
-                onPress: () => handleDismiss(sub.id),
-                busy: dismissingId === sub.id,
+                onPress: () => handleDismiss(item.id),
+                busy: dismissingId === item.id,
               }}
             />
           ))
@@ -210,22 +213,22 @@ export default function SubscriptionsScreen() {
         {confirmed.length > 0 ? (
           <>
             <Text style={[styles.sectionHeading, { marginTop: spacing.lg }]}>
-              Confirmadas
+              Confirmados
             </Text>
-            {confirmed.map((sub) => (
-              <SubscriptionCard
-                key={sub.id}
-                subscription={sub}
+            {confirmed.map((item) => (
+              <FixedExpenseCard
+                key={item.id}
+                fixedExpense={item}
                 categories={categories ?? []}
                 primaryAction={{
                   label: 'Pausar',
-                  onPress: () => handlePause(sub.id),
-                  busy: pausingId === sub.id,
+                  onPress: () => handlePause(item.id),
+                  busy: pausingId === item.id,
                 }}
                 secondaryAction={{
                   label: 'Cancelar',
-                  onPress: () => handleCancel(sub.id, sub.raw_description),
-                  busy: cancellingId === sub.id,
+                  onPress: () => handleCancel(item.id, item.raw_description),
+                  busy: cancellingId === item.id,
                   danger: true,
                 }}
               />
@@ -236,22 +239,22 @@ export default function SubscriptionsScreen() {
         {paused.length > 0 ? (
           <>
             <Text style={[styles.sectionHeading, { marginTop: spacing.lg }]}>
-              Pausadas
+              Pausados
             </Text>
-            {paused.map((sub) => (
-              <SubscriptionCard
-                key={sub.id}
-                subscription={sub}
+            {paused.map((item) => (
+              <FixedExpenseCard
+                key={item.id}
+                fixedExpense={item}
                 categories={categories ?? []}
                 primaryAction={{
                   label: 'Reanudar',
-                  onPress: () => handleResume(sub.id),
-                  busy: resumingId === sub.id,
+                  onPress: () => handleResume(item.id),
+                  busy: resumingId === item.id,
                 }}
                 secondaryAction={{
                   label: 'Cancelar',
-                  onPress: () => handleCancel(sub.id, sub.raw_description),
-                  busy: cancellingId === sub.id,
+                  onPress: () => handleCancel(item.id, item.raw_description),
+                  busy: cancellingId === item.id,
                   danger: true,
                 }}
               />
@@ -271,19 +274,19 @@ export default function SubscriptionsScreen() {
               accessibilityState={{ expanded: showCancelled }}
             >
               <Text style={styles.toggleText}>
-                {showCancelled ? '▾' : '▸'} Canceladas ({cancelled.length})
+                {showCancelled ? '▾' : '▸'} Cancelados ({cancelled.length})
               </Text>
             </Pressable>
             {showCancelled
-              ? cancelled.map((sub) => (
-                  <SubscriptionCard
-                    key={sub.id}
-                    subscription={sub}
+              ? cancelled.map((item) => (
+                  <FixedExpenseCard
+                    key={item.id}
+                    fixedExpense={item}
                     categories={categories ?? []}
                     secondaryAction={{
                       label: 'Eliminar',
-                      onPress: () => handleDelete(sub.id, sub.raw_description),
-                      busy: deletingId === sub.id,
+                      onPress: () => handleDelete(item.id, item.raw_description),
+                      busy: deletingId === item.id,
                       danger: true,
                     }}
                   />
@@ -304,24 +307,24 @@ export default function SubscriptionsScreen() {
               accessibilityState={{ expanded: showDismissed }}
             >
               <Text style={styles.toggleText}>
-                {showDismissed ? '▾' : '▸'} Descartadas ({dismissed.length})
+                {showDismissed ? '▾' : '▸'} Descartados ({dismissed.length})
               </Text>
             </Pressable>
             {showDismissed
-              ? dismissed.map((sub) => (
-                  <SubscriptionCard
-                    key={sub.id}
-                    subscription={sub}
+              ? dismissed.map((item) => (
+                  <FixedExpenseCard
+                    key={item.id}
+                    fixedExpense={item}
                     categories={categories ?? []}
                     primaryAction={{
                       label: 'Reactivar',
-                      onPress: () => handleReactivate(sub.id),
-                      busy: confirmingId === sub.id,
+                      onPress: () => handleReactivate(item.id),
+                      busy: confirmingId === item.id,
                     }}
                     secondaryAction={{
                       label: 'Eliminar',
-                      onPress: () => handleDelete(sub.id, sub.raw_description),
-                      busy: deletingId === sub.id,
+                      onPress: () => handleDelete(item.id, item.raw_description),
+                      busy: deletingId === item.id,
                       danger: true,
                     }}
                   />

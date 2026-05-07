@@ -26,7 +26,7 @@ interface Insight {
 /**
  * Tarjetas de insights calculados client-side a partir de los datos
  * reales del usuario. Sin mocks: si no hay datos suficientes, sólo se
- * muestra el placeholder de "Recurring Subscriptions" (próximamente).
+ * muestra el placeholder de "Gastos fijos recurrentes" (próximamente).
  */
 export function StitchSmartInsights({
   summary,
@@ -79,7 +79,7 @@ export function StitchSmartInsights({
           ))
         )}
         <ComingSoonRow
-          title="Subscripciones recurrentes"
+          title="Gastos fijos recurrentes"
           subtitle="Detección automática de cargos periódicos."
         />
       </div>
