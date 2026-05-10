@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from fastapi import status as http_status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.personal_finance.accounts.service import ensure_account_exists
 from app.modules.personal_finance.fixed_expenses import detector
 from app.modules.personal_finance.fixed_expenses.models import (
     FixedExpense,
@@ -154,9 +155,15 @@ async def update_fixed_expense(
     user_id: uuid.UUID,
     data: FixedExpenseUpdate,
 ) -> FixedExpense:
-    """Actualiza campos editables (`auto_post` por ahora)."""
+    """Actualiza campos editables (`auto_post`, `account_id`).
+
+    Si se incluye `account_id` no nulo, valida que pertenece al
+    usuario antes de asignarlo.
+    """
     item = await get_fixed_expense(db, fixed_expense_id, user_id)
     payload = data.model_dump(exclude_unset=True)
+    if "account_id" in payload and payload["account_id"] is not None:
+        await ensure_account_exists(db, payload["account_id"], user_id)
     for field, value in payload.items():
         setattr(item, field, value)
     await db.flush()
@@ -208,10 +215,17 @@ async def autopost_due_for_user(
     advanced = 0
     MAX_BACKFILL_CYCLES = 12
     for item in items:
+        # PHASE-19.1: el autopost necesita una cuenta para imputar la
+        # tx. Si el gasto fijo no la tiene asignada, lo saltamos
+        # silenciosamente — el frontend pinta un aviso para que el
+        # usuario lo configure.
+        if item.account_id is None:
+            continue
         cycles = 0
         while item.next_due <= today and cycles < MAX_BACKFILL_CYCLES:
             tx = Transaction(
                 user_id=user_id,
+                account_id=item.account_id,
                 category_id=item.category_id,
                 amount=item.amount,
                 currency=item.currency,

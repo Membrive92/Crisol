@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -7,8 +7,8 @@ import {
   View,
 } from 'react-native';
 
-import { useCategories } from '@finanzas/services';
-import type { ReceiptConfirmRequest, ReceiptExtraction } from '@finanzas/types';
+import { useAccounts, useCategories } from '@finanzas/services';
+import type { Account, ReceiptConfirmRequest, ReceiptExtraction } from '@finanzas/types';
 import {
   colors,
   fontSize,
@@ -30,6 +30,7 @@ export interface ReceiptCaptureFormProps {
 }
 
 interface FormValues {
+  account_id: string;
   amount: string;
   currency: string;
   occurred_at: string; // YYYY-MM-DD
@@ -43,10 +44,12 @@ function asString(value: unknown): string {
 
 function buildInitialValues(
   extraction: ReceiptExtraction | Record<string, unknown>,
+  defaultAccountId: string,
 ): FormValues {
   const ext = extraction as Record<string, unknown>;
   const occurred = asString(ext['occurred_at']);
   return {
+    account_id: defaultAccountId,
     amount: asString(ext['total']),
     currency: asString(ext['currency']) || 'EUR',
     occurred_at: occurred
@@ -65,8 +68,24 @@ export function ReceiptCaptureForm({
   onReject,
 }: ReceiptCaptureFormProps) {
   const { data: categories } = useCategories();
-  const [values, setValues] = useState<FormValues>(() => buildInitialValues(extraction));
+  // PHASE-19.1: el confirm de un ticket exige `account_id`. Pre-selecciona
+  // la primera activa; si el usuario no tiene ninguna mostramos warning
+  // y desactivamos el submit (el guard de onboarding debería haber evitado
+  // llegar aquí, pero defensivo).
+  const { data: accounts } = useAccounts();
+  const activeAccounts: Account[] = (accounts ?? []).filter((a) => !a.is_archived);
+  const defaultAccountId = activeAccounts[0]?.id ?? '';
+
+  const [values, setValues] = useState<FormValues>(() =>
+    buildInitialValues(extraction, defaultAccountId),
+  );
   const [validationError, setValidationError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!values.account_id && defaultAccountId) {
+      setValues((prev) => ({ ...prev, account_id: defaultAccountId }));
+    }
+  }, [defaultAccountId, values.account_id]);
 
   function handleChange<K extends keyof FormValues>(field: K, value: string) {
     setValues((prev) => ({ ...prev, [field]: value }));
@@ -75,6 +94,10 @@ export function ReceiptCaptureForm({
   function handleSubmit() {
     setValidationError(null);
 
+    if (!values.account_id) {
+      setValidationError('Selecciona una cuenta.');
+      return;
+    }
     const amount = values.amount.trim().replace(',', '.');
     if (!amount || Number.isNaN(Number(amount)) || Number(amount) <= 0) {
       setValidationError('Importe debe ser un número positivo');
@@ -91,6 +114,7 @@ export function ReceiptCaptureForm({
     }
 
     const payload: ReceiptConfirmRequest = {
+      account_id: values.account_id,
       amount,
       currency,
       occurred_at: fromDateInputValue(values.occurred_at),
@@ -100,12 +124,45 @@ export function ReceiptCaptureForm({
     onSubmit(payload);
   }
 
+  const noAccounts = activeAccounts.length === 0;
+
   return (
     <View>
       <Text style={styles.helper}>
         Edita los datos extraídos antes de confirmar — la transacción se crea
         con los valores definitivos.
       </Text>
+
+      <Text style={styles.label}>Cuenta</Text>
+      {noAccounts ? (
+        <Text style={styles.warning}>
+          No tienes cuentas activas. Crea una desde Análisis → Cuentas para
+          poder confirmar el ticket.
+        </Text>
+      ) : (
+        <View style={styles.categoryRow}>
+          {activeAccounts.map((a) => {
+            const active = values.account_id === a.id;
+            return (
+              <TouchableOpacity
+                key={a.id}
+                style={[styles.categoryChip, active && styles.categoryChipActive]}
+                onPress={() => handleChange('account_id', a.id)}
+              >
+                <Text
+                  style={[
+                    styles.categoryChipText,
+                    active && styles.categoryChipTextActive,
+                  ]}
+                >
+                  {a.icon ? `${a.icon} ` : ''}
+                  {a.name} ({a.currency})
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
 
       <Text style={styles.label}>Importe</Text>
       <TextInput
@@ -185,9 +242,9 @@ export function ReceiptCaptureForm({
 
       <View style={styles.buttonRow}>
         <TouchableOpacity
-          style={[styles.primaryButton, submitting && styles.disabled]}
+          style={[styles.primaryButton, (submitting || noAccounts) && styles.disabled]}
           onPress={handleSubmit}
-          disabled={submitting}
+          disabled={submitting || noAccounts}
         >
           <Text style={styles.primaryButtonText}>
             {submitting ? 'Guardando…' : 'Confirmar'}
@@ -255,6 +312,12 @@ const styles = StyleSheet.create({
   categoryChipTextActive: {
     color: colors.surface,
     fontWeight: fontWeight.semibold as '600',
+  },
+  warning: {
+    color: colors.warning,
+    fontSize: fontSize.sm,
+    marginBottom: spacing.sm,
+    lineHeight: 18,
   },
   error: {
     color: colors.danger,

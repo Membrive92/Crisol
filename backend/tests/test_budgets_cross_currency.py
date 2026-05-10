@@ -13,7 +13,7 @@ from app.modules.currency.models import ExchangeRate
 
 async def _setup_user(
     client: AsyncClient, email: str
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     r = await client.post(
         "/auth/register",
         json={"email": email, "password": "SecurePass123", "display_name": "Test"},
@@ -24,7 +24,12 @@ async def _setup_user(
         json={"name": "Comida", "kind": "expense"},
         headers={"Authorization": f"Bearer {token}"},
     )
-    return token, cat.json()["id"]
+    acc = await client.post(
+        "/accounts",
+        json={"name": "Cuenta principal", "type": "bank", "currency": "EUR"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    return token, cat.json()["id"], acc.json()["id"]
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -50,7 +55,7 @@ async def _seed_rate(test_engine, *, rate_date: date, quote: str, rate: str) -> 
 
 async def test_create_budget_with_cross_currency_flag(client: AsyncClient) -> None:
     """El flag se persiste y se devuelve en la respuesta."""
-    token, cat_id = await _setup_user(client, "ccb1@example.com")
+    token, cat_id, _ = await _setup_user(client, "ccb1@example.com")
     r = await client.post(
         "/budgets",
         json={
@@ -82,7 +87,7 @@ async def test_status_without_flag_ignores_other_currencies(
     client: AsyncClient,
 ) -> None:
     """Sin flag, una tx en USD no contribuye a un budget EUR."""
-    token, cat_id = await _setup_user(client, "ccb2@example.com")
+    token, cat_id, account_id = await _setup_user(client, "ccb2@example.com")
     await client.post(
         "/budgets",
         json={
@@ -98,6 +103,7 @@ async def test_status_without_flag_ignores_other_currencies(
     await client.post(
         "/transactions",
         json={
+            "account_id": account_id,
             "category_id": cat_id,
             "amount": "50.00",
             "currency": "USD",  # no es EUR
@@ -116,7 +122,7 @@ async def test_status_without_flag_ignores_other_currencies(
 
 async def test_status_with_flag_sums_converted(client: AsyncClient, test_engine) -> None:
     """Con flag, USD se convierte a EUR usando la tasa del día."""
-    token, cat_id = await _setup_user(client, "ccb3@example.com")
+    token, cat_id, account_id = await _setup_user(client, "ccb3@example.com")
     await client.post(
         "/budgets",
         json={
@@ -138,6 +144,7 @@ async def test_status_with_flag_sums_converted(client: AsyncClient, test_engine)
     await client.post(
         "/transactions",
         json={
+            "account_id": account_id,
             "category_id": cat_id,
             "amount": "50.00",
             "currency": "USD",
@@ -161,7 +168,7 @@ async def test_status_with_flag_reports_unconvertible(
 ) -> None:
     """Con flag, una tx en moneda exótica sin tasa se cuenta en
     unconvertible_count y NO se suma."""
-    token, cat_id = await _setup_user(client, "ccb4@example.com")
+    token, cat_id, account_id = await _setup_user(client, "ccb4@example.com")
     await client.post(
         "/budgets",
         json={
@@ -179,6 +186,7 @@ async def test_status_with_flag_reports_unconvertible(
     await client.post(
         "/transactions",
         json={
+            "account_id": account_id,
             "category_id": cat_id,
             "amount": "30.00",
             "currency": "EUR",
@@ -190,6 +198,7 @@ async def test_status_with_flag_reports_unconvertible(
     await client.post(
         "/transactions",
         json={
+            "account_id": account_id,
             "category_id": cat_id,
             "amount": "999.00",
             "currency": "XYZ",
@@ -208,7 +217,7 @@ async def test_status_with_flag_reports_unconvertible(
 
 async def test_update_can_toggle_flag(client: AsyncClient) -> None:
     """PUT puede activar/desactivar el flag."""
-    token, cat_id = await _setup_user(client, "ccb5@example.com")
+    token, cat_id, _ = await _setup_user(client, "ccb5@example.com")
     r = await client.post(
         "/budgets",
         json={
@@ -239,7 +248,7 @@ async def test_update_can_toggle_flag(client: AsyncClient) -> None:
 
 async def test_alert_respects_flag(client: AsyncClient, test_engine) -> None:
     """El alert proactivo (PHASE-14.5) usa el mismo flag que el status."""
-    token, cat_id = await _setup_user(client, "ccb6@example.com")
+    token, cat_id, account_id = await _setup_user(client, "ccb6@example.com")
     await client.post(
         "/budgets",
         json={
@@ -260,6 +269,7 @@ async def test_alert_respects_flag(client: AsyncClient, test_engine) -> None:
     r = await client.post(
         "/transactions",
         json={
+            "account_id": account_id,
             "category_id": cat_id,
             "amount": "100.00",
             "currency": "USD",

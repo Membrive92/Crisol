@@ -1,5 +1,7 @@
 'use client';
 
+import { useState } from 'react';
+
 import { formatApiError, useCategories, useUserCurrencies } from '@finanzas/services';
 import {
   useBudgetStatus,
@@ -16,6 +18,7 @@ import { BudgetForm } from '@/components/budgets/budget-form';
 import { BudgetRow } from '@/components/budgets/budget-row';
 import { BudgetStatusCard } from '@/components/budgets/budget-status-card';
 import { Card } from '@/components/ui/card';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 export default function BudgetsPage() {
   const { data: categories } = useCategories();
@@ -28,6 +31,7 @@ export default function BudgetsPage() {
 
   const budgets = budgetsQuery.data ?? [];
   const statusItems = statusQuery.data?.items ?? [];
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   function handleCreate(data: BudgetCreateRequest) {
     createMutation.mutate(data, {
@@ -38,13 +42,13 @@ export default function BudgetsPage() {
   }
 
   function handleDelete(id: string) {
-    if (
-      !confirm(
-        '¿Cerrar este presupuesto? Quedará archivado a partir de hoy y dejará de contarse en el estado.',
-      )
-    ) {
-      return;
-    }
+    setPendingDeleteId(id);
+  }
+
+  function confirmDelete() {
+    const id = pendingDeleteId;
+    if (!id) return;
+    setPendingDeleteId(null);
     deleteMutation.mutate(id, {
       onSuccess: () => toast.success('Presupuesto cerrado.'),
       onError: (err) =>
@@ -170,6 +174,18 @@ export default function BudgetsPage() {
           </Card>
         </section>
       ) : null}
+
+      <ConfirmDialog
+        open={pendingDeleteId !== null}
+        title="¿Cerrar este presupuesto?"
+        description="Quedará archivado a partir de hoy y dejará de contarse en el estado."
+        confirmLabel="Cerrar presupuesto"
+        cancelLabel="Atrás"
+        tone="danger"
+        loading={deleteMutation.isPending}
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDeleteId(null)}
+      />
     </div>
   );
 }

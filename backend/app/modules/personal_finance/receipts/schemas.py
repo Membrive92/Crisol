@@ -50,8 +50,12 @@ class ReceiptConfirmRequest(BaseModel):
 
     Se permite reemplazar los valores extraídos para corregir errores
     del modelo. La transacción se crea con estos valores definitivos.
+
+    PHASE-19.1: `account_id` es obligatorio — la transacción debe
+    imputarse a una cuenta del usuario.
     """
 
+    account_id: uuid.UUID
     amount: Decimal = Field(gt=0)
     occurred_at: datetime
     currency: str = Field(min_length=3, max_length=3)

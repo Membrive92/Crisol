@@ -25,6 +25,7 @@ class FixedExpenseResponse(BaseModel):
     next_due: date
     status: FixedExpenseStatus
     category_id: uuid.UUID | None
+    account_id: uuid.UUID | None
     first_seen_at: date
     last_seen_at: date
     occurrence_count: int
@@ -37,13 +38,15 @@ class FixedExpenseResponse(BaseModel):
 
 
 class FixedExpenseUpdate(BaseModel):
-    """Campos editables de un gasto fijo (PHASE-17.2).
+    """Campos editables de un gasto fijo (PHASE-17.2 + PHASE-19.1).
 
-    Por ahora sólo `auto_post` — el resto es derivado del detector
-    o lifecycle vía endpoints específicos (confirm/pause/cancel/...).
+    `auto_post` y `account_id` (la cuenta desde la que se cobra). El
+    resto se deriva del detector o se cambia vía endpoints específicos
+    (confirm/pause/cancel/...).
     """
 
     auto_post: bool | None = None
+    account_id: uuid.UUID | None = None
 
 
 class ScanResponse(BaseModel):

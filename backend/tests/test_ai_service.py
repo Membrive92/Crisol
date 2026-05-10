@@ -197,15 +197,41 @@ async def test_extract_bank_statement_page_invalid_json_raises() -> None:
         await ai_service.extract_bank_statement_page(b"fake")
 
 
-async def test_extract_bank_statement_page_negative_amount_rejected() -> None:
-    """El schema obliga a importes positivos: el modelo no debe colar negativos."""
+async def test_extract_bank_statement_page_filters_invalid_rows() -> None:
+    """Filas individuales inválidas (amount=0, negativos, fechas vacías) se
+    filtran en silencio para que una sola fila rara no aborte toda la
+    importación. Sólo la página completa malformada (no JSON, no objeto)
+    sigue lanzando AiInvalidOutputError."""
     response = json.dumps(
         {
             "rows": [
+                # válida
+                {"description": "Compra OK", "amount": "10.00", "occurred_at": "2026-04-01"},
+                # amount=0 → filtrada (e.g. categorías del desglose sin gasto)
+                {"description": "Categoría vacía", "amount": "0.00", "occurred_at": "2026-04-01"},
+                # negativo → filtrada (importes positivos por contrato)
                 {"description": "X", "amount": "-10", "occurred_at": "2026-04-01"},
+                # fecha vacía → filtrada
+                {"description": "Sin fecha", "amount": "5.00", "occurred_at": ""},
+                # válida
+                {"description": "Otra OK", "amount": "20.00", "occurred_at": "2026-04-02"},
             ]
         }
     )
+    with patch(
+        "app.modules.ai.client.generate_with_image",
+        new_callable=AsyncMock,
+        return_value=response,
+    ):
+        rows = await ai_service.extract_bank_statement_page(b"fake")
+
+    assert len(rows) == 2
+    assert [r.description for r in rows] == ["Compra OK", "Otra OK"]
+
+
+async def test_extract_bank_statement_page_top_level_invalid_raises() -> None:
+    """Si el JSON top-level no es un objeto con `rows`, sigue siendo error."""
+    response = json.dumps([1, 2, 3])  # lista en lugar de objeto
     with patch(
         "app.modules.ai.client.generate_with_image",
         new_callable=AsyncMock,

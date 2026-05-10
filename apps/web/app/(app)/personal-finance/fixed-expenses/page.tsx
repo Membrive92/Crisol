@@ -4,6 +4,7 @@ import { useState } from 'react';
 
 import {
   formatApiError,
+  useAccounts,
   useAutopostFixedExpenses,
   useCancelFixedExpense,
   useCategories,
@@ -22,9 +23,11 @@ import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
 import { FixedExpenseCard } from '@/components/fixed-expenses/fixed-expense-card';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 export default function FixedExpensesPage() {
   const { data: categories } = useCategories();
+  const { data: accounts } = useAccounts();
   const pendingQuery = useFixedExpenses({ status: 'pending' });
   const confirmedQuery = useFixedExpenses({ status: 'confirmed' });
   const pausedQuery = useFixedExpenses({ status: 'paused' });
@@ -41,6 +44,9 @@ export default function FixedExpensesPage() {
   const deleteMutation = useDeleteFixedExpense();
   const [showDismissed, setShowDismissed] = useState(false);
   const [showCancelled, setShowCancelled] = useState(false);
+  const [pendingAction, setPendingAction] = useState<
+    { kind: 'cancel' | 'delete'; id: string } | null
+  >(null);
 
   const pending = pendingQuery.data ?? [];
   const confirmed = confirmedQuery.data ?? [];
@@ -88,6 +94,22 @@ export default function FixedExpensesPage() {
     );
   }
 
+  function handleChangeAccount(id: string, accountId: string | null) {
+    updateMutation.mutate(
+      { id, data: { account_id: accountId } },
+      {
+        onSuccess: () =>
+          toast.success(
+            accountId
+              ? 'Cuenta de cobro actualizada.'
+              : 'Cuenta retirada — el autopost queda desactivado.',
+          ),
+        onError: (err) =>
+          toast.error(formatApiError(err, 'Error al cambiar la cuenta.')),
+      },
+    );
+  }
+
   function handleConfirm(id: string) {
     confirmMutation.mutate(id, {
       onSuccess: () => toast.success('Gasto fijo confirmado.'),
@@ -127,31 +149,28 @@ export default function FixedExpensesPage() {
   }
 
   function handleCancel(id: string) {
-    if (
-      !confirm(
-        'Marcar el gasto fijo como cancelado (ya no lo tienes activo). ¿Continuar?',
-      )
-    ) {
-      return;
-    }
-    cancelMutation.mutate(id, {
-      onSuccess: () => toast.info('Gasto fijo cancelado.'),
-      onError: (err) => toast.error(formatApiError(err, 'Error al cancelar.')),
-    });
+    setPendingAction({ kind: 'cancel', id });
   }
 
   function handleDelete(id: string) {
-    if (
-      !confirm(
-        'Eliminar este gasto fijo. Si el patrón persiste, volverá a aparecer como pendiente en el próximo escaneo. ¿Continuar?',
-      )
-    ) {
-      return;
+    setPendingAction({ kind: 'delete', id });
+  }
+
+  function confirmPendingAction() {
+    if (!pendingAction) return;
+    const { kind, id } = pendingAction;
+    setPendingAction(null);
+    if (kind === 'cancel') {
+      cancelMutation.mutate(id, {
+        onSuccess: () => toast.info('Gasto fijo cancelado.'),
+        onError: (err) => toast.error(formatApiError(err, 'Error al cancelar.')),
+      });
+    } else {
+      deleteMutation.mutate(id, {
+        onSuccess: () => toast.success('Gasto fijo eliminado.'),
+        onError: (err) => toast.error(formatApiError(err, 'Error al eliminar.')),
+      });
     }
-    deleteMutation.mutate(id, {
-      onSuccess: () => toast.success('Gasto fijo eliminado.'),
-      onError: (err) => toast.error(formatApiError(err, 'Error al eliminar.')),
-    });
   }
 
   const confirmingId = confirmMutation.isPending
@@ -280,8 +299,15 @@ export default function FixedExpensesPage() {
                 key={item.id}
                 fixedExpense={item}
                 categories={categories ?? []}
+                accounts={accounts ?? []}
                 onToggleAutoPost={handleToggleAutoPost}
                 autoPostBusy={
+                  updateMutation.isPending &&
+                  (updateMutation.variables as { id: string } | undefined)?.id ===
+                    item.id
+                }
+                onChangeAccount={handleChangeAccount}
+                accountBusy={
                   updateMutation.isPending &&
                   (updateMutation.variables as { id: string } | undefined)?.id ===
                     item.id
@@ -312,6 +338,13 @@ export default function FixedExpensesPage() {
                 key={item.id}
                 fixedExpense={item}
                 categories={categories ?? []}
+                accounts={accounts ?? []}
+                onChangeAccount={handleChangeAccount}
+                accountBusy={
+                  updateMutation.isPending &&
+                  (updateMutation.variables as { id: string } | undefined)?.id ===
+                    item.id
+                }
                 primaryAction={{
                   label: 'Reanudar',
                   onClick: () => handleResume(item.id),
@@ -413,6 +446,32 @@ export default function FixedExpensesPage() {
           ) : null}
         </section>
       ) : null}
+
+      <ConfirmDialog
+        open={pendingAction !== null}
+        title={
+          pendingAction?.kind === 'cancel'
+            ? '¿Cancelar gasto fijo?'
+            : '¿Eliminar gasto fijo?'
+        }
+        description={
+          pendingAction?.kind === 'cancel'
+            ? 'Quedará marcado como cancelado. Las transacciones existentes no se tocan.'
+            : 'Si el patrón persiste, volverá a aparecer como pendiente en el próximo escaneo.'
+        }
+        confirmLabel={
+          pendingAction?.kind === 'cancel' ? 'Cancelar gasto' : 'Eliminar'
+        }
+        cancelLabel="Atrás"
+        tone="danger"
+        loading={
+          pendingAction?.kind === 'cancel'
+            ? cancelMutation.isPending
+            : deleteMutation.isPending
+        }
+        onConfirm={confirmPendingAction}
+        onCancel={() => setPendingAction(null)}
+      />
     </div>
   );
 }

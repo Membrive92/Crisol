@@ -35,6 +35,7 @@ describe('importsApi', () => {
       type: 'text/csv',
     });
     await importsApi.create({
+      accountId: 'acc-1',
       file,
       columnMappings: {
         amount: 'amount',
@@ -67,6 +68,7 @@ describe('importsApi', () => {
 
     const file = new File(['x'], 'x.csv', { type: 'text/csv' });
     await importsApi.create({
+      accountId: 'acc-1',
       file,
       columnMappings: { amount: 'a', occurred_at: 'b' },
       currency: 'USD',
@@ -75,5 +77,62 @@ describe('importsApi', () => {
     const formData = spy.mock.calls[0]?.[1] as FormData;
     expect(formData.get('default_category_id')).toBeNull();
     expect(formData.get('currency')).toBe('USD');
+  });
+
+  it('preview envía multipart al endpoint /imports/preview', async () => {
+    const spy = vi.spyOn(apiClient, 'post').mockResolvedValue({
+      data: {
+        job_id: 'job-1',
+        source: 'csv',
+        total_rows: 0,
+        rows: [],
+      },
+    });
+
+    const file = new File(['x'], 'x.csv', { type: 'text/csv' });
+    await importsApi.preview({
+      accountId: 'acc-1',
+      file,
+      columnMappings: { amount: 'a', occurred_at: 'b' },
+      currency: 'EUR',
+    });
+
+    const [path, body] = spy.mock.calls[0]!;
+    expect(path).toBe('/imports/preview');
+    expect(body).toBeInstanceOf(FormData);
+    const formData = body as FormData;
+    expect(formData.get('file')).toBe(file);
+    // force_vision se omite si no se pide
+    expect(formData.get('force_vision')).toBeNull();
+  });
+
+  it('preview con forceVision añade el flag al multipart', async () => {
+    const spy = vi.spyOn(apiClient, 'post').mockResolvedValue({
+      data: { job_id: 'job-1', source: 'vision', total_rows: 0, rows: [] },
+    });
+
+    const file = new File(['x'], 'x.pdf', { type: 'application/pdf' });
+    await importsApi.preview({
+      accountId: 'acc-1',
+      file,
+      columnMappings: { amount: 'a', occurred_at: 'b' },
+      currency: 'EUR',
+      forceVision: true,
+    });
+
+    const formData = spy.mock.calls[0]?.[1] as FormData;
+    expect(formData.get('force_vision')).toBe('true');
+  });
+
+  it('commit POSTea a /imports/{id}/commit con timeout extendido', async () => {
+    const spy = vi.spyOn(apiClient, 'post').mockResolvedValue({ data: { id: 'job-1' } });
+
+    await importsApi.commit('job-1');
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    const [path, body, config] = spy.mock.calls[0]!;
+    expect(path).toBe('/imports/job-1/commit');
+    expect(body).toBeUndefined();
+    expect((config as { timeout?: number } | undefined)?.timeout).toBeGreaterThan(15_000);
   });
 });

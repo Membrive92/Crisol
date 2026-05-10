@@ -6,6 +6,7 @@ import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
 const STATUS_LABEL: Record<ImportJobStatus, string> = {
   pending: 'Pendiente',
   processing: 'Procesando',
+  preview: 'En revisión',
   completed: 'Completado',
   failed: 'Fallido',
 };
@@ -13,6 +14,7 @@ const STATUS_LABEL: Record<ImportJobStatus, string> = {
 const STATUS_COLOR: Record<ImportJobStatus, { bg: string; fg: string }> = {
   pending: { bg: colors.surfaceMuted, fg: colors.textMuted },
   processing: { bg: colors.primarySoft, fg: colors.primary },
+  preview: { bg: colors.primarySoft, fg: colors.primary },
   completed: { bg: colors.successSoft, fg: colors.success },
   failed: { bg: colors.dangerSoft, fg: colors.danger },
 };

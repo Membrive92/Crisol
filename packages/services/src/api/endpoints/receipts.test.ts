@@ -50,6 +50,7 @@ describe('receiptsApi', () => {
     const spy = vi.spyOn(apiClient, 'post').mockResolvedValue({ data: { id: 'r1' } });
 
     await receiptsApi.confirm('r1', {
+      account_id: 'acc-1',
       amount: '10.00',
       occurred_at: '2026-04-15T00:00:00Z',
       currency: 'EUR',

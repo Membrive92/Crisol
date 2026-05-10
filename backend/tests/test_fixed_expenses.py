@@ -114,7 +114,7 @@ def test_detect_picks_yearly_cadence() -> None:
 
 async def _setup_user(
     client: AsyncClient, email: str = "sub@example.com"
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     r = await client.post(
         "/auth/register",
         json={"email": email, "password": "SecurePass123", "display_name": "Test"},
@@ -125,7 +125,12 @@ async def _setup_user(
         json={"name": "Streaming", "kind": "expense"},
         headers={"Authorization": f"Bearer {token}"},
     )
-    return token, cat.json()["id"]
+    acc = await client.post(
+        "/accounts",
+        json={"name": "Cuenta principal", "type": "bank", "currency": "EUR"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    return token, cat.json()["id"], acc.json()["id"]
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -136,6 +141,7 @@ async def _insert_recurring(
     client: AsyncClient,
     token: str,
     cat_id: str,
+    account_id: str,
     *,
     description: str = "NETFLIX.COM",
     amount: str = "12.99",
@@ -149,6 +155,7 @@ async def _insert_recurring(
         await client.post(
             "/transactions",
             json={
+                "account_id": account_id,
                 "category_id": cat_id,
                 "amount": amount,
                 "currency": "EUR",
@@ -162,8 +169,8 @@ async def _insert_recurring(
 async def test_scan_creates_pending_fixed_expense_from_recurring_txs(
     client: AsyncClient,
 ) -> None:
-    token, cat_id = await _setup_user(client, "sub1@example.com")
-    await _insert_recurring(client, token, cat_id, months_back=4)
+    token, cat_id, account_id = await _setup_user(client, "sub1@example.com")
+    await _insert_recurring(client, token, cat_id, account_id, months_back=4)
 
     r = await client.post("/fixed-expenses/scan", headers=_auth(token))
     assert r.status_code == 200
@@ -186,8 +193,8 @@ async def test_scan_refreshes_existing_fixed_expense_without_duplicating(
     client: AsyncClient,
 ) -> None:
     """Re-ejecutar scan no crea duplicado si la huella coincide."""
-    token, cat_id = await _setup_user(client, "sub2@example.com")
-    await _insert_recurring(client, token, cat_id, months_back=4)
+    token, cat_id, account_id = await _setup_user(client, "sub2@example.com")
+    await _insert_recurring(client, token, cat_id, account_id, months_back=4)
     await client.post("/fixed-expenses/scan", headers=_auth(token))
 
     # Inserto otra ocurrencia (la del mes que viene → sigue siendo el
@@ -196,6 +203,7 @@ async def test_scan_refreshes_existing_fixed_expense_without_duplicating(
     await client.post(
         "/transactions",
         json={
+            "account_id": account_id,
             "category_id": cat_id,
             "amount": "12.99",
             "currency": "EUR",
@@ -220,8 +228,8 @@ async def test_dismiss_prevents_re_suggestion(client: AsyncClient) -> None:
     """Un gasto fijo dismissed sigue ahí pero no vuelve a aparecer
     como pending tras un nuevo scan (porque su fingerprint matchea y
     sólo se refresca sin tocar status)."""
-    token, cat_id = await _setup_user(client, "sub3@example.com")
-    await _insert_recurring(client, token, cat_id, months_back=4)
+    token, cat_id, account_id = await _setup_user(client, "sub3@example.com")
+    await _insert_recurring(client, token, cat_id, account_id, months_back=4)
     await client.post("/fixed-expenses/scan", headers=_auth(token))
 
     r_list = await client.get("/fixed-expenses", headers=_auth(token))
@@ -242,8 +250,8 @@ async def test_dismiss_prevents_re_suggestion(client: AsyncClient) -> None:
 
 
 async def test_confirm_sets_status_to_confirmed(client: AsyncClient) -> None:
-    token, cat_id = await _setup_user(client, "sub4@example.com")
-    await _insert_recurring(client, token, cat_id, months_back=4)
+    token, cat_id, account_id = await _setup_user(client, "sub4@example.com")
+    await _insert_recurring(client, token, cat_id, account_id, months_back=4)
     await client.post("/fixed-expenses/scan", headers=_auth(token))
     sid = (await client.get("/fixed-expenses", headers=_auth(token))).json()[0]["id"]
 
@@ -252,10 +260,10 @@ async def test_confirm_sets_status_to_confirmed(client: AsyncClient) -> None:
 
 
 async def test_user_isolation(client: AsyncClient) -> None:
-    token_a, cat_a = await _setup_user(client, "subA@example.com")
-    token_b, _ = await _setup_user(client, "subB@example.com")
+    token_a, cat_a, account_a = await _setup_user(client, "subA@example.com")
+    token_b, _, _ = await _setup_user(client, "subB@example.com")
 
-    await _insert_recurring(client, token_a, cat_a, months_back=4)
+    await _insert_recurring(client, token_a, cat_a, account_a, months_back=4)
     await client.post("/fixed-expenses/scan", headers=_auth(token_a))
 
     # B no ve el gasto fijo de A.
@@ -268,8 +276,8 @@ async def test_user_isolation(client: AsyncClient) -> None:
 
 
 async def test_delete_purges_fixed_expense(client: AsyncClient) -> None:
-    token, cat_id = await _setup_user(client, "sub5@example.com")
-    await _insert_recurring(client, token, cat_id, months_back=4)
+    token, cat_id, account_id = await _setup_user(client, "sub5@example.com")
+    await _insert_recurring(client, token, cat_id, account_id, months_back=4)
     await client.post("/fixed-expenses/scan", headers=_auth(token))
     sid = (await client.get("/fixed-expenses", headers=_auth(token))).json()[0]["id"]
 

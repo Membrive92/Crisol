@@ -7,8 +7,11 @@ from datetime import date
 from httpx import AsyncClient
 
 
-async def _setup_user(client: AsyncClient, email: str = "bg@example.com") -> tuple[str, str]:
-    """Helper: registra, crea categoría de gasto, devuelve (token, category_id)."""
+async def _setup_user(
+    client: AsyncClient, email: str = "bg@example.com"
+) -> tuple[str, str, str]:
+    """Helper: registra, crea categoría de gasto y cuenta, devuelve
+    (token, category_id, account_id)."""
     r = await client.post(
         "/auth/register",
         json={"email": email, "password": "SecurePass123", "display_name": "Test"},
@@ -19,7 +22,12 @@ async def _setup_user(client: AsyncClient, email: str = "bg@example.com") -> tup
         json={"name": "Comida", "kind": "expense"},
         headers={"Authorization": f"Bearer {token}"},
     )
-    return token, cat.json()["id"]
+    acc = await client.post(
+        "/accounts",
+        json={"name": "Cuenta principal", "type": "bank", "currency": "EUR"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    return token, cat.json()["id"], acc.json()["id"]
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -27,7 +35,7 @@ def _auth(token: str) -> dict[str, str]:
 
 
 async def test_create_and_list_budget(client: AsyncClient) -> None:
-    token, cat_id = await _setup_user(client, "bg1@example.com")
+    token, cat_id, _ = await _setup_user(client, "bg1@example.com")
     r = await client.post(
         "/budgets",
         json={
@@ -51,7 +59,7 @@ async def test_create_and_list_budget(client: AsyncClient) -> None:
 
 async def test_create_blocks_duplicate_active(client: AsyncClient) -> None:
     """No puede haber dos presupuestos activos para la misma categoría."""
-    token, cat_id = await _setup_user(client, "bg2@example.com")
+    token, cat_id, _ = await _setup_user(client, "bg2@example.com")
     payload = {
         "category_id": cat_id,
         "amount": "300.00",
@@ -65,7 +73,7 @@ async def test_create_blocks_duplicate_active(client: AsyncClient) -> None:
 
 async def test_global_budget_distinct_from_category(client: AsyncClient) -> None:
     """Un budget global (sin categoría) no choca con uno por categoría."""
-    token, cat_id = await _setup_user(client, "bg3@example.com")
+    token, cat_id, _ = await _setup_user(client, "bg3@example.com")
     await client.post(
         "/budgets",
         json={
@@ -86,7 +94,7 @@ async def test_global_budget_distinct_from_category(client: AsyncClient) -> None
 
 
 async def test_update_amount_and_currency(client: AsyncClient) -> None:
-    token, cat_id = await _setup_user(client, "bg4@example.com")
+    token, cat_id, _ = await _setup_user(client, "bg4@example.com")
     r = await client.post(
         "/budgets",
         json={
@@ -111,7 +119,7 @@ async def test_update_amount_and_currency(client: AsyncClient) -> None:
 
 async def test_delete_closes_budget(client: AsyncClient) -> None:
     """DELETE inicial cierra (effective_to=today)."""
-    token, cat_id = await _setup_user(client, "bg5@example.com")
+    token, cat_id, _ = await _setup_user(client, "bg5@example.com")
     r = await client.post(
         "/budgets",
         json={
@@ -137,8 +145,8 @@ async def test_delete_closes_budget(client: AsyncClient) -> None:
 
 async def test_user_isolation(client: AsyncClient) -> None:
     """User A no ve / no toca budgets de User B."""
-    token_a, cat_a = await _setup_user(client, "bgA@example.com")
-    token_b, _ = await _setup_user(client, "bgB@example.com")
+    token_a, cat_a, _ = await _setup_user(client, "bgA@example.com")
+    token_b, _, _ = await _setup_user(client, "bgB@example.com")
 
     r = await client.post(
         "/budgets",
@@ -163,7 +171,7 @@ async def test_user_isolation(client: AsyncClient) -> None:
 
 async def test_status_no_transactions(client: AsyncClient) -> None:
     """Sin transacciones, spent=0 y status=ok."""
-    token, cat_id = await _setup_user(client, "bgst1@example.com")
+    token, cat_id, _ = await _setup_user(client, "bgst1@example.com")
     await client.post(
         "/budgets",
         json={
@@ -187,7 +195,7 @@ async def test_status_no_transactions(client: AsyncClient) -> None:
 
 async def test_status_warning_and_over(client: AsyncClient) -> None:
     """Spent > 80% del budget → warning; > 100% → over."""
-    token, cat_id = await _setup_user(client, "bgst2@example.com")
+    token, cat_id, account_id = await _setup_user(client, "bgst2@example.com")
     await client.post(
         "/budgets",
         json={
@@ -204,6 +212,7 @@ async def test_status_warning_and_over(client: AsyncClient) -> None:
     await client.post(
         "/transactions",
         json={
+            "account_id": account_id,
             "category_id": cat_id,
             "amount": "90.00",
             "currency": "EUR",
@@ -221,6 +230,7 @@ async def test_status_warning_and_over(client: AsyncClient) -> None:
     await client.post(
         "/transactions",
         json={
+            "account_id": account_id,
             "category_id": cat_id,
             "amount": "50.00",
             "currency": "EUR",
@@ -238,7 +248,7 @@ async def test_status_warning_and_over(client: AsyncClient) -> None:
 
 async def test_status_global_budget_sums_all_expense_categories(client: AsyncClient) -> None:
     """Budget global (category_id=null) suma todos los gastos del mes."""
-    token, cat_id = await _setup_user(client, "bgst3@example.com")
+    token, cat_id, account_id = await _setup_user(client, "bgst3@example.com")
     cat2 = await client.post(
         "/categories",
         json={"name": "Transporte", "kind": "expense"},
@@ -256,6 +266,7 @@ async def test_status_global_budget_sums_all_expense_categories(client: AsyncCli
     await client.post(
         "/transactions",
         json={
+            "account_id": account_id,
             "category_id": cat_id,
             "amount": "100.00",
             "currency": "EUR",
@@ -266,6 +277,7 @@ async def test_status_global_budget_sums_all_expense_categories(client: AsyncCli
     await client.post(
         "/transactions",
         json={
+            "account_id": account_id,
             "category_id": cat2_id,
             "amount": "150.00",
             "currency": "EUR",
@@ -283,7 +295,7 @@ async def test_status_global_budget_sums_all_expense_categories(client: AsyncCli
 
 async def test_status_excludes_soft_deleted(client: AsyncClient) -> None:
     """Una transacción trasheada (PHASE-10.1) no debe contar."""
-    token, cat_id = await _setup_user(client, "bgst4@example.com")
+    token, cat_id, account_id = await _setup_user(client, "bgst4@example.com")
     await client.post(
         "/budgets",
         json={
@@ -299,6 +311,7 @@ async def test_status_excludes_soft_deleted(client: AsyncClient) -> None:
     r_tx = await client.post(
         "/transactions",
         json={
+            "account_id": account_id,
             "category_id": cat_id,
             "amount": "60.00",
             "currency": "EUR",

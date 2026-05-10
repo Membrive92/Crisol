@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 
 import { useAuthStore } from '@finanzas/store';
-import { authApi } from '@finanzas/services';
+import { authApi, useAccounts } from '@finanzas/services';
 import { DEFAULT_MODULE_ID, findModuleByPath, getModule } from '@finanzas/types';
 import { colors, spacing } from '@finanzas/ui';
 
@@ -244,12 +244,41 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         }}
       >
         <PasskeyPrompt />
-        {children}
+        <AccountsGuard>{children}</AccountsGuard>
       </main>
 
       <Toaster />
     </div>
   );
+}
+
+/**
+ * PHASE-19.1: bloquea el render del módulo hasta confirmar que el
+ * usuario tiene al menos una cuenta. Si la lista está vacía empuja a
+ * `/onboarding/accounts`. Vive en un sub-componente para que `useAccounts`
+ * sólo se monte cuando el bootstrap de auth ya pasó (el padre devuelve
+ * `null` antes de eso, así que aquí siempre hay sesión).
+ */
+function AccountsGuard({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  const { data, isLoading, isError } = useAccounts();
+
+  useEffect(() => {
+    if (isLoading) return;
+    // Si la query falla (red caída, 5xx) no redirigimos — sería peor
+    // dejar al usuario atrapado en onboarding. El children pintará su
+    // propio estado de error.
+    if (isError) return;
+    if ((data ?? []).length === 0) {
+      router.replace('/onboarding/accounts');
+    }
+  }, [data, isError, isLoading, router]);
+
+  // Mientras la query no resuelve no pintamos children — evita el flash
+  // del módulo vacío antes de redirigir al onboarding.
+  if (isLoading) return null;
+  if (!isError && (data ?? []).length === 0) return null;
+  return <>{children}</>;
 }
 
 function IconButton({

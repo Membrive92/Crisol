@@ -1,4 +1,5 @@
-import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Stack } from 'expo-router';
 
 import {
@@ -17,6 +18,8 @@ import {
   radius,
   spacing,
 } from '@finanzas/ui';
+
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 function findCategory(categories: Category[], id: string | null): Category | undefined {
   if (!id) return undefined;
@@ -53,20 +56,17 @@ export default function TrashScreen() {
     : purgeMutation.isPending
       ? (purgeMutation.variables as string)
       : null;
+  const [pendingPurgeId, setPendingPurgeId] = useState<string | null>(null);
 
   function handlePurge(id: string) {
-    Alert.alert(
-      'Eliminar permanente',
-      'Esta acción no se puede deshacer. ¿Continuar?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: () => purgeMutation.mutate(id),
-        },
-      ],
-    );
+    setPendingPurgeId(id);
+  }
+
+  function confirmPurge() {
+    const id = pendingPurgeId;
+    if (!id) return;
+    setPendingPurgeId(null);
+    purgeMutation.mutate(id);
   }
 
   function renderItem({ item }: { item: Transaction }) {
@@ -152,6 +152,17 @@ export default function TrashScreen() {
           Error al actualizar la papelera. Reintenta.
         </Text>
       )}
+
+      <ConfirmDialog
+        open={pendingPurgeId !== null}
+        title="¿Eliminar permanentemente?"
+        description="Esta acción no se puede deshacer. La transacción se borrará para siempre."
+        confirmLabel="Eliminar para siempre"
+        tone="danger"
+        loading={purgeMutation.isPending}
+        onConfirm={confirmPurge}
+        onCancel={() => setPendingPurgeId(null)}
+      />
     </View>
   );
 }

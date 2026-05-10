@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 
 import { useConfirmReceipt, useReceipt, useRejectReceipt } from '@finanzas/services';
@@ -15,6 +16,7 @@ import { ReceiptImage } from '@/components/receipts/receipt-image';
 import { ReceiptStatusBadge } from '@/components/receipts/status-badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 export default function ReceiptDetailPage() {
   const params = useParams<{ id: string }>();
@@ -24,6 +26,7 @@ export default function ReceiptDetailPage() {
   const { data: receipt, isLoading, isError, error } = useReceipt(id);
   const confirmMutation = useConfirmReceipt(id ?? '');
   const rejectMutation = useRejectReceipt(id ?? '');
+  const [confirmingReject, setConfirmingReject] = useState(false);
 
   function handleConfirm(payload: ReceiptConfirmRequest) {
     if (!receipt) return;
@@ -44,7 +47,12 @@ export default function ReceiptDetailPage() {
 
   function handleReject() {
     if (!receipt) return;
-    if (!confirm('¿Rechazar este ticket? La transacción no se creará.')) return;
+    setConfirmingReject(true);
+  }
+
+  function confirmReject() {
+    if (!receipt) return;
+    setConfirmingReject(false);
     rejectMutation.mutate(undefined, {
       onSuccess: () => {
         toast.info('Ticket rechazado.');
@@ -121,6 +129,18 @@ export default function ReceiptDetailPage() {
           <p style={{ color: colors.textMuted }}>Recibo no encontrado.</p>
         )}
       </Card>
+
+      <ConfirmDialog
+        open={confirmingReject}
+        title="¿Rechazar este ticket?"
+        description="La transacción no se creará y el ticket quedará marcado como rechazado."
+        confirmLabel="Rechazar"
+        cancelLabel="Atrás"
+        tone="danger"
+        loading={rejectMutation.isPending}
+        onConfirm={confirmReject}
+        onCancel={() => setConfirmingReject(false)}
+      />
     </div>
   );
 }

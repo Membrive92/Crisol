@@ -15,7 +15,9 @@ from __future__ import annotations
 from httpx import AsyncClient
 
 
-async def _setup_user(client: AsyncClient, email: str = "soft@example.com") -> tuple[str, str]:
+async def _setup_user(
+    client: AsyncClient, email: str = "soft@example.com"
+) -> tuple[str, str, str]:
     r = await client.post(
         "/auth/register",
         json={"email": email, "password": "SecurePass123", "display_name": "Test"},
@@ -26,7 +28,12 @@ async def _setup_user(client: AsyncClient, email: str = "soft@example.com") -> t
         json={"name": "General", "kind": "expense"},
         headers={"Authorization": f"Bearer {token}"},
     )
-    return token, cat.json()["id"]
+    acc = await client.post(
+        "/accounts",
+        json={"name": "Cuenta principal", "type": "bank", "currency": "EUR"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    return token, cat.json()["id"], acc.json()["id"]
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -36,13 +43,18 @@ def _auth(token: str) -> dict[str, str]:
 async def _create_tx(
     client: AsyncClient,
     token: str,
+    account_id: str,
     *,
     cat_id: str | None = None,
     amount: str = "10.00",
     when: str = "2026-04-15T12:00:00Z",
     description: str | None = None,
 ) -> str:
-    body: dict[str, str | None] = {"amount": amount, "occurred_at": when}
+    body: dict[str, str | None] = {
+        "account_id": account_id,
+        "amount": amount,
+        "occurred_at": when,
+    }
     if cat_id is not None:
         body["category_id"] = cat_id
     if description is not None:
@@ -53,8 +65,8 @@ async def _create_tx(
 
 
 async def test_delete_moves_to_trash_not_destructive(client: AsyncClient) -> None:
-    token, cat_id = await _setup_user(client, "soft1@example.com")
-    tx_id = await _create_tx(client, token, cat_id=cat_id)
+    token, cat_id, account_id = await _setup_user(client, "soft1@example.com")
+    tx_id = await _create_tx(client, token, account_id, cat_id=cat_id)
 
     # DELETE devuelve 204 igual que antes.
     r = await client.delete(f"/transactions/{tx_id}", headers=_auth(token))
@@ -77,8 +89,8 @@ async def test_delete_moves_to_trash_not_destructive(client: AsyncClient) -> Non
 
 
 async def test_restore_returns_to_active(client: AsyncClient) -> None:
-    token, cat_id = await _setup_user(client, "soft2@example.com")
-    tx_id = await _create_tx(client, token, cat_id=cat_id)
+    token, cat_id, account_id = await _setup_user(client, "soft2@example.com")
+    tx_id = await _create_tx(client, token, account_id, cat_id=cat_id)
     await client.delete(f"/transactions/{tx_id}", headers=_auth(token))
 
     r = await client.post(f"/transactions/{tx_id}/restore", headers=_auth(token))
@@ -91,16 +103,16 @@ async def test_restore_returns_to_active(client: AsyncClient) -> None:
 
 async def test_restore_404_when_active(client: AsyncClient) -> None:
     """Restaurar una activa o inexistente devuelve 404, no no-op silencioso."""
-    token, cat_id = await _setup_user(client, "soft3@example.com")
-    tx_id = await _create_tx(client, token, cat_id=cat_id)
+    token, cat_id, account_id = await _setup_user(client, "soft3@example.com")
+    tx_id = await _create_tx(client, token, account_id, cat_id=cat_id)
 
     r = await client.post(f"/transactions/{tx_id}/restore", headers=_auth(token))
     assert r.status_code == 404
 
 
 async def test_purge_only_works_on_trashed(client: AsyncClient) -> None:
-    token, cat_id = await _setup_user(client, "soft4@example.com")
-    tx_id = await _create_tx(client, token, cat_id=cat_id)
+    token, cat_id, account_id = await _setup_user(client, "soft4@example.com")
+    tx_id = await _create_tx(client, token, account_id, cat_id=cat_id)
 
     # Activa → purge debe ser 404 (forzar pasar por papelera primero).
     r_active = await client.delete(
@@ -128,10 +140,10 @@ async def test_purge_only_works_on_trashed(client: AsyncClient) -> None:
 
 async def test_trash_user_isolation(client: AsyncClient) -> None:
     """User A no puede listar/restaurar/purgar la papelera de User B."""
-    token_a, cat_a = await _setup_user(client, "softA@example.com")
-    token_b, _ = await _setup_user(client, "softB@example.com")
+    token_a, cat_a, account_a = await _setup_user(client, "softA@example.com")
+    token_b, _, _ = await _setup_user(client, "softB@example.com")
 
-    tx_a = await _create_tx(client, token_a, cat_id=cat_a, description="A trashed")
+    tx_a = await _create_tx(client, token_a, account_a, cat_id=cat_a, description="A trashed")
     await client.delete(f"/transactions/{tx_a}", headers=_auth(token_a))
 
     # B no ve la papelera de A.
@@ -153,9 +165,9 @@ async def test_trash_user_isolation(client: AsyncClient) -> None:
 
 async def test_trash_ordered_by_deleted_at_desc(client: AsyncClient) -> None:
     """La papelera devuelve los más recientes primero."""
-    token, cat = await _setup_user(client, "softorder@example.com")
-    tx_old = await _create_tx(client, token, cat_id=cat, description="vieja")
-    tx_new = await _create_tx(client, token, cat_id=cat, description="nueva")
+    token, cat, account_id = await _setup_user(client, "softorder@example.com")
+    tx_old = await _create_tx(client, token, account_id, cat_id=cat, description="vieja")
+    tx_new = await _create_tx(client, token, account_id, cat_id=cat, description="nueva")
 
     await client.delete(f"/transactions/{tx_old}", headers=_auth(token))
     await client.delete(f"/transactions/{tx_new}", headers=_auth(token))
@@ -169,9 +181,9 @@ async def test_trash_ordered_by_deleted_at_desc(client: AsyncClient) -> None:
 
 async def test_dashboard_summary_excludes_trashed(client: AsyncClient) -> None:
     """Una transacción trasheada no contribuye al summary del dashboard."""
-    token, cat_id = await _setup_user(client, "softdash@example.com")
-    tx_keep = await _create_tx(client, token, cat_id=cat_id, amount="100.00")
-    tx_trash = await _create_tx(client, token, cat_id=cat_id, amount="999.00")
+    token, cat_id, account_id = await _setup_user(client, "softdash@example.com")
+    tx_keep = await _create_tx(client, token, account_id, cat_id=cat_id, amount="100.00")
+    tx_trash = await _create_tx(client, token, account_id, cat_id=cat_id, amount="999.00")
 
     # Antes de borrar: 2 transacciones, 1099 de gasto.
     r1 = await client.get(
@@ -198,10 +210,10 @@ async def test_dashboard_summary_excludes_trashed(client: AsyncClient) -> None:
 
 async def test_top_expenses_excludes_trashed(client: AsyncClient) -> None:
     """El top de gastos del dashboard ignora soft-deleted."""
-    token, cat_id = await _setup_user(client, "softtop@example.com")
-    await _create_tx(client, token, cat_id=cat_id, amount="50.00", description="keep")
+    token, cat_id, account_id = await _setup_user(client, "softtop@example.com")
+    await _create_tx(client, token, account_id, cat_id=cat_id, amount="50.00", description="keep")
     tx_trash = await _create_tx(
-        client, token, cat_id=cat_id, amount="500.00", description="trash"
+        client, token, account_id, cat_id=cat_id, amount="500.00", description="trash"
     )
     await client.delete(f"/transactions/{tx_trash}", headers=_auth(token))
 
@@ -221,7 +233,7 @@ async def test_imports_dedup_ignores_trashed(client: AsyncClient) -> None:
     """
     import json
 
-    token, _ = await _setup_user(client, "softimport@example.com")
+    token, _, account_id = await _setup_user(client, "softimport@example.com")
 
     csv = b"date,amount,description\n2026-04-01,12.34,Coffee\n"
     column_mappings = json.dumps(
@@ -232,7 +244,11 @@ async def test_imports_dedup_ignores_trashed(client: AsyncClient) -> None:
     r1 = await client.post(
         "/imports",
         files={"file": ("a.csv", csv, "text/csv")},
-        data={"column_mappings": column_mappings, "currency": "EUR"},
+        data={
+            "account_id": account_id,
+            "column_mappings": column_mappings,
+            "currency": "EUR",
+        },
         headers=_auth(token),
     )
     assert r1.status_code == 201, r1.text
@@ -247,7 +263,11 @@ async def test_imports_dedup_ignores_trashed(client: AsyncClient) -> None:
     r2 = await client.post(
         "/imports",
         files={"file": ("a.csv", csv, "text/csv")},
-        data={"column_mappings": column_mappings, "currency": "EUR"},
+        data={
+            "account_id": account_id,
+            "column_mappings": column_mappings,
+            "currency": "EUR",
+        },
         headers=_auth(token),
     )
     assert r2.status_code == 201, r2.text

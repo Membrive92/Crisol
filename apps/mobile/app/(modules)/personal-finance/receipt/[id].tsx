@@ -1,5 +1,5 @@
+import { useState } from 'react';
 import {
-  Alert,
   Image,
   ScrollView,
   StyleSheet,
@@ -19,6 +19,7 @@ import type { ReceiptConfirmRequest } from '@finanzas/types';
 import { colors, fontSize, fontWeight, formatDate, radius, spacing } from '@finanzas/ui';
 
 import { ReceiptCaptureForm } from '@/components/receipt-capture-form';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 const STATUS_LABEL = {
   pending: 'Pendiente',
@@ -40,6 +41,7 @@ export default function ReceiptDetailScreen() {
   const { url: imageUrl, isLoading: imageLoading } = useReceiptImage(id);
   const confirmMutation = useConfirmReceipt(id ?? '');
   const rejectMutation = useRejectReceipt(id ?? '');
+  const [confirmingReject, setConfirmingReject] = useState(false);
 
   function handleConfirm(payload: ReceiptConfirmRequest) {
     if (!receipt) return;
@@ -50,14 +52,13 @@ export default function ReceiptDetailScreen() {
 
   function handleReject() {
     if (!receipt) return;
-    Alert.alert('Rechazar ticket', '¿Seguro? La transacción no se creará.', [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Rechazar',
-        style: 'destructive',
-        onPress: () => rejectMutation.mutate(),
-      },
-    ]);
+    setConfirmingReject(true);
+  }
+
+  function confirmReject() {
+    if (!receipt) return;
+    setConfirmingReject(false);
+    rejectMutation.mutate();
   }
 
   if (isLoading) {
@@ -119,6 +120,18 @@ export default function ReceiptDetailScreen() {
       <TouchableOpacity onPress={() => router.back()}>
         <Text style={styles.link}>← Volver</Text>
       </TouchableOpacity>
+
+      <ConfirmDialog
+        open={confirmingReject}
+        title="¿Rechazar este ticket?"
+        description="La transacción no se creará y el ticket quedará marcado como rechazado."
+        confirmLabel="Rechazar"
+        cancelLabel="Atrás"
+        tone="danger"
+        loading={rejectMutation.isPending}
+        onConfirm={confirmReject}
+        onCancel={() => setConfirmingReject(false)}
+      />
     </ScrollView>
   );
 }

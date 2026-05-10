@@ -32,6 +32,7 @@ describe('transactionsApi', () => {
     const spy = vi.spyOn(apiClient, 'post').mockResolvedValue({ data: { id: 'new' } });
 
     await transactionsApi.create({
+      account_id: 'acc-1',
       amount: '10.50',
       currency: 'EUR',
       occurred_at: '2026-04-16T00:00:00Z',

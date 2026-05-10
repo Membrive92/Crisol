@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, type ChangeEvent, type FormEvent } from 'react';
+import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 
-import { useCategories } from '@finanzas/services';
-import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
+import { useAccounts, useCategories } from '@finanzas/services';
+import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
 
 import { Button } from '../ui/button';
 import { Select, TextInput } from '../ui/field';
@@ -15,6 +15,8 @@ const ACCEPTED_EXTENSIONS = ['.csv', '.tsv', '.xlsx', '.pdf'] as const;
 
 export interface UploadStepValue {
   file: File;
+  /** PHASE-19.1: cuenta a la que se imputarán las txs del lote. */
+  accountId: string;
   currency: string;
   defaultCategoryId: string | null;
   detectedHeaders: string[] | null;
@@ -26,10 +28,30 @@ export interface UploadStepProps {
 
 export function UploadStep({ onContinue }: UploadStepProps) {
   const { data: categories, isLoading: loadingCategories } = useCategories();
+  const { data: accounts, isLoading: loadingAccounts } = useAccounts();
   const [file, setFile] = useState<File | null>(null);
+  const [accountId, setAccountId] = useState('');
   const [currency, setCurrency] = useState('EUR');
   const [defaultCategoryId, setDefaultCategoryId] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  // Pre-seleccionar la primera cuenta cuando se cargue la lista. La
+  // moneda del form sigue siendo independiente — el usuario puede
+  // tener una cuenta EUR y querer importar un extracto USD.
+  useEffect(() => {
+    if (!accounts || accounts.length === 0) return;
+    if (!accountId) {
+      const first = accounts[0];
+      if (first) {
+        setAccountId(first.id);
+        // Si no han tocado la moneda, sincronizamos con la cuenta — es
+        // el caso más común (extracto del banco en su moneda nativa).
+        setCurrency((prev) => (prev === 'EUR' ? first.currency : prev));
+      }
+    }
+  }, [accounts, accountId]);
+
+  const accountList = accounts ?? [];
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     setError(null);
@@ -62,6 +84,11 @@ export function UploadStep({ onContinue }: UploadStepProps) {
       return;
     }
 
+    if (!accountId) {
+      setError('Selecciona la cuenta a la que se imputarán las transacciones');
+      return;
+    }
+
     const trimmedCurrency = currency.trim().toUpperCase();
     if (trimmedCurrency.length !== 3) {
       setError('La moneda debe ser un código ISO de 3 letras (ej: EUR)');
@@ -72,6 +99,7 @@ export function UploadStep({ onContinue }: UploadStepProps) {
 
     onContinue({
       file,
+      accountId,
       currency: trimmedCurrency,
       defaultCategoryId: defaultCategoryId || null,
       detectedHeaders,
@@ -80,7 +108,25 @@ export function UploadStep({ onContinue }: UploadStepProps) {
 
   return (
     <form onSubmit={handleSubmit} noValidate>
-      <label style={{ display: 'block', marginBottom: spacing.md }}>
+      <Select
+        label="Cuenta destino"
+        value={accountId}
+        onChange={(e) => setAccountId(e.target.value)}
+        disabled={loadingAccounts || accountList.length === 0}
+        required
+      >
+        {accountList.length === 0 ? (
+          <option value="">— Sin cuentas disponibles —</option>
+        ) : null}
+        {accountList.map((a) => (
+          <option key={a.id} value={a.id}>
+            {a.icon ? `${a.icon} ` : ''}
+            {a.name} ({a.currency})
+          </option>
+        ))}
+      </Select>
+
+      <div style={{ marginBottom: spacing.md }}>
         <span
           style={{
             display: 'block',
@@ -92,24 +138,50 @@ export function UploadStep({ onContinue }: UploadStepProps) {
         >
           Fichero (CSV / XLSX / PDF, máx 10 MB)
         </span>
-        <input
-          type="file"
-          accept={ACCEPTED_EXTENSIONS.join(',')}
-          onChange={handleFileChange}
-          style={{ fontSize: fontSize.sm, color: colors.text }}
-        />
-        {file ? (
-          <div
+        <label
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: spacing.sm,
+            cursor: 'pointer',
+          }}
+        >
+          <span
             style={{
-              marginTop: spacing.xs,
-              fontSize: fontSize.xs,
-              color: colors.textMuted,
+              padding: `${spacing.sm}px ${spacing.md}px`,
+              borderRadius: radius.md,
+              fontSize: fontSize.sm,
+              fontWeight: fontWeight.semibold,
+              backgroundColor: 'transparent',
+              color: colors.text,
+              border: `1px solid ${colors.border}`,
             }}
           >
-            {file.name} · {(file.size / 1024).toFixed(1)} KB
-          </div>
-        ) : null}
-      </label>
+            Seleccionar archivo
+          </span>
+          <span style={{ fontSize: fontSize.sm, color: colors.textMuted }}>
+            {file
+              ? `${file.name} · ${(file.size / 1024).toFixed(1)} KB`
+              : 'Ningún archivo seleccionado'}
+          </span>
+          <input
+            type="file"
+            accept={ACCEPTED_EXTENSIONS.join(',')}
+            onChange={handleFileChange}
+            style={{
+              position: 'absolute',
+              width: 1,
+              height: 1,
+              padding: 0,
+              margin: -1,
+              overflow: 'hidden',
+              clip: 'rect(0, 0, 0, 0)',
+              whiteSpace: 'nowrap',
+              border: 0,
+            }}
+          />
+        </label>
+      </div>
 
       <TextInput
         label="Moneda"

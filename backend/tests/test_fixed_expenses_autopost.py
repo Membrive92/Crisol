@@ -15,7 +15,7 @@ from app.modules.personal_finance.fixed_expenses.service import (
 from app.modules.personal_finance.transactions.models import Transaction
 
 
-async def _setup_user(client: AsyncClient, email: str) -> tuple[str, str]:
+async def _setup_user(client: AsyncClient, email: str) -> tuple[str, str, str]:
     r = await client.post(
         "/auth/register",
         json={"email": email, "password": "SecurePass123", "display_name": "Test"},
@@ -26,7 +26,12 @@ async def _setup_user(client: AsyncClient, email: str) -> tuple[str, str]:
         json={"name": "Casa", "kind": "expense"},
         headers={"Authorization": f"Bearer {token}"},
     )
-    return token, cat.json()["id"]
+    acc = await client.post(
+        "/accounts",
+        json={"name": "Cuenta principal", "type": "bank", "currency": "EUR"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    return token, cat.json()["id"], acc.json()["id"]
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -34,7 +39,12 @@ def _auth(token: str) -> dict[str, str]:
 
 
 async def _create_confirmed_fixed_expense(
-    client: AsyncClient, token: str, cat_id: str, *, amount: str = "800.00"
+    client: AsyncClient,
+    token: str,
+    cat_id: str,
+    account_id: str,
+    *,
+    amount: str = "800.00",
 ) -> str:
     """Crea 4 cargos mensuales del mismo merchant + amount, dispara
     scan, confirma — devuelve id del fixed_expense confirmado."""
@@ -44,6 +54,7 @@ async def _create_confirmed_fixed_expense(
         await client.post(
             "/transactions",
             json={
+                "account_id": account_id,
                 "category_id": cat_id,
                 "amount": amount,
                 "currency": "EUR",
@@ -55,6 +66,13 @@ async def _create_confirmed_fixed_expense(
     await client.post("/fixed-expenses/scan", headers=_auth(token))
     item = (await client.get("/fixed-expenses", headers=_auth(token))).json()[0]
     await client.post(f"/fixed-expenses/{item['id']}/confirm", headers=_auth(token))
+    # PHASE-19.1: el autopost necesita una cuenta destino — asignamos
+    # la del helper para que los tests de autopost puedan disparar.
+    await client.put(
+        f"/fixed-expenses/{item['id']}",
+        json={"account_id": account_id},
+        headers=_auth(token),
+    )
     return item["id"]
 
 
@@ -63,16 +81,16 @@ async def test_create_fixed_expense_default_auto_post_false(
 ) -> None:
     """Por defecto un fixed_expense queda con auto_post=false al crearse
     desde el detector."""
-    token, cat_id = await _setup_user(client, "ap1@example.com")
-    fid = await _create_confirmed_fixed_expense(client, token, cat_id)
+    token, cat_id, account_id = await _setup_user(client, "ap1@example.com")
+    fid = await _create_confirmed_fixed_expense(client, token, cat_id, account_id)
     item = (await client.get(f"/fixed-expenses/{fid}", headers=_auth(token))).json()
     assert item["auto_post"] is False
 
 
 async def test_put_toggles_auto_post(client: AsyncClient) -> None:
     """PUT activa/desactiva el flag."""
-    token, cat_id = await _setup_user(client, "ap2@example.com")
-    fid = await _create_confirmed_fixed_expense(client, token, cat_id)
+    token, cat_id, account_id = await _setup_user(client, "ap2@example.com")
+    fid = await _create_confirmed_fixed_expense(client, token, cat_id, account_id)
 
     r_on = await client.put(
         f"/fixed-expenses/{fid}",
@@ -97,9 +115,9 @@ async def test_autopost_creates_expected_tx_and_advances_next_due(
     next_due un ciclo. Usamos session directa para forzar next_due a
     ayer (los cargos seedeados desde el helper dejan next_due en el
     futuro y autopost no dispararía)."""
-    token, cat_id = await _setup_user(client, "ap3@example.com")
+    token, cat_id, account_id = await _setup_user(client, "ap3@example.com")
     fid = await _create_confirmed_fixed_expense(
-        client, token, cat_id, amount="800.00"
+        client, token, cat_id, account_id, amount="800.00"
     )
     await client.put(
         f"/fixed-expenses/{fid}",
@@ -146,8 +164,8 @@ async def test_autopost_backfills_multiple_cycles_capped_at_12(
 ) -> None:
     """Si next_due está varios ciclos en el pasado, autopost crea una
     tx por ciclo perdido — capped a 12 para evitar avalanchas."""
-    token, cat_id = await _setup_user(client, "ap_bf@example.com")
-    fid = await _create_confirmed_fixed_expense(client, token, cat_id)
+    token, cat_id, account_id = await _setup_user(client, "ap_bf@example.com")
+    fid = await _create_confirmed_fixed_expense(client, token, cat_id, account_id)
     await client.put(
         f"/fixed-expenses/{fid}",
         json={"auto_post": True},
@@ -175,8 +193,8 @@ async def test_autopost_backfills_multiple_cycles_capped_at_12(
 async def test_autopost_skips_when_flag_off(client: AsyncClient) -> None:
     """Sin flag, autopost no toca el gasto fijo aunque next_due ya
     haya pasado."""
-    token, cat_id = await _setup_user(client, "ap4@example.com")
-    fid = await _create_confirmed_fixed_expense(client, token, cat_id)
+    token, cat_id, account_id = await _setup_user(client, "ap4@example.com")
+    fid = await _create_confirmed_fixed_expense(client, token, cat_id, account_id)
     item_before = (
         await client.get(f"/fixed-expenses/{fid}", headers=_auth(token))
     ).json()
@@ -193,8 +211,8 @@ async def test_autopost_skips_when_flag_off(client: AsyncClient) -> None:
 async def test_autopost_skips_paused_and_cancelled(client: AsyncClient) -> None:
     """Una hipoteca pausada con flag on NO se postea — el lifecycle
     gana sobre el flag."""
-    token, cat_id = await _setup_user(client, "ap5@example.com")
-    fid = await _create_confirmed_fixed_expense(client, token, cat_id)
+    token, cat_id, account_id = await _setup_user(client, "ap5@example.com")
+    fid = await _create_confirmed_fixed_expense(client, token, cat_id, account_id)
     await client.put(
         f"/fixed-expenses/{fid}",
         json={"auto_post": True},
@@ -208,14 +226,14 @@ async def test_autopost_skips_paused_and_cancelled(client: AsyncClient) -> None:
 
 async def test_autopost_user_isolation(client: AsyncClient) -> None:
     """User B no se ve afectado por flag on de user A."""
-    token_a, cat_a = await _setup_user(client, "apA@example.com")
-    fa = await _create_confirmed_fixed_expense(client, token_a, cat_a)
+    token_a, cat_a, account_a = await _setup_user(client, "apA@example.com")
+    fa = await _create_confirmed_fixed_expense(client, token_a, cat_a, account_a)
     await client.put(
         f"/fixed-expenses/{fa}",
         json={"auto_post": True},
         headers=_auth(token_a),
     )
 
-    token_b, _ = await _setup_user(client, "apB@example.com")
+    token_b, _, _ = await _setup_user(client, "apB@example.com")
     r_b = await client.post("/fixed-expenses/autopost", headers=_auth(token_b))
     assert r_b.json()["created"] == 0

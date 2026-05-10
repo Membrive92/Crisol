@@ -2,64 +2,174 @@
 
 import { useState } from 'react';
 
-import { useCreateImport } from '@finanzas/services';
+import {
+  useAiSuggestImport,
+  useCategories,
+  useCommitImport,
+  usePreviewImport,
+} from '@finanzas/services';
 import { toast } from '@finanzas/store';
-import type { ImportColumnMappings, ImportJob } from '@finanzas/types';
+import type {
+  ImportColumnMappings,
+  ImportJob,
+  ImportPreviewResponse,
+} from '@finanzas/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
 
 import { MappingStep } from '@/components/imports/mapping-step';
+import { PreviewStep } from '@/components/imports/preview-step';
 import { ResultStep } from '@/components/imports/result-step';
 import { UploadStep, type UploadStepValue } from '@/components/imports/upload-step';
 import { Card } from '@/components/ui/card';
 
-type Step = 'upload' | 'mapping' | 'result';
+type Step = 'upload' | 'mapping' | 'preview' | 'result';
 
 const STEPS: { key: Step; label: string }[] = [
   { key: 'upload', label: '1. Fichero' },
   { key: 'mapping', label: '2. Mapeo' },
-  { key: 'result', label: '3. Resultado' },
+  { key: 'preview', label: '3. Vista previa' },
+  { key: 'result', label: '4. Resultado' },
 ];
 
 export default function NewImportPage() {
   const [step, setStep] = useState<Step>('upload');
   const [uploadValue, setUploadValue] = useState<UploadStepValue | null>(null);
+  const [mappings, setMappings] = useState<ImportColumnMappings | null>(null);
+  const [preview, setPreview] = useState<ImportPreviewResponse | null>(null);
   const [result, setResult] = useState<ImportJob | null>(null);
-  const mutation = useCreateImport();
+
+  const previewMutation = usePreviewImport();
+  const commitMutation = useCommitImport();
+  const aiSuggestMutation = useAiSuggestImport();
+  const { data: categories } = useCategories();
+
+  async function handleAiSuggest(): Promise<Record<string, string | null> | undefined> {
+    if (!preview) return undefined;
+    const loadingId = toast.loading('IA sugiriendo categorías…');
+    try {
+      const { suggestions } = await aiSuggestMutation.mutateAsync(preview.job_id);
+      toast.dismiss(loadingId);
+      const applied = Object.values(suggestions).filter(Boolean).length;
+      if (applied === 0) {
+        toast.info('La IA no encontró categoría clara para los conceptos pendientes.');
+      } else {
+        toast.success(
+          `IA sugirió ${applied} ${applied === 1 ? 'categoría' : 'categorías'}.`,
+        );
+      }
+      return suggestions;
+    } catch (err) {
+      toast.dismiss(loadingId);
+      toast.error(
+        err instanceof Error
+          ? `Error con IA: ${err.message}`
+          : 'Error al sugerir con IA',
+      );
+      return undefined;
+    }
+  }
 
   function handleUploadContinue(value: UploadStepValue) {
     setUploadValue(value);
     setStep('mapping');
-    mutation.reset();
+    previewMutation.reset();
+    commitMutation.reset();
   }
 
   function handleMappingBack() {
     setStep('upload');
-    mutation.reset();
+    previewMutation.reset();
   }
 
-  function handleMappingSubmit(mappings: ImportColumnMappings) {
+  function handleMappingSubmit(nextMappings: ImportColumnMappings) {
     if (!uploadValue) return;
-    mutation.mutate(
+    setMappings(nextMappings);
+    previewMutation.mutate(
       {
+        accountId: uploadValue.accountId,
+        file: uploadValue.file,
+        columnMappings: nextMappings,
+        currency: uploadValue.currency,
+        defaultCategoryId: uploadValue.defaultCategoryId,
+      },
+      {
+        onSuccess: (data) => {
+          setPreview(data);
+          setStep('preview');
+        },
+        onError: (err) => {
+          toast.error(
+            err instanceof Error
+              ? `Error al previsualizar: ${err.message}`
+              : 'Error al previsualizar',
+          );
+        },
+      },
+    );
+  }
+
+  function handlePreviewBack() {
+    setStep('mapping');
+    previewMutation.reset();
+  }
+
+  function handlePreviewRetryWithVision() {
+    if (!uploadValue || !mappings) return;
+    // Toast persistente con cronómetro mientras Ollama procesa las
+    // páginas — la inferencia visión en CPU puede tardar varios
+    // minutos y sin feedback el usuario asume que la app está colgada.
+    const loadingId = toast.loading(
+      'IA leyendo las páginas del PDF…',
+    );
+    previewMutation.mutate(
+      {
+        accountId: uploadValue.accountId,
         file: uploadValue.file,
         columnMappings: mappings,
         currency: uploadValue.currency,
         defaultCategoryId: uploadValue.defaultCategoryId,
+        forceVision: true,
+      },
+      {
+        onSuccess: (data) => {
+          toast.dismiss(loadingId);
+          setPreview(data);
+          toast.info(`IA detectó ${data.total_rows} filas.`);
+        },
+        onError: (err) => {
+          toast.dismiss(loadingId);
+          toast.error(
+            err instanceof Error
+              ? `Error al procesar con IA: ${err.message}`
+              : 'Error al procesar con IA',
+          );
+        },
+      },
+    );
+  }
+
+  function handlePreviewConfirm(
+    categoryOverrides: Record<string, string>,
+  ) {
+    if (!preview) return;
+    commitMutation.mutate(
+      {
+        jobId: preview.job_id,
+        ...(Object.keys(categoryOverrides).length > 0
+          ? { categoryOverrides }
+          : {}),
       },
       {
         onSuccess: (job) => {
           setResult(job);
           setStep('result');
-          // PHASE-11.5: la step "Resultado" ya pinta el desglose
-          // (ok / skipped / failed); el toast añade un confirm
-          // global para el usuario que ya ha pasado de pantalla.
           toast.success(`Importación completada: ${job.rows_ok} filas añadidas.`);
         },
         onError: (err) => {
-          // El MappingStep también pinta el error inline (contexto del
-          // form); el toast lo refuerza por si el usuario no lo ve.
           toast.error(
-            err instanceof Error ? `Error al importar: ${err.message}` : 'Error al importar',
+            err instanceof Error
+              ? `Error al confirmar: ${err.message}`
+              : 'Error al confirmar la importación',
           );
         },
       },
@@ -68,10 +178,18 @@ export default function NewImportPage() {
 
   function handleRestart() {
     setUploadValue(null);
+    setMappings(null);
+    setPreview(null);
     setResult(null);
-    mutation.reset();
+    previewMutation.reset();
+    commitMutation.reset();
     setStep('upload');
   }
+
+  const canRetryWithVision =
+    preview !== null &&
+    (preview.source === 'pdfplumber_smart' ||
+      preview.source === 'pdfplumber_legacy');
 
   return (
     <div style={{ maxWidth: 720, margin: '0 auto', padding: spacing.lg }}>
@@ -93,16 +211,37 @@ export default function NewImportPage() {
         {step === 'mapping' && uploadValue ? (
           <MappingStep
             detectedHeaders={uploadValue.detectedHeaders}
-            submitting={mutation.isPending}
+            submitting={previewMutation.isPending}
             errorMessage={
-              mutation.isError
-                ? mutation.error instanceof Error
-                  ? mutation.error.message
-                  : 'Error al importar'
+              previewMutation.isError
+                ? previewMutation.error instanceof Error
+                  ? previewMutation.error.message
+                  : 'Error al generar el preview'
                 : null
             }
             onBack={handleMappingBack}
             onSubmit={handleMappingSubmit}
+          />
+        ) : null}
+        {step === 'preview' && preview ? (
+          <PreviewStep
+            preview={preview}
+            committing={commitMutation.isPending}
+            reprocessing={previewMutation.isPending}
+            canRetryWithVision={canRetryWithVision}
+            categories={categories ?? []}
+            errorMessage={
+              commitMutation.isError
+                ? commitMutation.error instanceof Error
+                  ? commitMutation.error.message
+                  : 'Error al confirmar'
+                : null
+            }
+            onConfirm={handlePreviewConfirm}
+            onRetryWithVision={handlePreviewRetryWithVision}
+            onBack={handlePreviewBack}
+            onAiSuggest={handleAiSuggest}
+            aiSuggesting={aiSuggestMutation.isPending}
           />
         ) : null}
         {step === 'result' && result ? (

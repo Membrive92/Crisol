@@ -18,6 +18,8 @@ export interface ReceiptExtractResponse {
 }
 
 export interface ReceiptConfirmRequest {
+  /** PHASE-19.1: cuenta a la que se imputa el ticket. Obligatorio. */
+  account_id: string;
   amount: string;
   occurred_at: string;
   currency: string;

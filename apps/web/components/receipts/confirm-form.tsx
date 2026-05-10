@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 
-import { useCategories } from '@finanzas/services';
+import { useAccounts, useCategories } from '@finanzas/services';
 import type { ReceiptConfirmRequest, ReceiptExtraction } from '@finanzas/types';
 import { colors, fontSize, fontWeight, fromDateInputValue, spacing, toDateInputValue } from '@finanzas/ui';
 
@@ -22,6 +22,7 @@ interface FormValues {
   currency: string;
   occurred_at: string;
   category_id: string;
+  account_id: string;
   description: string;
 }
 
@@ -39,6 +40,7 @@ function buildInitialValues(
     currency: asString(ext['currency']) || 'EUR',
     occurred_at: occurred ? toDateInputValue(occurred) : toDateInputValue(new Date().toISOString()),
     category_id: '',
+    account_id: '',
     description: asString(ext['merchant']),
   };
 }
@@ -51,8 +53,24 @@ export function ReceiptConfirmForm({
   onReject,
 }: ReceiptConfirmFormProps) {
   const { data: categories, isLoading: loadingCategories } = useCategories();
+  const { data: accounts, isLoading: loadingAccounts } = useAccounts();
   const [values, setValues] = useState<FormValues>(() => buildInitialValues(extraction));
   const [validationError, setValidationError] = useState<string | null>(null);
+
+  // Pre-seleccionar la primera cuenta cuando llegue la lista. El
+  // guard del layout impide llegar aquí sin cuentas, pero por defensa
+  // no dejamos crashear el form si la lista llega vacía.
+  useEffect(() => {
+    if (!accounts || accounts.length === 0) return;
+    setValues((prev) => {
+      if (prev.account_id) return prev;
+      const first = accounts[0];
+      if (!first) return prev;
+      return { ...prev, account_id: first.id };
+    });
+  }, [accounts]);
+
+  const accountList = accounts ?? [];
 
   function handleChange<K extends keyof FormValues>(field: K, value: string) {
     setValues((prev) => ({ ...prev, [field]: value }));
@@ -72,8 +90,13 @@ export function ReceiptConfirmForm({
       setValidationError('Moneda en formato ISO de 3 letras');
       return;
     }
+    if (!values.account_id) {
+      setValidationError('Selecciona una cuenta');
+      return;
+    }
 
     const payload: ReceiptConfirmRequest = {
+      account_id: values.account_id,
       amount,
       currency,
       occurred_at: fromDateInputValue(values.occurred_at),
@@ -112,6 +135,23 @@ export function ReceiptConfirmForm({
         value={values.currency}
         onChange={(e) => handleChange('currency', e.target.value)}
       />
+      <Select
+        label="Cuenta"
+        value={values.account_id}
+        onChange={(e) => handleChange('account_id', e.target.value)}
+        disabled={loadingAccounts || accountList.length === 0}
+        required
+      >
+        {accountList.length === 0 ? (
+          <option value="">— Crea una cuenta primero —</option>
+        ) : null}
+        {accountList.map((a) => (
+          <option key={a.id} value={a.id}>
+            {a.icon ? `${a.icon} ` : ''}
+            {a.name} ({a.currency})
+          </option>
+        ))}
+      </Select>
       <TextInput
         label="Fecha"
         type="date"

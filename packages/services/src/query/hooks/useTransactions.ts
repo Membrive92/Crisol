@@ -83,6 +83,23 @@ export function useDeleteTransaction() {
   });
 }
 
+/**
+ * Bulk soft-delete: mueve a papelera todas las transacciones que
+ * matcheen los filtros pasados (los mismos del listado). Sin filtros,
+ * mueve todas las activas. Mismo blast radius que `useDeleteTransaction`.
+ */
+export function useBulkDeleteTransactions() {
+  const queryClient = useQueryClient();
+  return useMutation<{ deleted_count: number }, Error, TransactionListQuery>({
+    mutationFn: (query) => transactionsApi.bulkRemove(query),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.budgets.all });
+    },
+  });
+}
+
 export function useTrashedTransactions(query: { limit?: number; offset?: number } = {}) {
   return useQuery({
     queryKey: queryKeys.transactions.trash(query),
@@ -112,6 +129,38 @@ export function usePurgeTransaction() {
       // Sólo afecta a la papelera (la tx ya estaba excluida de list y
       // dashboard). Aun así invalidamos `transactions.all` para que
       // el contador y la lista de papelera se refresquen.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
+    },
+  });
+}
+
+/**
+ * Restaura todas las transacciones que el usuario tiene en papelera.
+ * Mismo blast radius que `useRestoreTransaction` pero sin id.
+ */
+export function useBulkRestoreTrash() {
+  const queryClient = useQueryClient();
+  return useMutation<{ restored_count: number }, Error, void>({
+    mutationFn: () => transactionsApi.bulkRestoreTrash(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.budgets.all });
+    },
+  });
+}
+
+/**
+ * Borra permanente (DELETE real) todas las transacciones que el
+ * usuario tiene en papelera. IRREVERSIBLE.
+ */
+export function useBulkPurgeTrash() {
+  const queryClient = useQueryClient();
+  return useMutation<{ purged_count: number }, Error, void>({
+    mutationFn: () => transactionsApi.bulkPurgeTrash(),
+    onSuccess: () => {
+      // Sólo desaparecen de la papelera; ni listado ni dashboard las
+      // veían ya. Suficiente con invalidar `transactions.all`.
       void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
     },
   });

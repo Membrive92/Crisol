@@ -12,6 +12,8 @@ export interface FixedExpenseListQuery {
 
 export interface FixedExpenseUpdatePayload {
   auto_post?: boolean;
+  /** PHASE-19.1: cuenta de cobro. `null` desactiva el autopost (sin cuenta no se puede crear la tx). */
+  account_id?: string | null;
 }
 
 export interface AutopostResponse {

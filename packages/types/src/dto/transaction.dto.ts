@@ -1,6 +1,7 @@
 import type { Transaction, TransactionSource } from '../models/transaction';
 
 export interface TransactionCreateRequest {
+  account_id: string;
   category_id?: string | null;
   amount: string;
   currency?: string;
@@ -10,6 +11,7 @@ export interface TransactionCreateRequest {
 }
 
 export interface TransactionUpdateRequest {
+  account_id?: string;
   category_id?: string | null;
   amount?: string;
   currency?: string;
@@ -18,6 +20,7 @@ export interface TransactionUpdateRequest {
 }
 
 export interface TransactionListQuery {
+  account_id?: string;
   category_id?: string;
   date_from?: string;
   date_to?: string;

@@ -78,6 +78,16 @@ class FixedExpense(Base):
         ForeignKey("categories.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # PHASE-19.1: cuenta desde la que se cobra el gasto fijo. Nullable
+    # porque los gastos fijos detectados antes de declarar cuentas
+    # quedan sin asignar. El cron de auto-post sólo crea la tx
+    # `expected` si `account_id IS NOT NULL` — sin cuenta no se puede
+    # imputar la transacción.
+    account_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("accounts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     first_seen_at: Mapped[date] = mapped_column(Date, nullable=False)
     last_seen_at: Mapped[date] = mapped_column(Date, nullable=False)
     occurrence_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

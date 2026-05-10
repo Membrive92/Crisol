@@ -21,6 +21,7 @@ from app.core import storage
 from app.modules.ai import service as ai_service
 from app.modules.ai.exceptions import AiError
 from app.modules.ai.schemas import ReceiptExtraction
+from app.modules.personal_finance.accounts.service import ensure_account_exists
 from app.modules.personal_finance.categories.repository import get_category_by_id
 from app.modules.personal_finance.receipts.models import Receipt, ReceiptStatus
 from app.modules.personal_finance.receipts.repository import create_receipt, get_receipt_by_id
@@ -98,8 +99,11 @@ async def confirm_receipt(
                 detail="category_id no pertenece al usuario",
             )
 
+    await ensure_account_exists(db, payload.account_id, user_id)
+
     transaction = Transaction(
         user_id=user_id,
+        account_id=payload.account_id,
         category_id=payload.category_id,
         amount=payload.amount,
         currency=payload.currency.upper(),

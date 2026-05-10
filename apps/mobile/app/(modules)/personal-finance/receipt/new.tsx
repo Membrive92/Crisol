@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import {
-  Alert,
   Image,
   ScrollView,
   StyleSheet,
@@ -21,6 +20,7 @@ import type { Receipt, ReceiptConfirmRequest, ReceiptExtraction } from '@finanza
 import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
 
 import { ReceiptCaptureForm } from '@/components/receipt-capture-form';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 interface PickedImage {
   uri: string;
@@ -59,6 +59,7 @@ export default function NewReceiptScreen() {
   const [picked, setPicked] = useState<PickedImage | null>(null);
   const [stagedReceipt, setStagedReceipt] = useState<Receipt | null>(null);
   const [stagedExtraction, setStagedExtraction] = useState<ReceiptExtraction | null>(null);
+  const [confirmingReject, setConfirmingReject] = useState(false);
 
   const extractMutation = useExtractReceipt();
   const confirmMutation = useConfirmReceipt(stagedReceipt?.id ?? '');
@@ -102,12 +103,16 @@ export default function NewReceiptScreen() {
     if (!picked) return;
     try {
       const file = await buildFileFromAsset(picked);
+      // Toast persistente con spinner mientras la IA local procesa el ticket.
+      const loadingId = toast.loading('IA leyendo el ticket…');
       extractMutation.mutate(file, {
         onSuccess: (data) => {
+          toast.dismiss(loadingId);
           setStagedReceipt(data.receipt);
           setStagedExtraction(data.extraction);
         },
         onError: (err) => {
+          toast.dismiss(loadingId);
           toast.error(
             err instanceof Error
               ? `Error al analizar: ${err.message}`
@@ -139,29 +144,25 @@ export default function NewReceiptScreen() {
 
   function handleReject() {
     if (!stagedReceipt) return;
-    // Mantenemos Alert nativo para el confirm destructivo — bloqueante
-    // a propósito, no es un toast pasivo.
-    Alert.alert('Rechazar ticket', '¿Seguro? La transacción no se creará.', [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Rechazar',
-        style: 'destructive',
-        onPress: () =>
-          rejectMutation.mutate(undefined, {
-            onSuccess: () => {
-              toast.info('Ticket rechazado.');
-              router.replace('/(modules)/personal-finance/(tabs)/receipts');
-            },
-            onError: (err) => {
-              toast.error(
-                err instanceof Error
-                  ? `Error al rechazar: ${err.message}`
-                  : 'Error al rechazar el ticket.',
-              );
-            },
-          }),
+    setConfirmingReject(true);
+  }
+
+  function confirmReject() {
+    if (!stagedReceipt) return;
+    setConfirmingReject(false);
+    rejectMutation.mutate(undefined, {
+      onSuccess: () => {
+        toast.info('Ticket rechazado.');
+        router.replace('/(modules)/personal-finance/(tabs)/receipts');
       },
-    ]);
+      onError: (err) => {
+        toast.error(
+          err instanceof Error
+            ? `Error al rechazar: ${err.message}`
+            : 'Error al rechazar el ticket.',
+        );
+      },
+    });
   }
 
   const inExtraction = stagedReceipt !== null && stagedExtraction !== null;
@@ -218,6 +219,18 @@ export default function NewReceiptScreen() {
           />
         </View>
       )}
+
+      <ConfirmDialog
+        open={confirmingReject}
+        title="¿Rechazar este ticket?"
+        description="La transacción no se creará y el ticket quedará marcado como rechazado."
+        confirmLabel="Rechazar"
+        cancelLabel="Atrás"
+        tone="danger"
+        loading={rejectMutation.isPending}
+        onConfirm={confirmReject}
+        onCancel={() => setConfirmingReject(false)}
+      />
     </ScrollView>
   );
 }

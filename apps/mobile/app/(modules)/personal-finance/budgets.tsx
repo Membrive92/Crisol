@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack } from 'expo-router';
 
 import {
@@ -19,6 +19,7 @@ import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
 import { BudgetActiveRow } from '../../../components/budgets/budget-active-row';
 import { BudgetFormModal } from '../../../components/budgets/budget-form-modal';
 import { BudgetStatusCard } from '../../../components/budgets/budget-status-card';
+import { ConfirmDialog } from '../../../components/ui/confirm-dialog';
 
 /**
  * Pantalla de presupuestos mobile (PHASE-12.3). Reusa los hooks
@@ -35,6 +36,9 @@ export default function BudgetsScreen() {
   const updateMutation = useUpdateBudget();
   const deleteMutation = useDeleteBudget();
   const [formOpen, setFormOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<
+    { id: string; label: string } | null
+  >(null);
 
   const budgets = budgetsQuery.data ?? [];
   const statusItems = statusQuery.data?.items ?? [];
@@ -51,23 +55,18 @@ export default function BudgetsScreen() {
   }
 
   function handleDelete(id: string, label: string) {
-    Alert.alert(
-      'Cerrar presupuesto',
-      `"${label}" quedará archivado a partir de hoy y dejará de contarse en el estado.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Cerrar',
-          style: 'destructive',
-          onPress: () =>
-            deleteMutation.mutate(id, {
-              onSuccess: () => toast.success('Presupuesto cerrado.'),
-              onError: (err) =>
-                toast.error(formatApiError(err, 'Error al cerrar el presupuesto.')),
-            }),
-        },
-      ],
-    );
+    setPendingDelete({ id, label });
+  }
+
+  function confirmDelete() {
+    if (!pendingDelete) return;
+    const { id } = pendingDelete;
+    setPendingDelete(null);
+    deleteMutation.mutate(id, {
+      onSuccess: () => toast.success('Presupuesto cerrado.'),
+      onError: (err) =>
+        toast.error(formatApiError(err, 'Error al cerrar el presupuesto.')),
+    });
   }
 
   function handleSaveAmount(id: string, amount: string) {
@@ -150,6 +149,22 @@ export default function BudgetsScreen() {
         submitting={createMutation.isPending}
         onSubmit={handleCreate}
         onCancel={() => setFormOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="¿Cerrar presupuesto?"
+        description={
+          pendingDelete
+            ? `"${pendingDelete.label}" quedará archivado a partir de hoy y dejará de contarse en el estado.`
+            : undefined
+        }
+        confirmLabel="Cerrar"
+        cancelLabel="Atrás"
+        tone="danger"
+        loading={deleteMutation.isPending}
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
       />
     </View>
   );

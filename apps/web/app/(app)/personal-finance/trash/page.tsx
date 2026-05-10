@@ -4,15 +4,19 @@ import { useState } from 'react';
 import Link from 'next/link';
 
 import {
+  useBulkPurgeTrash,
+  useBulkRestoreTrash,
   useCategories,
   usePurgeTransaction,
   useRestoreTransaction,
   useTrashedTransactions,
 } from '@finanzas/services';
+import { toast } from '@finanzas/store';
 import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
 
 import { TrashList } from '@/components/transactions/trash-list';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { ChevronLeftIcon } from '@/components/ui/icons';
 import { Pagination } from '@/components/ui/pagination';
 
@@ -20,10 +24,15 @@ const PAGE_SIZE = 20;
 
 export default function TrashPage() {
   const [offset, setOffset] = useState(0);
+  const [pendingPurgeId, setPendingPurgeId] = useState<string | null>(null);
+  const [confirmingBulkRestore, setConfirmingBulkRestore] = useState(false);
+  const [confirmingBulkPurge, setConfirmingBulkPurge] = useState(false);
   const trashQuery = useTrashedTransactions({ limit: PAGE_SIZE, offset });
   const { data: categories } = useCategories();
   const restoreMutation = useRestoreTransaction();
   const purgeMutation = usePurgeTransaction();
+  const bulkRestoreMutation = useBulkRestoreTrash();
+  const bulkPurgeMutation = useBulkPurgeTrash();
 
   const items = trashQuery.data?.items ?? [];
   const total = trashQuery.data?.total ?? 0;
@@ -39,14 +48,60 @@ export default function TrashPage() {
   }
 
   function handlePurge(id: string) {
-    if (
-      !confirm(
-        'Eliminar permanente esta transacción. Esta acción no se puede deshacer. ¿Continuar?',
-      )
-    ) {
-      return;
-    }
+    setPendingPurgeId(id);
+  }
+
+  function confirmPurge() {
+    const id = pendingPurgeId;
+    if (!id) return;
     purgeMutation.mutate(id);
+    setPendingPurgeId(null);
+  }
+
+  function confirmBulkRestore() {
+    setConfirmingBulkRestore(false);
+    bulkRestoreMutation.mutate(undefined, {
+      onSuccess: ({ restored_count }) => {
+        if (restored_count === 0) {
+          toast.info('La papelera ya estaba vacía.');
+          return;
+        }
+        toast.success(
+          `Restauradas ${restored_count} ${
+            restored_count === 1 ? 'transacción' : 'transacciones'
+          }.`,
+        );
+      },
+      onError: (err) => {
+        toast.error(
+          err instanceof Error ? `Error: ${err.message}` : 'Error al restaurar',
+        );
+      },
+    });
+  }
+
+  function confirmBulkPurge() {
+    setConfirmingBulkPurge(false);
+    bulkPurgeMutation.mutate(undefined, {
+      onSuccess: ({ purged_count }) => {
+        if (purged_count === 0) {
+          toast.info('La papelera ya estaba vacía.');
+          return;
+        }
+        toast.success(
+          `Eliminadas ${purged_count} ${
+            purged_count === 1 ? 'transacción' : 'transacciones'
+          } definitivamente.`,
+        );
+      },
+      onError: (err) => {
+        toast.error(
+          err instanceof Error
+            ? `Error: ${err.message}`
+            : 'Error al eliminar',
+        );
+      },
+    });
   }
 
   return (
@@ -100,6 +155,23 @@ export default function TrashPage() {
             restaúralas o elimínalas para siempre.
           </p>
         </div>
+        <div style={{ display: 'inline-flex', gap: spacing.sm }}>
+          <Button
+            variant="ghost"
+            onClick={() => setConfirmingBulkRestore(true)}
+            disabled={total === 0 || bulkRestoreMutation.isPending}
+          >
+            {bulkRestoreMutation.isPending ? 'Restaurando…' : 'Restaurar todo'}
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={() => setConfirmingBulkPurge(true)}
+            disabled={total === 0 || bulkPurgeMutation.isPending}
+            style={{ color: colors.danger, borderColor: colors.danger }}
+          >
+            {bulkPurgeMutation.isPending ? 'Borrando…' : 'Borrar todo'}
+          </Button>
+        </div>
       </div>
 
       {trashQuery.isLoading ? (
@@ -139,6 +211,39 @@ export default function TrashPage() {
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={pendingPurgeId !== null}
+        title="¿Eliminar permanentemente?"
+        description="Esta acción no se puede deshacer. La transacción se borrará para siempre."
+        confirmLabel="Eliminar para siempre"
+        tone="danger"
+        loading={purgeMutation.isPending}
+        onConfirm={confirmPurge}
+        onCancel={() => setPendingPurgeId(null)}
+      />
+
+      <ConfirmDialog
+        open={confirmingBulkRestore}
+        title={`¿Restaurar ${total} ${total === 1 ? 'transacción' : 'transacciones'}?`}
+        description="Volverán a aparecer en el listado activo y al dashboard."
+        confirmLabel="Restaurar todo"
+        tone="primary"
+        loading={bulkRestoreMutation.isPending}
+        onConfirm={confirmBulkRestore}
+        onCancel={() => setConfirmingBulkRestore(false)}
+      />
+
+      <ConfirmDialog
+        open={confirmingBulkPurge}
+        title={`¿Borrar ${total} ${total === 1 ? 'transacción' : 'transacciones'} para siempre?`}
+        description="Esta acción NO se puede deshacer. Los datos se eliminarán de forma permanente."
+        confirmLabel="Borrar para siempre"
+        tone="danger"
+        loading={bulkPurgeMutation.isPending}
+        onConfirm={confirmBulkPurge}
+        onCancel={() => setConfirmingBulkPurge(false)}
+      />
     </div>
   );
 }

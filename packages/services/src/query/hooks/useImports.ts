@@ -1,8 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import type { ImportJob, ImportListQuery } from '@finanzas/types';
+import type {
+  ImportJob,
+  ImportListQuery,
+  ImportPreviewResponse,
+} from '@finanzas/types';
 
-import { importsApi, type CreateImportPayload } from '../../api/endpoints/imports';
+import {
+  importsApi,
+  type CreateImportPayload,
+  type PreviewImportPayload,
+} from '../../api/endpoints/imports';
 import { queryKeys } from '../keys';
 
 export function useImports(query: ImportListQuery = {}) {
@@ -29,6 +37,55 @@ export function useCreateImport() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.imports.all });
       void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
       void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+    },
+  });
+}
+
+export function usePreviewImport() {
+  return useMutation<ImportPreviewResponse, Error, PreviewImportPayload>({
+    mutationFn: (payload) => importsApi.preview(payload),
+  });
+}
+
+/**
+ * Pide al modelo de IA local sugerencias de categoría para los
+ * conceptos sin sugerencia previa de un job en PREVIEW.
+ */
+export function useAiSuggestImport() {
+  return useMutation<
+    { suggestions: Record<string, string | null> },
+    Error,
+    string
+  >({
+    mutationFn: (jobId) => importsApi.aiSuggest(jobId),
+  });
+}
+
+export interface CommitImportPayload {
+  jobId: string;
+  /**
+   * Mapping `concepto banco → category_id` para autoasignar
+   * categorías a las filas y guardar la equivalencia para futuras
+   * importaciones (PHASE-19).
+   */
+  categoryOverrides?: Record<string, string>;
+}
+
+export function useCommitImport() {
+  const queryClient = useQueryClient();
+  return useMutation<ImportJob, Error, CommitImportPayload>({
+    mutationFn: ({ jobId, categoryOverrides }) =>
+      importsApi.commit(
+        jobId,
+        categoryOverrides ? { categoryOverrides } : {},
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.imports.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+      // El commit puede haber creado equivalencias nuevas vía
+      // `category_overrides` → invalida bank-mappings.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.bankMappings.all });
     },
   });
 }

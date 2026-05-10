@@ -9,13 +9,19 @@ from __future__ import annotations
 from httpx import AsyncClient
 
 
-async def _register(client: AsyncClient, email: str) -> str:
-    """Registra un usuario y devuelve su access_token."""
+async def _register(client: AsyncClient, email: str) -> tuple[str, str]:
+    """Registra un usuario y crea una cuenta, devuelve (token, account_id)."""
     r = await client.post(
         "/auth/register",
         json={"email": email, "password": "SecurePass123", "display_name": "Test"},
     )
-    return r.json()["access_token"]
+    token = r.json()["access_token"]
+    acc = await client.post(
+        "/accounts",
+        json={"name": "Cuenta principal", "type": "bank", "currency": "EUR"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    return token, acc.json()["id"]
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -36,6 +42,7 @@ async def _make_category(
 async def _make_tx(
     client: AsyncClient,
     token: str,
+    account_id: str,
     *,
     amount: str,
     occurred_at: str,
@@ -44,6 +51,7 @@ async def _make_tx(
     description: str | None = None,
 ) -> None:
     payload: dict[str, object] = {
+        "account_id": account_id,
         "amount": amount,
         "currency": currency,
         "occurred_at": occurred_at,
@@ -60,7 +68,7 @@ async def _make_tx(
 
 
 async def test_summary_zero_when_no_transactions(client: AsyncClient) -> None:
-    token = await _register(client, "dash-empty@example.com")
+    token, _account_id = await _register(client, "dash-empty@example.com")
 
     r = await client.get("/dashboard/summary", headers=_auth(token))
     assert r.status_code == 200
@@ -73,20 +81,20 @@ async def test_summary_zero_when_no_transactions(client: AsyncClient) -> None:
 
 
 async def test_summary_aggregates_income_expenses_and_balance(client: AsyncClient) -> None:
-    token = await _register(client, "dash-sum@example.com")
+    token, account_id = await _register(client, "dash-sum@example.com")
     income_cat = await _make_category(client, token, name="Salario", kind="income")
     expense_cat = await _make_category(client, token, name="Comida", kind="expense")
 
     await _make_tx(
-        client, token, amount="1000.00", occurred_at="2026-04-01T10:00:00Z",
+        client, token, account_id, amount="1000.00", occurred_at="2026-04-01T10:00:00Z",
         category_id=income_cat,
     )
     await _make_tx(
-        client, token, amount="150.50", occurred_at="2026-04-02T10:00:00Z",
+        client, token, account_id, amount="150.50", occurred_at="2026-04-02T10:00:00Z",
         category_id=expense_cat,
     )
     await _make_tx(
-        client, token, amount="49.50", occurred_at="2026-04-03T10:00:00Z",
+        client, token, account_id, amount="49.50", occurred_at="2026-04-03T10:00:00Z",
         category_id=expense_cat,
     )
 
@@ -99,15 +107,15 @@ async def test_summary_aggregates_income_expenses_and_balance(client: AsyncClien
 
 
 async def test_summary_filters_by_currency(client: AsyncClient) -> None:
-    token = await _register(client, "dash-cur@example.com")
+    token, account_id = await _register(client, "dash-cur@example.com")
     cat = await _make_category(client, token, name="Salario", kind="income")
 
     await _make_tx(
-        client, token, amount="100.00", occurred_at="2026-04-01T10:00:00Z",
+        client, token, account_id, amount="100.00", occurred_at="2026-04-01T10:00:00Z",
         category_id=cat, currency="USD",
     )
     await _make_tx(
-        client, token, amount="200.00", occurred_at="2026-04-01T10:00:00Z",
+        client, token, account_id, amount="200.00", occurred_at="2026-04-01T10:00:00Z",
         category_id=cat, currency="EUR",
     )
 
@@ -119,15 +127,15 @@ async def test_summary_filters_by_currency(client: AsyncClient) -> None:
 
 
 async def test_summary_filters_by_date_range(client: AsyncClient) -> None:
-    token = await _register(client, "dash-date@example.com")
+    token, account_id = await _register(client, "dash-date@example.com")
     cat = await _make_category(client, token, name="Comida", kind="expense")
 
     await _make_tx(
-        client, token, amount="10.00", occurred_at="2026-01-15T10:00:00Z",
+        client, token, account_id, amount="10.00", occurred_at="2026-01-15T10:00:00Z",
         category_id=cat,
     )
     await _make_tx(
-        client, token, amount="20.00", occurred_at="2026-06-15T10:00:00Z",
+        client, token, account_id, amount="20.00", occurred_at="2026-06-15T10:00:00Z",
         category_id=cat,
     )
 
@@ -144,15 +152,15 @@ async def test_summary_counts_uncategorized_but_not_in_income_expense(
     client: AsyncClient,
 ) -> None:
     """Transacciones sin categoría cuentan en total, no en income/expenses."""
-    token = await _register(client, "dash-uncat@example.com")
+    token, account_id = await _register(client, "dash-uncat@example.com")
     income_cat = await _make_category(client, token, name="Salario", kind="income")
 
     await _make_tx(
-        client, token, amount="500.00", occurred_at="2026-04-01T10:00:00Z",
+        client, token, account_id, amount="500.00", occurred_at="2026-04-01T10:00:00Z",
         category_id=income_cat,
     )
     await _make_tx(
-        client, token, amount="50.00", occurred_at="2026-04-02T10:00:00Z",
+        client, token, account_id, amount="50.00", occurred_at="2026-04-02T10:00:00Z",
         category_id=None,
     )
 
@@ -168,24 +176,24 @@ async def test_summary_counts_uncategorized_but_not_in_income_expense(
 
 
 async def test_by_category_includes_uncategorized_bucket(client: AsyncClient) -> None:
-    token = await _register(client, "dash-cat@example.com")
+    token, account_id = await _register(client, "dash-cat@example.com")
     food = await _make_category(client, token, name="Comida", kind="expense")
     transport = await _make_category(client, token, name="Transporte", kind="expense")
 
     await _make_tx(
-        client, token, amount="30.00", occurred_at="2026-04-01T10:00:00Z",
+        client, token, account_id, amount="30.00", occurred_at="2026-04-01T10:00:00Z",
         category_id=food,
     )
     await _make_tx(
-        client, token, amount="20.00", occurred_at="2026-04-02T10:00:00Z",
+        client, token, account_id, amount="20.00", occurred_at="2026-04-02T10:00:00Z",
         category_id=food,
     )
     await _make_tx(
-        client, token, amount="15.00", occurred_at="2026-04-03T10:00:00Z",
+        client, token, account_id, amount="15.00", occurred_at="2026-04-03T10:00:00Z",
         category_id=transport,
     )
     await _make_tx(
-        client, token, amount="5.00", occurred_at="2026-04-04T10:00:00Z",
+        client, token, account_id, amount="5.00", occurred_at="2026-04-04T10:00:00Z",
         category_id=None,
     )
 
@@ -205,20 +213,20 @@ async def test_by_category_includes_uncategorized_bucket(client: AsyncClient) ->
 async def test_by_category_filter_by_kind_excludes_uncategorized(
     client: AsyncClient,
 ) -> None:
-    token = await _register(client, "dash-kind@example.com")
+    token, account_id = await _register(client, "dash-kind@example.com")
     expense = await _make_category(client, token, name="Gasto", kind="expense")
     income = await _make_category(client, token, name="Ingreso", kind="income")
 
     await _make_tx(
-        client, token, amount="10.00", occurred_at="2026-04-01T10:00:00Z",
+        client, token, account_id, amount="10.00", occurred_at="2026-04-01T10:00:00Z",
         category_id=expense,
     )
     await _make_tx(
-        client, token, amount="100.00", occurred_at="2026-04-01T10:00:00Z",
+        client, token, account_id, amount="100.00", occurred_at="2026-04-01T10:00:00Z",
         category_id=income,
     )
     await _make_tx(
-        client, token, amount="50.00", occurred_at="2026-04-01T10:00:00Z",
+        client, token, account_id, amount="50.00", occurred_at="2026-04-01T10:00:00Z",
         category_id=None,
     )
 
@@ -234,20 +242,20 @@ async def test_by_category_filter_by_kind_excludes_uncategorized(
 
 
 async def test_by_month_returns_12_buckets_with_zero_fill(client: AsyncClient) -> None:
-    token = await _register(client, "dash-month@example.com")
+    token, account_id = await _register(client, "dash-month@example.com")
     income = await _make_category(client, token, name="Salario", kind="income")
     expense = await _make_category(client, token, name="Comida", kind="expense")
 
     await _make_tx(
-        client, token, amount="1000.00", occurred_at="2026-03-15T10:00:00Z",
+        client, token, account_id, amount="1000.00", occurred_at="2026-03-15T10:00:00Z",
         category_id=income,
     )
     await _make_tx(
-        client, token, amount="200.00", occurred_at="2026-03-20T10:00:00Z",
+        client, token, account_id, amount="200.00", occurred_at="2026-03-20T10:00:00Z",
         category_id=expense,
     )
     await _make_tx(
-        client, token, amount="2000.00", occurred_at="2026-07-15T10:00:00Z",
+        client, token, account_id, amount="2000.00", occurred_at="2026-07-15T10:00:00Z",
         category_id=income,
     )
 
@@ -266,15 +274,15 @@ async def test_by_month_returns_12_buckets_with_zero_fill(client: AsyncClient) -
 
 
 async def test_by_month_ignores_other_years(client: AsyncClient) -> None:
-    token = await _register(client, "dash-year@example.com")
+    token, account_id = await _register(client, "dash-year@example.com")
     cat = await _make_category(client, token, name="Salario", kind="income")
 
     await _make_tx(
-        client, token, amount="500.00", occurred_at="2025-06-15T10:00:00Z",
+        client, token, account_id, amount="500.00", occurred_at="2025-06-15T10:00:00Z",
         category_id=cat,
     )
     await _make_tx(
-        client, token, amount="1000.00", occurred_at="2026-06-15T10:00:00Z",
+        client, token, account_id, amount="1000.00", occurred_at="2026-06-15T10:00:00Z",
         category_id=cat,
     )
 
@@ -287,13 +295,13 @@ async def test_by_month_ignores_other_years(client: AsyncClient) -> None:
 
 
 async def test_top_expenses_sorted_desc_respecting_limit(client: AsyncClient) -> None:
-    token = await _register(client, "dash-top@example.com")
+    token, account_id = await _register(client, "dash-top@example.com")
     expense = await _make_category(client, token, name="Gasto", kind="expense")
 
     amounts = ["10.00", "500.00", "50.00", "100.00", "5.00"]
     for idx, amount in enumerate(amounts):
         await _make_tx(
-            client, token, amount=amount, occurred_at=f"2026-04-{10 + idx}T10:00:00Z",
+            client, token, account_id, amount=amount, occurred_at=f"2026-04-{10 + idx}T10:00:00Z",
             category_id=expense, description=f"Gasto {amount}",
         )
 
@@ -306,20 +314,20 @@ async def test_top_expenses_sorted_desc_respecting_limit(client: AsyncClient) ->
 
 
 async def test_top_expenses_excludes_income_and_uncategorized(client: AsyncClient) -> None:
-    token = await _register(client, "dash-topx@example.com")
+    token, account_id = await _register(client, "dash-topx@example.com")
     expense = await _make_category(client, token, name="Gasto", kind="expense")
     income = await _make_category(client, token, name="Ingreso", kind="income")
 
     await _make_tx(
-        client, token, amount="999.00", occurred_at="2026-04-01T10:00:00Z",
+        client, token, account_id, amount="999.00", occurred_at="2026-04-01T10:00:00Z",
         category_id=income, description="Income 999 (should NOT appear)",
     )
     await _make_tx(
-        client, token, amount="888.00", occurred_at="2026-04-02T10:00:00Z",
+        client, token, account_id, amount="888.00", occurred_at="2026-04-02T10:00:00Z",
         category_id=None, description="Uncategorized 888 (should NOT appear)",
     )
     await _make_tx(
-        client, token, amount="10.00", occurred_at="2026-04-03T10:00:00Z",
+        client, token, account_id, amount="10.00", occurred_at="2026-04-03T10:00:00Z",
         category_id=expense, description="Real expense",
     )
 
@@ -334,18 +342,18 @@ async def test_top_expenses_excludes_income_and_uncategorized(client: AsyncClien
 
 async def test_dashboard_user_isolation(client: AsyncClient) -> None:
     """Usuario A no ve agregados de usuario B en ningún endpoint."""
-    token_a = await _register(client, "dashA@example.com")
-    token_b = await _register(client, "dashB@example.com")
+    token_a, account_a = await _register(client, "dashA@example.com")
+    token_b, account_b = await _register(client, "dashB@example.com")
 
     exp_a = await _make_category(client, token_a, name="GastoA", kind="expense")
     exp_b = await _make_category(client, token_b, name="GastoB", kind="expense")
 
     await _make_tx(
-        client, token_a, amount="100.00", occurred_at="2026-04-01T10:00:00Z",
+        client, token_a, account_a, amount="100.00", occurred_at="2026-04-01T10:00:00Z",
         category_id=exp_a, description="A only",
     )
     await _make_tx(
-        client, token_b, amount="999.00", occurred_at="2026-04-01T10:00:00Z",
+        client, token_b, account_b, amount="999.00", occurred_at="2026-04-01T10:00:00Z",
         category_id=exp_b, description="B only",
     )
 
@@ -386,10 +394,10 @@ async def test_summary_previous_period_null_without_date_range(
     client: AsyncClient,
 ) -> None:
     """Sin date_from/date_to no se calcula periodo previo."""
-    token = await _register(client, "dash-prev-null@example.com")
+    token, account_id = await _register(client, "dash-prev-null@example.com")
     cat = await _make_category(client, token, name="Comida", kind="expense")
     await _make_tx(
-        client, token, amount="10.00", occurred_at="2026-01-15T10:00:00Z",
+        client, token, account_id, amount="10.00", occurred_at="2026-01-15T10:00:00Z",
         category_id=cat,
     )
 
@@ -404,27 +412,27 @@ async def test_summary_previous_period_computed_with_date_range(
     client: AsyncClient,
 ) -> None:
     """Con date_from y date_to se computa el rango previo de igual longitud."""
-    token = await _register(client, "dash-prev-range@example.com")
+    token, account_id = await _register(client, "dash-prev-range@example.com")
     income_cat = await _make_category(client, token, name="Salario", kind="income")
     expense_cat = await _make_category(client, token, name="Comida", kind="expense")
 
     # Periodo actual: febrero 2026.
     await _make_tx(
-        client, token, amount="100.00", occurred_at="2026-02-10T10:00:00Z",
+        client, token, account_id, amount="100.00", occurred_at="2026-02-10T10:00:00Z",
         category_id=income_cat,
     )
     await _make_tx(
-        client, token, amount="40.00", occurred_at="2026-02-15T10:00:00Z",
+        client, token, account_id, amount="40.00", occurred_at="2026-02-15T10:00:00Z",
         category_id=expense_cat,
     )
 
     # Periodo previo (enero 2026, longitud equivalente).
     await _make_tx(
-        client, token, amount="80.00", occurred_at="2026-01-10T10:00:00Z",
+        client, token, account_id, amount="80.00", occurred_at="2026-01-10T10:00:00Z",
         category_id=income_cat,
     )
     await _make_tx(
-        client, token, amount="30.00", occurred_at="2026-01-15T10:00:00Z",
+        client, token, account_id, amount="30.00", occurred_at="2026-01-15T10:00:00Z",
         category_id=expense_cat,
     )
 
@@ -449,10 +457,10 @@ async def test_summary_previous_period_zero_when_no_prior_data(
     client: AsyncClient,
 ) -> None:
     """Si no hay transacciones en el rango previo, los valores son 0 (no None)."""
-    token = await _register(client, "dash-prev-zero@example.com")
+    token, account_id = await _register(client, "dash-prev-zero@example.com")
     income_cat = await _make_category(client, token, name="Salario", kind="income")
     await _make_tx(
-        client, token, amount="200.00", occurred_at="2026-02-10T10:00:00Z",
+        client, token, account_id, amount="200.00", occurred_at="2026-02-10T10:00:00Z",
         category_id=income_cat,
     )
 
@@ -476,18 +484,18 @@ async def test_summary_previous_period_zero_when_no_prior_data(
 async def test_currencies_returns_distinct_user_currencies(
     client: AsyncClient,
 ) -> None:
-    token = await _register(client, "dash-curr@example.com")
+    token, account_id = await _register(client, "dash-curr@example.com")
     cat = await _make_category(client, token, name="Comida", kind="expense")
     await _make_tx(
-        client, token, amount="10.00", currency="EUR",
+        client, token, account_id, amount="10.00", currency="EUR",
         occurred_at="2026-01-15T10:00:00Z", category_id=cat,
     )
     await _make_tx(
-        client, token, amount="5.00", currency="USD",
+        client, token, account_id, amount="5.00", currency="USD",
         occurred_at="2026-01-16T10:00:00Z", category_id=cat,
     )
     await _make_tx(
-        client, token, amount="3.00", currency="EUR",
+        client, token, account_id, amount="3.00", currency="EUR",
         occurred_at="2026-01-17T10:00:00Z", category_id=cat,
     )
 
@@ -497,19 +505,19 @@ async def test_currencies_returns_distinct_user_currencies(
 
 
 async def test_currencies_empty_for_new_user(client: AsyncClient) -> None:
-    token = await _register(client, "dash-curr-empty@example.com")
+    token, _account_id = await _register(client, "dash-curr-empty@example.com")
     r = await client.get("/dashboard/currencies", headers=_auth(token))
     assert r.status_code == 200
     assert r.json() == []
 
 
 async def test_currencies_isolated_per_user(client: AsyncClient) -> None:
-    token_a = await _register(client, "dash-curr-a@example.com")
-    token_b = await _register(client, "dash-curr-b@example.com")
+    token_a, account_a = await _register(client, "dash-curr-a@example.com")
+    token_b, _account_b = await _register(client, "dash-curr-b@example.com")
 
     cat_a = await _make_category(client, token_a, name="X", kind="expense")
     await _make_tx(
-        client, token_a, amount="1.00", currency="JPY",
+        client, token_a, account_a, amount="1.00", currency="JPY",
         occurred_at="2026-01-15T10:00:00Z", category_id=cat_a,
     )
 

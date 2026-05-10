@@ -6,12 +6,25 @@ from httpx import AsyncClient
 
 
 async def _register_and_get_token(client: AsyncClient, email: str = "cat@example.com") -> str:
-    """Helper: registra y devuelve access token."""
+    """Helper: registra, limpia el seed automático y devuelve token.
+
+    PHASE-20: el register siembra ~18 categorías + ~100 reglas. Estos
+    tests del módulo categories se centran en el CRUD básico y verifican
+    contadores exactos, así que partimos de cero.
+    """
     r = await client.post(
         "/auth/register",
         json={"email": email, "password": "SecurePass123", "display_name": "Test"},
     )
-    return r.json()["access_token"]
+    token = r.json()["access_token"]
+    h = {"Authorization": f"Bearer {token}"}
+    rules = (await client.get("/category-rules", headers=h)).json()["items"]
+    for rule in rules:
+        await client.delete(f"/category-rules/{rule['id']}", headers=h)
+    cats = (await client.get("/categories", headers=h)).json()
+    for c in cats:
+        await client.delete(f"/categories/{c['id']}", headers=h)
+    return token
 
 
 def _auth(token: str) -> dict[str, str]:

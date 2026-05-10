@@ -13,11 +13,14 @@ from reportlab.platypus import PageBreak, SimpleDocTemplate, Table, TableStyle
 
 from app.modules.personal_finance.imports.parser import (
     ParseError,
+    SmartParseAmbiguous,
     detect_format,
     parse_csv,
     parse_pdf,
+    parse_pdf_smart,
     parse_xlsx,
 )
+from app.modules.personal_finance.imports.service import _parse_amount, _RowError
 
 
 def _build_pdf(pages: list[list[list[str]]]) -> bytes:
@@ -165,3 +168,205 @@ def test_parse_pdf_no_tables_raises() -> None:
 def test_parse_pdf_invalid_bytes_raises() -> None:
     with pytest.raises(ParseError):
         parse_pdf(b"not a pdf")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# parse_pdf_smart: heurística sobre extractos bancarios reales (varias tablas)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _bank_statement_pdf() -> bytes:
+    """PDF de prueba con la estructura del PDF del usuario:
+    Resumen (2 cols, totales) + Desglose por categoría (2 cols) + Listado de
+    movimientos (5 cols con cabecera tipo 'F. Operac., Concepto, Detalle,
+    Importe (EUR)').
+    """
+    return _build_pdf(
+        [
+            # Página 1: dos tablas pequeñas (resumen + desglose) y la cabecera
+            # del listado. ReportLab pone una tabla por página en el helper —
+            # las metemos cada una en su propia "página" (separadas por
+            # PageBreak en _build_pdf).
+            [
+                ["Concepto", "Importe (EUR)"],
+                ["Total ingresos", "12.052,10"],
+                ["Total gastos", "-11.962,30"],
+                ["Balance neto", "89,80"],
+            ],
+            [
+                ["Categoria", "Total (EUR)"],
+                ["ADEUDOS", "-4.903,06"],
+                ["TARJETA - RESTAURANTES", "-435,41"],
+                ["NOMINA", "2.491,65"],
+            ],
+            [
+                ["F. Operac.", "F. Contab.", "Concepto", "Detalle", "Importe (EUR)"],
+                ["25/02", "02/03", "PAGO TARJETA - RESTAURANTES", "PAYPAL *PAGO 3 PLAZOS", "-29,66"],
+                ["28/02", "02/03", "PAGO CON TARJETA EN GASOLINERAS", "E.S. LA HITA TORRE PACHECO", "-40,00"],
+                ["13/03", "13/03", "ABONO DE NOMINA", "DNV GREENPOWERMONITOR", "2.491,65"],
+                ["13/03", "13/03", "TRANSFERENCIAS", "JOSE A MEMBRIVE", "-900,00"],
+                ["01/04", "02/04", "BIZUM RECIBIDO", "cena", "15,50"],
+            ],
+        ]
+    )
+
+
+def test_parse_pdf_smart_detects_transactions_table() -> None:
+    rows = parse_pdf_smart(_bank_statement_pdf())
+    # 5 transacciones reales; los totales del resumen y el desglose se ignoran.
+    assert len(rows) == 5
+    # Todas las filas usan keys fijas.
+    for r in rows:
+        assert set(r.keys()) == {"amount", "occurred_at", "description", "category_name"}
+    # Ningún total del resumen se cuela como transacción.
+    descriptions = [r["description"] for r in rows]
+    assert "Total ingresos" not in descriptions
+    assert "ADEUDOS" not in descriptions
+
+
+def test_parse_pdf_smart_uses_detalle_as_description_and_concepto_as_category() -> None:
+    rows = parse_pdf_smart(_bank_statement_pdf())
+    first = rows[0]
+    assert first["description"] == "PAYPAL *PAGO 3 PLAZOS"
+    assert first["category_name"] == "PAGO TARJETA - RESTAURANTES"
+    assert first["amount"] == "-29,66"
+
+
+def test_parse_pdf_smart_infers_year_for_ddmm_dates() -> None:
+    """Fechas DD/MM se rellenan con el año actual cuando no hay periodo
+    explícito en el PDF (cubierto por el fixture)."""
+    rows = parse_pdf_smart(_bank_statement_pdf())
+    from datetime import date
+    expected_year = str(date.today().year)
+    for r in rows:
+        assert r["occurred_at"].endswith(f"/{expected_year}"), r["occurred_at"]
+
+
+def test_parse_pdf_smart_picks_f_operac_over_f_contab() -> None:
+    """Si hay dos columnas de fecha, la primera (F. Operac.) gana."""
+    rows = parse_pdf_smart(_bank_statement_pdf())
+    # 25/02 (operac) vs 02/03 (contab): debe ganar la primera.
+    assert rows[0]["occurred_at"].startswith("25/02/")
+
+
+def test_parse_pdf_smart_picks_importe_over_saldo() -> None:
+    """Bug histórico: con cabeceras `[..., "Importe", "Saldo"]` la
+    heurística debe quedarse con el importe de la transacción, NO con
+    el saldo acumulado. Dato real del usuario: -60,00 € (importe) vs
+    3.317,98 € (saldo) → tiene que elegir el primero."""
+    payload = _build_pdf(
+        [
+            [
+                ["Fecha", "Concepto", "Importe", "Saldo"],
+                ["30/01/2026", "TRANSFERENCIA Wi", "-60,00 €", "3.317,98 €"],
+                ["30/01/2026", "PAYPAL GOOGLE", "-5,17 €", "3.312,81 €"],
+                ["30/01/2026", "PAGO TARJETA", "-12,49 €", "3.300,32 €"],
+            ]
+        ]
+    )
+    rows = parse_pdf_smart(payload)
+    assert len(rows) == 3
+    # Los importes deben ser los reales (con signo) — no los saldos.
+    amounts = [r["amount"] for r in rows]
+    assert "-60,00 €" in amounts[0]
+    assert "3.317,98" not in amounts[0]
+
+
+def test_parse_pdf_smart_ambiguous_when_no_transactions_table() -> None:
+    """PDF con solo tablas de resumen (sin cabeceras tipo fecha+importe
+    suficientes) → SmartParseAmbiguous, el caller cae al parser legacy."""
+    payload = _build_pdf(
+        [
+            [
+                ["Etiqueta", "Valor"],
+                ["foo", "1"],
+                ["bar", "2"],
+            ],
+        ]
+    )
+    with pytest.raises(SmartParseAmbiguous):
+        parse_pdf_smart(payload)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _parse_amount: importe con formatos europeos, símbolos de moneda, signos
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+from decimal import Decimal
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("25.50", Decimal("25.50")),
+        ("25,50", Decimal("25.50")),
+        ("1.234,56", Decimal("1234.56")),
+        ("1,234.56", Decimal("1234.56")),
+        # Signos
+        ("-29,66", Decimal("29.66")),
+        ("+10.00", Decimal("10.00")),
+        # Símbolos de moneda y espacios — el caso del usuario.
+        ("3310,00 €", Decimal("3310.00")),
+        ("€3.310,00", Decimal("3310.00")),
+        ("$25.50", Decimal("25.50")),
+        ("£1,234.56", Decimal("1234.56")),
+        ("1234,56 EUR", Decimal("1234.56")),
+        ("-1.234,56 €", Decimal("1234.56")),
+        # Espacios sueltos
+        (" 100,00 ", Decimal("100.00")),
+    ],
+)
+def test_parse_amount_accepts_currency_symbols_and_signs(
+    raw: str, expected: Decimal
+) -> None:
+    assert _parse_amount(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "",
+        "  €  ",
+        "abc",
+        "0,00",
+        "0",
+    ],
+)
+def test_parse_amount_rejects_empty_or_zero(raw: str) -> None:
+    with pytest.raises(_RowError):
+        _parse_amount(raw)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _normalize_date: celdas con doble fecha y formatos varios
+# ─────────────────────────────────────────────────────────────────────────────
+
+from app.modules.personal_finance.imports.parser import _normalize_date
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        # Formatos limpios
+        ("2026-04-15", "2026-04-15"),
+        ("15/04/2026", "15/04/2026"),
+        ("15/04/26", "15/04/2026"),
+        ("15/04", "15/04/2030"),  # DD/MM se rellena con default_year=2030
+        # Doble fecha (caso real: "Fecha operación + Fecha valor" en una celda)
+        (
+            "30/01/2026 Fecha valor 28/01/2026",
+            "30/01/2026",
+        ),
+        ("30/01/2026  28/01/2026", "30/01/2026"),
+        # ISO con texto extra
+        ("Fecha 2026-04-15 valor", "2026-04-15"),
+        # Con espacios en blanco
+        ("  15/04/2026  ", "15/04/2026"),
+        # Texto sin fecha → devuelve la cadena tal cual (el service la rechazará)
+        ("sin fecha", "sin fecha"),
+        ("", ""),
+    ],
+)
+def test_normalize_date_extracts_first_date(raw: str, expected: str) -> None:
+    assert _normalize_date(raw, default_year=2030) == expected

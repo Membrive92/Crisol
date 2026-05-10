@@ -59,12 +59,21 @@ def _mock_storage_and_ai(
         yield delete_mock
 
 
-async def _setup_user(client: AsyncClient, email: str = "rcpt@example.com") -> str:
+async def _setup_user(
+    client: AsyncClient, email: str = "rcpt@example.com"
+) -> tuple[str, str]:
+    """Registra un usuario y crea una cuenta, devuelve (token, account_id)."""
     r = await client.post(
         "/auth/register",
         json={"email": email, "password": "SecurePass123", "display_name": "Rcpt"},
     )
-    return str(r.json()["access_token"])
+    token = str(r.json()["access_token"])
+    acc = await client.post(
+        "/accounts",
+        json={"name": "Cuenta principal", "type": "bank", "currency": "EUR"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    return token, acc.json()["id"]
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -72,7 +81,7 @@ def _auth(token: str) -> dict[str, str]:
 
 
 async def test_extract_creates_pending_receipt(client: AsyncClient) -> None:
-    token = await _setup_user(client)
+    token, _account_id = await _setup_user(client)
     files = {"file": ("ticket.jpg", b"fake-image", "image/jpeg")}
     with _mock_storage_and_ai():
         r = await client.post("/receipts/extract", files=files, headers=_auth(token))
@@ -85,7 +94,7 @@ async def test_extract_creates_pending_receipt(client: AsyncClient) -> None:
 
 
 async def test_extract_rejects_unsupported_image_type(client: AsyncClient) -> None:
-    token = await _setup_user(client, "badimg@example.com")
+    token, _account_id = await _setup_user(client, "badimg@example.com")
     files = {"file": ("ticket.gif", b"\x00\x00", "image/gif")}
     with _mock_storage_and_ai():
         r = await client.post("/receipts/extract", files=files, headers=_auth(token))
@@ -93,7 +102,7 @@ async def test_extract_rejects_unsupported_image_type(client: AsyncClient) -> No
 
 
 async def test_extract_empty_payload_rejected(client: AsyncClient) -> None:
-    token = await _setup_user(client, "empty@example.com")
+    token, _account_id = await _setup_user(client, "empty@example.com")
     files = {"file": ("ticket.jpg", b"", "image/jpeg")}
     with _mock_storage_and_ai():
         r = await client.post("/receipts/extract", files=files, headers=_auth(token))
@@ -101,7 +110,7 @@ async def test_extract_empty_payload_rejected(client: AsyncClient) -> None:
 
 
 async def test_extract_ai_unavailable_cleans_blob(client: AsyncClient) -> None:
-    token = await _setup_user(client, "aidown@example.com")
+    token, _account_id = await _setup_user(client, "aidown@example.com")
     files = {"file": ("ticket.jpg", b"fake", "image/jpeg")}
     with _mock_storage_and_ai(
         extract_side_effect=AiUnavailableError("Ollama down")
@@ -112,13 +121,14 @@ async def test_extract_ai_unavailable_cleans_blob(client: AsyncClient) -> None:
 
 
 async def test_confirm_creates_transaction_and_marks_confirmed(client: AsyncClient) -> None:
-    token = await _setup_user(client, "confirm@example.com")
+    token, account_id = await _setup_user(client, "confirm@example.com")
     files = {"file": ("ticket.jpg", b"fake", "image/jpeg")}
     with _mock_storage_and_ai():
         extract = await client.post("/receipts/extract", files=files, headers=_auth(token))
     receipt_id = extract.json()["receipt"]["id"]
 
     payload = {
+        "account_id": account_id,
         "amount": "12.34",
         "occurred_at": "2026-04-15T13:45:00Z",
         "currency": "EUR",
@@ -143,12 +153,13 @@ async def test_confirm_creates_transaction_and_marks_confirmed(client: AsyncClie
 
 
 async def test_confirm_twice_returns_409(client: AsyncClient) -> None:
-    token = await _setup_user(client, "twice@example.com")
+    token, account_id = await _setup_user(client, "twice@example.com")
     files = {"file": ("ticket.jpg", b"fake", "image/jpeg")}
     with _mock_storage_and_ai():
         extract = await client.post("/receipts/extract", files=files, headers=_auth(token))
     receipt_id = extract.json()["receipt"]["id"]
     payload = {
+        "account_id": account_id,
         "amount": "5.00",
         "occurred_at": "2026-04-15T00:00:00Z",
         "currency": "EUR",
@@ -166,7 +177,7 @@ async def test_confirm_twice_returns_409(client: AsyncClient) -> None:
 async def test_reject_marks_rejected_and_does_not_create_transaction(
     client: AsyncClient,
 ) -> None:
-    token = await _setup_user(client, "reject@example.com")
+    token, _account_id = await _setup_user(client, "reject@example.com")
     files = {"file": ("ticket.jpg", b"fake", "image/jpeg")}
     with _mock_storage_and_ai():
         extract = await client.post("/receipts/extract", files=files, headers=_auth(token))
@@ -181,7 +192,7 @@ async def test_reject_marks_rejected_and_does_not_create_transaction(
 
 
 async def test_list_and_get_receipts(client: AsyncClient) -> None:
-    token = await _setup_user(client, "list@example.com")
+    token, _account_id = await _setup_user(client, "list@example.com")
     files = {"file": ("ticket.jpg", b"fake", "image/jpeg")}
     with _mock_storage_and_ai():
         await client.post("/receipts/extract", files=files, headers=_auth(token))
@@ -198,8 +209,8 @@ async def test_list_and_get_receipts(client: AsyncClient) -> None:
 
 
 async def test_receipt_user_isolation(client: AsyncClient) -> None:
-    token_a = await _setup_user(client, "a@example.com")
-    token_b = await _setup_user(client, "b@example.com")
+    token_a, _account_a = await _setup_user(client, "a@example.com")
+    token_b, _account_b = await _setup_user(client, "b@example.com")
     files = {"file": ("ticket.jpg", b"fake", "image/jpeg")}
     with _mock_storage_and_ai():
         a_extract = await client.post("/receipts/extract", files=files, headers=_auth(token_a))
@@ -211,7 +222,7 @@ async def test_receipt_user_isolation(client: AsyncClient) -> None:
 
 
 async def test_get_blob_returns_image_bytes(client: AsyncClient) -> None:
-    token = await _setup_user(client, "blob@example.com")
+    token, _account_id = await _setup_user(client, "blob@example.com")
     files = {"file": ("ticket.jpg", b"fake", "image/jpeg")}
     with _mock_storage_and_ai():
         extract = await client.post("/receipts/extract", files=files, headers=_auth(token))
@@ -229,8 +240,8 @@ async def test_get_blob_returns_image_bytes(client: AsyncClient) -> None:
 
 
 async def test_get_blob_isolated_per_user(client: AsyncClient) -> None:
-    token_a = await _setup_user(client, "ablob@example.com")
-    token_b = await _setup_user(client, "bblob@example.com")
+    token_a, _account_a = await _setup_user(client, "ablob@example.com")
+    token_b, _account_b = await _setup_user(client, "bblob@example.com")
     files = {"file": ("ticket.jpg", b"fake", "image/jpeg")}
     with _mock_storage_and_ai():
         a_extract = await client.post(
@@ -251,7 +262,7 @@ async def test_get_blob_isolated_per_user(client: AsyncClient) -> None:
 async def test_get_blob_storage_failure_returns_404(client: AsyncClient) -> None:
     from app.core.storage import StorageError
 
-    token = await _setup_user(client, "missing@example.com")
+    token, _account_id = await _setup_user(client, "missing@example.com")
     files = {"file": ("ticket.jpg", b"fake", "image/jpeg")}
     with _mock_storage_and_ai():
         extract = await client.post("/receipts/extract", files=files, headers=_auth(token))

@@ -80,7 +80,7 @@ def test_merge_three_way_keeps_longest() -> None:
 # ---------- Integration: scan API recoge la fusión ----------
 
 
-async def _setup_user(client: AsyncClient, email: str) -> tuple[str, str]:
+async def _setup_user(client: AsyncClient, email: str) -> tuple[str, str, str]:
     r = await client.post(
         "/auth/register",
         json={"email": email, "password": "SecurePass123", "display_name": "Test"},
@@ -91,7 +91,12 @@ async def _setup_user(client: AsyncClient, email: str) -> tuple[str, str]:
         json={"name": "Streaming", "kind": "expense"},
         headers={"Authorization": f"Bearer {token}"},
     )
-    return token, cat.json()["id"]
+    acc = await client.post(
+        "/accounts",
+        json={"name": "Cuenta principal", "type": "bank", "currency": "EUR"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    return token, cat.json()["id"], acc.json()["id"]
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -104,7 +109,7 @@ async def test_scan_merges_descriptions_with_common_prefix(
     """Crear 4 cargos mensuales alternando descripciones tipo
     "NETFLIX.COM" y "Netflix Premium" → el detector las trata como
     un único gasto fijo."""
-    token, cat_id = await _setup_user(client, "pf1@example.com")
+    token, cat_id, account_id = await _setup_user(client, "pf1@example.com")
     today = date.today()
 
     # Todas comparten prefijo "netflix" tras normalizar — el de
@@ -120,6 +125,7 @@ async def test_scan_merges_descriptions_with_common_prefix(
         await client.post(
             "/transactions",
             json={
+                "account_id": account_id,
                 "category_id": cat_id,
                 "amount": "12.99",
                 "currency": "EUR",

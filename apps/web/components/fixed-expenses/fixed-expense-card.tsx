@@ -1,6 +1,6 @@
 'use client';
 
-import type { Category, FixedExpense } from '@finanzas/types';
+import type { Account, Category, FixedExpense } from '@finanzas/types';
 import {
   colors,
   fontSize,
@@ -17,6 +17,8 @@ import { Card } from '@/components/ui/card';
 export interface FixedExpenseCardProps {
   fixedExpense: FixedExpense;
   categories: Category[];
+  /** PHASE-19.1 — cuentas disponibles para asignar al cobro. */
+  accounts?: Account[];
   /** Acción primaria (Confirmar para pending, Pausar para confirmed, etc.). */
   primaryAction?: { label: string; onClick: () => void; busy?: boolean };
   /** Acción secundaria (Descartar para pending, Cancelar para confirmed, etc.). */
@@ -24,6 +26,9 @@ export interface FixedExpenseCardProps {
   /** PHASE-17.2 — toggle de auto-post. Sólo se muestra cuando el caller pasa el handler. */
   onToggleAutoPost?: (id: string, next: boolean) => void;
   autoPostBusy?: boolean;
+  /** PHASE-19.1 — handler para cambiar la cuenta de cobro. Si null, se desactiva el autopost. */
+  onChangeAccount?: (id: string, accountId: string | null) => void;
+  accountBusy?: boolean;
 }
 
 const CADENCE_LABEL: Record<number, string> = {
@@ -48,14 +53,19 @@ function findCategory(categories: Category[], id: string | null): Category | und
 export function FixedExpenseCard({
   fixedExpense: item,
   categories,
+  accounts,
   primaryAction,
   secondaryAction,
   onToggleAutoPost,
   autoPostBusy,
+  onChangeAccount,
+  accountBusy,
 }: FixedExpenseCardProps) {
   const category = findCategory(categories, item.category_id);
   const cadenceLabel = CADENCE_LABEL[item.cadence_days] ?? `${item.cadence_days}d`;
   const confidencePct = Math.round(item.confidence * 100);
+  const accountList = accounts ?? [];
+  const showAccountSelector = onChangeAccount !== undefined && accountList.length > 0;
 
   return (
     <Card style={{ padding: spacing.md }}>
@@ -100,6 +110,59 @@ export function FixedExpenseCard({
         </span>
       </div>
 
+      {showAccountSelector ? (
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: spacing.xs,
+            paddingTop: spacing.xs,
+            borderTop: `1px solid ${colors.border}`,
+            marginTop: spacing.xs,
+            fontSize: fontSize.xs,
+            color: colors.textMuted,
+          }}
+        >
+          <label
+            htmlFor={`fixed-expense-${item.id}-account`}
+            style={{ fontWeight: fontWeight.medium }}
+          >
+            Cuenta:
+          </label>
+          <select
+            id={`fixed-expense-${item.id}-account`}
+            value={item.account_id ?? ''}
+            onChange={(e) => {
+              const next = e.target.value;
+              onChangeAccount(item.id, next ? next : null);
+            }}
+            disabled={accountBusy}
+            style={{
+              padding: `2px ${spacing.xs}px`,
+              borderRadius: radius.sm,
+              border: `1px solid ${colors.border}`,
+              backgroundColor: colors.surface,
+              color: colors.text,
+              fontSize: fontSize.xs,
+            }}
+          >
+            <option value="">— Sin cuenta —</option>
+            {accountList.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.icon ? `${a.icon} ` : ''}
+                {a.name} ({a.currency})
+              </option>
+            ))}
+          </select>
+          {item.account_id === null ? (
+            <span style={{ color: colors.warning }}>
+              Sin cuenta — el autopost no funcionará.
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
       <div
         style={{
           display: 'flex',
@@ -107,7 +170,7 @@ export function FixedExpenseCard({
           justifyContent: 'space-between',
           gap: spacing.sm,
           padding: `${spacing.xs}px 0`,
-          borderTop: `1px solid ${colors.border}`,
+          borderTop: showAccountSelector ? 'none' : `1px solid ${colors.border}`,
           marginTop: spacing.xs,
         }}
       >
@@ -135,8 +198,9 @@ export function FixedExpenseCard({
                   type="checkbox"
                   checked={item.auto_post}
                   onChange={(e) => onToggleAutoPost(item.id, e.target.checked)}
-                  disabled={autoPostBusy}
+                  disabled={autoPostBusy || item.account_id === null}
                   style={{ margin: 0 }}
+                  title={item.account_id === null ? 'Asigna una cuenta primero' : undefined}
                 />
                 Auto-añadir
               </label>

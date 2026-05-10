@@ -1,6 +1,14 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import {
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
-import type { Category, FixedExpense } from '@finanzas/types';
+import type { Account, Category, FixedExpense } from '@finanzas/types';
 import {
   colors,
   fontSize,
@@ -21,11 +29,16 @@ export interface FixedExpenseCardAction {
 export interface FixedExpenseCardProps {
   fixedExpense: FixedExpense;
   categories: Category[];
+  /** PHASE-19.1 — cuentas disponibles para asignar al cobro. */
+  accounts?: Account[];
   primaryAction?: FixedExpenseCardAction;
   secondaryAction?: FixedExpenseCardAction;
   /** PHASE-17.2 — toggle auto-post. Si se pasa el handler, aparece un check. */
   onToggleAutoPost?: (id: string, next: boolean) => void;
   autoPostBusy?: boolean;
+  /** PHASE-19.1 — handler para cambiar la cuenta de cobro. `null` desactiva autopost. */
+  onChangeAccount?: (id: string, accountId: string | null) => void;
+  accountBusy?: boolean;
 }
 
 const CADENCE_LABEL: Record<number, string> = {
@@ -42,23 +55,40 @@ function findCategory(categories: Category[], id: string | null): Category | und
   return categories.find((c) => c.id === id);
 }
 
+function findAccount(accounts: Account[], id: string | null): Account | undefined {
+  if (!id) return undefined;
+  return accounts.find((a) => a.id === id);
+}
+
 /**
  * Card de gasto fijo mobile equivalente a la versión web. Misma
  * propuesta: callers controlan acciones vía primaryAction /
  * secondaryAction props (Confirmar+Descartar para pending,
  * Pausar+Cancelar para confirmed, etc.).
+ *
+ * PHASE-19.1: cuando el caller pasa `onChangeAccount` aparece un
+ * selector inline de cuenta. Si la cuenta es null muestra un warning
+ * indicando que el autopost no funcionará.
  */
 export function FixedExpenseCard({
   fixedExpense: item,
   categories,
+  accounts,
   primaryAction,
   secondaryAction,
   onToggleAutoPost,
   autoPostBusy,
+  onChangeAccount,
+  accountBusy,
 }: FixedExpenseCardProps) {
   const category = findCategory(categories, item.category_id);
   const cadenceLabel = CADENCE_LABEL[item.cadence_days] ?? `${item.cadence_days}d`;
   const confidencePct = Math.round(item.confidence * 100);
+  const accountList = useMemo(() => accounts ?? [], [accounts]);
+  const showAccountSelector = onChangeAccount !== undefined && accountList.length > 0;
+  const currentAccount = findAccount(accountList, item.account_id);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const autoPostDisabled = autoPostBusy || item.account_id === null;
 
   return (
     <View style={styles.card}>
@@ -77,14 +107,40 @@ export function FixedExpenseCard({
 
       <View style={styles.divider} />
 
+      {showAccountSelector ? (
+        <View style={styles.accountRow}>
+          <Text style={styles.accountLabel}>Cuenta:</Text>
+          <Pressable
+            onPress={() => setPickerOpen(true)}
+            disabled={accountBusy}
+            style={({ pressed }) => [
+              styles.accountChip,
+              pressed && { opacity: 0.7 },
+              accountBusy && { opacity: 0.5 },
+            ]}
+          >
+            <Text style={styles.accountChipText}>
+              {currentAccount
+                ? `${currentAccount.icon ? `${currentAccount.icon} ` : ''}${currentAccount.name} (${currentAccount.currency})`
+                : '— Sin cuenta —'}
+            </Text>
+          </Pressable>
+          {item.account_id === null ? (
+            <Text style={styles.accountWarning}>
+              Sin cuenta — el autopost no funcionará.
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
       {onToggleAutoPost ? (
         <Pressable
           onPress={() => onToggleAutoPost(item.id, !item.auto_post)}
-          disabled={autoPostBusy}
+          disabled={autoPostDisabled}
           style={({ pressed }) => [
             styles.autoPostRow,
             pressed && { opacity: 0.7 },
-            autoPostBusy && { opacity: 0.5 },
+            autoPostDisabled && { opacity: 0.5 },
           ]}
         >
           <View
@@ -101,7 +157,9 @@ export function FixedExpenseCard({
               item.auto_post && { color: colors.primary, fontWeight: fontWeight.semibold },
             ]}
           >
-            Auto-añadir cada {CADENCE_LABEL[item.cadence_days]?.toLowerCase() ?? 'ciclo'}
+            {item.account_id === null
+              ? 'Asigna una cuenta para activar auto-añadir'
+              : `Auto-añadir cada ${CADENCE_LABEL[item.cadence_days]?.toLowerCase() ?? 'ciclo'}`}
           </Text>
         </Pressable>
       ) : null}
@@ -152,6 +210,68 @@ export function FixedExpenseCard({
           ) : null}
         </View>
       </View>
+
+      {showAccountSelector ? (
+        <Modal
+          visible={pickerOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setPickerOpen(false)}
+        >
+          <Pressable
+            style={styles.pickerBackdrop}
+            onPress={() => setPickerOpen(false)}
+          >
+            <Pressable
+              style={styles.pickerSheet}
+              onPress={(e) => e.stopPropagation()}
+            >
+              <Text style={styles.pickerTitle}>Cuenta de cobro</Text>
+              <ScrollView style={{ maxHeight: 360 }}>
+                <Pressable
+                  onPress={() => {
+                    setPickerOpen(false);
+                    onChangeAccount?.(item.id, null);
+                  }}
+                  style={({ pressed }) => [
+                    styles.pickerItem,
+                    pressed && { opacity: 0.7 },
+                  ]}
+                >
+                  <Text style={styles.pickerItemText}>— Sin cuenta —</Text>
+                </Pressable>
+                {accountList.map((a) => {
+                  const selected = a.id === item.account_id;
+                  return (
+                    <Pressable
+                      key={a.id}
+                      onPress={() => {
+                        setPickerOpen(false);
+                        onChangeAccount?.(item.id, a.id);
+                      }}
+                      style={({ pressed }) => [
+                        styles.pickerItem,
+                        selected && styles.pickerItemSelected,
+                        pressed && { opacity: 0.7 },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.pickerItemText,
+                          selected && styles.pickerItemTextSelected,
+                        ]}
+                      >
+                        {a.icon ? `${a.icon} ` : ''}
+                        {a.name} ({a.currency})
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      ) : null}
     </View>
   );
 }
@@ -182,6 +302,36 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: colors.border,
     marginVertical: spacing.xs,
+  },
+  accountRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
+  },
+  accountLabel: {
+    fontSize: fontSize.xs,
+    color: colors.textMuted,
+    fontWeight: fontWeight.medium,
+  },
+  accountChip: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+  },
+  accountChipText: {
+    fontSize: fontSize.xs,
+    color: colors.text,
+    fontWeight: fontWeight.medium,
+  },
+  accountWarning: {
+    fontSize: fontSize.xs,
+    color: colors.warning,
+    flexBasis: '100%',
   },
   footer: {
     flexDirection: 'row',
@@ -243,5 +393,43 @@ const styles = StyleSheet.create({
   autoPostLabel: {
     fontSize: fontSize.xs,
     color: colors.textMuted,
+  },
+  pickerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg,
+  },
+  pickerSheet: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    width: '100%',
+    maxWidth: 420,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  pickerTitle: {
+    fontSize: fontSize.md,
+    fontWeight: fontWeight.semibold,
+    color: colors.text,
+    marginBottom: spacing.sm,
+  },
+  pickerItem: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.sm,
+  },
+  pickerItemSelected: {
+    backgroundColor: colors.primarySoft,
+  },
+  pickerItemText: {
+    fontSize: fontSize.sm,
+    color: colors.text,
+  },
+  pickerItemTextSelected: {
+    color: colors.primary,
+    fontWeight: fontWeight.semibold,
   },
 });

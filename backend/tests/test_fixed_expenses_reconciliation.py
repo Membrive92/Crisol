@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import uuid
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
@@ -23,7 +24,7 @@ from app.modules.personal_finance.transactions.models import (
 )
 
 
-async def _setup_user(client: AsyncClient, email: str) -> tuple[str, str]:
+async def _setup_user(client: AsyncClient, email: str) -> tuple[str, str, str]:
     r = await client.post(
         "/auth/register",
         json={"email": email, "password": "SecurePass123", "display_name": "Test"},
@@ -34,7 +35,12 @@ async def _setup_user(client: AsyncClient, email: str) -> tuple[str, str]:
         json={"name": "Casa", "kind": "expense"},
         headers={"Authorization": f"Bearer {token}"},
     )
-    return token, cat.json()["id"]
+    acc = await client.post(
+        "/accounts",
+        json={"name": "Cuenta principal", "type": "bank", "currency": "EUR"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    return token, cat.json()["id"], acc.json()["id"]
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -45,6 +51,7 @@ async def _create_expected_tx(
     client: AsyncClient,
     token: str,
     cat_id: str,
+    account_id: str,
     test_engine,
     *,
     occurred_at: date,
@@ -60,6 +67,7 @@ async def _create_expected_tx(
         await client.post(
             "/transactions",
             json={
+                "account_id": account_id,
                 "category_id": cat_id,
                 "amount": amount,
                 "currency": "EUR",
@@ -74,7 +82,7 @@ async def _create_expected_tx(
     await client.post(f"/fixed-expenses/{fid}/confirm", headers=_auth(token))
     await client.put(
         f"/fixed-expenses/{fid}",
-        json={"auto_post": True},
+        json={"auto_post": True, "account_id": account_id},
         headers=_auth(token),
     )
 
@@ -109,11 +117,12 @@ def _make_csv(rows: list[tuple[str, str, str]]) -> bytes:
     return "\n".join(lines).encode("utf-8")
 
 
-def _import_payload(cat_id: str) -> dict:
+def _import_payload(cat_id: str, account_id: str) -> dict:
     """Form data para POST /imports — column_mappings como JSON string."""
     import json as _json
 
     return {
+        "account_id": account_id,
         "currency": "EUR",
         "default_category_id": cat_id,
         "column_mappings": _json.dumps(
@@ -132,11 +141,11 @@ async def test_reconcile_returns_existing_when_match(
     """Tx expected creada por autopost → import con merchant + amount +
     fecha próximos → devuelve la expected existente con import_hash y
     description actualizada. NO crea fila nueva."""
-    token, cat_id = await _setup_user(client, "rec1@example.com")
+    token, cat_id, account_id = await _setup_user(client, "rec1@example.com")
     today = date.today()
     yesterday = today - timedelta(days=1)
     fid, expected_tx_id = await _create_expected_tx(
-        client, token, cat_id, test_engine, occurred_at=yesterday
+        client, token, cat_id, account_id, test_engine, occurred_at=yesterday
     )
 
     factory = async_sessionmaker(bind=test_engine, expire_on_commit=False)
@@ -151,6 +160,7 @@ async def test_reconcile_returns_existing_when_match(
         match = await reconcile_with_expected(
             db,
             user.id,
+            account_id=uuid.UUID(account_id),
             occurred_at=datetime.combine(today, datetime.min.time()).replace(tzinfo=UTC),
             amount=Decimal("800.00"),
             currency="EUR",
@@ -169,11 +179,11 @@ async def test_reconcile_no_match_when_amount_differs(
     client: AsyncClient, test_engine
 ) -> None:
     """Mismo merchant + fecha pero amount distinto → no match."""
-    token, cat_id = await _setup_user(client, "rec2@example.com")
+    token, cat_id, account_id = await _setup_user(client, "rec2@example.com")
     today = date.today()
     yesterday = today - timedelta(days=1)
     await _create_expected_tx(
-        client, token, cat_id, test_engine, occurred_at=yesterday, amount="800.00"
+        client, token, cat_id, account_id, test_engine, occurred_at=yesterday, amount="800.00"
     )
 
     factory = async_sessionmaker(bind=test_engine, expire_on_commit=False)
@@ -187,6 +197,7 @@ async def test_reconcile_no_match_when_amount_differs(
         match = await reconcile_with_expected(
             db,
             user.id,
+            account_id=uuid.UUID(account_id),
             occurred_at=datetime.combine(today, datetime.min.time()).replace(tzinfo=UTC),
             amount=Decimal("750.00"),  # distinto
             currency="EUR",
@@ -200,11 +211,11 @@ async def test_reconcile_no_match_when_outside_date_window(
     client: AsyncClient, test_engine
 ) -> None:
     """Fuera de ±3 días → no match."""
-    token, cat_id = await _setup_user(client, "rec3@example.com")
+    token, cat_id, account_id = await _setup_user(client, "rec3@example.com")
     today = date.today()
     long_ago = today - timedelta(days=10)
     await _create_expected_tx(
-        client, token, cat_id, test_engine, occurred_at=long_ago
+        client, token, cat_id, account_id, test_engine, occurred_at=long_ago
     )
 
     factory = async_sessionmaker(bind=test_engine, expire_on_commit=False)
@@ -218,6 +229,7 @@ async def test_reconcile_no_match_when_outside_date_window(
         match = await reconcile_with_expected(
             db,
             user.id,
+            account_id=uuid.UUID(account_id),
             occurred_at=datetime.combine(today, datetime.min.time()).replace(tzinfo=UTC),
             amount=Decimal("800.00"),
             currency="EUR",
@@ -231,11 +243,11 @@ async def test_reconcile_no_match_when_merchant_different(
     client: AsyncClient, test_engine
 ) -> None:
     """Mismo amount + fecha pero merchant sin prefijo común → no match."""
-    token, cat_id = await _setup_user(client, "rec4@example.com")
+    token, cat_id, account_id = await _setup_user(client, "rec4@example.com")
     today = date.today()
     yesterday = today - timedelta(days=1)
     await _create_expected_tx(
-        client, token, cat_id, test_engine, occurred_at=yesterday
+        client, token, cat_id, account_id, test_engine, occurred_at=yesterday
     )
 
     factory = async_sessionmaker(bind=test_engine, expire_on_commit=False)
@@ -249,6 +261,7 @@ async def test_reconcile_no_match_when_merchant_different(
         match = await reconcile_with_expected(
             db,
             user.id,
+            account_id=uuid.UUID(account_id),
             occurred_at=datetime.combine(today, datetime.min.time()).replace(tzinfo=UTC),
             amount=Decimal("800.00"),
             currency="EUR",
@@ -263,11 +276,11 @@ async def test_reconcile_skips_already_reconciled(
 ) -> None:
     """Una expected con import_hash ya asignado no se vuelve a
     reconciliar (no debería matchear dos imports al mismo evento)."""
-    token, cat_id = await _setup_user(client, "rec5@example.com")
+    token, cat_id, account_id = await _setup_user(client, "rec5@example.com")
     today = date.today()
     yesterday = today - timedelta(days=1)
     fid, expected_tx_id = await _create_expected_tx(
-        client, token, cat_id, test_engine, occurred_at=yesterday
+        client, token, cat_id, account_id, test_engine, occurred_at=yesterday
     )
 
     factory = async_sessionmaker(bind=test_engine, expire_on_commit=False)
@@ -289,6 +302,7 @@ async def test_reconcile_skips_already_reconciled(
         match = await reconcile_with_expected(
             db,
             user.id,
+            account_id=uuid.UUID(account_id),
             occurred_at=datetime.combine(today, datetime.min.time()).replace(tzinfo=UTC),
             amount=Decimal("800.00"),
             currency="EUR",
@@ -303,11 +317,11 @@ async def test_imports_pipeline_reconciles_expected_via_csv(
 ) -> None:
     """Un CSV importado que coincide con una expected reconcilia en
     lugar de crear duplicada (smoke del pipeline completo)."""
-    token, cat_id = await _setup_user(client, "rec_pipe@example.com")
+    token, cat_id, account_id = await _setup_user(client, "rec_pipe@example.com")
     today = date.today()
     yesterday = today - timedelta(days=1)
     fid, expected_tx_id = await _create_expected_tx(
-        client, token, cat_id, test_engine, occurred_at=yesterday
+        client, token, cat_id, account_id, test_engine, occurred_at=yesterday
     )
 
     csv = _make_csv(
@@ -316,7 +330,7 @@ async def test_imports_pipeline_reconciles_expected_via_csv(
     files = {"file": ("hipoteca.csv", io.BytesIO(csv), "text/csv")}
     r = await client.post(
         "/imports",
-        data=_import_payload(cat_id),
+        data=_import_payload(cat_id, account_id),
         files=files,
         headers=_auth(token),
     )

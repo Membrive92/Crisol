@@ -51,6 +51,7 @@ async def reconcile_with_expected(
     db: AsyncSession,
     user_id: uuid.UUID,
     *,
+    account_id: uuid.UUID,
     occurred_at: datetime,
     amount: Decimal,
     currency: str,
@@ -61,6 +62,10 @@ async def reconcile_with_expected(
     el `import_hash` y refresca su `description` con la del import (la
     del banco suele ser más legible). Devuelve la tx fusionada o
     `None` si no hubo match.
+
+    PHASE-19.1: la reconciliación se restringe a la misma cuenta —
+    una tx `expected` del fixed_expense en cuenta A no concilia con
+    un import de cuenta B aunque el importe coincida.
 
     El caller debe seguir contando esa fila como "no insertada" — la
     operación cuenta como reconciliación, no como creación.
@@ -83,6 +88,7 @@ async def reconcile_with_expected(
     query = (
         select(Transaction)
         .where(Transaction.user_id == user_id)
+        .where(Transaction.account_id == account_id)
         .where(Transaction.source == TransactionSource.EXPECTED)
         .where(Transaction.import_hash.is_(None))
         .where(Transaction.deleted_at.is_(None))

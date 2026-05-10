@@ -29,6 +29,12 @@ export interface FixedExpense {
   next_due: string;
   status: FixedExpenseStatus;
   category_id: string | null;
+  /**
+   * PHASE-19.1: cuenta desde la que se cobra el gasto fijo. El cron de
+   * autopost sólo crea la tx `expected` si está asignada — si es null
+   * la UI debe pedirle al usuario que la elija.
+   */
+  account_id: string | null;
   /** ISO date `YYYY-MM-DD`. */
   first_seen_at: string;
   /** ISO date `YYYY-MM-DD`. */

@@ -17,7 +17,9 @@ import {
   ReceiptConfirmForm,
 } from '@/components/receipts/confirm-form';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { Card } from '@/components/ui/card';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 const ACCEPTED_IMAGE_TYPES = [
   'image/jpeg',
@@ -36,6 +38,7 @@ export default function NewReceiptPage() {
   const [stagedReceipt, setStagedReceipt] = useState<Receipt | null>(null);
   const [stagedExtraction, setStagedExtraction] = useState<ReceiptExtraction | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [confirmingReject, setConfirmingReject] = useState(false);
 
   const extractMutation = useExtractReceipt();
   const confirmMutation = useConfirmReceipt(stagedReceipt?.id ?? '');
@@ -66,12 +69,17 @@ export default function NewReceiptPage() {
   function handleExtract() {
     if (!file) return;
     setUploadError(null);
+    // Toast persistente con spinner: la inferencia visión en CPU
+    // puede tardar 60-120s. Sin feedback el usuario asume cuelgue.
+    const loadingId = toast.loading('IA leyendo el ticket…');
     extractMutation.mutate(file, {
       onSuccess: (data) => {
+        toast.dismiss(loadingId);
         setStagedReceipt(data.receipt);
         setStagedExtraction(data.extraction);
       },
       onError: (err) => {
+        toast.dismiss(loadingId);
         // PHASE-11.5: error de extracción al toast — antes era un
         // <div> rojo inline que el usuario podía perder al hacer
         // scroll. La causa #1 en dev es Ollama no corriendo, lo
@@ -104,7 +112,12 @@ export default function NewReceiptPage() {
 
   function handleReject() {
     if (!stagedReceipt) return;
-    if (!confirm('¿Rechazar este ticket? La transacción no se creará.')) return;
+    setConfirmingReject(true);
+  }
+
+  function confirmReject() {
+    if (!stagedReceipt) return;
+    setConfirmingReject(false);
     rejectMutation.mutate(undefined, {
       onSuccess: () => {
         toast.info('Ticket rechazado.');
@@ -228,7 +241,12 @@ export default function NewReceiptPage() {
 
           <div style={{ display: 'flex', gap: spacing.sm }}>
             <Button onClick={handleExtract} disabled={!file || extractMutation.isPending}>
-              {extractMutation.isPending ? 'Analizando…' : 'Analizar ticket'}
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                {extractMutation.isPending ? (
+                  <Spinner size={14} color={colors.onPrimary} />
+                ) : null}
+                {extractMutation.isPending ? 'Analizando…' : 'Analizar ticket'}
+              </span>
             </Button>
           </div>
         </Card>
@@ -246,6 +264,18 @@ export default function NewReceiptPage() {
           <ExtractionSummary extraction={stagedExtraction} />
         </Card>
       )}
+
+      <ConfirmDialog
+        open={confirmingReject}
+        title="¿Rechazar este ticket?"
+        description="La transacción no se creará y el ticket quedará marcado como rechazado."
+        confirmLabel="Rechazar"
+        cancelLabel="Atrás"
+        tone="danger"
+        loading={rejectMutation.isPending}
+        onConfirm={confirmReject}
+        onCancel={() => setConfirmingReject(false)}
+      />
     </div>
   );
 }

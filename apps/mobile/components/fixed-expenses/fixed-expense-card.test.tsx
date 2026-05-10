@@ -16,6 +16,7 @@ function makeItem(overrides: Partial<FixedExpense> = {}): FixedExpense {
     next_due: '2026-06-15',
     status: 'pending',
     category_id: 'cat-1',
+    account_id: null,
     first_seen_at: '2026-02-15',
     last_seen_at: '2026-05-15',
     occurrence_count: 4,

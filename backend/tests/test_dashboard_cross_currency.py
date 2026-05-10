@@ -18,12 +18,18 @@ from app.modules.currency import repository as rates_repository
 from app.modules.currency.exceptions import FrankfurterUnavailableError
 
 
-async def _register(client: AsyncClient, email: str) -> str:
+async def _register(client: AsyncClient, email: str) -> tuple[str, str]:
     r = await client.post(
         "/auth/register",
         json={"email": email, "password": "SecurePass123", "display_name": "Test"},
     )
-    return r.json()["access_token"]
+    token = r.json()["access_token"]
+    acc = await client.post(
+        "/accounts",
+        json={"name": "Cuenta principal", "type": "bank", "currency": "EUR"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    return token, acc.json()["id"]
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -42,6 +48,7 @@ async def _make_category(client: AsyncClient, token: str, *, name: str, kind: st
 async def _make_tx(
     client: AsyncClient,
     token: str,
+    account_id: str,
     *,
     amount: str,
     occurred_at: str,
@@ -49,6 +56,7 @@ async def _make_tx(
     category_id: str | None = None,
 ) -> None:
     payload: dict[str, object] = {
+        "account_id": account_id,
         "amount": amount,
         "currency": currency,
         "occurred_at": occurred_at,
@@ -97,12 +105,13 @@ async def test_summary_target_currency_converts_each_tx_with_its_date_rate(
     test_engine,  # type: ignore[no-untyped-def]
 ) -> None:
     """27,66€ del 19-feb + 2 USD del 03-may → convertir cada uno con su tasa."""
-    token = await _register(client, "tgt@test.com")
+    token, account_id = await _register(client, "tgt@test.com")
     expense = await _make_category(client, token, name="Gasto", kind="expense")
 
     await _make_tx(
         client,
         token,
+        account_id,
         amount="27.66",
         currency="EUR",
         occurred_at="2026-02-19T12:00:00Z",
@@ -111,6 +120,7 @@ async def test_summary_target_currency_converts_each_tx_with_its_date_rate(
     await _make_tx(
         client,
         token,
+        account_id,
         amount="2.00",
         currency="USD",
         occurred_at="2026-05-03T02:00:00Z",
@@ -147,12 +157,13 @@ async def test_summary_target_currency_to_eur_uses_inverse_rate(
     test_engine,  # type: ignore[no-untyped-def]
 ) -> None:
     """target=EUR sobre una transacción USD: divide por la tasa EUR→USD."""
-    token = await _register(client, "tgteur@test.com")
+    token, account_id = await _register(client, "tgteur@test.com")
     expense = await _make_category(client, token, name="Gasto", kind="expense")
 
     await _make_tx(
         client,
         token,
+        account_id,
         amount="100",
         currency="USD",
         occurred_at="2026-02-19T12:00:00Z",
@@ -179,13 +190,14 @@ async def test_summary_target_currency_uses_previous_within_window(
     test_engine,  # type: ignore[no-untyped-def]
 ) -> None:
     """Si no hay tasa exacta, usa la última anterior dentro de 14 días."""
-    token = await _register(client, "win@test.com")
+    token, account_id = await _register(client, "win@test.com")
     expense = await _make_category(client, token, name="Gasto", kind="expense")
 
     # Transacción el 13-mar; tasa más cercana es del 6-mar (7 días antes).
     await _make_tx(
         client,
         token,
+        account_id,
         amount="100",
         currency="EUR",
         occurred_at="2026-03-13T12:00:00Z",
@@ -212,12 +224,13 @@ async def test_summary_target_currency_excludes_unconvertible_outside_window(
     test_engine,  # type: ignore[no-untyped-def]
 ) -> None:
     """Tasa más antigua que 14 días → transacción no se incluye en SUM."""
-    token = await _register(client, "out@test.com")
+    token, account_id = await _register(client, "out@test.com")
     expense = await _make_category(client, token, name="Gasto", kind="expense")
 
     await _make_tx(
         client,
         token,
+        account_id,
         amount="100",
         currency="EUR",
         occurred_at="2026-03-30T12:00:00Z",
@@ -246,11 +259,12 @@ async def test_summary_target_currency_skips_conversion_when_currency_matches(
     test_engine,  # type: ignore[no-untyped-def]
 ) -> None:
     """Transacciones ya en target no necesitan tasa."""
-    token = await _register(client, "skip@test.com")
+    token, account_id = await _register(client, "skip@test.com")
     expense = await _make_category(client, token, name="Gasto", kind="expense")
     await _make_tx(
         client,
         token,
+        account_id,
         amount="100",
         currency="USD",
         occurred_at="2026-02-19T12:00:00Z",
@@ -276,13 +290,14 @@ async def test_by_month_target_currency_aggregates_per_month(
     test_engine,  # type: ignore[no-untyped-def]
 ) -> None:
     """Cada mes agrega sus transacciones convertidas con la tasa del día."""
-    token = await _register(client, "month@test.com")
+    token, account_id = await _register(client, "month@test.com")
     expense = await _make_category(client, token, name="Gasto", kind="expense")
 
     # Febrero: 1 transacción 100 EUR a tasa 1.10 → 110 USD
     await _make_tx(
         client,
         token,
+        account_id,
         amount="100",
         currency="EUR",
         occurred_at="2026-02-15T12:00:00Z",
@@ -292,6 +307,7 @@ async def test_by_month_target_currency_aggregates_per_month(
     await _make_tx(
         client,
         token,
+        account_id,
         amount="100",
         currency="EUR",
         occurred_at="2026-03-15T12:00:00Z",
@@ -325,12 +341,13 @@ async def test_by_category_target_currency_sums_converted(
     test_engine,  # type: ignore[no-untyped-def]
 ) -> None:
     """Una categoría con transacciones en monedas distintas: conversión per-tx."""
-    token = await _register(client, "cat@test.com")
+    token, account_id = await _register(client, "cat@test.com")
     cat = await _make_category(client, token, name="Comida", kind="expense")
 
     await _make_tx(
         client,
         token,
+        account_id,
         amount="100",
         currency="EUR",
         occurred_at="2026-02-19T12:00:00Z",
@@ -339,6 +356,7 @@ async def test_by_category_target_currency_sums_converted(
     await _make_tx(
         client,
         token,
+        account_id,
         amount="50",
         currency="USD",
         occurred_at="2026-05-03T12:00:00Z",
@@ -372,12 +390,13 @@ async def test_top_expenses_target_currency_sorts_by_converted(
     test_engine,  # type: ignore[no-untyped-def]
 ) -> None:
     """100 EUR (x1.20 = 120 USD) > 110 USD pese a que el USD nominal es mayor."""
-    token = await _register(client, "top@test.com")
+    token, account_id = await _register(client, "top@test.com")
     expense = await _make_category(client, token, name="Gasto", kind="expense")
 
     await _make_tx(
         client,
         token,
+        account_id,
         amount="110",
         currency="USD",
         occurred_at="2026-02-15T12:00:00Z",
@@ -386,6 +405,7 @@ async def test_top_expenses_target_currency_sorts_by_converted(
     await _make_tx(
         client,
         token,
+        account_id,
         amount="100",
         currency="EUR",
         occurred_at="2026-02-15T12:00:00Z",
@@ -416,11 +436,12 @@ async def test_legacy_currency_mode_unchanged(
     test_engine,  # type: ignore[no-untyped-def]
 ) -> None:
     """`?currency=EUR` mantiene comportamiento pre-PHASE-8.3."""
-    token = await _register(client, "legacy@test.com")
+    token, account_id = await _register(client, "legacy@test.com")
     expense = await _make_category(client, token, name="Gasto", kind="expense")
     await _make_tx(
         client,
         token,
+        account_id,
         amount="100",
         currency="EUR",
         occurred_at="2026-02-19T12:00:00Z",
@@ -429,6 +450,7 @@ async def test_legacy_currency_mode_unchanged(
     await _make_tx(
         client,
         token,
+        account_id,
         amount="50",
         currency="USD",
         occurred_at="2026-02-19T12:00:00Z",
@@ -458,12 +480,13 @@ async def test_top_expenses_target_currency_exposes_original(
     test_engine,  # type: ignore[no-untyped-def]
 ) -> None:
     """top-expenses devuelve `amount` (convertido) + `original_amount`/`original_currency`."""
-    token = await _register(client, "topog@test.com")
+    token, account_id = await _register(client, "topog@test.com")
     expense = await _make_category(client, token, name="Gasto", kind="expense")
 
     await _make_tx(
         client,
         token,
+        account_id,
         amount="100",
         currency="EUR",
         occurred_at="2026-02-15T12:00:00Z",
@@ -491,11 +514,12 @@ async def test_top_expenses_legacy_original_equals_amount(
     client: AsyncClient,
 ) -> None:
     """En modo legacy, original_amount/currency coinciden con amount/currency activos."""
-    token = await _register(client, "topleg@test.com")
+    token, account_id = await _register(client, "topleg@test.com")
     expense = await _make_category(client, token, name="Gasto", kind="expense")
     await _make_tx(
         client,
         token,
+        account_id,
         amount="42.50",
         currency="EUR",
         occurred_at="2026-02-15T12:00:00Z",
@@ -522,12 +546,13 @@ async def test_transactions_target_currency_returns_converted_per_row(
     test_engine,  # type: ignore[no-untyped-def]
 ) -> None:
     """/transactions?target_currency=USD añade converted_amount + converted_currency por fila."""
-    token = await _register(client, "txconv@test.com")
+    token, account_id = await _register(client, "txconv@test.com")
     expense = await _make_category(client, token, name="Gasto", kind="expense")
 
     await _make_tx(
         client,
         token,
+        account_id,
         amount="100",
         currency="EUR",
         occurred_at="2026-02-15T12:00:00Z",
@@ -536,6 +561,7 @@ async def test_transactions_target_currency_returns_converted_per_row(
     await _make_tx(
         client,
         token,
+        account_id,
         amount="50",
         currency="EUR",
         occurred_at="2026-03-15T12:00:00Z",
@@ -569,11 +595,12 @@ async def test_transactions_legacy_mode_converted_fields_null(
     client: AsyncClient,
 ) -> None:
     """Sin target_currency, converted_amount y converted_currency vienen como null."""
-    token = await _register(client, "txleg@test.com")
+    token, account_id = await _register(client, "txleg@test.com")
     expense = await _make_category(client, token, name="Gasto", kind="expense")
     await _make_tx(
         client,
         token,
+        account_id,
         amount="25",
         currency="EUR",
         occurred_at="2026-02-15T12:00:00Z",
@@ -591,12 +618,13 @@ async def test_transactions_target_currency_missing_rate_yields_null_converted(
     client: AsyncClient,
 ) -> None:
     """Una fila sin tasa disponible devuelve converted_amount=null pero sigue listada."""
-    token = await _register(client, "txmiss@test.com")
+    token, account_id = await _register(client, "txmiss@test.com")
     expense = await _make_category(client, token, name="Gasto", kind="expense")
     # Sin sembrar tasas — frankfurter está mockeado a offline (autouse).
     await _make_tx(
         client,
         token,
+        account_id,
         amount="100",
         currency="EUR",
         occurred_at="2026-02-15T12:00:00Z",
@@ -619,11 +647,12 @@ async def test_transactions_target_currency_matches_skips_conversion(
     client: AsyncClient,
 ) -> None:
     """Tx ya en target → converted_amount == amount sin necesitar tasa."""
-    token = await _register(client, "txmatch@test.com")
+    token, account_id = await _register(client, "txmatch@test.com")
     expense = await _make_category(client, token, name="Gasto", kind="expense")
     await _make_tx(
         client,
         token,
+        account_id,
         amount="42",
         currency="USD",
         occurred_at="2026-02-15T12:00:00Z",

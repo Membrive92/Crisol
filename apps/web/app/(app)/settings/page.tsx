@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { passkeysApi, type PasskeyResponse } from '@finanzas/services';
 import { colors, fontSize, fontWeight, formatDate, radius, spacing } from '@finanzas/ui';
 
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { PasskeyAbortError, registerPasskey, supportsPasskeys } from '@/lib/webauthn';
 
 interface ConfirmDeleteState {
@@ -123,53 +124,108 @@ export default function SettingsPage() {
         >
           Finanzas personales
         </h2>
-        <Link
-          href="/settings/categories"
+        <div
           style={{
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            backgroundColor: colors.surface,
-            border: `1px solid ${colors.border}`,
-            borderRadius: radius.md,
-            padding: spacing.md,
-            color: colors.text,
-            textDecoration: 'none',
+            flexDirection: 'column',
+            gap: spacing.sm,
           }}
         >
-          <div>
-            <div
-              style={{
-                fontSize: fontSize.md,
-                fontWeight: fontWeight.semibold,
-                color: colors.text,
-              }}
-            >
-              Categorías
-            </div>
-            <div
-              style={{
-                marginTop: spacing.xs,
-                fontSize: fontSize.sm,
-                color: colors.textMuted,
-                lineHeight: 1.4,
-              }}
-            >
-              Crea, edita y borra las categorías que clasifican transacciones,
-              tickets e importaciones.
-            </div>
-          </div>
-          <span
+          <Link
+            href="/settings/accounts"
             style={{
-              fontSize: fontSize.lg,
-              color: colors.textMuted,
-              marginLeft: spacing.md,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              backgroundColor: colors.surface,
+              border: `1px solid ${colors.border}`,
+              borderRadius: radius.md,
+              padding: spacing.md,
+              color: colors.text,
+              textDecoration: 'none',
             }}
-            aria-hidden
           >
-            →
-          </span>
-        </Link>
+            <div>
+              <div
+                style={{
+                  fontSize: fontSize.md,
+                  fontWeight: fontWeight.semibold,
+                  color: colors.text,
+                }}
+              >
+                Cuentas
+              </div>
+              <div
+                style={{
+                  marginTop: spacing.xs,
+                  fontSize: fontSize.sm,
+                  color: colors.textMuted,
+                  lineHeight: 1.4,
+                }}
+              >
+                Define dónde vive tu dinero (banco, ahorro, crypto, efectivo).
+                Cada transacción se imputa a una cuenta.
+              </div>
+            </div>
+            <span
+              style={{
+                fontSize: fontSize.lg,
+                color: colors.textMuted,
+                marginLeft: spacing.md,
+              }}
+              aria-hidden
+            >
+              →
+            </span>
+          </Link>
+          <Link
+            href="/settings/categories"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              backgroundColor: colors.surface,
+              border: `1px solid ${colors.border}`,
+              borderRadius: radius.md,
+              padding: spacing.md,
+              color: colors.text,
+              textDecoration: 'none',
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontSize: fontSize.md,
+                  fontWeight: fontWeight.semibold,
+                  color: colors.text,
+                }}
+              >
+                Categorías
+              </div>
+              <div
+                style={{
+                  marginTop: spacing.xs,
+                  fontSize: fontSize.sm,
+                  color: colors.textMuted,
+                  lineHeight: 1.4,
+                }}
+              >
+                Crea, edita y borra las categorías que clasifican transacciones,
+                tickets e importaciones.
+              </div>
+            </div>
+            <span
+              style={{
+                fontSize: fontSize.lg,
+                color: colors.textMuted,
+                marginLeft: spacing.md,
+              }}
+              aria-hidden
+            >
+              →
+            </span>
+          </Link>
+        </div>
       </section>
 
       <section
@@ -309,13 +365,26 @@ export default function SettingsPage() {
         )}
       </section>
 
-      {pendingDelete ? (
-        <ConfirmDeleteDialog
-          label={pendingDelete.label}
-          onCancel={() => setPendingDelete(null)}
-          onConfirm={() => handleDelete(pendingDelete.id)}
-        />
-      ) : null}
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="¿Eliminar passkey?"
+        description={
+          pendingDelete ? (
+            <>
+              <strong>{pendingDelete.label}</strong> dejará de poder usarse para
+              iniciar sesión. Si tienes otras passkeys o tu password sigues
+              entrando con normalidad.
+            </>
+          ) : null
+        }
+        confirmLabel="Eliminar"
+        cancelLabel="Cancelar"
+        tone="danger"
+        onConfirm={() => {
+          if (pendingDelete) void handleDelete(pendingDelete.id);
+        }}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }
@@ -483,102 +552,3 @@ function PasskeyRow({
   );
 }
 
-interface ConfirmDeleteDialogProps {
-  label: string;
-  onCancel: () => void;
-  onConfirm: () => void;
-}
-
-function ConfirmDeleteDialog({ label, onCancel, onConfirm }: ConfirmDeleteDialogProps) {
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      style={{
-        position: 'fixed',
-        inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: spacing.lg,
-        zIndex: 100,
-      }}
-      onClick={onCancel}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          backgroundColor: colors.surface,
-          border: `1px solid ${colors.border}`,
-          borderRadius: radius.md,
-          padding: spacing.lg,
-          width: '100%',
-          maxWidth: 400,
-        }}
-      >
-        <h3
-          style={{
-            margin: 0,
-            fontSize: fontSize.lg,
-            fontWeight: fontWeight.semibold,
-            color: colors.text,
-          }}
-        >
-          ¿Eliminar passkey?
-        </h3>
-        <p
-          style={{
-            margin: `${spacing.sm}px 0`,
-            fontSize: fontSize.sm,
-            color: colors.textMuted,
-            lineHeight: 1.5,
-          }}
-        >
-          <strong>{label}</strong> dejará de poder usarse para iniciar sesión.
-          Si tienes otras passkeys o tu password sigues entrando con normalidad.
-        </p>
-        <div
-          style={{
-            display: 'flex',
-            gap: spacing.sm,
-            justifyContent: 'flex-end',
-            marginTop: spacing.md,
-          }}
-        >
-          <button
-            type="button"
-            onClick={onCancel}
-            style={{
-              padding: `${spacing.xs}px ${spacing.md}px`,
-              backgroundColor: 'transparent',
-              color: colors.text,
-              border: `1px solid ${colors.border}`,
-              borderRadius: radius.sm,
-              fontSize: fontSize.sm,
-              cursor: 'pointer',
-            }}
-          >
-            Cancelar
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            style={{
-              padding: `${spacing.xs}px ${spacing.md}px`,
-              backgroundColor: colors.danger,
-              color: colors.onPrimary,
-              border: 'none',
-              borderRadius: radius.sm,
-              fontSize: fontSize.sm,
-              fontWeight: fontWeight.semibold,
-              cursor: 'pointer',
-            }}
-          >
-            Eliminar
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}

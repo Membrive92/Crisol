@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack } from 'expo-router';
 
 import {
   formatApiError,
+  useAccounts,
   useAutopostFixedExpenses,
   useCancelFixedExpense,
   useCategories,
@@ -20,6 +21,7 @@ import { toast } from '@finanzas/store';
 import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
 
 import { FixedExpenseCard } from '../../../components/fixed-expenses/fixed-expense-card';
+import { ConfirmDialog } from '../../../components/ui/confirm-dialog';
 
 /**
  * Pantalla mobile de gastos fijos (PHASE-13.3, renombrado en PHASE-17.1).
@@ -30,6 +32,7 @@ import { FixedExpenseCard } from '../../../components/fixed-expenses/fixed-expen
  */
 export default function FixedExpensesScreen() {
   const { data: categories } = useCategories();
+  const { data: accounts } = useAccounts();
   const pendingQuery = useFixedExpenses({ status: 'pending' });
   const confirmedQuery = useFixedExpenses({ status: 'confirmed' });
   const dismissedQuery = useFixedExpenses({ status: 'dismissed' });
@@ -46,6 +49,9 @@ export default function FixedExpensesScreen() {
   const deleteMutation = useDeleteFixedExpense();
   const [showDismissed, setShowDismissed] = useState(false);
   const [showCancelled, setShowCancelled] = useState(false);
+  const [pendingAction, setPendingAction] = useState<
+    { kind: 'cancel' | 'delete'; id: string; label: string } | null
+  >(null);
 
   const pending = pendingQuery.data ?? [];
   const confirmed = confirmedQuery.data ?? [];
@@ -89,6 +95,22 @@ export default function FixedExpensesScreen() {
     );
   }
 
+  function handleChangeAccount(id: string, accountId: string | null) {
+    updateMutation.mutate(
+      { id, data: { account_id: accountId } },
+      {
+        onSuccess: () =>
+          toast.success(
+            accountId
+              ? 'Cuenta de cobro actualizada.'
+              : 'Cuenta retirada — el autopost queda desactivado.',
+          ),
+        onError: (err) =>
+          toast.error(formatApiError(err, 'Error al cambiar la cuenta.')),
+      },
+    );
+  }
+
   function handleConfirm(id: string) {
     confirmMutation.mutate(id, {
       onSuccess: () => toast.success('Gasto fijo confirmado.'),
@@ -126,43 +148,28 @@ export default function FixedExpensesScreen() {
   }
 
   function handleCancel(id: string, label: string) {
-    Alert.alert(
-      'Cancelar gasto fijo',
-      `Marca "${label}" como cancelado (ya no lo tienes activo).`,
-      [
-        { text: 'Volver', style: 'cancel' },
-        {
-          text: 'Cancelar',
-          style: 'destructive',
-          onPress: () =>
-            cancelMutation.mutate(id, {
-              onSuccess: () => toast.info('Gasto fijo cancelado.'),
-              onError: (err) =>
-                toast.error(formatApiError(err, 'Error al cancelar.')),
-            }),
-        },
-      ],
-    );
+    setPendingAction({ kind: 'cancel', id, label });
   }
 
   function handleDelete(id: string, label: string) {
-    Alert.alert(
-      'Eliminar gasto fijo',
-      `"${label}" desaparecerá. Si el patrón persiste, volverá a aparecer como pendiente en el próximo escaneo.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: () =>
-            deleteMutation.mutate(id, {
-              onSuccess: () => toast.success('Gasto fijo eliminado.'),
-              onError: (err) =>
-                toast.error(formatApiError(err, 'Error al eliminar.')),
-            }),
-        },
-      ],
-    );
+    setPendingAction({ kind: 'delete', id, label });
+  }
+
+  function confirmPendingAction() {
+    if (!pendingAction) return;
+    const { kind, id } = pendingAction;
+    setPendingAction(null);
+    if (kind === 'cancel') {
+      cancelMutation.mutate(id, {
+        onSuccess: () => toast.info('Gasto fijo cancelado.'),
+        onError: (err) => toast.error(formatApiError(err, 'Error al cancelar.')),
+      });
+    } else {
+      deleteMutation.mutate(id, {
+        onSuccess: () => toast.success('Gasto fijo eliminado.'),
+        onError: (err) => toast.error(formatApiError(err, 'Error al eliminar.')),
+      });
+    }
   }
 
   const confirmingId = confirmMutation.isPending
@@ -265,8 +272,15 @@ export default function FixedExpensesScreen() {
                 key={item.id}
                 fixedExpense={item}
                 categories={categories ?? []}
+                accounts={accounts ?? []}
                 onToggleAutoPost={handleToggleAutoPost}
                 autoPostBusy={
+                  updateMutation.isPending &&
+                  (updateMutation.variables as { id: string } | undefined)?.id ===
+                    item.id
+                }
+                onChangeAccount={handleChangeAccount}
+                accountBusy={
                   updateMutation.isPending &&
                   (updateMutation.variables as { id: string } | undefined)?.id ===
                     item.id
@@ -297,6 +311,13 @@ export default function FixedExpensesScreen() {
                 key={item.id}
                 fixedExpense={item}
                 categories={categories ?? []}
+                accounts={accounts ?? []}
+                onChangeAccount={handleChangeAccount}
+                accountBusy={
+                  updateMutation.isPending &&
+                  (updateMutation.variables as { id: string } | undefined)?.id ===
+                    item.id
+                }
                 primaryAction={{
                   label: 'Reanudar',
                   onPress: () => handleResume(item.id),
@@ -384,6 +405,34 @@ export default function FixedExpensesScreen() {
           </View>
         ) : null}
       </ScrollView>
+
+      <ConfirmDialog
+        open={pendingAction !== null}
+        title={
+          pendingAction?.kind === 'cancel'
+            ? '¿Cancelar gasto fijo?'
+            : '¿Eliminar gasto fijo?'
+        }
+        description={
+          pendingAction
+            ? pendingAction.kind === 'cancel'
+              ? `"${pendingAction.label}" quedará marcado como cancelado. Las transacciones existentes no se tocan.`
+              : `"${pendingAction.label}" desaparecerá. Si el patrón persiste, volverá a aparecer como pendiente en el próximo escaneo.`
+            : undefined
+        }
+        confirmLabel={
+          pendingAction?.kind === 'cancel' ? 'Cancelar gasto' : 'Eliminar'
+        }
+        cancelLabel="Atrás"
+        tone="danger"
+        loading={
+          pendingAction?.kind === 'cancel'
+            ? cancelMutation.isPending
+            : deleteMutation.isPending
+        }
+        onConfirm={confirmPendingAction}
+        onCancel={() => setPendingAction(null)}
+      />
     </View>
   );
 }

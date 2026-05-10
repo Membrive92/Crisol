@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-import { useCategories } from '@finanzas/services';
+import { useAccounts, useCategories } from '@finanzas/services';
 import type {
+  Account,
   Category,
   Transaction,
   TransactionCreateRequest,
@@ -21,6 +22,7 @@ import {
 import { DateInput } from './ui/date-input';
 
 interface TransactionFormValues {
+  account_id: string;
   amount: string;
   currency: string;
   occurred_at: string;
@@ -36,8 +38,12 @@ export interface TransactionFormProps {
   onCancel?: () => void;
 }
 
-function buildInitialValues(initial?: Transaction): TransactionFormValues {
+function buildInitialValues(
+  initial: Transaction | undefined,
+  defaultAccountId: string,
+): TransactionFormValues {
   return {
+    account_id: initial?.account_id ?? defaultAccountId,
     amount: initial?.amount ?? '',
     currency: initial?.currency ?? 'EUR',
     occurred_at: toDateInputValue(initial?.occurred_at ?? new Date().toISOString()),
@@ -54,8 +60,28 @@ export function TransactionForm({
   onCancel,
 }: TransactionFormProps) {
   const { data: categories } = useCategories();
-  const [values, setValues] = useState<TransactionFormValues>(() => buildInitialValues(initial));
+  // PHASE-19.1: cuentas son obligatorias. Filtramos archivadas para
+  // crear/editar — si la cuenta original de un edit está archivada se
+  // mantiene en values.account_id (la mostramos sólo si coincide para
+  // no perder el binding), pero el usuario no puede pasarse a otra
+  // archivada desde el form.
+  const { data: accounts } = useAccounts();
+  const activeAccounts: Account[] = (accounts ?? []).filter((a) => !a.is_archived);
+  const defaultAccountId = activeAccounts[0]?.id ?? '';
+
+  const [values, setValues] = useState<TransactionFormValues>(() =>
+    buildInitialValues(initial, defaultAccountId),
+  );
   const [error, setError] = useState<string | null>(null);
+
+  // Sincroniza account_id si las cuentas cargan después del montaje del
+  // form (p.ej. crear desde un FAB sin pre-fetch). Sólo aplica si el
+  // valor sigue vacío — no pisamos una elección manual del usuario.
+  useEffect(() => {
+    if (!values.account_id && defaultAccountId) {
+      setValues((prev) => ({ ...prev, account_id: defaultAccountId }));
+    }
+  }, [defaultAccountId, values.account_id]);
 
   function update<K extends keyof TransactionFormValues>(field: K, value: string) {
     setValues((prev) => ({ ...prev, [field]: value }));
@@ -63,12 +89,17 @@ export function TransactionForm({
 
   function handleSubmit() {
     setError(null);
+    if (!values.account_id) {
+      setError('Selecciona una cuenta.');
+      return;
+    }
     const amount = values.amount.trim().replace(',', '.');
     if (!amount || Number.isNaN(Number(amount)) || Number(amount) <= 0) {
       setError('Importe debe ser un número positivo');
       return;
     }
     onSubmit({
+      account_id: values.account_id,
       amount,
       currency: values.currency.trim().toUpperCase() || 'EUR',
       occurred_at: fromDateInputValue(values.occurred_at),
@@ -77,12 +108,45 @@ export function TransactionForm({
     });
   }
 
+  const noAccounts = activeAccounts.length === 0;
+
   return (
     <ScrollView
       style={styles.container}
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"
     >
+      <Text style={styles.label}>Cuenta</Text>
+      {noAccounts ? (
+        <Text style={styles.warning}>
+          No tienes cuentas activas. Crea una desde Análisis → Cuentas para
+          poder registrar transacciones.
+        </Text>
+      ) : (
+        <View style={styles.categoryList}>
+          {activeAccounts.map((a) => {
+            const selected = values.account_id === a.id;
+            return (
+              <TouchableOpacity
+                key={a.id}
+                style={[styles.categoryChip, selected && styles.categoryChipActive]}
+                onPress={() => update('account_id', a.id)}
+              >
+                <Text
+                  style={[
+                    styles.categoryChipText,
+                    selected && styles.categoryChipTextActive,
+                  ]}
+                >
+                  {a.icon ? `${a.icon} ` : ''}
+                  {a.name} ({a.currency})
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+
       <Text style={styles.label}>Importe</Text>
       <TextInput
         style={styles.input}
@@ -155,9 +219,9 @@ export function TransactionForm({
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <TouchableOpacity
-        style={[styles.submit, submitting && styles.submitDisabled]}
+        style={[styles.submit, (submitting || noAccounts) && styles.submitDisabled]}
         onPress={handleSubmit}
-        disabled={submitting}
+        disabled={submitting || noAccounts}
       >
         <Text style={styles.submitText}>{submitting ? 'Guardando…' : submitLabel}</Text>
       </TouchableOpacity>
@@ -202,6 +266,12 @@ const styles = StyleSheet.create({
   categoryChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   categoryChipText: { color: colors.text, fontSize: fontSize.sm },
   categoryChipTextActive: { color: colors.surface },
+  warning: {
+    color: colors.warning,
+    fontSize: fontSize.sm,
+    marginBottom: spacing.sm,
+    lineHeight: 18,
+  },
   error: { color: colors.danger, marginTop: spacing.sm, fontSize: fontSize.sm },
   submit: {
     backgroundColor: colors.primary,
