@@ -28,6 +28,12 @@
 | `c54e9b3a7d18` | 16   | `budgets.convert_other_currencies` (BOOLEAN, default FALSE) — opt-in para sumar gasto en otras monedas convertido. |
 | `d72f1a5e8b29` | 17.1 | rename `subscriptions` → `fixed_expenses` (tabla, índices, enum `subscriptionstatus` → `fixedexpensestatus`). |
 | `e8c34a9b1d52` | 17.2 | `fixed_expenses.auto_post` (BOOLEAN, default FALSE) + `transactionsource.expected`. |
+| `f3a78b5c19d0` | 20   | `import_jobs.preview_payload` (JSONB nullable) — payload del wizard preview. |
+| `g4b89c612e07` | 20   | Normalize enum casing — alinea `transactionsource` y `fixedexpensestatus` a UPPER (SA emite `name` del StrEnum). |
+| `h5c92d703f18` | 19   | `bank_category_mappings` (`user_id, bank_concept_normalized, category_id` con UNIQUE). |
+| `i6d83e4f29a5` | 20   | `category_rules` + enums `rulematchtype` y `rulefield`. |
+| `j7e95d1b3f4c` | 21.2 | `accounts` + enums `accounttype`/`accountnature` + WIPE de transactions/import_jobs/receipts + `account_id` (NOT NULL en transactions, opcional en import_jobs y fixed_expenses). |
+| `k8a92c4e7d5a1` | 21.3 | `transactions.transfer_pair_id` (FK auto-referente, NULLABLE, ON DELETE SET NULL) + index parcial `WHERE transfer_pair_id IS NOT NULL AND deleted_at IS NULL`. |
 
 ---
 
@@ -182,6 +188,62 @@ tocar `status`/`category_id`. No match → crea como `pending`. Una
 `dismissed` con misma huella sólo se refresca → no se vuelve a
 sugerir al usuario.
 
+### `bank_category_mappings` (`PHASE-19`)
+
+| Columna | Tipo | Notas |
+|---------|------|-------|
+| `id` | `UUID` PK | |
+| `user_id` | `UUID` FK `users(id) ON DELETE CASCADE` | índice. |
+| `bank_concept_normalized` | `VARCHAR(255)` | `casefold()` + trim aplicado por el service. |
+| `category_id` | `UUID` FK `categories(id) ON DELETE CASCADE` | |
+| `created_at`/`updated_at` | `TIMESTAMPTZ` | `now()`. |
+
+UNIQUE `(user_id, bank_concept_normalized)` — un concepto sólo
+mapea a una categoría por usuario. UPSERT silencioso: si el
+usuario reasigna el concepto en un import posterior, el mapping
+se actualiza sin conflicto.
+
+### `category_rules` (`PHASE-20`)
+
+| Columna | Tipo | Notas |
+|---------|------|-------|
+| `id` | `UUID` PK | |
+| `user_id` | `UUID` FK `users(id) ON DELETE CASCADE` | índice. |
+| `pattern` | `VARCHAR(255)` | el "qué" matchear. |
+| `match_type` | `rulematchtype` | `EXACT`, `CONTAINS`, `STARTS_WITH`, `REGEX`. |
+| `field` | `rulefield` | `CONCEPT`, `DESCRIPTION`, `BOTH`. |
+| `category_id` | `UUID` FK `categories(id) ON DELETE CASCADE` | |
+| `priority` | `INTEGER` | `default 100`. Las reglas del seed van 10-79; las custom 100. Menor número = más prioridad. |
+| `enabled` | `BOOLEAN` | `default TRUE`. |
+| `created_at`/`updated_at` | `TIMESTAMPTZ` | `now()`. |
+
+UNIQUE `(user_id, pattern, match_type, field, category_id)` — el
+mismo patrón puede mapear a categorías distintas si difiere algún
+otro campo, pero no se duplica la combinación exacta.
+
+### `accounts` (`PHASE-21.2`)
+
+| Columna | Tipo | Notas |
+|---------|------|-------|
+| `id` | `UUID` PK | |
+| `user_id` | `UUID` FK `users(id) ON DELETE CASCADE` | índice. |
+| `name` | `VARCHAR(100)` | único case-insensible por usuario (validado en service). |
+| `type` | `accounttype` | `BANK`, `SAVINGS`, `BROKERAGE`, `CRYPTO`, `CASH` (PHASE-21.2) + `CREDIT_CARD`, `LOAN`, `MORTGAGE` reservados para PHASE-22. |
+| `nature` | `accountnature` | `ASSET` (default) o `LIABILITY` (reservado). |
+| `currency` | `VARCHAR(3)` | ISO 4217. Default `'EUR'`. |
+| `color` | `VARCHAR(7)` | hex `#RRGGBB`, opcional. |
+| `icon` | `VARCHAR(50)` | emoji, opcional. |
+| `opening_balance` | `NUMERIC(14, 2)` | default `0`. Saldo inicial declarado. |
+| `opening_balance_date` | `DATE` | opcional. |
+| `display_order` | `INTEGER` | default `0`. Orden en UI. |
+| `is_archived` | `BOOLEAN` | default `FALSE`. Si TRUE, oculta del selector pero conserva histórico. |
+| `created_at`/`updated_at` | `TIMESTAMPTZ` | `now()`. |
+
+`transactions.account_id` (NOT NULL, FK CASCADE),
+`import_jobs.account_id` (nullable, FK SET NULL) y
+`fixed_expenses.account_id` (nullable, FK SET NULL) referencian
+esta tabla.
+
 ### `exchange_rates` (`PHASE-8.1`)
 
 | Columna | Tipo | Notas |
@@ -204,16 +266,26 @@ aplica aislamiento multi-tenant. Índice secundario
 
 ```
 users ─┬─< refresh_tokens
-       ├─< categories ──┐
-       ├─< transactions ┘   (category_id ON DELETE SET NULL)
-       ├─< import_jobs
-       └─< receipts ──┐
-                      │
-                      └─→ transactions   (receipts.transaction_id ON DELETE SET NULL)
+       ├─< categories ──┬───────────────┐
+       ├─< accounts ─┐  │               │
+       ├─< transactions ┴── (account_id NOT NULL CASCADE)
+       │              └── (category_id ON DELETE SET NULL)
+       │              └── (transfer_pair_id → transactions.id ON DELETE SET NULL)
+       ├─< import_jobs ── (account_id ON DELETE SET NULL)
+       ├─< receipts ──┐
+       │              └─→ transactions (receipts.transaction_id ON DELETE SET NULL)
+       ├─< budgets ── (category_id ON DELETE SET NULL)
+       ├─< fixed_expenses ── (account_id, category_id ON DELETE SET NULL)
+       ├─< bank_category_mappings ── (category_id ON DELETE CASCADE)
+       └─< category_rules ── (category_id ON DELETE CASCADE)
 
-transactions.import_hash → unique partial index para deduplicar
-                           imports sin afectar a manual/receipt.
-transactions.receipt_id  → UUID sin FK formal (consistencia en service).
+transactions.import_hash       → unique partial index para deduplicar
+                                  imports sin afectar a manual/receipt.
+transactions.receipt_id        → UUID sin FK formal (consistencia en service).
+transactions.transfer_pair_id  → FK auto-referente bidireccional;
+                                  partial index WHERE NOT NULL AND deleted_at NULL.
+                                  Las txs con valor se EXCLUYEN de cashflow,
+                                  donut, top-expenses y budgets.
 ```
 
 ## Enums (PostgreSQL `CREATE TYPE`)
@@ -222,5 +294,9 @@ transactions.receipt_id  → UUID sin FK formal (consistencia en service).
 |--------|---------|
 | `categorykind` | `INCOME`, `EXPENSE` |
 | `transactionsource` | `MANUAL`, `IMPORT`, `RECEIPT`, `EXPECTED` |
-| `importjobstatus` | `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED` |
+| `importjobstatus` | `PENDING`, `PROCESSING`, `PREVIEW`, `COMPLETED`, `FAILED` |
 | `receiptstatus` | `PENDING`, `CONFIRMED`, `REJECTED` |
+| `accounttype` | `BANK`, `SAVINGS`, `BROKERAGE`, `CRYPTO`, `CASH`, `CREDIT_CARD`, `LOAN`, `MORTGAGE` (los 3 últimos reservados para PHASE-22). |
+| `accountnature` | `ASSET`, `LIABILITY` (la última reservada). |
+| `rulematchtype` | `EXACT`, `CONTAINS`, `STARTS_WITH`, `REGEX` |
+| `rulefield` | `CONCEPT`, `DESCRIPTION`, `BOTH` |

@@ -90,21 +90,33 @@ asociadas conservan `category_id = NULL` (`ON DELETE SET NULL`).
 
 ---
 
-## Transactions (`PHASE-2.1` + `PHASE-8.4` + `PHASE-10.1`)
+## Transactions (`PHASE-2.1` + `PHASE-8.4` + `PHASE-10.1` + `PHASE-21.2` + `PHASE-21.3`)
 
 | Método | Ruta | Auth | Body / Query | Response |
 |--------|------|------|--------------|----------|
-| GET | `/transactions` | sí | `category_id?`, `date_from?`, `date_to?`, `search?`, `target_currency?` (3 letras, PHASE-8.4), `limit` (1..200, def 50), `offset` (def 0) | `200` `{ items, total, limit, offset }` (sólo activas) |
+| GET | `/transactions` | sí | `account_id?` (PHASE-21.3), `category_id?`, `date_from?`, `date_to?`, `search?`, `target_currency?` (3 letras, PHASE-8.4), `limit` (1..200, def 50), `offset` (def 0) | `200` `{ items, total, limit, offset }` (sólo activas) |
 | GET | `/transactions/trash` | sí | `limit` (1..200, def 50), `offset` (def 0) | `200` `{ items, total, limit, offset }` — soft-deleted, `deleted_at DESC` (PHASE-10.1) |
 | GET | `/transactions/{id}` | sí | — | `200` `TransactionResponse` (404 si trasheada) |
-| POST | `/transactions` | sí | `{ amount, occurred_at, category_id?, currency?, description?, source? }` | `201` `TransactionResponse` |
-| PUT | `/transactions/{id}` | sí | `Partial<TransactionCreate>` | `200` `TransactionResponse` |
+| POST | `/transactions` | sí | `{ account_id, amount, occurred_at, category_id?, currency?, description?, source? }` (PHASE-21.2: `account_id` obligatorio) | `201` `TransactionResponse` |
+| PUT | `/transactions/{id}` | sí | `Partial<TransactionCreate>` (acepta cambiar `account_id` a otra cuenta del mismo usuario) | `200` `TransactionResponse` |
 | DELETE | `/transactions/{id}` | sí | — | `204` (soft-delete, PHASE-10.1: mueve a papelera) |
 | POST | `/transactions/{id}/restore` | sí | — | `200` `TransactionResponse` (404 si no está en papelera) — PHASE-10.1 |
 | DELETE | `/transactions/{id}/purge` | sí | — | `204` (DELETE real; 404 si no está en papelera — forzar soft-delete previo) — PHASE-10.1 |
 
-`source`: `manual | import | receipt` (default `manual`). Importes
-positivos; el signo se infiere de `category.kind` en frontend.
+`source`: `manual | import | receipt | expected` (default `manual`).
+Importes positivos; el signo se infiere de `category.kind` en
+frontend.
+
+`account_id` (PHASE-21.2) — obligatorio en `POST` y siempre
+presente en respuestas. Validado contra ownership: un `account_id`
+ajeno devuelve `404` (no `403`, para no filtrar existencia).
+
+`transfer_pair_id` (PHASE-21.3) — siempre presente en respuestas
+(`null` o `UUID`). Cuando no es `null`, esta tx forma parte de una
+transferencia interna y se EXCLUYE de cashflow / donut /
+top-expenses / budgets, pero SÍ cuenta al saldo de su cuenta. Se
+gestiona vía `/transfers/*` — no se asigna directamente desde
+estos endpoints.
 
 `target_currency` (PHASE-8.4) — cuando se pasa, cada item de la
 respuesta gana `converted_amount: Decimal | null` y
@@ -234,19 +246,26 @@ Mínimo 3 ocurrencias en 180 días, desviación relativa de gaps
 
 ---
 
-## Imports (`PHASE-4.1`, `PHASE-4.3`, `PHASE-17.3`)
+## Imports (`PHASE-4.1`, `PHASE-4.3`, `PHASE-17.3`, `PHASE-20`, `PHASE-21.2`)
 
 PHASE-17.3 — el pipeline reconcilia con tx `source=expected`
 existentes antes de crear duplicadas. Si una fila del CSV tiene
 mismo `amount + currency`, `occurred_at` ±3 días y prefijo común
 de `description ≥ 6 chars`, se asigna el `import_hash` a la
 `expected` (que pasa a estar conciliada con el banco) en lugar de
-crear una nueva. Las reconciliadas se cuentan en `rows_ok`.
+crear una nueva. Las reconciliadas se cuentan en `rows_ok`. Desde
+PHASE-21.2 la reconciliación restringe el match a la misma cuenta.
 
+PHASE-20 añade el flujo en dos pasos `preview` → `commit` con
+sugerencias por concepto del banco (saved_mapping → rule → AI
+fallback) y endpoint dedicado `/imports/{id}/ai-suggest`.
 
 | Método | Ruta | Auth | Body / Query | Response |
 |--------|------|------|--------------|----------|
-| POST | `/imports` | sí | multipart: `file`, `column_mappings` (JSON), `currency` (def `EUR`), `default_category_id?` | `201` `ImportJobResponse` (job ya finalizado) |
+| POST | `/imports` | sí | multipart: `file`, `account_id` (PHASE-21.2), `column_mappings` (JSON), `currency` (def `EUR`), `default_category_id?` | `201` `ImportJobResponse` (job ya finalizado) |
+| POST | `/imports/preview` | sí | multipart: `file`, `account_id`, `column_mappings`, `currency`, `default_category_id?`, `force_vision?` (PHASE-20) | `200` `ImportPreviewResponse { job_id, source, total_rows, rows, bank_concept_groups, error_sample }` |
+| POST | `/imports/{id}/commit` | sí | `{ category_overrides?: { bank_concept: category_id } }` | `200` `ImportJobResponse` (los overrides se persisten como `bank_category_mappings`) |
+| POST | `/imports/{id}/ai-suggest` | sí | — | `200 AiSuggestionResponse` (PHASE-20) |
 | GET  | `/imports` | sí | `limit` (1..200, def 50), `offset` (def 0) | `200` `{ items, total, limit, offset }` |
 | GET  | `/imports/{id}` | sí | — | `200` `ImportJobResponse` |
 
@@ -262,18 +281,21 @@ Reglas:
   `user_id|amount(2dp)|currency|occurred_at_iso|description.casefold().strip()`.
 - `error_log` capado a 100 entradas; `rows_failed` cuenta todas las
   filas inválidas.
-- Estado del job: `pending | processing | completed | failed`.
+- Estado del job: `pending | processing | preview | completed | failed`
+  (PHASE-20 añade `preview`).
+- `account_id` se persiste en `import_jobs.account_id` y se
+  propaga a cada `Transaction` creada (PHASE-21.2).
 - Asignación de categoría por nombre: case-insensitive, no se crean
   categorías nuevas. Si no matchea → `default_category_id` (o `null`).
 
 ---
 
-## Receipts (`PHASE-5.1`)
+## Receipts (`PHASE-5.1` + `PHASE-21.2`)
 
 | Método | Ruta | Auth | Body / Query | Response |
 |--------|------|------|--------------|----------|
 | POST   | `/receipts/extract` | sí | multipart `file` (image/jpeg\|png\|webp\|heic\|heif, ≤8 MB) | `201` `{ receipt, extraction }` |
-| POST   | `/receipts/{id}/confirm` | sí | `{ amount, occurred_at, currency, description?, category_id? }` | `200` `ReceiptResponse` |
+| POST   | `/receipts/{id}/confirm` | sí | `{ account_id, amount, occurred_at, currency, description?, category_id? }` (PHASE-21.2: `account_id` obligatorio) | `200` `ReceiptResponse` |
 | POST   | `/receipts/{id}/reject` | sí | — | `200` `ReceiptResponse` |
 | GET    | `/receipts` | sí | `limit` (1..200, def 50), `offset` (def 0) | `200` `{ items, total, limit, offset }` |
 | GET    | `/receipts/{id}` | sí | — | `200` `ReceiptResponse` |
@@ -296,6 +318,93 @@ Reglas:
   transacción con el total.
 
 ---
+
+## Bank mappings (`PHASE-19`)
+
+| Método | Ruta | Auth | Body / Query | Response |
+|--------|------|------|--------------|----------|
+| GET    | `/bank-mappings` | sí | — | `200 list[BankCategoryMapping]` |
+| POST   | `/bank-mappings` | sí | `{ bank_concept, category_id }` | `201 BankCategoryMapping` (UPSERT por concepto normalizado) |
+| DELETE | `/bank-mappings/{id}` | sí | — | `204` |
+
+Reglas:
+- `bank_concept` se normaliza con `casefold() + trim`. Conceptos
+  equivalentes generan la misma fila.
+- El upsert se invoca implícitamente en `POST /imports/{id}/commit`
+  con los `category_overrides` aceptados — el endpoint REST es
+  para gestión manual.
+
+## Category rules (`PHASE-20`)
+
+| Método | Ruta | Auth | Body / Query | Response |
+|--------|------|------|--------------|----------|
+| GET    | `/category-rules` | sí | `?enabled_only=true|false` | `200 list[CategoryRule]` |
+| POST   | `/category-rules` | sí | `{ pattern, match_type, field, category_id, priority?, enabled? }` | `201 CategoryRule` |
+| PUT    | `/category-rules/{id}` | sí | `{ pattern?, match_type?, field?, priority?, enabled? }` | `200 CategoryRule` |
+| DELETE | `/category-rules/{id}` | sí | — | `204` |
+| POST   | `/seed/recommended` | sí | — | `200 SeedResult` (idempotente) |
+| POST   | `/imports/{id}/ai-suggest` | sí | — | `200 AiSuggestionResponse { suggestions: { concept_norm: category_id|null } }` |
+
+Reglas:
+- `priority` ascendente: 10 gana a 100. Las del seed van 10-79;
+  las custom 100 por defecto.
+- `field` decide contra qué se evalúa: `CONCEPT`, `DESCRIPTION` o
+  `BOTH` (cualquiera matchea).
+- `seed/recommended` puebla ~18 categorías + ~30 reglas; ejecutado
+  varias veces no duplica (UPSERT por nombre / por tupla
+  `(pattern, match_type, field, category_id)`). Si la categoría
+  existe sin `color`/`icon`, los rellena.
+- `ai-suggest` consulta Ollama local con el listado de categorías
+  del usuario y devuelve sugerencias para los conceptos sin
+  `saved_mapping` ni regla matching. Sólo aplica a jobs en
+  `PREVIEW`. Latencia 30-90s en CPU.
+
+## Accounts (`PHASE-21.2`)
+
+| Método | Ruta | Auth | Body / Query | Response |
+|--------|------|------|--------------|----------|
+| GET    | `/accounts` | sí | `?include_archived=` | `200 list[Account]` |
+| GET    | `/accounts/{id}` | sí | — | `200 Account` |
+| GET    | `/accounts/balances` | sí | — | `200 AccountBalancesResponse { items, total_assets, total_liabilities, net_worth, mixed_currencies, reference_currency }` (PHASE-21.3) |
+| POST   | `/accounts` | sí | `{ name, type, currency?, color?, icon?, opening_balance?, opening_balance_date?, display_order? }` | `201 Account` (`409` si nombre duplicado, `400` si `type` reservado para PHASE-22) |
+| PUT    | `/accounts/{id}` | sí | partial | `200 Account` |
+| DELETE | `/accounts/{id}` | sí | — | `204` (`409` si la cuenta tiene transacciones — usar `PUT { is_archived: true }`) |
+
+Reglas:
+- `type` permitido en PHASE-21.2: `bank | savings | brokerage |
+  crypto | cash`. Los `liability` (`credit_card | loan | mortgage`)
+  están reservados para PHASE-22.
+- Tras el wipe de PHASE-21.2, todo usuario empieza sin cuentas y
+  el frontend bloquea en `/onboarding/accounts` hasta declarar al
+  menos una.
+- `current_balance = opening_balance + Σ(income−expense)` en la
+  moneda nativa de la cuenta (excluye papelera; las transferencias
+  internas SÍ cuentan al saldo).
+- `mixed_currencies=true` cuando las cuentas activas no comparten
+  moneda — los totales son suma cruda sin conversión.
+
+## Transfers (`PHASE-21.3`)
+
+| Método | Ruta | Auth | Body / Query | Response |
+|--------|------|------|--------------|----------|
+| GET    | `/transfers` | sí | — | `200 list[TransferPair]` |
+| GET    | `/transfers/candidates` | sí | `?window_days=N` (def 3, max 14) | `200 list[TransferCandidate]` (sin escribir nada en BD) |
+| POST   | `/transfers/match` | sí | `{ window_days?: N }` | `200 TransferMatchResponse { linked_count, pending_candidates }` |
+| POST   | `/transfers/link` | sí | `{ out_transaction_id, in_transaction_id }` | `201 TransferPair` (`400` si misma cuenta o importe distinto, `409` si ya hay par, `404` si tx ajena) |
+| DELETE | `/transfers/{transaction_id}` | sí | — | `204` |
+
+Reglas:
+- El matcher empareja por `amount` + `currency` + cuentas distintas
+  + `occurred_at` dentro de `±window_days` + `kind` opuesto cuando
+  hay categoría (txs sin categoría participan en ambos lados).
+- Política conservadora: si dos pares comparten huella
+  (`amount + currency + frozenset({acc_a, acc_b})`), NINGUNO se
+  enlaza automáticamente — los devuelve como `pending_candidates`
+  para que el usuario decida.
+- Bidireccional: al enlazar A↔B, ambas filas apuntan mutuamente.
+- Las txs con `transfer_pair_id IS NOT NULL` se EXCLUYEN de los
+  agregados (cashflow, donut, top-expenses, budgets) pero SÍ
+  cuentan al saldo individual de su cuenta.
 
 ## Currency (`PHASE-8.1`)
 

@@ -181,6 +181,26 @@ Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
 | 18.1 | Web — Recharts (balance + i/e + donut)       | ✅     | —  |
 | 18.2 | Mobile — react-native-gifted-charts (polish) | ✅     | —  |
 
+### Fase 19 — Bank mappings (auto-aprendizaje en imports)
+
+| Fase | Nombre                                                 | Estado | PR |
+|------|--------------------------------------------------------|--------|----|
+| 19   | Bank-concept ↔ category mappings con auto-learn        | ✅     | —  |
+
+### Fase 20 — Rules engine + seed bancos españoles + AI suggest
+
+| Fase | Nombre                                                 | Estado | PR |
+|------|--------------------------------------------------------|--------|----|
+| 20   | Rules engine + seed (~30 reglas) + Ollama suggest      | ✅     | —  |
+
+### Fase 21 — Cuentas, transferencias internas y patrimonio
+
+| Fase | Nombre                                                 | Estado | PR |
+|------|--------------------------------------------------------|--------|----|
+| 21.1 | Categorías color/icon + presets cross-platform         | ✅     | —  |
+| 21.2 | Accounts module + onboarding + account_id obligatorio  | ✅     | —  |
+| 21.3 | Transfers + matcher + saldos + filtro cuenta + balances| ✅     | —  |
+
 ---
 
 ## Estructura de este directorio
