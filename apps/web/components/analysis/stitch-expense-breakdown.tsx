@@ -31,6 +31,7 @@ interface Slice {
   label: string;
   value: number;
   color: string;
+  emoji: string | null;
   pct: number;
   isOther: boolean;
 }
@@ -58,7 +59,11 @@ export function StitchExpenseBreakdown({
       id: item.category_id ?? `_no_cat_${item.category_name}`,
       label: item.category_name,
       value: Number(item.total),
-      color: SLICE_PALETTE[idx % SLICE_PALETTE.length] ?? colors.primary,
+      color:
+        item.category_color ??
+        SLICE_PALETTE[idx % SLICE_PALETTE.length] ??
+        colors.primary,
+      emoji: item.category_icon,
       pct: total > 0 ? (Number(item.total) / total) * 100 : 0,
       isOther: false,
     })),
@@ -69,6 +74,7 @@ export function StitchExpenseBreakdown({
       label: `Otros (${rest.length})`,
       value: restTotal,
       color: colors.borderStrong,
+      emoji: null,
       pct: total > 0 ? (restTotal / total) * 100 : 0,
       isOther: true,
     });
@@ -242,7 +248,11 @@ function LegendRow({
           border: `1px solid ${colors.border}`,
         }}
       >
-        <Icon size={16} />
+        {slice.emoji ? (
+          <span style={{ fontSize: fontSize.md, lineHeight: 1 }}>{slice.emoji}</span>
+        ) : (
+          <Icon size={16} />
+        )}
       </span>
       <span
         style={{

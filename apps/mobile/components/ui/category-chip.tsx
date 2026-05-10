@@ -6,6 +6,10 @@ import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
 export interface CategoryChipProps {
   label: string;
   kind: CategoryKind | null;
+  /** Hex `#RRGGBB` propio de la categoría — gana sobre la paleta por kind. */
+  color?: string | null;
+  /** Emoji prefix opcional. */
+  icon?: string | null;
 }
 
 interface Palette {
@@ -19,10 +23,31 @@ function paletteFor(kind: CategoryKind | null): Palette {
   return { bg: colors.primarySoft, fg: colors.primary };
 }
 
-export function CategoryChip({ label, kind }: CategoryChipProps) {
-  const palette = paletteFor(kind);
+function hexToRgba(hex: string, alpha: number): string | null {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return null;
+  const v = m[1]!;
+  const r = parseInt(v.slice(0, 2), 16);
+  const g = parseInt(v.slice(2, 4), 16);
+  const b = parseInt(v.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function paletteForColor(color: string): Palette {
+  const bg = hexToRgba(color, 0.15);
+  if (bg === null) return paletteFor(null);
+  return { bg, fg: color };
+}
+
+export function CategoryChip({ label, kind, color, icon }: CategoryChipProps) {
+  const palette = color ? paletteForColor(color) : paletteFor(kind);
   return (
     <View style={[styles.chip, { backgroundColor: palette.bg }]}>
+      {icon ? (
+        <Text style={styles.icon} accessibilityElementsHidden>
+          {icon}
+        </Text>
+      ) : null}
       <Text style={[styles.text, { color: palette.fg }]} numberOfLines={1}>
         {label}
       </Text>
@@ -33,6 +58,9 @@ export function CategoryChip({ label, kind }: CategoryChipProps) {
 const styles = StyleSheet.create({
   chip: {
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs / 2,
     borderRadius: radius.sm,
@@ -43,4 +71,5 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
+  icon: { fontSize: fontSize.sm },
 });

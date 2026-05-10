@@ -44,6 +44,8 @@ class CategoryBreakdownItem(BaseModel):
     category_id: uuid.UUID | None
     category_name: str
     category_kind: str | None
+    category_color: str | None = None
+    category_icon: str | None = None
     total: Decimal
     count: int
 

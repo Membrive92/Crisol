@@ -34,12 +34,19 @@ export function BudgetStatusCard({ item, categories }: BudgetStatusCardProps) {
   const palette = paletteFor(status);
   const category = findCategory(categories, budget.category_id);
   const label = category?.name ?? 'Global (todas las categorías)';
+  const accent = category?.color ?? null;
+  const emoji = category?.icon ?? null;
   const cappedPercent = Math.min(percent_used, 100);
   const isOver = Number(remaining) < 0;
 
   return (
     <View style={styles.card}>
       <View style={styles.header}>
+        {accent ? (
+          <View style={[styles.swatch, { backgroundColor: accent }]}>
+            {emoji ? <Text style={styles.swatchIcon}>{emoji}</Text> : null}
+          </View>
+        ) : null}
         <View style={{ flex: 1 }}>
           <Text style={styles.title} numberOfLines={1}>
             {label}
@@ -120,6 +127,14 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   subtitle: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: 2 },
+  swatch: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swatchIcon: { fontSize: fontSize.sm },
   badge: {
     borderWidth: 1,
     borderRadius: radius.sm,

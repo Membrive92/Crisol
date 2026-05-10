@@ -198,10 +198,12 @@ async def get_breakdown_by_category(
             category_id=cat_id,
             category_name=cat_name if cat_name is not None else _UNCATEGORIZED_NAME,
             category_kind=cat_kind.value if cat_kind is not None else None,
+            category_color=cat_color,
+            category_icon=cat_icon,
             total=total,
             count=count,
         )
-        for cat_id, cat_name, cat_kind, total, count in rows
+        for cat_id, cat_name, cat_kind, cat_color, cat_icon, total, count in rows
     ]
     items.sort(key=lambda i: i.total, reverse=True)
     return items

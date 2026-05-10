@@ -69,9 +69,14 @@ export function CategoryDonut({
   const slices: Slice[] = [
     ...top.map((item, idx) => ({
       id: item.category_id ?? `_no_cat_${item.category_name}`,
-      label: item.category_name,
+      label: item.category_icon
+        ? `${item.category_icon} ${item.category_name}`
+        : item.category_name,
       value: Number(item.total),
-      color: PALETTE[idx % PALETTE.length] ?? colors.primary,
+      color:
+        item.category_color ??
+        PALETTE[idx % PALETTE.length] ??
+        colors.primary,
       pct: total > 0 ? (Number(item.total) / total) * 100 : 0,
       isOther: false,
     })),

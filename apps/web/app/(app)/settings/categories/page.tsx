@@ -8,27 +8,62 @@ import {
   useCategories,
   useCreateCategory,
   useDeleteCategory,
+  useSeedRecommended,
   useUpdateCategory,
 } from '@finanzas/services';
+import { toast } from '@finanzas/store';
 import type { Category, CategoryKind } from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import {
+  DEFAULT_CATEGORY_COLOR,
+  colors,
+  fontSize,
+  fontWeight,
+  radius,
+  spacing,
+} from '@finanzas/ui';
 
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { CategoryAppearanceFields } from '@/components/ui/category-appearance';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Select, TextInput } from '@/components/ui/field';
 
 interface FormState {
   name: string;
   kind: CategoryKind;
+  color: string;
+  icon: string | null;
 }
 
-const EMPTY_FORM: FormState = { name: '', kind: 'expense' };
+const EMPTY_FORM: FormState = {
+  name: '',
+  kind: 'expense',
+  color: DEFAULT_CATEGORY_COLOR,
+  icon: null,
+};
 
 export default function CategoriesSettingsPage() {
   const list = useCategories();
   const create = useCreateCategory();
+  const seed = useSeedRecommended();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [createError, setCreateError] = useState<string | null>(null);
+
+  function handleSeed() {
+    seed.mutate(undefined, {
+      onSuccess: ({ categories_created, rules_created }) => {
+        if (categories_created === 0 && rules_created === 0) {
+          toast.info('Ya tienes todas las recomendadas creadas.');
+        } else {
+          toast.success(
+            `Creadas ${categories_created} categorías y ${rules_created} reglas.`,
+          );
+        }
+      },
+      onError: (err) =>
+        toast.error(formatApiError(err, 'Error al crear recomendadas')),
+    });
+  }
 
   function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -39,7 +74,7 @@ export default function CategoriesSettingsPage() {
       return;
     }
     create.mutate(
-      { name, kind: form.kind },
+      { name, kind: form.kind, color: form.color, icon: form.icon },
       {
         onSuccess: () => setForm(EMPTY_FORM),
         onError: (err) => setCreateError(formatApiError(err, 'No se pudo crear')),
@@ -64,30 +99,54 @@ export default function CategoriesSettingsPage() {
         ← Ajustes
       </Link>
 
-      <header style={{ marginTop: spacing.sm, marginBottom: spacing.lg }}>
-        <h1
-          style={{
-            margin: 0,
-            fontSize: fontSize.xl,
-            fontWeight: fontWeight.bold,
-            color: colors.text,
-            letterSpacing: '-0.01em',
-          }}
-        >
-          Categorías
-        </h1>
-        <p
-          style={{
-            margin: `${spacing.xs}px 0 0 0`,
-            fontSize: fontSize.sm,
-            color: colors.textMuted,
-            lineHeight: 1.4,
-          }}
-        >
-          Las usas para clasificar transacciones, tickets e importaciones del
-          módulo Finanzas personales. Al borrar una categoría, las transacciones
-          que la usaban quedan sin categoría (no se borran).
-        </p>
+      <header
+        style={{
+          marginTop: spacing.sm,
+          marginBottom: spacing.lg,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          gap: spacing.md,
+          flexWrap: 'wrap',
+        }}
+      >
+        <div style={{ flex: '1 1 360px' }}>
+          <h1
+            style={{
+              margin: 0,
+              fontSize: fontSize.xl,
+              fontWeight: fontWeight.bold,
+              color: colors.text,
+              letterSpacing: '-0.01em',
+            }}
+          >
+            Categorías
+          </h1>
+          <p
+            style={{
+              margin: `${spacing.xs}px 0 0 0`,
+              fontSize: fontSize.sm,
+              color: colors.textMuted,
+              lineHeight: 1.4,
+            }}
+          >
+            Las usas para clasificar transacciones, tickets e importaciones del
+            módulo Finanzas personales. Al borrar una categoría, las
+            transacciones que la usaban quedan sin categoría (no se borran).
+          </p>
+        </div>
+        <div style={{ display: 'inline-flex', gap: spacing.sm, flexWrap: 'wrap' }}>
+          <Link href="/settings/categories/rules">
+            <Button variant="ghost">Ver reglas</Button>
+          </Link>
+          <Button
+            variant="secondary"
+            onClick={handleSeed}
+            disabled={seed.isPending}
+          >
+            {seed.isPending ? 'Creando…' : 'Crear recomendadas'}
+          </Button>
+        </div>
       </header>
 
       <Card style={{ padding: spacing.lg, marginBottom: spacing.lg }}>
@@ -104,29 +163,37 @@ export default function CategoriesSettingsPage() {
         </h2>
         <form
           onSubmit={handleCreate}
-          style={{ display: 'flex', gap: spacing.md, alignItems: 'flex-end', flexWrap: 'wrap' }}
+          style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}
         >
-          <div style={{ flex: '2 1 220px', minWidth: 0 }}>
-            <TextInput
-              label="Nombre"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              maxLength={64}
-              placeholder="Comida, Nómina, Transporte…"
-              required
-            />
+          <div style={{ display: 'flex', gap: spacing.md, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div style={{ flex: '2 1 220px', minWidth: 0 }}>
+              <TextInput
+                label="Nombre"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                maxLength={64}
+                placeholder="Comida, Nómina, Transporte…"
+                required
+              />
+            </div>
+            <div style={{ flex: '1 1 160px', minWidth: 0 }}>
+              <Select
+                label="Tipo"
+                value={form.kind}
+                onChange={(e) => setForm({ ...form, kind: e.target.value as CategoryKind })}
+              >
+                <option value="expense">Gasto</option>
+                <option value="income">Ingreso</option>
+              </Select>
+            </div>
           </div>
-          <div style={{ flex: '1 1 160px', minWidth: 0 }}>
-            <Select
-              label="Tipo"
-              value={form.kind}
-              onChange={(e) => setForm({ ...form, kind: e.target.value as CategoryKind })}
-            >
-              <option value="expense">Gasto</option>
-              <option value="income">Ingreso</option>
-            </Select>
-          </div>
-          <div style={{ flex: '0 0 auto', marginBottom: spacing.md }}>
+          <CategoryAppearanceFields
+            color={form.color}
+            icon={form.icon}
+            onColorChange={(hex) => setForm({ ...form, color: hex })}
+            onIconChange={(emoji) => setForm({ ...form, icon: emoji })}
+          />
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <Button type="submit" disabled={create.isPending}>
               {create.isPending ? 'Creando…' : 'Crear'}
             </Button>
@@ -224,6 +291,10 @@ function CategoryRow({ category }: { category: Category }) {
   const [confirming, setConfirming] = useState(false);
   const [draftName, setDraftName] = useState(category.name);
   const [draftKind, setDraftKind] = useState<CategoryKind>(category.kind);
+  const [draftColor, setDraftColor] = useState<string>(
+    category.color ?? DEFAULT_CATEGORY_COLOR,
+  );
+  const [draftIcon, setDraftIcon] = useState<string | null>(category.icon);
   const [rowError, setRowError] = useState<string | null>(null);
 
   const update = useUpdateCategory(category.id);
@@ -233,6 +304,8 @@ function CategoryRow({ category }: { category: Category }) {
     setRowError(null);
     setDraftName(category.name);
     setDraftKind(category.kind);
+    setDraftColor(category.color ?? DEFAULT_CATEGORY_COLOR);
+    setDraftIcon(category.icon);
     setEditing(true);
   }
 
@@ -244,7 +317,7 @@ function CategoryRow({ category }: { category: Category }) {
       return;
     }
     update.mutate(
-      { name, kind: draftKind },
+      { name, kind: draftKind, color: draftColor, icon: draftIcon },
       {
         onSuccess: () => setEditing(false),
         onError: (err) => setRowError(formatApiError(err, 'No se pudo guardar')),
@@ -255,43 +328,57 @@ function CategoryRow({ category }: { category: Category }) {
   function handleDelete() {
     setRowError(null);
     remove.mutate(category.id, {
+      onSuccess: () => setConfirming(false),
       onError: (err) => setRowError(formatApiError(err, 'No se pudo eliminar')),
     });
   }
 
   if (editing) {
     return (
-      <div style={{ padding: spacing.md, display: 'flex', gap: spacing.sm, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-        <div style={{ flex: '2 1 200px', minWidth: 0 }}>
-          <TextInput
-            label="Nombre"
-            value={draftName}
-            onChange={(e) => setDraftName(e.target.value)}
-            maxLength={64}
-          />
+      <div
+        style={{
+          padding: spacing.md,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: spacing.md,
+        }}
+      >
+        <div style={{ display: 'flex', gap: spacing.sm, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ flex: '2 1 200px', minWidth: 0 }}>
+            <TextInput
+              label="Nombre"
+              value={draftName}
+              onChange={(e) => setDraftName(e.target.value)}
+              maxLength={64}
+            />
+          </div>
+          <div style={{ flex: '1 1 140px', minWidth: 0 }}>
+            <Select
+              label="Tipo"
+              value={draftKind}
+              onChange={(e) => setDraftKind(e.target.value as CategoryKind)}
+            >
+              <option value="expense">Gasto</option>
+              <option value="income">Ingreso</option>
+            </Select>
+          </div>
         </div>
-        <div style={{ flex: '1 1 140px', minWidth: 0 }}>
-          <Select
-            label="Tipo"
-            value={draftKind}
-            onChange={(e) => setDraftKind(e.target.value as CategoryKind)}
-          >
-            <option value="expense">Gasto</option>
-            <option value="income">Ingreso</option>
-          </Select>
-        </div>
-        <div style={{ display: 'flex', gap: spacing.xs, marginBottom: spacing.md }}>
-          <Button type="button" onClick={saveEdit} disabled={update.isPending}>
-            {update.isPending ? 'Guardando…' : 'Guardar'}
-          </Button>
+        <CategoryAppearanceFields
+          color={draftColor}
+          icon={draftIcon}
+          onColorChange={setDraftColor}
+          onIconChange={setDraftIcon}
+        />
+        <div style={{ display: 'flex', gap: spacing.xs, justifyContent: 'flex-end' }}>
           <Button type="button" variant="ghost" onClick={() => setEditing(false)}>
             Cancelar
           </Button>
+          <Button type="button" onClick={saveEdit} disabled={update.isPending}>
+            {update.isPending ? 'Guardando…' : 'Guardar'}
+          </Button>
         </div>
         {rowError ? (
-          <div style={{ flex: '1 0 100%', color: colors.danger, fontSize: fontSize.sm }}>
-            {rowError}
-          </div>
+          <div style={{ color: colors.danger, fontSize: fontSize.sm }}>{rowError}</div>
         ) : null}
       </div>
     );
@@ -306,6 +393,7 @@ function CategoryRow({ category }: { category: Category }) {
         gap: spacing.md,
       }}
     >
+      <CategorySwatch color={category.color} icon={category.icon} />
       <span
         style={{
           flex: 1,
@@ -321,32 +409,52 @@ function CategoryRow({ category }: { category: Category }) {
         <Button type="button" variant="ghost" onClick={startEdit}>
           Editar
         </Button>
-        {confirming ? (
-          <>
-            <Button
-              type="button"
-              variant="danger"
-              onClick={handleDelete}
-              disabled={remove.isPending}
-            >
-              {remove.isPending ? 'Eliminando…' : 'Confirmar'}
-            </Button>
-            <Button type="button" variant="ghost" onClick={() => setConfirming(false)}>
-              Cancelar
-            </Button>
-          </>
-        ) : (
-          <Button type="button" variant="ghost" onClick={() => setConfirming(true)}>
-            Eliminar
-          </Button>
-        )}
+        <Button type="button" variant="ghost" onClick={() => setConfirming(true)}>
+          Eliminar
+        </Button>
       </div>
       {rowError ? (
         <div style={{ flex: '1 0 100%', color: colors.danger, fontSize: fontSize.sm }}>
           {rowError}
         </div>
       ) : null}
+      <ConfirmDialog
+        open={confirming}
+        title="¿Eliminar categoría?"
+        description={
+          <>
+            <strong>{category.name}</strong> dejará de estar disponible. Las
+            transacciones que la usaban quedarán sin categoría — no se borran.
+          </>
+        }
+        confirmLabel="Eliminar"
+        tone="danger"
+        loading={remove.isPending}
+        onConfirm={handleDelete}
+        onCancel={() => setConfirming(false)}
+      />
     </div>
+  );
+}
+
+function CategorySwatch({ color, icon }: { color: string | null; icon: string | null }) {
+  const bg = color ?? DEFAULT_CATEGORY_COLOR;
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        width: 32,
+        height: 32,
+        borderRadius: '50%',
+        backgroundColor: bg,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+      }}
+    >
+      {icon ? <span style={{ fontSize: fontSize.md, lineHeight: 1 }}>{icon}</span> : null}
+    </span>
   );
 }
 

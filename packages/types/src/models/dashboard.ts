@@ -26,6 +26,8 @@ export interface CategoryBreakdownItem {
   category_id: string | null;
   category_name: string;
   category_kind: CategoryKind | null;
+  category_color: string | null;
+  category_icon: string | null;
   total: string;
   count: number;
 }

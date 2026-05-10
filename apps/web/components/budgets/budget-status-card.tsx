@@ -40,6 +40,8 @@ export function BudgetStatusCard({ item, categories }: BudgetStatusCardProps) {
   const palette = paletteFor(status);
   const category = findCategory(categories, budget.category_id);
   const label = category?.name ?? 'Global (todas las categorías)';
+  const emoji = category?.icon ?? null;
+  const accent = category?.color ?? null;
   const cappedPercent = Math.min(percent_used, 100);
 
   return (
@@ -53,20 +55,39 @@ export function BudgetStatusCard({ item, categories }: BudgetStatusCardProps) {
           marginBottom: spacing.sm,
         }}
       >
-        <div>
-          <span
-            style={{
-              fontSize: fontSize.sm,
-              fontWeight: fontWeight.semibold,
-              color: colors.text,
-              display: 'block',
-            }}
-          >
-            {label}
-          </span>
-          <span style={{ fontSize: fontSize.xs, color: colors.textMuted }}>
-            Límite mensual {formatAmount(budget.amount, budget.currency)}
-          </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, minWidth: 0 }}>
+          {accent ? (
+            <span
+              aria-hidden
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: '50%',
+                backgroundColor: accent,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              {emoji ? <span style={{ fontSize: fontSize.sm, lineHeight: 1 }}>{emoji}</span> : null}
+            </span>
+          ) : null}
+          <div style={{ minWidth: 0 }}>
+            <span
+              style={{
+                fontSize: fontSize.sm,
+                fontWeight: fontWeight.semibold,
+                color: colors.text,
+                display: 'block',
+              }}
+            >
+              {label}
+            </span>
+            <span style={{ fontSize: fontSize.xs, color: colors.textMuted }}>
+              Límite mensual {formatAmount(budget.amount, budget.currency)}
+            </span>
+          </div>
         </div>
         <span
           style={{
