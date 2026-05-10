@@ -35,6 +35,7 @@ class BudgetAlertSchema(BaseModel):
 class TransactionCreate(BaseModel):
     """Datos para crear una transacción."""
 
+    account_id: uuid.UUID
     category_id: uuid.UUID | None = None
     amount: Decimal = Field(decimal_places=2, ge=Decimal("0.01"))
     currency: str = Field(default="EUR", max_length=3)
@@ -46,6 +47,7 @@ class TransactionCreate(BaseModel):
 class TransactionUpdate(BaseModel):
     """Datos para actualizar una transacción (parcial)."""
 
+    account_id: uuid.UUID | None = None
     category_id: uuid.UUID | None = None
     amount: Decimal | None = Field(default=None, decimal_places=2, ge=Decimal("0.01"))
     currency: str | None = Field(default=None, max_length=3)
@@ -65,7 +67,9 @@ class TransactionResponse(BaseModel):
 
     id: uuid.UUID
     user_id: uuid.UUID
+    account_id: uuid.UUID
     category_id: uuid.UUID | None
+    transfer_pair_id: uuid.UUID | None = None
     amount: Decimal
     currency: str
     occurred_at: datetime

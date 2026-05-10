@@ -79,6 +79,8 @@ export function TrashList({
         <CategoryChip
           label={category?.name ?? 'Sin categoría'}
           kind={category?.kind ?? null}
+          color={category?.color ?? null}
+          icon={category?.icon ?? null}
         />
       ),
     },

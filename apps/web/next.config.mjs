@@ -11,11 +11,13 @@ const nextConfig = {
   reactStrictMode: true,
   outputFileTracingRoot: path.join(__dirname, '../..'),
   // El dev server cierra los rewrites/proxy a los 30s por defecto. La
-  // inferencia local con qwen2.5vl:7b en CPU puede tardar 60–120s, así que
-  // damos 5 minutos para que /receipts/extract llegue a completar.
+  // inferencia local con qwen2.5vl:7b en CPU tarda 60-120s para un
+  // ticket pero 3-5 min por página de extracto bancario. Para
+  // /imports/preview con `force_vision=true` y 5 páginas el peor caso
+  // ronda los 25 min en CPU. Damos 30 min de margen.
   experimental: {
     typedRoutes: true,
-    proxyTimeout: 300_000,
+    proxyTimeout: 30 * 60 * 1000,
   },
   // Proxy /api/* a FastAPI para que la cookie httpOnly del refresh token
   // viaje same-origin. En producción este rewrite también funciona detrás

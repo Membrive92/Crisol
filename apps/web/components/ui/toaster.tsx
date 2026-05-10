@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 import { useToastStore } from '@finanzas/store';
 import type { Toast, ToastKind } from '@finanzas/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
 
 import { XIcon } from './icons';
+import { Spinner } from './spinner';
 
 /**
  * Renderiza la queue de toasts globales en una stack fixed
@@ -57,6 +58,7 @@ function ToastCard({ toast }: { toast: Toast }) {
   }, [toast.id, toast.dismissAfterMs, dismiss]);
 
   const palette = paletteFor(toast.kind);
+  const isLoading = toast.kind === 'loading';
 
   return (
     <div
@@ -75,6 +77,7 @@ function ToastCard({ toast }: { toast: Toast }) {
         boxShadow: '0 6px 16px rgba(0,0,0,0.12)',
       }}
     >
+      {isLoading ? <Spinner size={18} color={palette.accent} /> : null}
       <span
         style={{
           flex: 1,
@@ -85,6 +88,7 @@ function ToastCard({ toast }: { toast: Toast }) {
         }}
       >
         {toast.message}
+        {isLoading ? <ElapsedTime /> : null}
       </span>
       {toast.action ? (
         <button
@@ -108,25 +112,58 @@ function ToastCard({ toast }: { toast: Toast }) {
           {toast.action.label}
         </button>
       ) : null}
-      <button
-        type="button"
-        aria-label="Cerrar"
-        onClick={() => dismiss(toast.id)}
-        style={{
-          backgroundColor: 'transparent',
-          color: colors.textMuted,
-          border: 'none',
-          padding: 4,
-          cursor: 'pointer',
-          borderRadius: radius.sm,
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <XIcon size={14} />
-      </button>
+      {/* Loading toasts no son dismissables manualmente — el caller
+          los cierra con `toast.dismiss(id)` cuando termina la operación.
+          Mostrar la X confunde (parece que cancelas la operación). */}
+      {!isLoading ? (
+        <button
+          type="button"
+          aria-label="Cerrar"
+          onClick={() => dismiss(toast.id)}
+          style={{
+            backgroundColor: 'transparent',
+            color: colors.textMuted,
+            border: 'none',
+            padding: 4,
+            cursor: 'pointer',
+            borderRadius: radius.sm,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <XIcon size={14} />
+        </button>
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * Cronómetro mm:ss que se actualiza cada segundo. Usado en toasts
+ * `loading` para que el usuario vea que sigue trabajando.
+ */
+function ElapsedTime() {
+  const [start] = useState(() => Date.now());
+  const [now, setNow] = useState(start);
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const seconds = Math.floor((now - start) / 1000);
+  const mm = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const ss = (seconds % 60).toString().padStart(2, '0');
+  return (
+    <span
+      style={{
+        marginLeft: spacing.xs,
+        fontVariantNumeric: 'tabular-nums',
+        color: colors.textMuted,
+        fontWeight: fontWeight.regular,
+      }}
+    >
+      ({mm}:{ss})
+    </span>
   );
 }
 
@@ -138,6 +175,7 @@ function paletteFor(kind: ToastKind): { bg: string; accent: string } {
       return { bg: colors.warningSoft, accent: colors.warning };
     case 'error':
       return { bg: colors.dangerSoft, accent: colors.danger };
+    case 'loading':
     case 'info':
     default:
       return { bg: colors.primarySoft, accent: colors.primary };

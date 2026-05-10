@@ -41,6 +41,15 @@ class Transaction(Base):
         nullable=False,
         index=True,
     )
+    # PHASE-19.1: cada transacción pertenece obligatoriamente a una
+    # cuenta del usuario. CASCADE: borrar la cuenta arrastra su
+    # histórico (el service de accounts impide DELETE si hay
+    # transacciones — se exige archivar para conservar el histórico).
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     category_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("categories.id", ondelete="SET NULL"),
         nullable=True,
@@ -55,6 +64,16 @@ class Transaction(Base):
     )
     receipt_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     import_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # PHASE-19.3: enlace a la otra mitad del par cuando esta tx forma
+    # parte de una transferencia interna entre cuentas del usuario.
+    # NULL para movimientos normales (income/expense reales).
+    # FK auto-referente con SET NULL para que al borrar una mitad la
+    # otra quede huérfana (luego el frontend la mostrará como "no
+    # emparejada" para que el usuario decida).
+    transfer_pair_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("transactions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -89,5 +108,14 @@ class Transaction(Base):
             "ix_transactions_user_id_active",
             "user_id",
             postgresql_where="deleted_at IS NULL",
+        ),
+        # PHASE-19.3: agregados de cashflow/budgets/dashboard excluyen
+        # las txs con `transfer_pair_id IS NOT NULL`. Filtramos sobre
+        # filas activas (sin papelera) y con pareja, que son las que
+        # se descuentan del cómputo.
+        Index(
+            "ix_transactions_transfer_pair_id",
+            "transfer_pair_id",
+            postgresql_where="transfer_pair_id IS NOT NULL AND deleted_at IS NULL",
         ),
     )

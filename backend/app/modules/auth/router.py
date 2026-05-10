@@ -81,8 +81,19 @@ async def register_endpoint(
     response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TokenResponse:
-    """Registra un nuevo usuario, devuelve tokens y setea la cookie."""
+    """Registra un nuevo usuario, devuelve tokens y setea la cookie.
+
+    PHASE-20: tras crear el usuario, se siembran automáticamente
+    categorías y reglas recomendadas para bancos españoles, para que
+    el primer import ya venga mayoritariamente categorizado.
+    """
+    from app.modules.personal_finance.seed.service import seed_recommended
+    from app.modules.users.repository import get_user_by_email
+
     session = await register(db, body.email, body.password, body.display_name)
+    user = await get_user_by_email(db, body.email)
+    if user is not None:
+        await seed_recommended(db, user.id)
     await db.commit()
     _set_refresh_cookie(
         response, session.tokens.refresh_token, ttl_days=session.refresh_ttl_days

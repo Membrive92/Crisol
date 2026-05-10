@@ -14,13 +14,18 @@ from app.modules.ai.router import router as ai_router
 from app.modules.auth.router import router as auth_router
 from app.modules.auth.webauthn.router import router as webauthn_router
 from app.modules.currency.router import router as currency_router
+from app.modules.personal_finance.accounts.router import router as accounts_router
+from app.modules.personal_finance.bank_mappings.router import router as bank_mappings_router
 from app.modules.personal_finance.budgets.router import router as budgets_router
 from app.modules.personal_finance.categories.router import router as categories_router
+from app.modules.personal_finance.category_rules.router import router as category_rules_router
+from app.modules.personal_finance.seed.router import router as seed_router
 from app.modules.personal_finance.dashboard.router import router as dashboard_router
 from app.modules.personal_finance.imports.router import router as imports_router
 from app.modules.personal_finance.receipts.router import router as receipts_router
 from app.modules.personal_finance.fixed_expenses.router import router as fixed_expenses_router
 from app.modules.personal_finance.transactions.router import router as transactions_router
+from app.modules.personal_finance.transfers.router import router as transfers_router
 
 
 @asynccontextmanager
@@ -64,13 +69,18 @@ app.include_router(ai_router)
 app.include_router(auth_router)
 app.include_router(webauthn_router)
 app.include_router(currency_router)
+app.include_router(accounts_router)
 app.include_router(categories_router)
 app.include_router(transactions_router)
+app.include_router(transfers_router)
 app.include_router(dashboard_router)
 app.include_router(budgets_router)
 app.include_router(fixed_expenses_router)
 app.include_router(imports_router)
 app.include_router(receipts_router)
+app.include_router(bank_mappings_router)
+app.include_router(category_rules_router)
+app.include_router(seed_router)
 
 
 @app.get("/health", tags=["system"])

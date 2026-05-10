@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     # ---------- Ollama (IA local) ----------
     ollama_base_url: str = "http://localhost:11434"
     ollama_vision_model: str = "qwen2.5vl:7b"
+    # Modelo de texto puro para tareas tipo "sugiere categoría". Default
+    # al mismo que visión (qwen2.5vl acepta texto solo), pero se puede
+    # sobreescribir vía env a un modelo más liviano (qwen2.5:3b,
+    # llama3.2:3b) si el host tiene poca RAM/VRAM.
+    ollama_text_model: str = "qwen2.5vl:7b"
     ollama_timeout_seconds: int = 120
 
     # ---------- Frankfurter (exchange rates) ----------

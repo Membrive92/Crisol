@@ -4,7 +4,7 @@
  * hace con un componente `<Toaster />` por plataforma.
  */
 
-export type ToastKind = 'info' | 'success' | 'warning' | 'error';
+export type ToastKind = 'info' | 'success' | 'warning' | 'error' | 'loading';
 
 /**
  * Acción opcional dentro de un toast (botón al lado del mensaje).

@@ -16,6 +16,19 @@ export const queryKeys = {
   auth: {
     me: ['auth', 'me'] as const,
   },
+  accounts: {
+    all: ['accounts'] as const,
+    list: (includeArchived = false) =>
+      [...queryKeys.accounts.all, 'list', includeArchived] as const,
+    detail: (id: string) => [...queryKeys.accounts.all, 'detail', id] as const,
+    balances: () => [...queryKeys.accounts.all, 'balances'] as const,
+  },
+  transfers: {
+    all: ['transfers'] as const,
+    list: () => [...queryKeys.transfers.all, 'list'] as const,
+    candidates: (windowDays = 3) =>
+      [...queryKeys.transfers.all, 'candidates', windowDays] as const,
+  },
   categories: {
     all: ['categories'] as const,
     list: () => [...queryKeys.categories.all, 'list'] as const,
@@ -70,6 +83,12 @@ export const queryKeys = {
       [...queryKeys.fixedExpenses.all, 'list', status ?? 'any'] as const,
     detail: (id: string) =>
       [...queryKeys.fixedExpenses.all, 'detail', id] as const,
+  },
+  bankMappings: {
+    all: ['bankMappings'] as const,
+  },
+  categoryRules: {
+    all: ['categoryRules'] as const,
   },
 } as const;
 

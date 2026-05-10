@@ -23,7 +23,16 @@ export interface BudgetAlert {
 export interface Transaction {
   id: string;
   user_id: string;
+  /** PHASE-19.1: cuenta a la que pertenece la transacción. Obligatorio. */
+  account_id: string;
   category_id: string | null;
+  /**
+   * PHASE-19.3: si esta tx forma parte de una transferencia interna,
+   * apunta a la otra mitad del par. NULL en movimientos normales.
+   * Las parejas se excluyen de cashflow / tasa de ahorro / donut /
+   * presupuestos pero SÍ afectan al saldo individual de su cuenta.
+   */
+  transfer_pair_id: string | null;
   amount: string;
   currency: string;
   occurred_at: string;

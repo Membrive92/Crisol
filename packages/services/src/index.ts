@@ -8,6 +8,8 @@ export {
 export { formatApiError } from './api/errors';
 export { authApi } from './api/endpoints/auth';
 export { passkeysApi, type PasskeyResponse } from './api/endpoints/passkeys';
+export { accountsApi, type AccountListQuery } from './api/endpoints/accounts';
+export { transfersApi } from './api/endpoints/transfers';
 export { categoriesApi } from './api/endpoints/categories';
 export { transactionsApi } from './api/endpoints/transactions';
 export { dashboardApi } from './api/endpoints/dashboard';
@@ -18,7 +20,16 @@ export {
   type FixedExpenseListQuery,
   type FixedExpenseUpdatePayload,
 } from './api/endpoints/fixed-expenses';
-export { importsApi, type CreateImportPayload } from './api/endpoints/imports';
+export {
+  importsApi,
+  type CreateImportPayload,
+  type PreviewImportPayload,
+} from './api/endpoints/imports';
+export {
+  bankMappingsApi,
+  type BankMappingUpsertPayload,
+} from './api/endpoints/bank-mappings';
+export { categoryRulesApi } from './api/endpoints/category-rules';
 export { receiptsApi } from './api/endpoints/receipts';
 export {
   currencyApi,
@@ -28,6 +39,21 @@ export {
 } from './api/endpoints/currency';
 
 export { queryKeys } from './query/keys';
+export {
+  useAccount,
+  useAccountBalances,
+  useAccounts,
+  useCreateAccount,
+  useDeleteAccount,
+  useUpdateAccount,
+} from './query/hooks/useAccounts';
+export {
+  useLinkTransfer,
+  useMatchTransfers,
+  useTransferCandidates,
+  useTransfers,
+  useUnlinkTransfer,
+} from './query/hooks/useTransfers';
 export {
   useCategories,
   useCategory,
@@ -41,9 +67,12 @@ export {
   useCreateTransaction,
   useUpdateTransaction,
   useDeleteTransaction,
+  useBulkDeleteTransactions,
   useTrashedTransactions,
   useRestoreTransaction,
   usePurgeTransaction,
+  useBulkRestoreTrash,
+  useBulkPurgeTrash,
 } from './query/hooks/useTransactions';
 export {
   useDashboardSummary,
@@ -52,7 +81,27 @@ export {
   useDashboardTopExpenses,
   useUserCurrencies,
 } from './query/hooks/useDashboard';
-export { useImports, useImport, useCreateImport } from './query/hooks/useImports';
+export {
+  useImports,
+  useImport,
+  useCreateImport,
+  usePreviewImport,
+  useCommitImport,
+  useAiSuggestImport,
+  type CommitImportPayload,
+} from './query/hooks/useImports';
+export {
+  useBankMappings,
+  useUpsertBankMapping,
+  useDeleteBankMapping,
+} from './query/hooks/useBankMappings';
+export {
+  useCategoryRules,
+  useCreateCategoryRule,
+  useUpdateCategoryRule,
+  useDeleteCategoryRule,
+  useSeedRecommended,
+} from './query/hooks/useCategoryRules';
 export {
   useReceipts,
   useReceipt,

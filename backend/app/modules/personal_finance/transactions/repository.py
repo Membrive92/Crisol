@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Literal
 
-from sqlalchemy import Select, func, null, select
+from sqlalchemy import Select, Update, func, null, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.personal_finance.dashboard.conversion import converted_amount_expr
@@ -20,22 +20,29 @@ from app.modules.personal_finance.transactions.models import Transaction
 DeletedScope = Literal["active", "trashed", "any"]
 
 
-def _scope[Q: Select[Any]](
+def _scope[Q: Select[Any] | Update](
     query: Q,
     user_id: uuid.UUID,
     *,
+    account_id: uuid.UUID | None = None,
     category_id: uuid.UUID | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     search: str | None = None,
     deleted: DeletedScope = "active",
 ) -> Q:
-    """Filtros comunes (user_id obligatorio + opcionales)."""
+    """Filtros comunes (user_id obligatorio + opcionales).
+
+    Aplicable tanto a SELECT como a UPDATE (bulk soft-delete) — el
+    `where()` chaining funciona idéntico en ambos.
+    """
     query = query.where(Transaction.user_id == user_id)
     if deleted == "active":
         query = query.where(Transaction.deleted_at.is_(None))
     elif deleted == "trashed":
         query = query.where(Transaction.deleted_at.is_not(None))
+    if account_id is not None:
+        query = query.where(Transaction.account_id == account_id)
     if category_id is not None:
         query = query.where(Transaction.category_id == category_id)
     if date_from is not None:
@@ -51,6 +58,7 @@ async def list_transactions(
     db: AsyncSession,
     user_id: uuid.UUID,
     *,
+    account_id: uuid.UUID | None = None,
     category_id: uuid.UUID | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
@@ -73,6 +81,7 @@ async def list_transactions(
     count_query = _scope(
         count_query,
         user_id,
+        account_id=account_id,
         category_id=category_id,
         date_from=date_from,
         date_to=date_to,
@@ -89,6 +98,7 @@ async def list_transactions(
     items_query = _scope(
         items_query,
         user_id,
+        account_id=account_id,
         category_id=category_id,
         date_from=date_from,
         date_to=date_to,
@@ -180,6 +190,77 @@ async def soft_delete_transaction(
     await db.flush()
     await db.refresh(transaction)
     return transaction
+
+
+async def bulk_soft_delete_transactions(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    category_id: uuid.UUID | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    search: str | None = None,
+) -> int:
+    """Mueve a papelera todas las transacciones activas del usuario que
+    matcheen los filtros. Devuelve el número de filas afectadas.
+
+    Usa los mismos filtros que `list_transactions` para que "borrar todo
+    lo que veo en pantalla con este filtro" sea exacto. Si no se pasa
+    ningún filtro, mueve todas las transacciones activas del usuario.
+    """
+    stmt = update(Transaction).values(deleted_at=datetime.now(UTC))
+    stmt = _scope(
+        stmt,
+        user_id,
+        category_id=category_id,
+        date_from=date_from,
+        date_to=date_to,
+        search=search,
+        deleted="active",
+    )
+    result = await db.execute(stmt)
+    await db.flush()
+    return result.rowcount or 0
+
+
+async def bulk_restore_trashed(db: AsyncSession, user_id: uuid.UUID) -> int:
+    """Restaura todas las transacciones del usuario que estén en papelera.
+
+    Devuelve cuántas se restauraron. Idempotente: si la papelera está
+    vacía, devuelve 0 sin tocar nada.
+    """
+    stmt = update(Transaction).values(deleted_at=None)
+    stmt = _scope(stmt, user_id, deleted="trashed")
+    result = await db.execute(stmt)
+    await db.flush()
+    return result.rowcount or 0
+
+
+async def bulk_purge_trashed(db: AsyncSession, user_id: uuid.UUID) -> int:
+    """Elimina permanente (DELETE real) todas las transacciones del
+    usuario que estén en papelera. Devuelve cuántas se eliminaron.
+
+    Operación IRREVERSIBLE. El caller debe haber confirmado con el
+    usuario antes de invocar.
+    """
+    # Necesitamos contar primero porque algunas variantes de
+    # asyncpg/sqlalchemy no devuelven `rowcount` fiable en bulk
+    # DELETE; preferimos un SELECT COUNT explícito sobre la misma
+    # condición para tener una respuesta determinista al caller.
+    count_query = select(func.count()).select_from(Transaction)
+    count_query = _scope(count_query, user_id, deleted="trashed")
+    count = (await db.execute(count_query)).scalar_one()
+
+    if count == 0:
+        return 0
+
+    from sqlalchemy import delete as sa_delete
+
+    delete_stmt = sa_delete(Transaction)
+    delete_stmt = _scope(delete_stmt, user_id, deleted="trashed")
+    await db.execute(delete_stmt)
+    await db.flush()
+    return int(count)
 
 
 async def restore_transaction(

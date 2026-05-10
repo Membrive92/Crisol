@@ -7,7 +7,30 @@ export {
   getModule,
   findModuleByPath,
 } from './registry/modules';
+export type {
+  Account,
+  AccountNature,
+  AccountType,
+} from './models/account';
+export { ASSET_ACCOUNT_TYPES } from './models/account';
+export type {
+  AccountBalance,
+  AccountBalancesResponse,
+} from './models/account-balance';
+export type {
+  TransferCandidate,
+  TransferMatchResponse,
+  TransferPair,
+} from './models/transfer';
 export type { Category, CategoryKind } from './models/category';
+export type {
+  CategoryRule,
+  CategoryRuleCreateRequest,
+  CategoryRuleUpdateRequest,
+  RuleField,
+  RuleMatchType,
+  SeedResult,
+} from './models/category-rule';
 export type { BudgetAlert, Transaction, TransactionSource } from './models/transaction';
 export type {
   DashboardSummary,
@@ -16,10 +39,16 @@ export type {
   TopExpenseItem,
 } from './models/dashboard';
 export type {
+  BankCategoryMapping,
   ImportColumnMappings,
   ImportErrorEntry,
   ImportJob,
   ImportJobStatus,
+  ImportPreviewBankConceptGroup,
+  ImportPreviewResponse,
+  ImportPreviewRow,
+  ImportSource,
+  ImportSuggestionSource,
 } from './models/import';
 export type {
   Receipt,
@@ -46,6 +75,16 @@ export type {
   RefreshRequest,
   TokenResponse,
 } from './dto/auth.dto';
+
+export type {
+  AccountCreateRequest,
+  AccountUpdateRequest,
+} from './dto/account.dto';
+
+export type {
+  TransferLinkRequest,
+  TransferMatchOptions,
+} from './dto/transfer.dto';
 
 export type {
   CategoryCreateRequest,

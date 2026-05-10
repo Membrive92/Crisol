@@ -68,9 +68,14 @@ def _apply_scope[Q: Select[Any]](
     del dashboard ignoran transacciones en papelera. Cuando `currency`
     es None la query NO filtra por moneda — el caller está usando
     modo `target_currency` y agrega cross-currency.
+
+    PHASE-19.3: además excluye las txs con `transfer_pair_id IS NOT NULL`
+    — son movimientos internos entre cuentas del usuario y no afectan
+    al flujo neto (sí al saldo individual de cada cuenta).
     """
     query = query.where(Transaction.user_id == user_id)
     query = query.where(Transaction.deleted_at.is_(None))
+    query = query.where(Transaction.transfer_pair_id.is_(None))
     if currency is not None:
         query = query.where(Transaction.currency == currency)
     if date_from is not None:
@@ -197,19 +202,42 @@ async def get_breakdown_by_category(
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     kind: CategoryKind | None = None,
-) -> list[tuple[uuid.UUID | None, str | None, CategoryKind | None, Decimal, int]]:
-    """Totales por categoría. Incluye bucket con `category_id=None`."""
+) -> list[
+    tuple[
+        uuid.UUID | None,
+        str | None,
+        CategoryKind | None,
+        str | None,
+        str | None,
+        Decimal,
+        int,
+    ]
+]:
+    """Totales por categoría. Incluye bucket con `category_id=None`.
+
+    Devuelve tuplas con `(id, name, kind, color, icon, total, count)` —
+    color/icon llegan al frontend para que la UI (donut, chips,
+    breakdowns) pinte cada categoría con su personalización.
+    """
     amount = _amount_expr(target_currency)
     query = (
         select(
             Category.id,
             Category.name,
             Category.kind,
+            Category.color,
+            Category.icon,
             func.coalesce(func.sum(amount), 0),
             func.count(Transaction.id),
         )
         .outerjoin(Category, Category.id == Transaction.category_id)
-        .group_by(Category.id, Category.name, Category.kind)
+        .group_by(
+            Category.id,
+            Category.name,
+            Category.kind,
+            Category.color,
+            Category.icon,
+        )
     )
     query = _apply_scope(
         query,
@@ -223,8 +251,8 @@ async def get_breakdown_by_category(
 
     result = await db.execute(query)
     return [
-        (cat_id, cat_name, cat_kind, Decimal(total), int(count))
-        for cat_id, cat_name, cat_kind, total, count in result.all()
+        (cat_id, cat_name, cat_kind, cat_color, cat_icon, Decimal(total), int(count))
+        for cat_id, cat_name, cat_kind, cat_color, cat_icon, total, count in result.all()
     ]
 
 
@@ -246,6 +274,8 @@ async def get_totals_by_month(
         .join(Category, Category.id == Transaction.category_id)
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
+        # PHASE-19.3: las transferencias internas no son cashflow real.
+        .where(Transaction.transfer_pair_id.is_(None))
         .where(year_col == year)
         .group_by(month_col, Category.kind)
     )

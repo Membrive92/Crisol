@@ -13,6 +13,7 @@ import {
 import { useAuthStore, useCurrencyStore } from '@finanzas/store';
 import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
 
+import { BalancesCard } from '../../../../components/accounts/balances-card';
 import {
   CategoryDonut,
   type DonutKindFilter,
@@ -165,6 +166,21 @@ export default function AnalysisScreen() {
                 <Text style={styles.headerButtonText}>Gastos fijos</Text>
               </Pressable>
             </Link>
+            <Link href="/(modules)/personal-finance/categories" asChild>
+              <Pressable style={styles.headerButton}>
+                <Text style={styles.headerButtonText}>Categorías</Text>
+              </Pressable>
+            </Link>
+            <Link href="/(modules)/personal-finance/accounts" asChild>
+              <Pressable style={styles.headerButton}>
+                <Text style={styles.headerButtonText}>Cuentas</Text>
+              </Pressable>
+            </Link>
+            <Link href="/(modules)/personal-finance/transfers" asChild>
+              <Pressable style={styles.headerButton}>
+                <Text style={styles.headerButtonText}>Transferencias</Text>
+              </Pressable>
+            </Link>
             <Pressable onPress={handleLogout} style={styles.logoutButton}>
               <Text style={styles.logoutText}>Salir</Text>
             </Pressable>
@@ -199,6 +215,7 @@ export default function AnalysisScreen() {
         </View>
         <PeriodToggle value={period} onChange={setPeriod} />
 
+        <BalancesCard />
         <KpiCards summary={summaryQuery.data} isLoading={summaryQuery.isLoading} />
         <SavingsRateCard summary={summaryQuery.data} />
         <MonthlyChart

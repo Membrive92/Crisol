@@ -115,6 +115,9 @@ async def sum_expenses_in_period(
             .join(Category, Category.id == Transaction.category_id)
             .where(Transaction.user_id == user_id)
             .where(Transaction.deleted_at.is_(None))
+            # PHASE-19.3: una salida que es transferencia interna no
+            # cuenta como gasto y no consume presupuesto.
+            .where(Transaction.transfer_pair_id.is_(None))
             .where(Transaction.currency == currency)
             .where(Transaction.occurred_at >= month_start)
             .where(Transaction.occurred_at <= month_end)
@@ -134,6 +137,7 @@ async def sum_expenses_in_period(
         .join(Category, Category.id == Transaction.category_id)
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
+        .where(Transaction.transfer_pair_id.is_(None))
         .where(Transaction.occurred_at >= month_start)
         .where(Transaction.occurred_at <= month_end)
         .where(Category.kind == CategoryKind.EXPENSE)
@@ -147,6 +151,7 @@ async def sum_expenses_in_period(
         .join(Category, Category.id == Transaction.category_id)
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
+        .where(Transaction.transfer_pair_id.is_(None))
         .where(Transaction.occurred_at >= month_start)
         .where(Transaction.occurred_at <= month_end)
         .where(Category.kind == CategoryKind.EXPENSE)

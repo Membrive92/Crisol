@@ -1,0 +1,245 @@
+"""Queries del módulo transfers (PHASE-19.3)."""
+
+from __future__ import annotations
+
+import uuid
+from decimal import Decimal
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.modules.personal_finance.categories.models import Category, CategoryKind
+from app.modules.personal_finance.transactions.models import Transaction
+
+
+async def get_transaction(
+    db: AsyncSession, tx_id: uuid.UUID, user_id: uuid.UUID
+) -> Transaction | None:
+    """Obtiene una tx activa del usuario (o None). Filtra por
+    `deleted_at IS NULL` para no permitir enlazar txs trasheadas.
+    """
+    query = select(Transaction).where(
+        Transaction.user_id == user_id,
+        Transaction.id == tx_id,
+        Transaction.deleted_at.is_(None),
+    )
+    return (await db.execute(query)).scalar_one_or_none()
+
+
+async def list_unmatched_active_transactions(
+    db: AsyncSession, user_id: uuid.UUID
+) -> list[tuple[Transaction, CategoryKind | None]]:
+    """Lista todas las txs activas del usuario sin pareja, junto con
+    el `kind` de su categoría (o None si no tiene). El matcher usa el
+    kind para emparejar income con expense.
+    """
+    query = (
+        select(Transaction, Category.kind)
+        .outerjoin(Category, Category.id == Transaction.category_id)
+        .where(
+            Transaction.user_id == user_id,
+            Transaction.deleted_at.is_(None),
+            Transaction.transfer_pair_id.is_(None),
+        )
+        .order_by(Transaction.occurred_at.asc())
+    )
+    rows = await db.execute(query)
+    return [(tx, kind) for tx, kind in rows.all()]
+
+
+async def list_pairs(
+    db: AsyncSession, user_id: uuid.UUID
+) -> list[tuple[Transaction, Transaction]]:
+    """Lista pares emparejados del usuario, devolviendo (out, in).
+
+    Usa `Transaction.amount` (el out se identifica por categoría
+    `expense` cuando hay categoría; si no hay, asumimos que la fila
+    con `transfer_pair_id < self.id` es out — esto sólo importa para
+    presentar al usuario, el modelo no asume cuál es cuál).
+    """
+    # Selecciona todas las activas con pareja. Las agrupamos en pares
+    # por unicidad de tupla ordenada (min_id, max_id).
+    query = (
+        select(Transaction, Category.kind)
+        .outerjoin(Category, Category.id == Transaction.category_id)
+        .where(
+            Transaction.user_id == user_id,
+            Transaction.deleted_at.is_(None),
+            Transaction.transfer_pair_id.is_not(None),
+        )
+        .order_by(Transaction.occurred_at.asc())
+    )
+    rows = (await db.execute(query)).all()
+    by_id: dict[uuid.UUID, tuple[Transaction, CategoryKind | None]] = {
+        tx.id: (tx, kind) for tx, kind in rows
+    }
+    seen: set[frozenset[uuid.UUID]] = set()
+    pairs: list[tuple[Transaction, Transaction]] = []
+    for tx_a, kind_a in rows:
+        if tx_a.transfer_pair_id is None:
+            continue
+        partner = by_id.get(tx_a.transfer_pair_id)
+        if partner is None:
+            continue
+        tx_b, kind_b = partner
+        key = frozenset({tx_a.id, tx_b.id})
+        if key in seen:
+            continue
+        seen.add(key)
+        # Decide cuál es "out" para presentación: la que tenga categoría
+        # con kind=expense; si ninguna lo tiene, usamos el orden por id.
+        if kind_a == CategoryKind.EXPENSE or kind_b == CategoryKind.INCOME:
+            pairs.append((tx_a, tx_b))
+        elif kind_b == CategoryKind.EXPENSE or kind_a == CategoryKind.INCOME:
+            pairs.append((tx_b, tx_a))
+        else:
+            # Sin pista — ordenamos por id para determinismo.
+            if tx_a.id < tx_b.id:
+                pairs.append((tx_a, tx_b))
+            else:
+                pairs.append((tx_b, tx_a))
+    return pairs
+
+
+async def get_pair(
+    db: AsyncSession, tx_id: uuid.UUID, user_id: uuid.UUID
+) -> tuple[Transaction, Transaction] | None:
+    """Devuelve (tx, partner) si la tx tiene pareja activa; None si no."""
+    tx = await get_transaction(db, tx_id, user_id)
+    if tx is None or tx.transfer_pair_id is None:
+        return None
+    partner = await get_transaction(db, tx.transfer_pair_id, user_id)
+    if partner is None:
+        return None
+    return tx, partner
+
+
+async def link_pair(
+    db: AsyncSession, tx_a: Transaction, tx_b: Transaction
+) -> None:
+    """Marca las dos txs como pareja (bidireccional). NO valida nada;
+    el caller debe haber comprobado pertenencia + criterio."""
+    tx_a.transfer_pair_id = tx_b.id
+    tx_b.transfer_pair_id = tx_a.id
+    await db.flush()
+
+
+async def unlink_pair(
+    db: AsyncSession, tx_a: Transaction, tx_b: Transaction
+) -> None:
+    """Deshace la pareja, dejando ambas txs como movimientos normales."""
+    tx_a.transfer_pair_id = None
+    tx_b.transfer_pair_id = None
+    await db.flush()
+
+
+def find_candidate_pairs(
+    items: list[tuple[Transaction, CategoryKind | None]],
+    *,
+    window_days: int,
+) -> list[tuple[Transaction, Transaction, int]]:
+    """Recorre las txs no emparejadas y devuelve pares (out, in, delta_days)
+    candidatos según el criterio:
+
+    - mismo `amount` (Decimal exacto)
+    - misma `currency`
+    - cuentas distintas (`account_id` diferente)
+    - `occurred_at` dentro de ±window_days
+    - kind opuesto (expense vs income) cuando ambas tienen categoría
+      con kind. Si una de las dos no tiene categoría, igualmente
+      proponemos el par (el usuario decide).
+    - cada tx aparece como mucho en UN par sugerido (las ambigüedades
+      se resuelven por proximidad de fecha y luego por id determinista).
+
+    No toca BD — es lógica pura para que el caller decida qué hacer
+    con los pares (auto-link los no ambiguos, devolver el resto para
+    confirmación).
+    """
+    out_candidates: list[tuple[Transaction, CategoryKind | None]] = []
+    in_candidates: list[tuple[Transaction, CategoryKind | None]] = []
+    unknown: list[tuple[Transaction, CategoryKind | None]] = []
+    for tx, kind in items:
+        if kind == CategoryKind.EXPENSE:
+            out_candidates.append((tx, kind))
+        elif kind == CategoryKind.INCOME:
+            in_candidates.append((tx, kind))
+        else:
+            unknown.append((tx, kind))
+
+    # Las "unknown" pueden actuar de cualquier lado — las añadimos a
+    # ambos pools con su kind real (None) para que el matcher las
+    # considere por importe/fecha/cuenta.
+    out_pool = out_candidates + unknown
+    in_pool = in_candidates + unknown
+
+    used: set[uuid.UUID] = set()
+    pairs: list[tuple[Transaction, Transaction, int]] = []
+
+    # Estable: iteramos `out_pool` por fecha asc y para cada salida
+    # buscamos la mejor entrada candidata aún disponible.
+    out_pool_sorted = sorted(out_pool, key=lambda t: t[0].occurred_at)
+
+    for out_tx, _out_kind in out_pool_sorted:
+        if out_tx.id in used:
+            continue
+        best: tuple[Transaction, int] | None = None
+        for in_tx, _in_kind in in_pool:
+            if in_tx.id in used or in_tx.id == out_tx.id:
+                continue
+            if in_tx.amount != out_tx.amount:
+                continue
+            if in_tx.currency != out_tx.currency:
+                continue
+            if in_tx.account_id == out_tx.account_id:
+                continue
+            delta = abs((in_tx.occurred_at - out_tx.occurred_at).days)
+            if delta > window_days:
+                continue
+            # Mejor candidato: menor delta; en empate, id menor para
+            # determinismo (evita flapping entre runs).
+            if best is None or delta < best[1] or (
+                delta == best[1] and in_tx.id < best[0].id
+            ):
+                best = (in_tx, delta)
+        if best is not None:
+            in_tx, delta = best
+            pairs.append((out_tx, in_tx, delta))
+            used.add(out_tx.id)
+            used.add(in_tx.id)
+
+    return pairs
+
+
+def filter_unambiguous(
+    pairs: list[tuple[Transaction, Transaction, int]],
+) -> tuple[list[tuple[Transaction, Transaction, int]], list[tuple[Transaction, Transaction, int]]]:
+    """Separa pares en (sin ambigüedad, con ambigüedad).
+
+    Un par es ambiguo si comparte el mismo (amount, currency, account_pair)
+    con otro par del lote — el usuario debe confirmar cuál es cuál.
+    Aquí "sin ambigüedad" significa que no hay otro par con la misma
+    huella de identidad.
+    """
+    # Cuenta huellas: (amount, currency, frozenset({out_acc, in_acc}))
+    counts: dict[tuple[Decimal, str, frozenset[uuid.UUID]], int] = {}
+    for out_tx, in_tx, _ in pairs:
+        key = (
+            out_tx.amount,
+            out_tx.currency,
+            frozenset({out_tx.account_id, in_tx.account_id}),
+        )
+        counts[key] = counts.get(key, 0) + 1
+
+    unambiguous: list[tuple[Transaction, Transaction, int]] = []
+    ambiguous: list[tuple[Transaction, Transaction, int]] = []
+    for out_tx, in_tx, delta in pairs:
+        key = (
+            out_tx.amount,
+            out_tx.currency,
+            frozenset({out_tx.account_id, in_tx.account_id}),
+        )
+        if counts[key] == 1:
+            unambiguous.append((out_tx, in_tx, delta))
+        else:
+            ambiguous.append((out_tx, in_tx, delta))
+    return unambiguous, ambiguous

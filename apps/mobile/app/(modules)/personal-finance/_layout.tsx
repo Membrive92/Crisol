@@ -20,6 +20,18 @@ export default function PersonalFinanceLayout() {
         name="receipt/[id]"
         options={{ headerShown: true, title: 'Detalle ticket' }}
       />
+      <Stack.Screen
+        name="categories"
+        options={{ headerShown: true, title: 'Categorías' }}
+      />
+      <Stack.Screen
+        name="accounts"
+        options={{ headerShown: true, title: 'Cuentas' }}
+      />
+      <Stack.Screen
+        name="transfers"
+        options={{ headerShown: true, title: 'Transferencias internas' }}
+      />
     </Stack>
   );
 }

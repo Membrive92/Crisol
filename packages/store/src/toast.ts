@@ -3,15 +3,19 @@ import { create } from 'zustand';
 import type { Toast, ToastInput, ToastKind } from '@finanzas/types';
 
 /**
- * Defaults de auto-dismiss por kind. `error` queda en 0 (manual)
- * porque tragar un error en silencio frustra al usuario; con acción
- * subimos a 8s para que dé tiempo a leerla y pulsarla.
+ * Defaults de auto-dismiss por kind. `error` y `loading` quedan en 0
+ * (manual) porque:
+ *  - error: tragar un error en silencio frustra al usuario.
+ *  - loading: indica que algo está en marcha; el caller lo cierra
+ *    explícitamente con `toast.dismiss(id)` cuando termina.
+ *  Con acción subimos a 8s para que dé tiempo a leerla y pulsarla.
  */
 const DEFAULT_DISMISS_MS: Record<ToastKind, number> = {
   info: 5000,
   success: 5000,
   warning: 6000,
   error: 0,
+  loading: 0,
 };
 
 const DEFAULT_DISMISS_MS_WITH_ACTION = 8000;
@@ -108,6 +112,13 @@ export const toast = {
     useToastStore.getState().show({ kind: 'warning', message }),
   error: (message: string) =>
     useToastStore.getState().show({ kind: 'error', message }),
+  /**
+   * Toast persistente con spinner que indica una operación en curso
+   * (típicamente IA local que tarda minutos). Devuelve el id para
+   * cerrarlo explícitamente con `toast.dismiss(id)` al terminar.
+   */
+  loading: (message: string) =>
+    useToastStore.getState().show({ kind: 'loading', message }),
   dismiss: (id: string) => useToastStore.getState().dismiss(id),
   clear: () => useToastStore.getState().clear(),
 };

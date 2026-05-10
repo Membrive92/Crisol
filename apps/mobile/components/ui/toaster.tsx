@@ -1,9 +1,11 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useToastStore } from '@finanzas/store';
 import type { Toast, ToastKind } from '@finanzas/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+
+import { Spinner } from './spinner';
 
 /**
  * Stack inferior de toasts globales (PHASE-11.3). Equivalente al
@@ -37,15 +39,20 @@ function ToastCard({ toast }: { toast: Toast }) {
   }, [toast.id, toast.dismissAfterMs, dismiss]);
 
   const palette = paletteFor(toast.kind);
+  const isLoading = toast.kind === 'loading';
 
   return (
     <View
       style={[styles.toast, { borderLeftColor: palette.accent }]}
       accessibilityLiveRegion={toast.kind === 'error' ? 'assertive' : 'polite'}
     >
-      <Text style={styles.message} numberOfLines={3}>
-        {toast.message}
-      </Text>
+      {isLoading ? <Spinner size="small" color={colors.surface} /> : null}
+      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+        <Text style={styles.message} numberOfLines={3}>
+          {toast.message}
+        </Text>
+        {isLoading ? <ElapsedTime /> : null}
+      </View>
       {toast.action ? (
         <Pressable
           onPress={() => {
@@ -59,14 +66,35 @@ function ToastCard({ toast }: { toast: Toast }) {
           </Text>
         </Pressable>
       ) : null}
-      <Pressable
-        accessibilityLabel="Cerrar"
-        onPress={() => dismiss(toast.id)}
-        style={({ pressed }) => [styles.close, pressed && styles.closePressed]}
-      >
-        <Text style={styles.closeText}>×</Text>
-      </Pressable>
+      {/* Loading toasts solo se cierran programáticamente. */}
+      {!isLoading ? (
+        <Pressable
+          accessibilityLabel="Cerrar"
+          onPress={() => dismiss(toast.id)}
+          style={({ pressed }) => [styles.close, pressed && styles.closePressed]}
+        >
+          <Text style={styles.closeText}>×</Text>
+        </Pressable>
+      ) : null}
     </View>
+  );
+}
+
+function ElapsedTime() {
+  const [start] = useState(() => Date.now());
+  const [now, setNow] = useState(start);
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const seconds = Math.floor((now - start) / 1000);
+  const mm = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const ss = (seconds % 60).toString().padStart(2, '0');
+  return (
+    <Text style={styles.elapsed}>
+      {' '}
+      ({mm}:{ss})
+    </Text>
   );
 }
 
@@ -78,6 +106,7 @@ function paletteFor(kind: ToastKind): { accent: string } {
       return { accent: colors.warning };
     case 'error':
       return { accent: colors.danger };
+    case 'loading':
     case 'info':
     default:
       return { accent: colors.primary };
@@ -108,10 +137,14 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   message: {
-    flex: 1,
     color: colors.surface,
     fontSize: fontSize.sm,
     fontWeight: fontWeight.medium,
+  },
+  elapsed: {
+    color: colors.surface,
+    opacity: 0.7,
+    fontSize: fontSize.xs,
   },
   action: {
     paddingVertical: spacing.xs,

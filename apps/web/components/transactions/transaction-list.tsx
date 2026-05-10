@@ -10,6 +10,8 @@ import {
   fontWeight,
   formatAmount,
   formatDate,
+  radius,
+  spacing,
 } from '@finanzas/ui';
 
 import { Button } from '@/components/ui/button';
@@ -21,7 +23,15 @@ export interface TransactionListProps {
   items: Transaction[];
   categories: Category[];
   onDelete: (id: string) => void;
+  /**
+   * PHASE-19.3: deshace la transferencia interna de la que la
+   * transacción forma parte. Sólo se muestra el botón cuando la fila
+   * tiene `transfer_pair_id !== null`. Si no se pasa el handler, el
+   * botón no aparece (callers que no admitan esta acción).
+   */
+  onUnlinkTransfer?: ((id: string) => void) | undefined;
   deletingId?: string | null;
+  unlinkingId?: string | null | undefined;
 }
 
 interface TransactionRow {
@@ -50,7 +60,9 @@ export function TransactionList({
   items,
   categories,
   onDelete,
+  onUnlinkTransfer,
   deletingId,
+  unlinkingId,
 }: TransactionListProps) {
   const router = useRouter();
   const activeCurrency = useCurrencyStore((s) => s.currency);
@@ -85,6 +97,8 @@ export function TransactionList({
         <CategoryChip
           label={category?.name ?? 'Sin categoría'}
           kind={category?.kind ?? null}
+          color={category?.color ?? null}
+          icon={category?.icon ?? null}
         />
       ),
     },
@@ -94,17 +108,26 @@ export function TransactionList({
       render: ({ tx }) => (
         <span
           style={{
-            fontSize: fontSize.sm,
-            fontWeight: fontWeight.medium,
-            color: tx.description ? colors.text : colors.textSubtle,
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            display: 'inline-block',
-            maxWidth: 280,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: spacing.xs,
+            maxWidth: 320,
           }}
         >
-          {tx.description ?? '(sin descripción)'}
+          <span
+            style={{
+              fontSize: fontSize.sm,
+              fontWeight: fontWeight.medium,
+              color: tx.description ? colors.text : colors.textSubtle,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              minWidth: 0,
+            }}
+          >
+            {tx.description ?? '(sin descripción)'}
+          </span>
+          {tx.transfer_pair_id !== null ? <TransferBadge /> : null}
         </span>
       ),
     },
@@ -179,19 +202,37 @@ export function TransactionList({
       key: 'actions',
       header: '',
       align: 'right',
-      width: 100,
-      render: ({ tx }) => (
-        <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-          <Button
-            variant="ghost"
-            onClick={() => onDelete(tx.id)}
-            disabled={deletingId === tx.id}
-            style={{ color: colors.danger, borderColor: colors.border }}
+      width: onUnlinkTransfer ? 200 : 100,
+      render: ({ tx }) => {
+        const showUnlink =
+          onUnlinkTransfer !== undefined && tx.transfer_pair_id !== null;
+        const isUnlinking = unlinkingId === tx.id;
+        return (
+          <span
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            style={{ display: 'inline-flex', gap: spacing.xs, justifyContent: 'flex-end' }}
           >
-            {deletingId === tx.id ? 'Borrando…' : 'Borrar'}
-          </Button>
-        </span>
-      ),
+            {showUnlink ? (
+              <Button
+                variant="ghost"
+                onClick={() => onUnlinkTransfer(tx.id)}
+                disabled={isUnlinking}
+              >
+                {isUnlinking ? 'Deshaciendo…' : 'Deshacer'}
+              </Button>
+            ) : null}
+            <Button
+              variant="ghost"
+              onClick={() => onDelete(tx.id)}
+              disabled={deletingId === tx.id}
+              style={{ color: colors.danger, borderColor: colors.border }}
+            >
+              {deletingId === tx.id ? 'Borrando…' : 'Borrar'}
+            </Button>
+          </span>
+        );
+      },
     },
   ];
 
@@ -205,5 +246,32 @@ export function TransactionList({
       }
       emptyMessage="Sin transacciones con los filtros actuales."
     />
+  );
+}
+
+/**
+ * Chip que marca una transacción como mitad de una transferencia
+ * interna (PHASE-19.3). Es informativo, no clicable: las acciones
+ * "Deshacer" y "Borrar" viven en la columna de acciones de la fila.
+ */
+function TransferBadge() {
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        padding: `${spacing.xs / 2}px ${spacing.sm}px`,
+        backgroundColor: colors.primarySoft,
+        color: colors.primary,
+        borderRadius: radius.sm,
+        fontSize: fontSize.xs,
+        fontWeight: fontWeight.semibold,
+        textTransform: 'uppercase',
+        letterSpacing: '0.04em',
+        whiteSpace: 'nowrap',
+        flex: '0 0 auto',
+      }}
+    >
+      Transferencia
+    </span>
   );
 }

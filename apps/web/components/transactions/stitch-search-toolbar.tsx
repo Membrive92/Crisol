@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-import type { Category, TransactionListQuery } from '@finanzas/types';
+import type { Account, Category, TransactionListQuery } from '@finanzas/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
 
 import {
@@ -15,6 +15,8 @@ export interface StitchSearchToolbarProps {
   value: TransactionListQuery;
   onChange: (next: TransactionListQuery) => void;
   categories: Category[];
+  /** PHASE-19.4: cuentas disponibles para filtrar por imputación. */
+  accounts: Account[];
 }
 
 /**
@@ -27,6 +29,7 @@ export function StitchSearchToolbar({
   value,
   onChange,
   categories,
+  accounts,
 }: StitchSearchToolbarProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -85,6 +88,19 @@ export function StitchSearchToolbar({
             padding: spacing.md,
           }}
         >
+          <FilterSelect
+            label="Cuenta"
+            value={value.account_id ?? ''}
+            onChange={(v) => update('account_id', v)}
+          >
+            <option value="">Todas</option>
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.icon ? `${a.icon} ` : ''}
+                {a.name}
+              </option>
+            ))}
+          </FilterSelect>
           <FilterSelect
             label="Categoría"
             value={value.category_id ?? ''}

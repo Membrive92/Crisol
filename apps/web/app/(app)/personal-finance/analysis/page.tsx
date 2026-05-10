@@ -10,6 +10,7 @@ import {
 import { useCurrencyStore } from '@finanzas/store';
 import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
 
+import { BalancesCard } from '@/components/accounts/balances-card';
 import { StitchExpenseBreakdown } from '@/components/analysis/stitch-expense-breakdown';
 import { StitchIncomeVsExpenses } from '@/components/analysis/stitch-income-vs-expenses';
 import { StitchKeyMetrics } from '@/components/analysis/stitch-key-metrics';
@@ -122,6 +123,14 @@ export default function AnalysisPage() {
         </div>
         <StitchPeriodToggle value={period} onChange={setPeriod} />
       </header>
+
+      {/* Saldo agregado por cuenta — independiente del periodo
+          seleccionado (siempre snapshot actual). Va por delante del
+          bento porque responde la pregunta "¿cuánto tengo?" antes que
+          "¿cómo me he movido?". */}
+      <div style={{ marginBottom: spacing.md }}>
+        <BalancesCard />
+      </div>
 
       {/* Bento principal: chart + métricas */}
       <div

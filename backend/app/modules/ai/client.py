@@ -105,12 +105,17 @@ async def generate_with_image(
     image: bytes,
     model: str | None = None,
     json_mode: bool = True,
+    timeout_seconds: int | None = None,
 ) -> str:
     """Llama a `POST /api/generate` con el modelo de visión.
 
     Devuelve el campo `response` (string) tal cual lo entrega el modelo.
     El parser/validador de la respuesta vive en `ai.service`. La imagen
     se pasa como base64 (la API de Ollama lo acepta así).
+
+    `timeout_seconds` permite al caller subir el default global (típicamente
+    120s suficiente para tickets) cuando la imagen tiene mucho texto y la
+    inferencia tarda más — caso típico: páginas de extracto bancario.
 
     Raises:
         AiUnavailable: Ollama no responde.
@@ -127,10 +132,11 @@ async def generate_with_image(
     if json_mode:
         payload["format"] = "json"
 
+    effective_timeout = float(timeout_seconds or settings.ollama_timeout_seconds)
     try:
         async with httpx.AsyncClient(
             base_url=settings.ollama_base_url,
-            timeout=float(settings.ollama_timeout_seconds),
+            timeout=effective_timeout,
         ) as client:
             response = await client.post("/api/generate", json=payload)
             response.raise_for_status()
@@ -144,4 +150,44 @@ async def generate_with_image(
         # Ollama puede devolver 500 cuando la KV cache se queda corta o el
         # runner aborta con OOM. Lo tratamos como "no disponible" para que
         # el caller (receipts service) limpie blobs y devuelva 502.
+        raise AiUnavailableError(f"Ollama error {e.response.status_code}") from e
+
+
+async def generate_text(
+    *,
+    prompt: str,
+    model: str | None = None,
+    json_mode: bool = True,
+    timeout_seconds: int | None = None,
+) -> str:
+    """Llama a `POST /api/generate` con prompt de texto puro (sin imagen).
+
+    Usado por flujos como sugerencia de categorías por concepto del
+    banco (PHASE-20+). Mismo manejo de timeouts y errores que
+    `generate_with_image`.
+    """
+    target = model or settings.ollama_text_model
+    payload: dict[str, Any] = {
+        "model": target,
+        "prompt": prompt,
+        "stream": False,
+    }
+    if json_mode:
+        payload["format"] = "json"
+
+    effective_timeout = float(timeout_seconds or settings.ollama_timeout_seconds)
+    try:
+        async with httpx.AsyncClient(
+            base_url=settings.ollama_base_url,
+            timeout=effective_timeout,
+        ) as client:
+            response = await client.post("/api/generate", json=payload)
+            response.raise_for_status()
+            data = response.json()
+            return str(data.get("response", ""))
+    except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+        raise AiUnavailableError("Ollama no responde") from e
+    except httpx.ReadTimeout as e:
+        raise AiTimeoutError("Timeout de inferencia") from e
+    except httpx.HTTPStatusError as e:
         raise AiUnavailableError(f"Ollama error {e.response.status_code}") from e

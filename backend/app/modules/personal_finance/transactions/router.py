@@ -8,6 +8,7 @@ from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -25,6 +26,9 @@ from app.modules.personal_finance.transactions.schemas import (
     TransactionUpdate,
 )
 from app.modules.personal_finance.transactions.service import (
+    bulk_delete_transactions,
+    bulk_purge_trashed_transactions,
+    bulk_restore_trashed_transactions,
     create_transaction,
     delete_transaction,
     get_transaction,
@@ -34,6 +38,24 @@ from app.modules.personal_finance.transactions.service import (
     restore_transaction,
     update_transaction,
 )
+
+
+class BulkDeleteResponse(BaseModel):
+    """Respuesta del endpoint DELETE /transactions (bulk)."""
+
+    deleted_count: int
+
+
+class BulkRestoreResponse(BaseModel):
+    """Respuesta del endpoint POST /transactions/trash/restore (bulk)."""
+
+    restored_count: int
+
+
+class BulkPurgeResponse(BaseModel):
+    """Respuesta del endpoint DELETE /transactions/trash (bulk)."""
+
+    purged_count: int
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -57,6 +79,7 @@ def _build_response(
 async def list_endpoint(
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
+    account_id: uuid.UUID | None = None,
     category_id: uuid.UUID | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
@@ -67,14 +90,17 @@ async def list_endpoint(
 ) -> TransactionListResponse:
     """Lista transacciones activas con filtros opcionales.
 
+    PHASE-19.4: `account_id` permite filtrar por cuenta. Las
+    soft-deleted (PHASE-10.1) NO aparecen aquí — usar `/trash`.
+
     Si se pasa `target_currency`, cada fila incluye `converted_amount`
     + `converted_currency` (PHASE-8.4) — la UI puede pintar el
     equivalente en moneda activa sin lanzar fetches por fecha.
-    Las soft-deleted (PHASE-10.1) NO aparecen aquí — usar `/trash`.
     """
     items, total = await list_transactions(
         db,
         user.id,
+        account_id=account_id,
         category_id=category_id,
         date_from=date_from,
         date_to=date_to,
@@ -114,6 +140,36 @@ async def list_trash_endpoint(
         limit=limit,
         offset=offset,
     )
+
+
+@router.post("/trash/restore", response_model=BulkRestoreResponse)
+async def bulk_restore_trash_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> BulkRestoreResponse:
+    """Restaura todas las transacciones del usuario que estén en papelera.
+
+    Idempotente: si la papelera está vacía, devuelve 0. Las transacciones
+    vuelven al listado activo y al dashboard.
+    """
+    count = await bulk_restore_trashed_transactions(db, user.id)
+    await db.commit()
+    return BulkRestoreResponse(restored_count=count)
+
+
+@router.delete("/trash", response_model=BulkPurgeResponse)
+async def bulk_purge_trash_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> BulkPurgeResponse:
+    """Elimina permanente (DELETE real) todas las transacciones del
+    usuario que estén en papelera. Operación IRREVERSIBLE.
+
+    Idempotente: si la papelera está vacía, devuelve 0.
+    """
+    count = await bulk_purge_trashed_transactions(db, user.id)
+    await db.commit()
+    return BulkPurgeResponse(purged_count=count)
 
 
 @router.get("/{transaction_id}", response_model=TransactionResponse)
@@ -189,6 +245,37 @@ async def update_endpoint(
     transaction = await update_transaction(db, transaction_id, user.id, body)
     await db.commit()
     return TransactionResponse.model_validate(transaction)
+
+
+@router.delete("", response_model=BulkDeleteResponse)
+async def bulk_delete_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    category_id: uuid.UUID | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    search: str | None = None,
+) -> BulkDeleteResponse:
+    """Mueve a papelera todas las transacciones que matcheen los filtros.
+
+    Acepta los mismos filtros que `GET /transactions` para que "borrar
+    todo lo que veo" sea exacto. Sin filtros, mueve todas las activas del
+    usuario. Idempotente — si ya no hay nada que matchee, devuelve 0.
+
+    Las transacciones se pueden recuperar individualmente desde
+    `/transactions/trash`. No hay endpoint de undo masivo: el caller
+    puede recordar los IDs antes y restaurarlos uno a uno si lo necesita.
+    """
+    count = await bulk_delete_transactions(
+        db,
+        user.id,
+        category_id=category_id,
+        date_from=date_from,
+        date_to=date_to,
+        search=search,
+    )
+    await db.commit()
+    return BulkDeleteResponse(deleted_count=count)
 
 
 @router.delete("/{transaction_id}", status_code=204, response_class=Response)

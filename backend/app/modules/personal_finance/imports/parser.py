@@ -8,12 +8,21 @@ parsee homogéneamente.
 PDF: usa `pdfplumber.extract_tables()` con la heurística por defecto.
 Los PDFs sin tablas extraíbles (escaneados) lanzan `NoTablesInPdfError`,
 que el service de imports captura para fallback con visión local.
+
+`parse_pdf_smart` añade una capa heurística sobre `parse_pdf` para
+extractos bancarios reales (varias tablas: resumen + desglose +
+movimientos). Detecta la tabla de transacciones por cabecera y
+devuelve filas con keys fijas (`amount`, `occurred_at`, `description`,
+`category_name`). Si la heurística no es confiable lanza
+`SmartParseAmbiguous` y el caller cae al parser legacy.
 """
 
 from __future__ import annotations
 
 import csv
 import io
+import re
+from datetime import date
 from typing import IO, Any
 
 import pdfplumber
@@ -42,6 +51,13 @@ class NoTablesInPdfError(ParseError):
 
     El service de imports lo captura para intentar el fallback con visión
     local (renderizar páginas como imagen y pasarlas al modelo).
+    """
+
+
+class SmartParseAmbiguous(ParseError):
+    """`parse_pdf_smart` no logró identificar con confianza la tabla
+    de transacciones. El caller debe caer al parser legacy con mapping
+    manual o al fallback de visión.
     """
 
 
@@ -259,3 +275,294 @@ def _stringify(value: Any) -> str:
         return ""
     # openpyxl ya devuelve datetime/date/Decimal/int/float — basta str()
     return str(value)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Smart PDF parser: detecta la tabla de transacciones y devuelve filas con
+# keys fijas. Específico para extractos bancarios con múltiples tablas
+# (resumen, desglose, movimientos). Si la heurística no es confiable, lanza
+# SmartParseAmbiguous para que el caller decida el fallback.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Sinónimos de cada rol de columna (case + acento-insensibles).
+_DATE_HEADER_HINTS = (
+    "fecha", "fec.", "f. operac", "f.operac", "f operac", "f. contab",
+    "f.contab", "f contab", "operación", "operacion", "valor", "date",
+)
+# IMPORTANT: NO incluir "saldo" — los extractos típicos tienen
+# columnas Importe + Saldo y la heurística de "último match" se quedaría
+# con el saldo (acumulado), no con el importe de la transacción. El
+# usuario verá saldos como si fueran transacciones — bug grave.
+# "valor" tampoco: confunde con "Fecha valor" en cabeceras de extractos
+# bancarios españoles. Mantenemos sinónimos seguros.
+_AMOUNT_HEADER_HINTS = (
+    "importe", "amount", "monto", "cantidad", "cuantia", "cuantía",
+)
+_CATEGORY_HEADER_HINTS = (
+    "concepto", "categoría", "categoria", "tipo", "movimiento", "operación",
+    "operacion", "category",
+)
+_DESCRIPTION_HEADER_HINTS = (
+    "detalle", "descripción", "descripcion", "observaciones", "comercio",
+    "description", "referencia",
+)
+
+# Score mínimo para aceptar una tabla como "tabla de transacciones".
+_SMART_MIN_SCORE = 8
+
+
+def _norm(value: str) -> str:
+    """Normaliza para comparar cabeceras (lowercase + sin acentos + trim)."""
+    return (
+        value.lower()
+        .replace("á", "a").replace("é", "e").replace("í", "i")
+        .replace("ó", "o").replace("ú", "u").replace("ñ", "n")
+        .strip()
+    )
+
+
+def _header_matches(cell: str, hints: tuple[str, ...]) -> bool:
+    n = _norm(cell)
+    return any(hint in n for hint in hints)
+
+
+def _classify_columns(headers: list[str]) -> dict[str, int]:
+    """Devuelve `{role: column_idx}` para los roles detectados.
+
+    Si hay dos columnas de fecha (F. Operac. + F. Contab.), gana la primera
+    (típicamente la de operación, que es la que el usuario quiere). Para
+    importe gana la última (suelen poner saldo antes de importe en algunos
+    extractos, pero el más a la derecha tiende a ser el importe firmado).
+    """
+    roles: dict[str, int] = {}
+    for idx, header in enumerate(headers):
+        if not header:
+            continue
+        if "occurred_at" not in roles and _header_matches(header, _DATE_HEADER_HINTS):
+            roles["occurred_at"] = idx
+            continue
+        if _header_matches(header, _AMOUNT_HEADER_HINTS):
+            # gana el último match
+            roles["amount"] = idx
+            continue
+        if "description" not in roles and _header_matches(
+            header, _DESCRIPTION_HEADER_HINTS
+        ):
+            roles["description"] = idx
+            continue
+        if "category_name" not in roles and _header_matches(
+            header, _CATEGORY_HEADER_HINTS
+        ):
+            roles["category_name"] = idx
+    return roles
+
+
+def _score_table(table: list[list[str | None]]) -> tuple[int, dict[str, int]]:
+    """Devuelve `(score, role_columns)` para una tabla candidata.
+
+    Score basis:
+      +5 si la cabecera tiene una columna de fecha
+      +5 si la cabecera tiene una columna de importe
+      +3 si tiene columna de descripción
+      +2 si tiene columna de categoría
+      +1 por cada 5 filas de datos (capado a +5)
+    """
+    if not table or not table[0]:
+        return 0, {}
+    headers = [_pdf_clean(c) for c in table[0]]
+    roles = _classify_columns(headers)
+
+    score = 0
+    if "occurred_at" in roles:
+        score += 5
+    if "amount" in roles:
+        score += 5
+    if "description" in roles:
+        score += 3
+    if "category_name" in roles:
+        score += 2
+    score += min(5, max(0, (len(table) - 1) // 5))
+    return score, roles
+
+
+# Las regex anchored (^/$) detectan formatos limpios. Las "first match"
+# se usan para extraer la PRIMERA fecha de una celda con texto adicional
+# (caso típico: "30/01/2026 Fecha valor 28/01/2026" en extractos donde
+# la columna combina fecha operación y fecha valor).
+_DATE_DDMM = re.compile(r"^(\d{1,2})/(\d{1,2})$")
+_DATE_DDMMYY = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{2})$")
+_DATE_DDMMYYYY = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})$")
+_DATE_ISO = re.compile(r"^(\d{4})-(\d{2})-(\d{2})")
+_DATE_FIRST_DDMMYYYY = re.compile(r"(\d{1,2})/(\d{1,2})/(\d{4})")
+_DATE_FIRST_DDMMYY = re.compile(r"(\d{1,2})/(\d{1,2})/(\d{2})\b")
+_DATE_FIRST_DDMM = re.compile(r"\b(\d{1,2})/(\d{1,2})\b")
+_DATE_FIRST_ISO = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+
+_PERIOD_HINT = re.compile(
+    r"(?:periodo|per[ií]odo|fecha emisi[oó]n|extracto)\D*?(\d{1,2})/(\d{1,2})/(\d{2,4})",
+    re.IGNORECASE,
+)
+
+
+def _infer_year(full_text: str) -> int:
+    """Busca en el texto del PDF un periodo o fecha de emisión.
+
+    Si no encuentra ninguno, devuelve el año actual.
+    """
+    match = _PERIOD_HINT.search(full_text)
+    if match:
+        year_part = match.group(3)
+        if len(year_part) == 2:
+            return 2000 + int(year_part)
+        return int(year_part)
+    return date.today().year
+
+
+def _normalize_date(value: str, default_year: int) -> str:
+    """Normaliza una fecha del PDF a `DD/MM/YYYY` para que el service
+    la parsee con sus formatos existentes. No lanza si no puede.
+
+    Tolera celdas con texto extra: si la celda contiene varias fechas
+    (típico en extractos que mezclan "Fecha operación + Fecha valor"
+    en la misma columna, e.g. `"30/01/2026 Fecha valor 28/01/2026"`),
+    se queda con la PRIMERA fecha que encuentra. La intención es la
+    fecha operación: en columnas combinadas suele aparecer primera.
+    """
+    cleaned = (value or "").strip()
+    if not cleaned:
+        return ""
+    # Match exacto preferido (celdas limpias).
+    if _DATE_ISO.match(cleaned) or _DATE_DDMMYYYY.match(cleaned):
+        return cleaned
+    m = _DATE_DDMMYY.match(cleaned)
+    if m:
+        return f"{m.group(1)}/{m.group(2)}/20{m.group(3)}"
+    m = _DATE_DDMM.match(cleaned)
+    if m:
+        return f"{m.group(1)}/{m.group(2)}/{default_year}"
+
+    # Fallback: extraer la primera fecha que aparezca dentro del texto
+    # (orden de preferencia: ISO > DD/MM/YYYY > DD/MM/YY > DD/MM).
+    m = _DATE_FIRST_ISO.search(cleaned)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    m = _DATE_FIRST_DDMMYYYY.search(cleaned)
+    if m:
+        return f"{m.group(1)}/{m.group(2)}/{m.group(3)}"
+    m = _DATE_FIRST_DDMMYY.search(cleaned)
+    if m:
+        return f"{m.group(1)}/{m.group(2)}/20{m.group(3)}"
+    m = _DATE_FIRST_DDMM.search(cleaned)
+    if m:
+        return f"{m.group(1)}/{m.group(2)}/{default_year}"
+    return cleaned  # devolvemos como vino; el service decidirá si la rechaza
+
+
+def parse_pdf_smart(payload: bytes) -> list[dict[str, str]]:
+    """Heurística sobre `extract_tables`: detecta la tabla de
+    transacciones entre todas las del PDF y devuelve filas con keys
+    fijas (`amount`, `occurred_at`, `description`, `category_name`).
+
+    El caller debe usar `VISION_FORCED_MAPPING` o equivalente cuando
+    use el resultado de esta función — el mapping del usuario se
+    ignora porque las claves ya son las correctas.
+
+    Lanza `SmartParseAmbiguous` si ninguna tabla supera el score
+    mínimo. Lanza `NoTablesInPdfError` si pdfplumber no encuentra
+    ninguna tabla (igual que `parse_pdf`).
+    """
+    try:
+        pdf = pdfplumber.open(io.BytesIO(payload))
+    except Exception as e:
+        raise ParseError(f"PDF inválido: {e}") from e
+
+    candidates: list[list[list[str | None]]] = []
+    full_text_parts: list[str] = []
+    with pdf:
+        for page in pdf.pages:
+            try:
+                text = page.extract_text() or ""
+                if text:
+                    full_text_parts.append(text)
+            except Exception:
+                pass
+            for table in page.extract_tables():
+                if table:
+                    candidates.append(table)
+
+    if not candidates:
+        raise NoTablesInPdfError(
+            "No se detectaron tablas en el PDF (¿escaneado?)"
+        )
+
+    # Agrupar tablas con cabeceras idénticas (continuación entre páginas).
+    # Una vez identificada la "mejor" cabecera, todas las tablas posteriores
+    # con esa misma cabecera se concatenan.
+    scored = [(score, roles, table) for table in candidates for score, roles in [_score_table(table)]]
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    best_score, best_roles, best_table = scored[0]
+    if best_score < _SMART_MIN_SCORE or "occurred_at" not in best_roles or "amount" not in best_roles:
+        raise SmartParseAmbiguous(
+            f"Heurística no encontró tabla de transacciones (mejor score={best_score})"
+        )
+
+    best_header_norm = [_norm(_pdf_clean(c)) for c in best_table[0]]
+    grouped: list[list[list[str | None]]] = []
+    for table in candidates:
+        if not table:
+            continue
+        header_norm = [_norm(_pdf_clean(c)) for c in table[0]]
+        if header_norm == best_header_norm:
+            grouped.append(table)
+
+    if not grouped:
+        grouped = [best_table]
+
+    inferred_year = _infer_year(" ".join(full_text_parts))
+
+    rows: list[dict[str, str]] = []
+    for table in grouped:
+        for raw_row in table[1:]:  # saltar cabecera
+            cleaned = [_pdf_clean(c) for c in raw_row]
+            if all(not c for c in cleaned):
+                continue
+            # saltar repetidas de cabecera (algunos PDFs repiten la cabecera
+            # al inicio de cada página)
+            if [_norm(c) for c in cleaned[: len(best_header_norm)]] == best_header_norm:
+                continue
+
+            def get(role: str) -> str:
+                idx = best_roles.get(role)
+                if idx is None or idx >= len(cleaned):
+                    return ""
+                return cleaned[idx]
+
+            occurred_at = _normalize_date(get("occurred_at"), inferred_year)
+            amount = get("amount")
+            description = get("description")
+            category_name = get("category_name")
+
+            # Si Detalle está vacío usamos Concepto. Si Concepto y Detalle
+            # son iguales (algunos extractos los duplican), nos quedamos
+            # con uno solo.
+            if not description:
+                description = category_name
+            elif description == category_name:
+                category_name = ""
+
+            rows.append(
+                {
+                    "amount": amount,
+                    "occurred_at": occurred_at,
+                    "description": description,
+                    "category_name": category_name,
+                }
+            )
+
+    if not rows:
+        raise SmartParseAmbiguous(
+            "Tabla de transacciones detectada pero sin filas de datos"
+        )
+
+    return rows
