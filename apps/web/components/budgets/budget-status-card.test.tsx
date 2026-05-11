@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
-import type { BudgetStatusItem, Category } from '@finanzas/types';
+import type { BudgetStatusItem, Category } from '@crisol/types';
 
 import { BudgetStatusCard } from './budget-status-card';
 

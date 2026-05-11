@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-import { toast, useToastStore } from '@finanzas/store';
+import { toast, useToastStore } from '@crisol/store';
 
 import { Toaster } from './toaster';
 

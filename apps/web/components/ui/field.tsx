@@ -2,7 +2,7 @@
 
 import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
 
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 const labelStyle = {
   display: 'block',

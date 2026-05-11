@@ -7,8 +7,8 @@ import {
   View,
 } from 'react-native';
 
-import { useAccounts, useCategories } from '@finanzas/services';
-import type { Account, ReceiptConfirmRequest, ReceiptExtraction } from '@finanzas/types';
+import { useAccounts, useCategories } from '@crisol/services';
+import type { Account, ReceiptConfirmRequest, ReceiptExtraction } from '@crisol/types';
 import {
   colors,
   fontSize,
@@ -17,7 +17,7 @@ import {
   radius,
   spacing,
   toDateInputValue,
-} from '@finanzas/ui';
+} from '@crisol/ui';
 
 import { DateInput } from './ui/date-input';
 

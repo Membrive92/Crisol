@@ -4,7 +4,7 @@ import type {
   ImportJob,
   ImportListQuery,
   ImportPreviewResponse,
-} from '@finanzas/types';
+} from '@crisol/types';
 
 import {
   importsApi,

@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from 'react';
 
-import { useAccountBalances, useAccounts } from '@finanzas/services';
-import type { AccountBalance } from '@finanzas/types';
+import { useAccountBalances, useAccounts } from '@crisol/services';
+import type { AccountBalance } from '@crisol/types';
 import {
   colors,
   fontSize,
@@ -11,7 +11,7 @@ import {
   formatAmount,
   radius,
   spacing,
-} from '@finanzas/ui';
+} from '@crisol/ui';
 
 import { AccountSwatch } from '@/components/accounts/account-swatch';
 import { Card } from '@/components/ui/card';

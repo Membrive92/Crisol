@@ -7,16 +7,16 @@ import {
   formatApiError,
   useAccounts,
   useCreateAccount,
-} from '@finanzas/services';
-import { toast, useAuthStore } from '@finanzas/store';
-import type { AccountCreateRequest } from '@finanzas/types';
+} from '@crisol/services';
+import { toast, useAuthStore } from '@crisol/store';
+import type { AccountCreateRequest } from '@crisol/types';
 import {
   colors,
   fontSize,
   fontWeight,
   radius,
   spacing,
-} from '@finanzas/ui';
+} from '@crisol/ui';
 
 import {
   AccountFormFields,

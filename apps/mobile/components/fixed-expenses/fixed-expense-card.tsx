@@ -8,7 +8,7 @@ import {
   View,
 } from 'react-native';
 
-import type { Account, Category, FixedExpense } from '@finanzas/types';
+import type { Account, Category, FixedExpense } from '@crisol/types';
 import {
   colors,
   fontSize,
@@ -17,7 +17,7 @@ import {
   formatDate,
   radius,
   spacing,
-} from '@finanzas/ui';
+} from '@crisol/ui';
 
 export interface FixedExpenseCardAction {
   label: string;

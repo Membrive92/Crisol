@@ -6,8 +6,19 @@ import { QueryProvider } from '@/lib/query-provider';
 import { ThemeProvider } from '@/lib/theme-provider';
 
 export const metadata = {
-  title: 'Finanzas App',
-  description: 'Finanzas personales multiportfolio con IA local',
+  title: 'Crisol',
+  description: 'Crisol — finanzas personales multiportfolio con IA local',
+  icons: {
+    icon: [
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/favicon.ico' },
+    ],
+    apple: '/apple-touch-icon.png',
+  },
+  appleWebApp: {
+    title: 'Crisol',
+  },
+  manifest: '/manifest.webmanifest',
 };
 
 // Inline script que aplica el tema antes del primer paint para evitar
@@ -16,7 +27,7 @@ export const metadata = {
 const themeBootstrapScript = `
 (function() {
   try {
-    var saved = localStorage.getItem('finanzas_theme');
+    var saved = localStorage.getItem('crisol_theme');
     var resolved;
     if (saved === 'light' || saved === 'dark') {
       resolved = saved;

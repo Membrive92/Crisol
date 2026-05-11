@@ -1,4 +1,4 @@
-# Internal Docs — Finanzas App
+# Internal Docs — Crisol
 
 Documentación viva del proyecto: arquitectura, metodología, estado por fase,
 lecciones aprendidas y contexto de consulta para IA.

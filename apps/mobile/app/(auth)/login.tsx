@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Link } from 'expo-router';
 
-import { authApi } from '@finanzas/services';
-import { useAuthStore } from '@finanzas/store';
+import { authApi } from '@crisol/services';
+import { useAuthStore } from '@crisol/store';
 
 export default function LoginScreen() {
   const { setTokens, setUser } = useAuthStore();

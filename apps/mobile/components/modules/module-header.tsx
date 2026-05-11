@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
-import { MODULES, type AppModule } from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import { MODULES, type AppModule } from '@crisol/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 interface ModuleHeaderProps {
   active: AppModule;

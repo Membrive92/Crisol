@@ -2,9 +2,9 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { PieChart } from 'react-native-gifted-charts';
 
-import type { CategoryBreakdownItem } from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
-import { formatAmount } from '@finanzas/ui';
+import type { CategoryBreakdownItem } from '@crisol/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
+import { formatAmount } from '@crisol/ui';
 
 export type DonutKindFilter = 'all' | 'income' | 'expense';
 

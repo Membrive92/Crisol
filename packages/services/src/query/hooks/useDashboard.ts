@@ -5,7 +5,7 @@ import type {
   DashboardByMonthQuery,
   DashboardSummaryQuery,
   DashboardTopExpensesQuery,
-} from '@finanzas/types';
+} from '@crisol/types';
 
 import { dashboardApi } from '../../api/endpoints/dashboard';
 import { queryKeys } from '../keys';

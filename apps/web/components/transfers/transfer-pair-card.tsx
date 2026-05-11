@@ -1,6 +1,6 @@
 'use client';
 
-import type { Account, TransferCandidate, TransferPair } from '@finanzas/types';
+import type { Account, TransferCandidate, TransferPair } from '@crisol/types';
 import {
   colors,
   fontSize,
@@ -9,7 +9,7 @@ import {
   formatDate,
   radius,
   spacing,
-} from '@finanzas/ui';
+} from '@crisol/ui';
 
 import { AccountSwatch } from '@/components/accounts/account-swatch';
 import { Button } from '@/components/ui/button';

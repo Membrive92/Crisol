@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-import type { Category, FixedExpense } from '@finanzas/types';
+import type { Category, FixedExpense } from '@crisol/types';
 
 import { FixedExpenseCard } from './fixed-expense-card';
 

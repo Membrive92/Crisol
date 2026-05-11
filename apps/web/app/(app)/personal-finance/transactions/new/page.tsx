@@ -2,9 +2,9 @@
 
 import { useRouter } from 'next/navigation';
 
-import { useCreateTransaction } from '@finanzas/services';
-import type { TransactionCreateRequest } from '@finanzas/types';
-import { colors, fontSize, spacing } from '@finanzas/ui';
+import { useCreateTransaction } from '@crisol/services';
+import type { TransactionCreateRequest } from '@crisol/types';
+import { colors, fontSize, spacing } from '@crisol/ui';
 
 import { TransactionForm } from '@/components/transactions/transaction-form';
 import { Card } from '@/components/ui/card';

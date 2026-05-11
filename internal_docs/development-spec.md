@@ -1,4 +1,4 @@
-# Development Spec — Finanzas App
+# Development Spec — Crisol
 
 > Metodología de desarrollo incremental + desglose de fases.
 > Cada fase es una rama, un PR y un merge a `main` con CI verde.

@@ -4,7 +4,7 @@ import axios, {
   type InternalAxiosRequestConfig,
 } from 'axios';
 
-import type { TokenResponse } from '@finanzas/types';
+import type { TokenResponse } from '@crisol/types';
 
 let _accessToken: string | null = null;
 let _refreshToken: string | null = null;

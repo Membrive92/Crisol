@@ -2,7 +2,7 @@
 
 import type { ButtonHTMLAttributes, CSSProperties } from 'react';
 
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost';
 

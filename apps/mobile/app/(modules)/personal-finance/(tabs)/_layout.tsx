@@ -1,7 +1,7 @@
 import { Tabs } from 'expo-router';
 
-import { getModule } from '@finanzas/types';
-import { colors } from '@finanzas/ui';
+import { getModule } from '@crisol/types';
+import { colors } from '@crisol/ui';
 
 import { ModuleHeader } from '../../../../components/modules/module-header';
 

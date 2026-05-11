@@ -3,10 +3,10 @@
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 
-import { useAuthStore } from '@finanzas/store';
-import { authApi, useAccounts } from '@finanzas/services';
-import { DEFAULT_MODULE_ID, findModuleByPath, getModule } from '@finanzas/types';
-import { colors, spacing } from '@finanzas/ui';
+import { useAuthStore } from '@crisol/store';
+import { authApi, useAccounts } from '@crisol/services';
+import { DEFAULT_MODULE_ID, findModuleByPath, getModule } from '@crisol/types';
+import { colors, spacing } from '@crisol/ui';
 
 import { PasskeyPrompt } from '@/components/auth/passkey-prompt';
 import { UserMenu } from '@/components/auth/user-menu';

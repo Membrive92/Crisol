@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-import type { Budget, Category } from '@finanzas/types';
+import type { Budget, Category } from '@crisol/types';
 
 import { BudgetRow } from './budget-row';
 

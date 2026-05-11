@@ -1,6 +1,6 @@
 import { StyleSheet, Text, View } from 'react-native';
 
-import { colors, fontSize, fontWeight } from '@finanzas/ui';
+import { colors, fontSize, fontWeight } from '@crisol/ui';
 
 export interface KpiDeltaProps {
   current: number;

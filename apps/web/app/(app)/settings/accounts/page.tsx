@@ -10,14 +10,14 @@ import {
   useCreateAccount,
   useDeleteAccount,
   useUpdateAccount,
-} from '@finanzas/services';
-import { toast } from '@finanzas/store';
+} from '@crisol/services';
+import { toast } from '@crisol/store';
 import type {
   Account,
   AccountBalance,
   AccountCreateRequest,
   AccountUpdateRequest,
-} from '@finanzas/types';
+} from '@crisol/types';
 import {
   DEFAULT_CATEGORY_COLOR,
   colors,
@@ -26,7 +26,7 @@ import {
   formatAmount,
   radius,
   spacing,
-} from '@finanzas/ui';
+} from '@crisol/ui';
 
 import {
   AccountFormFields,

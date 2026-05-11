@@ -2,9 +2,9 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 
-import { useAccounts, useCategories } from '@finanzas/services';
-import type { ReceiptConfirmRequest, ReceiptExtraction } from '@finanzas/types';
-import { colors, fontSize, fontWeight, fromDateInputValue, spacing, toDateInputValue } from '@finanzas/ui';
+import { useAccounts, useCategories } from '@crisol/services';
+import type { ReceiptConfirmRequest, ReceiptExtraction } from '@crisol/types';
+import { colors, fontSize, fontWeight, fromDateInputValue, spacing, toDateInputValue } from '@crisol/ui';
 
 import { Button } from '../ui/button';
 import { Select, TextArea, TextInput } from '../ui/field';

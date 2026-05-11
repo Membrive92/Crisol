@@ -1,5 +1,5 @@
 {
-  "extends": "@finanzas/tsconfig/expo.json",
+  "extends": "@crisol/tsconfig/expo.json",
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {

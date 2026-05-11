@@ -2,8 +2,8 @@
 
 import { useRouter } from 'next/navigation';
 
-import { useCurrencyStore } from '@finanzas/store';
-import type { Category, CategoryKind, Transaction } from '@finanzas/types';
+import { useCurrencyStore } from '@crisol/store';
+import type { Category, CategoryKind, Transaction } from '@crisol/types';
 import {
   colors,
   fontSize,
@@ -12,7 +12,7 @@ import {
   formatDate,
   radius,
   spacing,
-} from '@finanzas/ui';
+} from '@crisol/ui';
 
 import { Button } from '@/components/ui/button';
 import { CategoryChip } from '@/components/ui/category-chip';

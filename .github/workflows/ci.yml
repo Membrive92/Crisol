@@ -42,7 +42,7 @@ jobs:
         run: pnpm test
 
       - name: Build web
-        run: pnpm --filter @finanzas/web build
+        run: pnpm --filter @crisol/web build
 
   # ─────────────────────────────────────
   # Backend (Postgres + pgvector as service container)
@@ -55,9 +55,9 @@ jobs:
       postgres:
         image: pgvector/pgvector:pg16
         env:
-          POSTGRES_USER: finanzas
-          POSTGRES_PASSWORD: finanzas
-          POSTGRES_DB: finanzas
+          POSTGRES_USER: crisol
+          POSTGRES_PASSWORD: crisol
+          POSTGRES_DB: crisol
         ports:
           - 5432:5432
         options: >-
@@ -67,7 +67,7 @@ jobs:
           --health-retries 5
 
     env:
-      DATABASE_URL: postgresql+asyncpg://finanzas:finanzas@localhost:5432/finanzas
+      DATABASE_URL: postgresql+asyncpg://crisol:crisol@localhost:5432/crisol
       JWT_SECRET_KEY: ci-only-not-secret
       APP_ENV: test
 

@@ -2,10 +2,10 @@
 
 import Link from 'next/link';
 
-import { useCategories, useTransactions } from '@finanzas/services';
-import type { Category, Transaction } from '@finanzas/types';
-import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
-import { formatAmount } from '@finanzas/ui';
+import { useCategories, useTransactions } from '@crisol/services';
+import type { Category, Transaction } from '@crisol/types';
+import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
+import { formatAmount } from '@crisol/ui';
 
 import { iconForTransaction } from '@/lib/category-icons';
 import { Card } from '@/components/ui/card';

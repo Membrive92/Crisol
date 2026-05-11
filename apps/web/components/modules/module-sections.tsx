@@ -4,8 +4,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 
-import type { AppModule, ModuleSection } from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import type { AppModule, ModuleSection } from '@crisol/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 interface ModuleSectionsProps {
   module: AppModule;

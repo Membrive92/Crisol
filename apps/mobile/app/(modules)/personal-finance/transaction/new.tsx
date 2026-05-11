@@ -1,7 +1,7 @@
 import { useRouter } from 'expo-router';
 
-import { useCreateTransaction } from '@finanzas/services';
-import type { TransactionCreateRequest } from '@finanzas/types';
+import { useCreateTransaction } from '@crisol/services';
+import type { TransactionCreateRequest } from '@crisol/types';
 
 import { TransactionForm } from '../../../../components/transaction-form';
 

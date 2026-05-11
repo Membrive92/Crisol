@@ -2,8 +2,8 @@
 
 import { useState } from 'react';
 
-import type { BudgetCreateRequest, Category } from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import type { BudgetCreateRequest, Category } from '@crisol/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import { Button } from '@/components/ui/button';
 

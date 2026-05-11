@@ -1,5 +1,5 @@
 /*
- * Variables CSS de tema. Las consume `@finanzas/ui/tokens` en runtime
+ * Variables CSS de tema. Las consume `@crisol/ui/tokens` en runtime
  * web mediante `var(--color-…)`. El selector `[data-theme="dark"]` en el
  * <html> conmuta toda la paleta sin tocar componentes ni inline styles.
  *

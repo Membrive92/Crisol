@@ -1,8 +1,8 @@
 import { StyleSheet, Text, View } from 'react-native';
 
-import type { DashboardSummary } from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
-import { formatAmount } from '@finanzas/ui';
+import type { DashboardSummary } from '@crisol/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
+import { formatAmount } from '@crisol/ui';
 
 import { KpiDelta } from '../ui/kpi-delta';
 

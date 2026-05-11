@@ -3,10 +3,10 @@
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 
-import { useConfirmReceipt, useReceipt, useRejectReceipt } from '@finanzas/services';
-import { toast } from '@finanzas/store';
-import type { ReceiptConfirmRequest } from '@finanzas/types';
-import { colors, fontSize, formatDate, spacing } from '@finanzas/ui';
+import { useConfirmReceipt, useReceipt, useRejectReceipt } from '@crisol/services';
+import { toast } from '@crisol/store';
+import type { ReceiptConfirmRequest } from '@crisol/types';
+import { colors, fontSize, formatDate, spacing } from '@crisol/ui';
 
 import {
   ExtractionSummary,

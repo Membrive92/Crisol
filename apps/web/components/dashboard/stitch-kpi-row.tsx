@@ -2,9 +2,9 @@
 
 import type { ReactNode } from 'react';
 
-import type { DashboardSummary } from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
-import { formatAmount } from '@finanzas/ui';
+import type { DashboardSummary } from '@crisol/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
+import { formatAmount } from '@crisol/ui';
 
 import { Card } from '@/components/ui/card';
 import {

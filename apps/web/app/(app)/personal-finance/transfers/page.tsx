@@ -8,9 +8,9 @@ import {
   useTransferCandidates,
   useTransfers,
   useUnlinkTransfer,
-} from '@finanzas/services';
-import { toast } from '@finanzas/store';
-import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
+} from '@crisol/services';
+import { toast } from '@crisol/store';
+import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
 
 import { TransferPairCard } from '@/components/transfers/transfer-pair-card';
 import { Button } from '@/components/ui/button';

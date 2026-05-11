@@ -2,17 +2,17 @@
 
 import { useState } from 'react';
 
-import { formatApiError, useCategories, useUserCurrencies } from '@finanzas/services';
+import { formatApiError, useCategories, useUserCurrencies } from '@crisol/services';
 import {
   useBudgetStatus,
   useBudgets,
   useCreateBudget,
   useDeleteBudget,
   useUpdateBudget,
-} from '@finanzas/services';
-import { toast } from '@finanzas/store';
-import type { BudgetCreateRequest } from '@finanzas/types';
-import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
+} from '@crisol/services';
+import { toast } from '@crisol/store';
+import type { BudgetCreateRequest } from '@crisol/types';
+import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
 
 import { BudgetForm } from '@/components/budgets/budget-form';
 import { BudgetRow } from '@/components/budgets/budget-row';

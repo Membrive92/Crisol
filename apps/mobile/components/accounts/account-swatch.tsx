@@ -1,6 +1,6 @@
 import { StyleSheet, Text, View } from 'react-native';
 
-import { DEFAULT_CATEGORY_COLOR, colors, fontSize } from '@finanzas/ui';
+import { DEFAULT_CATEGORY_COLOR, colors, fontSize } from '@crisol/ui';
 
 export interface AccountSwatchProps {
   color: string | null;

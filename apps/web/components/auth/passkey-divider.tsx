@@ -1,6 +1,6 @@
 'use client';
 
-import { colors, fontSize, spacing } from '@finanzas/ui';
+import { colors, fontSize, spacing } from '@crisol/ui';
 
 /**
  * Separador horizontal con texto "o" en medio. Se usa entre el botón

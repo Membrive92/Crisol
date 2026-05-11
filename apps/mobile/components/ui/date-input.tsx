@@ -4,7 +4,7 @@ import DateTimePicker, {
   type DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
 
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 export interface DateInputProps {
   /** Valor en formato `YYYY-MM-DD`. Vacío = hoy. */

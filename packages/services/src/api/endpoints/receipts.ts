@@ -4,7 +4,7 @@ import type {
   ReceiptExtractResponse,
   ReceiptListQuery,
   ReceiptListResponse,
-} from '@finanzas/types';
+} from '@crisol/types';
 
 import { apiClient } from '../client';
 

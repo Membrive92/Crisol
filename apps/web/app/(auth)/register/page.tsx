@@ -4,9 +4,9 @@ import { type FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
-import { authApi, formatApiError } from '@finanzas/services';
-import { useAuthStore } from '@finanzas/store';
-import { colors, fontWeight, spacing } from '@finanzas/ui';
+import { authApi, formatApiError } from '@crisol/services';
+import { useAuthStore } from '@crisol/store';
+import { colors, fontWeight, spacing } from '@crisol/ui';
 
 import { AuthCard } from '@/components/auth/auth-card';
 import { AuthInput } from '@/components/auth/auth-input';

@@ -1,4 +1,4 @@
-# Finanzas App — Monorepo híbrido (web + móvil)
+# Crisol — Monorepo híbrido (web + móvil)
 
 ## Stack
 - Frontend: Next.js (web) + Expo/React Native (móvil) + Turborepo + pnpm

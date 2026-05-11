@@ -1,13 +1,13 @@
 'use client';
 
-import type { Category, CategoryKind, Transaction } from '@finanzas/types';
+import type { Category, CategoryKind, Transaction } from '@crisol/types';
 import {
   colors,
   fontSize,
   fontWeight,
   formatAmount,
   formatDate,
-} from '@finanzas/ui';
+} from '@crisol/ui';
 
 import { Button } from '@/components/ui/button';
 import { CategoryChip } from '@/components/ui/category-chip';

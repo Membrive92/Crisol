@@ -5,7 +5,7 @@ import type {
   CategoryRuleCreateRequest,
   CategoryRuleUpdateRequest,
   SeedResult,
-} from '@finanzas/types';
+} from '@crisol/types';
 
 import { categoryRulesApi } from '../../api/endpoints/category-rules';
 import { queryKeys } from '../keys';

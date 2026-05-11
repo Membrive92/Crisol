@@ -16,9 +16,9 @@ import {
   useResumeFixedExpense,
   useScanFixedExpenses,
   useUpdateFixedExpense,
-} from '@finanzas/services';
-import { toast } from '@finanzas/store';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+} from '@crisol/services';
+import { toast } from '@crisol/store';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import { FixedExpenseCard } from '../../../components/fixed-expenses/fixed-expense-card';
 import { ConfirmDialog } from '../../../components/ui/confirm-dialog';

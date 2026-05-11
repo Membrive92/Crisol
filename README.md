@@ -1,4 +1,4 @@
-# Finanzas App
+# Crisol
 
 Aplicación de finanzas personales multiportfolio, multi-usuario, con IA local
 para extracción automática de tickets mediante visión por computador.
@@ -45,7 +45,7 @@ make docker-up
 make db-upgrade
 
 # 4. Descargar modelo de visión (solo la primera vez)
-docker exec -it finanzas-ollama ollama pull qwen2.5-vl:7b
+docker exec -it crisol-ollama ollama pull qwen2.5-vl:7b
 
 # 5. Arrancar frontend y backend
 make dev

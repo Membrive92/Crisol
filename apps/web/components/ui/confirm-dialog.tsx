@@ -2,7 +2,7 @@
 
 import { useEffect, type ReactNode } from 'react';
 
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import { Button } from './button';
 

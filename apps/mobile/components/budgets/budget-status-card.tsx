@@ -1,7 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 
-import type { BudgetStatusItem, Category } from '@finanzas/types';
-import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@finanzas/ui';
+import type { BudgetStatusItem, Category } from '@crisol/types';
+import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@crisol/ui';
 
 export interface BudgetStatusCardProps {
   item: BudgetStatusItem;

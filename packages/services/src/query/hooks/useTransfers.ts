@@ -6,7 +6,7 @@ import type {
   TransferMatchOptions,
   TransferMatchResponse,
   TransferPair,
-} from '@finanzas/types';
+} from '@crisol/types';
 
 import { transfersApi } from '../../api/endpoints/transfers';
 import { queryKeys } from '../keys';

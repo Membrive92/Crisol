@@ -1,6 +1,6 @@
 'use client';
 
-import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
+import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
 
 import { useTheme, type ThemePreference } from '@/lib/theme-provider';
 

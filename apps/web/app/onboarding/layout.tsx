@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react';
 
-import { colors } from '@finanzas/ui';
+import { colors } from '@crisol/ui';
 
 import { Toaster } from '@/components/ui/toaster';
 

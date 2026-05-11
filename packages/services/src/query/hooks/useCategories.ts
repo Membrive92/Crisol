@@ -4,7 +4,7 @@ import type {
   Category,
   CategoryCreateRequest,
   CategoryUpdateRequest,
-} from '@finanzas/types';
+} from '@crisol/types';
 
 import { categoriesApi } from '../../api/endpoints/categories';
 import { queryKeys } from '../keys';

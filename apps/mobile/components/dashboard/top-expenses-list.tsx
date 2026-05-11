@@ -1,8 +1,8 @@
 import { StyleSheet, Text, View } from 'react-native';
 
-import type { TopExpenseItem } from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
-import { formatAmount, formatDate } from '@finanzas/ui';
+import type { TopExpenseItem } from '@crisol/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
+import { formatAmount, formatDate } from '@crisol/ui';
 
 export interface TopExpensesListProps {
   data: TopExpenseItem[] | undefined;

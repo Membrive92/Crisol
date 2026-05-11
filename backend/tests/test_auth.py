@@ -96,7 +96,7 @@ async def test_login_remember_me_extends_cookie_max_age(client: AsyncClient) -> 
     assert response.status_code == 200
 
     set_cookie = response.headers.get("set-cookie", "")
-    assert "finanzas_refresh=" in set_cookie
+    assert "crisol_refresh=" in set_cookie
     # 30 días en segundos = 2_592_000. Aceptamos cualquier valor ≥ 8 días
     # para que falle si volvemos al default de 7.
     import re
@@ -159,7 +159,7 @@ async def test_refresh_via_cookie(client: AsyncClient) -> None:
     assert new_body["refresh_token"] != old_refresh
     # La cookie nueva está en el response.
     set_cookie = response.headers.get("set-cookie", "")
-    assert "finanzas_refresh=" in set_cookie
+    assert "crisol_refresh=" in set_cookie
     assert "HttpOnly" in set_cookie
 
 
@@ -202,7 +202,7 @@ async def test_logout_ok(client: AsyncClient) -> None:
     assert response.status_code == 204
     # logout debe limpiar la cookie.
     set_cookie = response.headers.get("set-cookie", "")
-    assert "finanzas_refresh=" in set_cookie
+    assert "crisol_refresh=" in set_cookie
 
     # Refresh with the revoked token should fail. Limpiamos cookie por si
     # httpx mantuvo la versión obsoleta.

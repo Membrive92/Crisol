@@ -1,6 +1,6 @@
 'use client';
 
-import { DEFAULT_CATEGORY_COLOR, fontSize } from '@finanzas/ui';
+import { DEFAULT_CATEGORY_COLOR, fontSize } from '@crisol/ui';
 
 export interface AccountSwatchProps {
   color: string | null;

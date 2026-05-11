@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-import type { User } from '@finanzas/types';
+import type { User } from '@crisol/types';
 
 export interface AuthState {
   user: User | null;

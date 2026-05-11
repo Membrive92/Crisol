@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-import { useUserCurrencies } from '@finanzas/services';
-import { useCurrencyStore } from '@finanzas/store';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import { useUserCurrencies } from '@crisol/services';
+import { useCurrencyStore } from '@crisol/store';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import { CheckCircleIcon, ChevronDownIcon, WalletIcon } from '@/components/ui/icons';
 

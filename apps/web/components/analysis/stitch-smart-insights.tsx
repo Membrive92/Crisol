@@ -1,7 +1,7 @@
 'use client';
 
-import type { CategoryBreakdownItem, DashboardSummary } from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import type { CategoryBreakdownItem, DashboardSummary } from '@crisol/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import { Card } from '@/components/ui/card';
 import {

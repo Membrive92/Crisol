@@ -7,7 +7,7 @@ import type {
   ReceiptConfirmRequest,
   ReceiptExtractResponse,
   ReceiptListQuery,
-} from '@finanzas/types';
+} from '@crisol/types';
 
 import { receiptsApi } from '../../api/endpoints/receipts';
 import { queryKeys } from '../keys';

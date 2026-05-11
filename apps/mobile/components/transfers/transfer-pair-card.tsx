@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import type { Account, TransferCandidate, TransferPair } from '@finanzas/types';
+import type { Account, TransferCandidate, TransferPair } from '@crisol/types';
 import {
   colors,
   fontSize,
@@ -9,7 +9,7 @@ import {
   formatDate,
   radius,
   spacing,
-} from '@finanzas/ui';
+} from '@crisol/ui';
 
 import { AccountSwatch } from '../accounts/account-swatch';
 

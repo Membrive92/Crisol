@@ -1,5 +1,5 @@
 {
-  "name": "finanzas-app",
+  "name": "crisol",
   "version": "0.0.0",
   "private": true,
   "packageManager": "pnpm@9.15.9",
@@ -9,8 +9,8 @@
   },
   "scripts": {
     "dev": "turbo run dev",
-    "dev:web": "turbo run dev --filter=@finanzas/web",
-    "dev:mobile": "turbo run dev --filter=@finanzas/mobile",
+    "dev:web": "turbo run dev --filter=@crisol/web",
+    "dev:mobile": "turbo run dev --filter=@crisol/mobile",
     "build": "turbo run build",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",

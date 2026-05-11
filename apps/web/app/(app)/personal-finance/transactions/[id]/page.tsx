@@ -6,9 +6,9 @@ import { useRouter } from 'next/navigation';
 import {
   useTransaction,
   useUpdateTransaction,
-} from '@finanzas/services';
-import type { TransactionUpdateRequest } from '@finanzas/types';
-import { colors, fontSize, spacing } from '@finanzas/ui';
+} from '@crisol/services';
+import type { TransactionUpdateRequest } from '@crisol/types';
+import { colors, fontSize, spacing } from '@crisol/ui';
 
 import { TransactionForm } from '@/components/transactions/transaction-form';
 import { Card } from '@/components/ui/card';

@@ -3,7 +3,7 @@ import type {
   AccountBalancesResponse,
   AccountCreateRequest,
   AccountUpdateRequest,
-} from '@finanzas/types';
+} from '@crisol/types';
 
 import { apiClient } from '../client';
 

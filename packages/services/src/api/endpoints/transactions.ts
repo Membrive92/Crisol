@@ -4,7 +4,7 @@ import type {
   TransactionListQuery,
   TransactionListResponse,
   TransactionUpdateRequest,
-} from '@finanzas/types';
+} from '@crisol/types';
 
 import { apiClient } from '../client';
 

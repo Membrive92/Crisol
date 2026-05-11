@@ -2,7 +2,7 @@
 
 import type { CSSProperties, ReactNode } from 'react';
 
-import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
+import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
 
 export type DataTableAlign = 'left' | 'right' | 'center';
 

@@ -5,7 +5,7 @@ import type {
   BudgetCreateRequest,
   BudgetStatusResponse,
   BudgetUpdateRequest,
-} from '@finanzas/types';
+} from '@crisol/types';
 
 import { budgetsApi } from '../../api/endpoints/budgets';
 import { queryKeys } from '../keys';

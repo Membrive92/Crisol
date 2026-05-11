@@ -4,7 +4,7 @@ import type {
   FixedExpense,
   FixedExpenseScanResponse,
   FixedExpenseStatus,
-} from '@finanzas/types';
+} from '@crisol/types';
 
 import {
   type AutopostResponse,

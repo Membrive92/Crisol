@@ -2,8 +2,8 @@
 
 import { useState } from 'react';
 
-import type { Account, Category, TransactionListQuery } from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import type { Account, Category, TransactionListQuery } from '@crisol/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import {
   CalendarIcon,

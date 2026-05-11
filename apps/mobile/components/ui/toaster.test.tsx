@@ -1,7 +1,7 @@
 // @types/jest expone los globals (describe/it/expect/jest) — sin import.
 import { act, fireEvent, render } from '@testing-library/react-native';
 
-import { toast, useToastStore } from '@finanzas/store';
+import { toast, useToastStore } from '@crisol/store';
 
 import { Toaster } from './toaster';
 

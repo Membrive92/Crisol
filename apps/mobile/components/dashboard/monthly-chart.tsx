@@ -2,9 +2,9 @@ import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { BarChart } from 'react-native-gifted-charts';
 
-import type { MonthlyBucket } from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
-import { formatAmount, formatMonthLabel } from '@finanzas/ui';
+import type { MonthlyBucket } from '@crisol/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
+import { formatAmount, formatMonthLabel } from '@crisol/ui';
 
 export interface MonthlyChartProps {
   data: MonthlyBucket[] | undefined;

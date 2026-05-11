@@ -7,7 +7,7 @@ import {
   View,
 } from 'react-native';
 
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 export type ConfirmDialogTone = 'danger' | 'primary';
 

@@ -5,11 +5,11 @@ import type {
   TransactionCreateRequest,
   TransactionListQuery,
   TransactionUpdateRequest,
-} from '@finanzas/types';
+} from '@crisol/types';
 // PHASE-14.5: el hook dispara un toast cuando la respuesta del POST
 // trae `budget_alert`. La store de toasts es cross-platform y
 // `toast.warning` / `toast.error` ya tienen palette por kind.
-import { toast } from '@finanzas/store';
+import { toast } from '@crisol/store';
 
 import { transactionsApi } from '../../api/endpoints/transactions';
 import { queryKeys } from '../keys';

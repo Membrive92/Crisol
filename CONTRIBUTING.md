@@ -1,4 +1,4 @@
-# Contribuir a Finanzas App
+# Contribuir a Crisol
 
 Este proyecto sigue un workflow de desarrollo incremental por fases, con cada
 fase entregada en su propio PR a `main`. Consulta

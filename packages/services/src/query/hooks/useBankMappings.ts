@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import type { BankCategoryMapping } from '@finanzas/types';
+import type { BankCategoryMapping } from '@crisol/types';
 
 import {
   bankMappingsApi,

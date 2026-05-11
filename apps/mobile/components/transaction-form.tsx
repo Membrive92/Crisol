@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-import { useAccounts, useCategories } from '@finanzas/services';
+import { useAccounts, useCategories } from '@crisol/services';
 import type {
   Account,
   Category,
   Transaction,
   TransactionCreateRequest,
   TransactionUpdateRequest,
-} from '@finanzas/types';
+} from '@crisol/types';
 import {
   colors,
   fontSize,
@@ -17,7 +17,7 @@ import {
   radius,
   spacing,
   toDateInputValue,
-} from '@finanzas/ui';
+} from '@crisol/ui';
 
 import { DateInput } from './ui/date-input';
 

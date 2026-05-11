@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react';
 
-import { useToastStore } from '@finanzas/store';
-import type { Toast, ToastKind } from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import { useToastStore } from '@crisol/store';
+import type { Toast, ToastKind } from '@crisol/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import { XIcon } from './icons';
 import { Spinner } from './spinner';

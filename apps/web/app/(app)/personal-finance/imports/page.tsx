@@ -3,9 +3,9 @@
 import { useState } from 'react';
 import Link from 'next/link';
 
-import { useImports } from '@finanzas/services';
-import type { ImportListQuery } from '@finanzas/types';
-import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
+import { useImports } from '@crisol/services';
+import type { ImportListQuery } from '@crisol/types';
+import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
 
 import { ImportList } from '@/components/imports/import-list';
 import { Button } from '@/components/ui/button';

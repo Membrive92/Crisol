@@ -1,8 +1,8 @@
 'use client';
 
-import type { DashboardSummary } from '@finanzas/types';
-import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
-import { formatAmount } from '@finanzas/ui';
+import type { DashboardSummary } from '@crisol/types';
+import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
+import { formatAmount } from '@crisol/ui';
 
 import { Card } from '@/components/ui/card';
 import { SparklesIcon } from '@/components/ui/icons';

@@ -15,17 +15,17 @@ import {
   formatApiError,
   useAccounts,
   useCreateAccount,
-} from '@finanzas/services';
-import { toast } from '@finanzas/store';
-import type { AccountCreateRequest, AccountType } from '@finanzas/types';
-import { ASSET_ACCOUNT_TYPES } from '@finanzas/types';
+} from '@crisol/services';
+import { toast } from '@crisol/store';
+import type { AccountCreateRequest, AccountType } from '@crisol/types';
+import { ASSET_ACCOUNT_TYPES } from '@crisol/types';
 import {
   colors,
   fontSize,
   fontWeight,
   radius,
   spacing,
-} from '@finanzas/ui';
+} from '@crisol/ui';
 
 const REDIRECT_TARGET = '/(modules)/personal-finance/(tabs)/analysis';
 

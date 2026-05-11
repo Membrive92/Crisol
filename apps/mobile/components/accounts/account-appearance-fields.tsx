@@ -8,7 +8,7 @@ import {
   fontWeight,
   radius,
   spacing,
-} from '@finanzas/ui';
+} from '@crisol/ui';
 
 export interface AccountAppearanceFieldsProps {
   color: string | null;

@@ -1,4 +1,4 @@
-import baseConfig from '@finanzas/eslint-config/base.js';
+import baseConfig from '@crisol/eslint-config/base.js';
 
 /** @type {import('eslint').Linter.Config[]} */
 export default [

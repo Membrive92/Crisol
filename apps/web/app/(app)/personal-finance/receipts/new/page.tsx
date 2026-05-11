@@ -7,10 +7,10 @@ import {
   useConfirmReceipt,
   useExtractReceipt,
   useRejectReceipt,
-} from '@finanzas/services';
-import { toast } from '@finanzas/store';
-import type { Receipt, ReceiptConfirmRequest, ReceiptExtraction } from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+} from '@crisol/services';
+import { toast } from '@crisol/store';
+import type { Receipt, ReceiptConfirmRequest, ReceiptExtraction } from '@crisol/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import {
   ExtractionSummary,

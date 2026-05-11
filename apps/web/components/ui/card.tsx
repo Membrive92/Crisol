@@ -2,7 +2,7 @@
 
 import type { HTMLAttributes } from 'react';
 
-import { colors, radius, spacing } from '@finanzas/ui';
+import { colors, radius, spacing } from '@crisol/ui';
 
 export function Card({ style, ...rest }: HTMLAttributes<HTMLDivElement>) {
   return (

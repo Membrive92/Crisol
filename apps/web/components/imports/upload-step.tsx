@@ -2,8 +2,8 @@
 
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 
-import { useAccounts, useCategories } from '@finanzas/services';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import { useAccounts, useCategories } from '@crisol/services';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import { Button } from '../ui/button';
 import { Select, TextInput } from '../ui/field';

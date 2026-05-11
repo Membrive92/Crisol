@@ -10,15 +10,15 @@ import {
   useTransferCandidates,
   useTransfers,
   useUnlinkTransfer,
-} from '@finanzas/services';
-import { toast } from '@finanzas/store';
+} from '@crisol/services';
+import { toast } from '@crisol/store';
 import {
   colors,
   fontSize,
   fontWeight,
   radius,
   spacing,
-} from '@finanzas/ui';
+} from '@crisol/ui';
 
 import { TransferPairCard } from '../../../components/transfers/transfer-pair-card';
 import { ConfirmDialog } from '../../../components/ui/confirm-dialog';

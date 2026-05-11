@@ -1,9 +1,13 @@
 services:
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: finanzas-postgres
+    container_name: crisol-postgres
     restart: unless-stopped
     environment:
+      # Default `finanzas/finanzas/finanzas` se mantiene por
+      # compatibilidad con la BD legacy. Para nuevos despliegues
+      # exporta `POSTGRES_USER=crisol POSTGRES_PASSWORD=... POSTGRES_DB=crisol`
+      # antes de levantar el compose.
       POSTGRES_USER: ${POSTGRES_USER:-finanzas}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-finanzas}
       POSTGRES_DB: ${POSTGRES_DB:-finanzas}
@@ -19,7 +23,7 @@ services:
 
   minio:
     image: minio/minio
-    container_name: finanzas-minio
+    container_name: crisol-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
@@ -38,7 +42,7 @@ services:
 
   ollama:
     image: ollama/ollama
-    container_name: finanzas-ollama
+    container_name: crisol-ollama
     restart: unless-stopped
     ports:
       - "11434:11434"

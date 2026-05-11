@@ -11,10 +11,10 @@ import {
   useDeleteBudget,
   useUpdateBudget,
   useUserCurrencies,
-} from '@finanzas/services';
-import { toast } from '@finanzas/store';
-import type { BudgetCreateRequest } from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+} from '@crisol/services';
+import { toast } from '@crisol/store';
+import type { BudgetCreateRequest } from '@crisol/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import { BudgetActiveRow } from '../../../components/budgets/budget-active-row';
 import { BudgetFormModal } from '../../../components/budgets/budget-form-modal';

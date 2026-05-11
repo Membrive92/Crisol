@@ -49,9 +49,9 @@ async def lifespan(app_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(
-    title="Finanzas App API",
+    title="Crisol API",
     version="0.0.0",
-    description="API del backend de Finanzas App.",
+    description="API del backend de Crisol.",
     debug=settings.app_debug,
     lifespan=lifespan,
 )

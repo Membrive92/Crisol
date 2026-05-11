@@ -1,8 +1,8 @@
 'use client';
 
-import { useDashboardSummary, useReceipts } from '@finanzas/services';
-import { useCurrencyStore } from '@finanzas/store';
-import { colors, fontSize, fontWeight, formatAmount, spacing } from '@finanzas/ui';
+import { useDashboardSummary, useReceipts } from '@crisol/services';
+import { useCurrencyStore } from '@crisol/store';
+import { colors, fontSize, fontWeight, formatAmount, spacing } from '@crisol/ui';
 
 import { Card } from '@/components/ui/card';
 

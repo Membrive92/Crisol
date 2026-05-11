@@ -1,6 +1,6 @@
 /**
  * Tipos del sistema de toasts global (PHASE-11.3).
- * El store vive en `@finanzas/store` (`useToastStore`); el render se
+ * El store vive en `@crisol/store` (`useToastStore`); el render se
  * hace con un componente `<Toaster />` por plataforma.
  */
 

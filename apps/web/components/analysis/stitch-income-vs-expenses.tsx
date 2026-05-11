@@ -11,8 +11,8 @@ import {
   YAxis,
 } from 'recharts';
 
-import type { MonthlyBucket } from '@finanzas/types';
-import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@finanzas/ui';
+import type { MonthlyBucket } from '@crisol/types';
+import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@crisol/ui';
 
 import { Card } from '@/components/ui/card';
 

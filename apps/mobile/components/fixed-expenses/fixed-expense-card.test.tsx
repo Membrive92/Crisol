@@ -1,6 +1,6 @@
 import { fireEvent, render } from '@testing-library/react-native';
 
-import type { Category, FixedExpense } from '@finanzas/types';
+import type { Category, FixedExpense } from '@crisol/types';
 
 import { FixedExpenseCard } from './fixed-expense-card';
 

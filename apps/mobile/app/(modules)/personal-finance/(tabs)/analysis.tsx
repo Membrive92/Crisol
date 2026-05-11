@@ -9,9 +9,9 @@ import {
   useDashboardSummary,
   useDashboardTopExpenses,
   useUserCurrencies,
-} from '@finanzas/services';
-import { useAuthStore, useCurrencyStore } from '@finanzas/store';
-import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
+} from '@crisol/services';
+import { useAuthStore, useCurrencyStore } from '@crisol/store';
+import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
 
 import { BalancesCard } from '../../../../components/accounts/balances-card';
 import {

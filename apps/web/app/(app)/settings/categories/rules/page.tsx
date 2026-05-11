@@ -10,14 +10,14 @@ import {
   useCreateCategoryRule,
   useDeleteCategoryRule,
   useUpdateCategoryRule,
-} from '@finanzas/services';
-import { toast } from '@finanzas/store';
+} from '@crisol/services';
+import { toast } from '@crisol/store';
 import type {
   CategoryRule,
   RuleField,
   RuleMatchType,
-} from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+} from '@crisol/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';

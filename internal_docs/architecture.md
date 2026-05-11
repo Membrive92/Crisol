@@ -1,4 +1,4 @@
-# Arquitectura — Finanzas App
+# Arquitectura — Crisol
 
 > Documento vivo. Se actualiza cuando una fase introduce cambios arquitectónicos.
 > Última actualización: refactor a `personal_finance/` — los sub-features de
@@ -10,7 +10,7 @@
 
 ## 1. Visión general
 
-Finanzas App es una aplicación de finanzas personales "multiportfolio" modular,
+Crisol es una aplicación de finanzas personales "multiportfolio" modular,
 multi-usuario, con IA local para extracción de tickets mediante visión por
 computador. Se entrega como monorepo con **web (Next.js)** y **móvil (Expo)**
 compartiendo lógica, tipos y UI.
@@ -98,7 +98,7 @@ imagen para despliegue.
 ## 5. Estructura del monorepo
 
 ```
-finanzas-app/
+crisol/
 ├── apps/
 │   ├── web/                # Next.js App Router (apps/web/components/* solo-web)
 │   └── mobile/             # Expo Router (apps/mobile/components/* solo-mobile)
@@ -146,7 +146,7 @@ Notas sobre el monorepo actual:
 - Desde PHASE-6.1, las apps tienen una **shell de módulos**: web bajo
   `apps/web/app/(app)/<module-id>/...` y mobile bajo
   `apps/mobile/app/(modules)/<module-id>/...`. Sólo `personal-finance`
-  está activo; el registro `MODULES` en `@finanzas/types/registry/modules.ts`
+  está activo; el registro `MODULES` en `@crisol/types/registry/modules.ts`
   declara el resto como `enabled: false`. Settings sigue cross-cutting
   (`apps/web/app/(app)/settings/`).
 

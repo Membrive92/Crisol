@@ -6,7 +6,7 @@ import type {
   ImportListQuery,
   ReceiptListQuery,
   TransactionListQuery,
-} from '@finanzas/types';
+} from '@crisol/types';
 
 /**
  * Query keys centralizados para TanStack Query.

@@ -14,9 +14,9 @@ import {
   useReceipt,
   useReceiptImage,
   useRejectReceipt,
-} from '@finanzas/services';
-import type { ReceiptConfirmRequest } from '@finanzas/types';
-import { colors, fontSize, fontWeight, formatDate, radius, spacing } from '@finanzas/ui';
+} from '@crisol/services';
+import type { ReceiptConfirmRequest } from '@crisol/types';
+import { colors, fontSize, fontWeight, formatDate, radius, spacing } from '@crisol/ui';
 
 import { ReceiptCaptureForm } from '@/components/receipt-capture-form';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';

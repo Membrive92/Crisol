@@ -1,6 +1,6 @@
 'use client';
 
-import type { Account, Category, FixedExpense } from '@finanzas/types';
+import type { Account, Category, FixedExpense } from '@crisol/types';
 import {
   colors,
   fontSize,
@@ -9,7 +9,7 @@ import {
   formatDate,
   radius,
   spacing,
-} from '@finanzas/ui';
+} from '@crisol/ui';
 
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';

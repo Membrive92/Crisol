@@ -2,8 +2,8 @@
 
 import { useState, type FormEvent } from 'react';
 
-import type { ImportColumnMappings } from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import type { ImportColumnMappings } from '@crisol/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import { Button } from '../ui/button';
 import { TextInput } from '../ui/field';

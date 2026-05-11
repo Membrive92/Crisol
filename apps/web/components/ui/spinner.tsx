@@ -2,7 +2,7 @@
 
 import type { CSSProperties } from 'react';
 
-import { colors } from '@finanzas/ui';
+import { colors } from '@crisol/ui';
 
 export interface SpinnerProps {
   /** Tamaño del SVG en px. Default 16. */

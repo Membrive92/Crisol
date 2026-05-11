@@ -2,7 +2,7 @@
 
 import type { ButtonHTMLAttributes } from 'react';
 
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 export interface SubmitButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   loading?: boolean;

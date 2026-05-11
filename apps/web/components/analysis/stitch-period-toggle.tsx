@@ -1,6 +1,6 @@
 'use client';
 
-import { colors, fontSize, fontWeight, radius } from '@finanzas/ui';
+import { colors, fontSize, fontWeight, radius } from '@crisol/ui';
 
 export type PeriodKey = 'month' | 'quarter' | 'year';
 

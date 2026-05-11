@@ -3,8 +3,8 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
-import { passkeysApi, type PasskeyResponse } from '@finanzas/services';
-import { colors, fontSize, fontWeight, formatDate, radius, spacing } from '@finanzas/ui';
+import { passkeysApi, type PasskeyResponse } from '@crisol/services';
+import { colors, fontSize, fontWeight, formatDate, radius, spacing } from '@crisol/ui';
 
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { PasskeyAbortError, registerPasskey, supportsPasskeys } from '@/lib/webauthn';

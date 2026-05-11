@@ -8,7 +8,7 @@ import {
   fontWeight,
   radius,
   spacing,
-} from '@finanzas/ui';
+} from '@crisol/ui';
 
 export interface CategoryAppearanceFieldsProps {
   color: string | null;
@@ -19,7 +19,7 @@ export interface CategoryAppearanceFieldsProps {
 
 /**
  * Pickers de color y emoji para mobile. Misma paleta y mismo set de
- * emojis que la web (importados de `@finanzas/ui/category-presets`).
+ * emojis que la web (importados de `@crisol/ui/category-presets`).
  * Pensado para vivir dentro de un modal/form vertical.
  */
 export function CategoryAppearanceFields({

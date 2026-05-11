@@ -7,7 +7,7 @@ import type {
   DashboardTopExpensesQuery,
   MonthlyBucket,
   TopExpenseItem,
-} from '@finanzas/types';
+} from '@crisol/types';
 
 import { apiClient } from '../client';
 

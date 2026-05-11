@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 
-import type { Category, CategoryKind } from '@finanzas/types';
+import type { Category, CategoryKind } from '@crisol/types';
 import {
   DEFAULT_CATEGORY_COLOR,
   colors,
@@ -17,7 +17,7 @@ import {
   fontWeight,
   radius,
   spacing,
-} from '@finanzas/ui';
+} from '@crisol/ui';
 
 import { CategoryAppearanceFields } from './category-appearance-fields';
 

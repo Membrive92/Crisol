@@ -2,8 +2,8 @@ import { useEffect } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 
-import { authApi, useAccounts } from '@finanzas/services';
-import { useAuthStore } from '@finanzas/store';
+import { authApi, useAccounts } from '@crisol/services';
+import { useAuthStore } from '@crisol/store';
 
 import { Toaster } from '../components/ui/toaster';
 import { useAuthInit } from '../lib/auth-provider';

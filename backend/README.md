@@ -1,4 +1,4 @@
-# Finanzas App — Backend
+# Crisol — Backend
 
 FastAPI + SQLAlchemy 2.0 async + PostgreSQL 16 (pgvector).
 

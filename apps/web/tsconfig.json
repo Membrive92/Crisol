@@ -1,5 +1,5 @@
 {
-  "extends": "@finanzas/tsconfig/nextjs.json",
+  "extends": "@crisol/tsconfig/nextjs.json",
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {

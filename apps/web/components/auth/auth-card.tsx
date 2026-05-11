@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react';
 
-import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
+import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
 
 import { IconAlert } from '@/components/auth/icons';
 

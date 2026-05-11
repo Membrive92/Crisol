@@ -9,8 +9,8 @@ import {
   View,
 } from 'react-native';
 
-import type { Account, AccountType } from '@finanzas/types';
-import { ASSET_ACCOUNT_TYPES } from '@finanzas/types';
+import type { Account, AccountType } from '@crisol/types';
+import { ASSET_ACCOUNT_TYPES } from '@crisol/types';
 import {
   DEFAULT_CATEGORY_COLOR,
   colors,
@@ -18,7 +18,7 @@ import {
   fontWeight,
   radius,
   spacing,
-} from '@finanzas/ui';
+} from '@crisol/ui';
 
 import { AccountAppearanceFields } from './account-appearance-fields';
 

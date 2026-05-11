@@ -1,4 +1,4 @@
-import type { BankCategoryMapping } from '@finanzas/types';
+import type { BankCategoryMapping } from '@crisol/types';
 
 import { apiClient } from '../client';
 

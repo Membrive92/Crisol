@@ -2,8 +2,8 @@
 
 import { useRouter } from 'next/navigation';
 
-import type { ImportJob } from '@finanzas/types';
-import { colors, fontSize, fontWeight, formatDate } from '@finanzas/ui';
+import type { ImportJob } from '@crisol/types';
+import { colors, fontSize, fontWeight, formatDate } from '@crisol/ui';
 
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 

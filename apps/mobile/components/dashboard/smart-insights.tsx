@@ -1,7 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 
-import type { CategoryBreakdownItem, DashboardSummary } from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import type { CategoryBreakdownItem, DashboardSummary } from '@crisol/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 export interface SmartInsightsProps {
   summary: DashboardSummary | undefined;

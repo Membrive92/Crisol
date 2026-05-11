@@ -1,13 +1,13 @@
 'use client';
 
-import type { AccountType } from '@finanzas/types';
-import { ASSET_ACCOUNT_TYPES } from '@finanzas/types';
+import type { AccountType } from '@crisol/types';
+import { ASSET_ACCOUNT_TYPES } from '@crisol/types';
 import {
   DEFAULT_CATEGORY_COLOR,
   colors,
   fontSize,
   spacing,
-} from '@finanzas/ui';
+} from '@crisol/ui';
 
 import { CategoryAppearanceFields } from '@/components/ui/category-appearance';
 import { Select, TextInput } from '@/components/ui/field';

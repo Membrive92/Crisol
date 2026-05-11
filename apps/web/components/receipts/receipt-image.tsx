@@ -1,7 +1,7 @@
 'use client';
 
-import { useReceiptImage } from '@finanzas/services';
-import { colors, fontSize, radius, spacing } from '@finanzas/ui';
+import { useReceiptImage } from '@crisol/services';
+import { colors, fontSize, radius, spacing } from '@crisol/ui';
 
 export interface ReceiptImageProps {
   receiptId: string;

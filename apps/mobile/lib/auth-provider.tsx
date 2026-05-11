@@ -2,8 +2,8 @@ import { useEffect, useRef } from 'react';
 
 import * as SecureStore from 'expo-secure-store';
 
-import { configureApi, setAccessToken, setOnAuthFailure, setRefreshToken } from '@finanzas/services';
-import { useAuthStore } from '@finanzas/store';
+import { configureApi, setAccessToken, setOnAuthFailure, setRefreshToken } from '@crisol/services';
+import { useAuthStore } from '@crisol/store';
 
 const API_URL = process.env['EXPO_PUBLIC_API_URL'] ?? 'http://localhost:8000';
 

@@ -1,7 +1,7 @@
 // @types/jest expone los globals (describe/it/expect) — sin import.
 import { render } from '@testing-library/react-native';
 
-import type { BudgetStatusItem, Category } from '@finanzas/types';
+import type { BudgetStatusItem, Category } from '@crisol/types';
 
 import { BudgetStatusCard } from './budget-status-card';
 

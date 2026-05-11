@@ -2,7 +2,7 @@
 
 import { forwardRef, type InputHTMLAttributes, type ReactNode } from 'react';
 
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 export interface AuthInputProps extends InputHTMLAttributes<HTMLInputElement> {
   label: string;

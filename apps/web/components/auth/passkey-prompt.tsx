@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react';
 
-import { passkeysApi } from '@finanzas/services';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import { passkeysApi } from '@crisol/services';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import { PasskeyAbortError, registerPasskey, supportsPasskeys } from '@/lib/webauthn';
 

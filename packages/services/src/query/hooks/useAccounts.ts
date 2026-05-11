@@ -5,7 +5,7 @@ import type {
   AccountBalancesResponse,
   AccountCreateRequest,
   AccountUpdateRequest,
-} from '@finanzas/types';
+} from '@crisol/types';
 
 import { accountsApi } from '../../api/endpoints/accounts';
 import { queryKeys } from '../keys';

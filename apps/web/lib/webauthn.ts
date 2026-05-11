@@ -4,7 +4,7 @@ import {
   startRegistration,
 } from '@simplewebauthn/browser';
 
-import { passkeysApi } from '@finanzas/services';
+import { passkeysApi } from '@crisol/services';
 
 /**
  * Detecta si el navegador soporta WebAuthn. Útil para esconder los botones

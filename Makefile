@@ -1,4 +1,4 @@
-# Finanzas App — Comandos de desarrollo
+# Crisol — Comandos de desarrollo
 # Usa: make <comando>
 
 .PHONY: dev dev-web dev-mobile dev-backend setup lint typecheck test verify format db-migrate db-upgrade docker-up docker-down clean

@@ -2,7 +2,7 @@ import type {
   Category,
   CategoryCreateRequest,
   CategoryUpdateRequest,
-} from '@finanzas/types';
+} from '@crisol/types';
 
 import { apiClient } from '../client';
 

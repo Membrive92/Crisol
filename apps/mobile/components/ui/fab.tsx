@@ -1,7 +1,7 @@
 import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
-import { colors, fontWeight } from '@finanzas/ui';
+import { colors, fontWeight } from '@crisol/ui';
 
 export interface FabLinkProps {
   href: string;

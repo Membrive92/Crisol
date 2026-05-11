@@ -1,7 +1,7 @@
 'use client';
 
-import type { ImportJobStatus } from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import type { ImportJobStatus } from '@crisol/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 const STATUS_LABEL: Record<ImportJobStatus, string> = {
   pending: 'Pendiente',

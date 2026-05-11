@@ -2,8 +2,8 @@
 
 import { useEffect, useRef } from 'react';
 
-import { configureApi, setAccessToken, setOnAuthFailure } from '@finanzas/services';
-import { useAuthStore } from '@finanzas/store';
+import { configureApi, setAccessToken, setOnAuthFailure } from '@crisol/services';
+import { useAuthStore } from '@crisol/store';
 
 const API_URL = process.env['NEXT_PUBLIC_API_URL'] ?? '/api';
 

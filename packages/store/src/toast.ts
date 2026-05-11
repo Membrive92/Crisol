@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-import type { Toast, ToastInput, ToastKind } from '@finanzas/types';
+import type { Toast, ToastInput, ToastKind } from '@crisol/types';
 
 /**
  * Defaults de auto-dismiss por kind. `error` y `loading` quedan en 0
@@ -98,7 +98,7 @@ export const useToastStore = create<ToastState>()((set) => ({
 /**
  * API procedural para callers que no quieren llamar a `useToastStore.getState()`.
  *
- *   import { toast } from '@finanzas/store';
+ *   import { toast } from '@crisol/store';
  *   toast.success('Guardado');
  *   toast.show({ kind: 'info', message: '...', action: { label: 'Deshacer', onPress } });
  */

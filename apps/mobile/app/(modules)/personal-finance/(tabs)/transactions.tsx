@@ -18,9 +18,9 @@ import {
   useRestoreTransaction,
   useTransactions,
   useTrashedTransactions,
-} from '@finanzas/services';
-import { toast } from '@finanzas/store';
-import type { Account, Category, Transaction } from '@finanzas/types';
+} from '@crisol/services';
+import { toast } from '@crisol/store';
+import type { Account, Category, Transaction } from '@crisol/types';
 import {
   colors,
   fontSize,
@@ -29,7 +29,7 @@ import {
   formatDate,
   radius,
   spacing,
-} from '@finanzas/ui';
+} from '@crisol/ui';
 
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 

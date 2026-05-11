@@ -2,8 +2,8 @@
 
 import Link from 'next/link';
 
-import type { ImportJob } from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import type { ImportJob } from '@crisol/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import { Button } from '../ui/button';
 import { StatusBadge } from './status-badge';

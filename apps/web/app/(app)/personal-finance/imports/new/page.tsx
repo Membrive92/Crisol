@@ -7,14 +7,14 @@ import {
   useCategories,
   useCommitImport,
   usePreviewImport,
-} from '@finanzas/services';
-import { toast } from '@finanzas/store';
+} from '@crisol/services';
+import { toast } from '@crisol/store';
 import type {
   ImportColumnMappings,
   ImportJob,
   ImportPreviewResponse,
-} from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+} from '@crisol/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import { MappingStep } from '@/components/imports/mapping-step';
 import { PreviewStep } from '@/components/imports/preview-step';

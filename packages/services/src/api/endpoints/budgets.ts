@@ -3,7 +3,7 @@ import type {
   BudgetCreateRequest,
   BudgetStatusResponse,
   BudgetUpdateRequest,
-} from '@finanzas/types';
+} from '@crisol/types';
 
 import { apiClient } from '../client';
 

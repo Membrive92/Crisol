@@ -12,10 +12,10 @@ import {
   useTransactions,
   useTrashedTransactions,
   useUnlinkTransfer,
-} from '@finanzas/services';
-import { toast, useCurrencyStore } from '@finanzas/store';
-import type { TransactionListQuery } from '@finanzas/types';
-import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
+} from '@crisol/services';
+import { toast, useCurrencyStore } from '@crisol/store';
+import type { TransactionListQuery } from '@crisol/types';
+import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
 
 import { StitchSearchToolbar } from '@/components/transactions/stitch-search-toolbar';
 import { StitchTransactionsKpiRow } from '@/components/transactions/stitch-transactions-kpi-row';

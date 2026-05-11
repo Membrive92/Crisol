@@ -1,6 +1,6 @@
 import { fireEvent, render } from '@testing-library/react-native';
 
-import type { Budget, Category } from '@finanzas/types';
+import type { Budget, Category } from '@crisol/types';
 
 import { BudgetActiveRow } from './budget-active-row';
 

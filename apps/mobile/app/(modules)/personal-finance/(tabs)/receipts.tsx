@@ -1,9 +1,9 @@
 import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 
-import { useReceipts } from '@finanzas/services';
-import type { Receipt } from '@finanzas/types';
-import { colors, fontSize, fontWeight, formatDate, radius, spacing } from '@finanzas/ui';
+import { useReceipts } from '@crisol/services';
+import type { Receipt } from '@crisol/types';
+import { colors, fontSize, fontWeight, formatDate, radius, spacing } from '@crisol/ui';
 
 const STATUS_LABEL: Record<Receipt['status'], string> = {
   pending: 'Pendiente',

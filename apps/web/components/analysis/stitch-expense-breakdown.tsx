@@ -3,8 +3,8 @@
 import { useState } from 'react';
 import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
 
-import type { CategoryBreakdownItem } from '@finanzas/types';
-import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@finanzas/ui';
+import type { CategoryBreakdownItem } from '@crisol/types';
+import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@crisol/ui';
 
 import { iconForCategoryName } from '@/lib/category-icons';
 import { Card } from '@/components/ui/card';

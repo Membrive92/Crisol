@@ -3,7 +3,7 @@
 import Link, { type LinkProps } from 'next/link';
 import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from 'react';
 
-import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
+import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
 
 const baseStyle: CSSProperties = {
   position: 'fixed',

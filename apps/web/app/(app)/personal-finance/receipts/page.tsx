@@ -3,9 +3,9 @@
 import { useState } from 'react';
 import Link from 'next/link';
 
-import { useReceipts } from '@finanzas/services';
-import type { ReceiptListQuery } from '@finanzas/types';
-import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
+import { useReceipts } from '@crisol/services';
+import type { ReceiptListQuery } from '@crisol/types';
+import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
 
 import { ReceiptList } from '@/components/receipts/receipt-list';
 import { Button } from '@/components/ui/button';

@@ -2,8 +2,8 @@
 
 import { useRouter } from 'next/navigation';
 
-import type { Receipt } from '@finanzas/types';
-import { colors, fontSize, fontWeight, formatDate } from '@finanzas/ui';
+import type { Receipt } from '@crisol/types';
+import { colors, fontSize, fontWeight, formatDate } from '@crisol/ui';
 
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 

@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react';
 
-import { colors, spacing } from '@finanzas/ui';
+import { colors, spacing } from '@crisol/ui';
 
 import { BrandPanel } from '@/components/auth/brand-panel';
 import { ThemeToggle } from '@/components/ui/theme-toggle';

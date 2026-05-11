@@ -4,7 +4,7 @@ import type {
   ImportListQuery,
   ImportListResponse,
   ImportPreviewResponse,
-} from '@finanzas/types';
+} from '@crisol/types';
 
 import { apiClient } from '../client';
 

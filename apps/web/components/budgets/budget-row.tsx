@@ -2,8 +2,8 @@
 
 import { useState } from 'react';
 
-import type { Budget, Category } from '@finanzas/types';
-import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@finanzas/ui';
+import type { Budget, Category } from '@crisol/types';
+import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@crisol/ui';
 
 import { Button } from '@/components/ui/button';
 

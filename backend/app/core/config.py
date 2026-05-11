@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     app_port: int = 8000
 
     # ---------- Database ----------
+    # Nota: el DSN por defecto sigue apuntando a la BD `finanzas` legacy
+    # — el rename a Crisol no fuerza renombrar la BD ya creada (sería
+    # destructivo). Los nuevos despliegues pueden usar el DSN
+    # `postgresql+asyncpg://crisol:crisol@localhost:5432/crisol`
+    # sobreescribiendo en `.env`.
     database_url: str = "postgresql+asyncpg://finanzas:finanzas@localhost:5432/finanzas"
     # BD aislada para tests. Se crea automáticamente desde conftest si no
     # existe. Nunca debe coincidir con `database_url` — los tests truncan
@@ -46,7 +51,7 @@ class Settings(BaseSettings):
 
     # Cookie del refresh token (web). Mobile sigue usando expo-secure-store
     # y enviando el refresh en el body — el backend acepta ambos.
-    auth_cookie_name: str = "finanzas_refresh"
+    auth_cookie_name: str = "crisol_refresh"
     auth_cookie_secure: bool = False  # ponerlo a true en prod (HTTPS).
     auth_cookie_samesite: str = "lax"  # lax | strict | none (none requiere secure).
 
@@ -56,7 +61,7 @@ class Settings(BaseSettings):
     # usuarios en el diálogo del SO. `origin` es el origin completo que
     # debe coincidir con el del cliente (incl. puerto en dev).
     webauthn_rp_id: str = "localhost"
-    webauthn_rp_name: str = "Finanzas"
+    webauthn_rp_name: str = "Crisol"
     webauthn_origin: str = "http://localhost:3030"
     webauthn_challenge_ttl_seconds: int = 300
 

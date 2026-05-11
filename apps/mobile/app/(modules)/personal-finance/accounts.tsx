@@ -9,13 +9,13 @@ import {
   useCreateAccount,
   useDeleteAccount,
   useUpdateAccount,
-} from '@finanzas/services';
-import { toast } from '@finanzas/store';
+} from '@crisol/services';
+import { toast } from '@crisol/store';
 import type {
   Account,
   AccountCreateRequest,
   AccountUpdateRequest,
-} from '@finanzas/types';
+} from '@crisol/types';
 import {
   colors,
   fontSize,
@@ -23,7 +23,7 @@ import {
   formatAmount,
   radius,
   spacing,
-} from '@finanzas/ui';
+} from '@crisol/ui';
 
 import {
   AccountFormModal,

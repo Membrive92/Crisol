@@ -1,25 +1,33 @@
 {
   "expo": {
-    "name": "Finanzas App",
-    "slug": "finanzas-app",
+    "name": "Crisol",
+    "slug": "crisol",
     "version": "0.0.0",
     "orientation": "portrait",
-    "scheme": "finanzas",
+    "scheme": "crisol",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0f0f0f"
+    },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.finanzas.app"
+      "bundleIdentifier": "com.crisol.app"
     },
     "android": {
-      "package": "com.finanzas.app",
+      "package": "com.crisol.app",
       "adaptiveIcon": {
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#0f0f0f"
       }
     },
     "web": {
       "bundler": "metro",
-      "output": "static"
+      "output": "static",
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-router",

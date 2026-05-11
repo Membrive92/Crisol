@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-import type { Category, ImportPreviewResponse, ImportSource } from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import type { Category, ImportPreviewResponse, ImportSource } from '@crisol/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import { Button } from '../ui/button';
 import { Spinner } from '../ui/spinner';

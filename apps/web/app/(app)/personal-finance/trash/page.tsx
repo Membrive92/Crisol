@@ -10,9 +10,9 @@ import {
   usePurgeTransaction,
   useRestoreTransaction,
   useTrashedTransactions,
-} from '@finanzas/services';
-import { toast } from '@finanzas/store';
-import { colors, fontSize, fontWeight, spacing } from '@finanzas/ui';
+} from '@crisol/services';
+import { toast } from '@crisol/store';
+import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
 
 import { TrashList } from '@/components/transactions/trash-list';
 import { Button } from '@/components/ui/button';

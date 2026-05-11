@@ -32,7 +32,7 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-const STORAGE_KEY = 'finanzas_theme';
+const STORAGE_KEY = 'crisol_theme';
 
 function readStoredPreference(): ThemePreference {
   try {

@@ -1,9 +1,9 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
-import { useTransaction, useUpdateTransaction } from '@finanzas/services';
-import type { TransactionUpdateRequest } from '@finanzas/types';
-import { colors, fontSize, spacing } from '@finanzas/ui';
+import { useTransaction, useUpdateTransaction } from '@crisol/services';
+import type { TransactionUpdateRequest } from '@crisol/types';
+import { colors, fontSize, spacing } from '@crisol/ui';
 
 import { TransactionForm } from '../../../../components/transaction-form';
 

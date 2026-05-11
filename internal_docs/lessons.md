@@ -1,4 +1,4 @@
-# Lecciones aprendidas — Finanzas App
+# Lecciones aprendidas — Crisol
 
 > Este archivo se actualiza CADA VEZ que se corrige un error que podría haberse
 > prevenido. Leer al inicio de cada fase y añadir entradas durante la misma.
@@ -87,7 +87,7 @@ export default defineConfig({
 **Error:** Añadí `"lint": "eslint ."` a `package.json` de paquetes que no tenían `eslint`
 instalado; `pnpm lint` falló con "eslint no se reconoce como un comando".
 **Causa:** En monorepo con `hoist-pattern` restrictivo, `eslint` no está disponible en cada
-paquete a menos que se declare como devDep (el preset `@finanzas/eslint-config` **usa** eslint
+paquete a menos que se declare como devDep (el preset `@crisol/eslint-config` **usa** eslint
 pero no lo arrastra para el binario del paquete).
 **Solución:** Añadir `"eslint": "^9.17.0"` a los `devDependencies` de cada paquete que tenga
 script de lint.

@@ -1,7 +1,7 @@
 'use client';
 
-import type { ReceiptStatus } from '@finanzas/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@finanzas/ui';
+import type { ReceiptStatus } from '@crisol/types';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 const STATUS_LABEL: Record<ReceiptStatus, string> = {
   pending: 'Pendiente',

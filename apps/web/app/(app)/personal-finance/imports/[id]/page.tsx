@@ -2,8 +2,8 @@
 
 import { useParams, useRouter } from 'next/navigation';
 
-import { useImport } from '@finanzas/services';
-import { colors, fontSize, spacing } from '@finanzas/ui';
+import { useImport } from '@crisol/services';
+import { colors, fontSize, spacing } from '@crisol/ui';
 
 import { ResultStep } from '@/components/imports/result-step';
 import { Button } from '@/components/ui/button';

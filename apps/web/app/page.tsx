@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
-import { useAuthStore } from '@finanzas/store';
+import { useAuthStore } from '@crisol/store';
 
 export default function RootPage() {
   const router = useRouter();

@@ -6,15 +6,15 @@ import {
   colors,
   fromDateInputValue,
   toDateInputValue,
-} from '@finanzas/ui';
-import { useAccounts, useCategories, useUserCurrencies } from '@finanzas/services';
-import { useCurrencyStore } from '@finanzas/store';
+} from '@crisol/ui';
+import { useAccounts, useCategories, useUserCurrencies } from '@crisol/services';
+import { useCurrencyStore } from '@crisol/store';
 import type {
   Category,
   Transaction,
   TransactionCreateRequest,
   TransactionUpdateRequest,
-} from '@finanzas/types';
+} from '@crisol/types';
 
 import { Button } from '../ui/button';
 import { Select, TextArea, TextInput } from '../ui/field';

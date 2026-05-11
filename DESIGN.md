@@ -1,6 +1,6 @@
 ---
 version: alpha
-name: Finanzas App
+name: Crisol
 description: >
   Personal-finance suite with a modular, multi-portfolio shell. Tone is
   calm and analytical: dark by default, neutral surfaces, blue brand
@@ -267,7 +267,7 @@ layout:
 
 ## Brand & Style
 
-Finanzas App is a personal-finance suite designed for calm, analytical
+Crisol is a personal-finance suite designed for calm, analytical
 work. The product is private by default — data lives locally and AI
 runs locally — and the design language reflects that promise: muted
 palettes, generous breathing room, and minimal chrome that gets out of

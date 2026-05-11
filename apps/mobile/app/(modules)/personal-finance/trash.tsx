@@ -7,8 +7,8 @@ import {
   usePurgeTransaction,
   useRestoreTransaction,
   useTrashedTransactions,
-} from '@finanzas/services';
-import type { Category, Transaction } from '@finanzas/types';
+} from '@crisol/services';
+import type { Category, Transaction } from '@crisol/types';
 import {
   colors,
   fontSize,
@@ -17,7 +17,7 @@ import {
   formatDate,
   radius,
   spacing,
-} from '@finanzas/ui';
+} from '@crisol/ui';
 
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 

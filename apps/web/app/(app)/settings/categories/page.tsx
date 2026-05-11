@@ -10,9 +10,9 @@ import {
   useDeleteCategory,
   useSeedRecommended,
   useUpdateCategory,
-} from '@finanzas/services';
-import { toast } from '@finanzas/store';
-import type { Category, CategoryKind } from '@finanzas/types';
+} from '@crisol/services';
+import { toast } from '@crisol/store';
+import type { Category, CategoryKind } from '@crisol/types';
 import {
   DEFAULT_CATEGORY_COLOR,
   colors,
@@ -20,7 +20,7 @@ import {
   fontWeight,
   radius,
   spacing,
-} from '@finanzas/ui';
+} from '@crisol/ui';
 
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';

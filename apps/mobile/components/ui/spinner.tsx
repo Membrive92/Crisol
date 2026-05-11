@@ -1,6 +1,6 @@
 import { ActivityIndicator } from 'react-native';
 
-import { colors } from '@finanzas/ui';
+import { colors } from '@crisol/ui';
 
 export interface SpinnerProps {
   size?: 'small' | 'large' | number;
