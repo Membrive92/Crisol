@@ -26,17 +26,12 @@ class Settings(BaseSettings):
     app_port: int = 8000
 
     # ---------- Database ----------
-    # Nota: el DSN por defecto sigue apuntando a la BD `finanzas` legacy
-    # — el rename a Crisol no fuerza renombrar la BD ya creada (sería
-    # destructivo). Los nuevos despliegues pueden usar el DSN
-    # `postgresql+asyncpg://crisol:crisol@localhost:5432/crisol`
-    # sobreescribiendo en `.env`.
-    database_url: str = "postgresql+asyncpg://finanzas:finanzas@localhost:5432/finanzas"
+    database_url: str = "postgresql+asyncpg://crisol:crisol@localhost:5432/crisol"
     # BD aislada para tests. Se crea automáticamente desde conftest si no
     # existe. Nunca debe coincidir con `database_url` — los tests truncan
     # tablas tras cada test y haría desaparecer datos de desarrollo.
     test_database_url: str = (
-        "postgresql+asyncpg://finanzas:finanzas@localhost:5432/finanzas_test"
+        "postgresql+asyncpg://crisol:crisol@localhost:5432/crisol_test"
     )
 
     # ---------- Auth ----------

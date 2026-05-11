@@ -4,19 +4,15 @@ services:
     container_name: crisol-postgres
     restart: unless-stopped
     environment:
-      # Default `finanzas/finanzas/finanzas` se mantiene por
-      # compatibilidad con la BD legacy. Para nuevos despliegues
-      # exporta `POSTGRES_USER=crisol POSTGRES_PASSWORD=... POSTGRES_DB=crisol`
-      # antes de levantar el compose.
-      POSTGRES_USER: ${POSTGRES_USER:-finanzas}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-finanzas}
-      POSTGRES_DB: ${POSTGRES_DB:-finanzas}
+      POSTGRES_USER: ${POSTGRES_USER:-crisol}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crisol}
+      POSTGRES_DB: ${POSTGRES_DB:-crisol}
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-finanzas}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-crisol}"]
       interval: 10s
       timeout: 5s
       retries: 5
