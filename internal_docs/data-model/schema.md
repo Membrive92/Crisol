@@ -34,6 +34,7 @@
 | `i6d83e4f29a5` | 20   | `category_rules` + enums `rulematchtype` y `rulefield`. |
 | `j7e95d1b3f4c` | 21.2 | `accounts` + enums `accounttype`/`accountnature` + WIPE de transactions/import_jobs/receipts + `account_id` (NOT NULL en transactions, opcional en import_jobs y fixed_expenses). |
 | `k8a92c4e7d5a1` | 21.3 | `transactions.transfer_pair_id` (FK auto-referente, NULLABLE, ON DELETE SET NULL) + index parcial `WHERE transfer_pair_id IS NOT NULL AND deleted_at IS NULL`. |
+| `l9b03d5f8e6b2` | 22   | `accounts.apr` (NUMERIC(6,4) NULL) + `accounts.term_months` (INTEGER NULL) + `accounts.start_date` (DATE NULL) — campos opcionales del cuadro de amortización francés para loans/mortgages. |
 
 ---
 
@@ -221,20 +222,23 @@ UNIQUE `(user_id, pattern, match_type, field, category_id)` — el
 mismo patrón puede mapear a categorías distintas si difiere algún
 otro campo, pero no se duplica la combinación exacta.
 
-### `accounts` (`PHASE-21.2`)
+### `accounts` (`PHASE-21.2`, ampliada en `PHASE-22`)
 
 | Columna | Tipo | Notas |
 |---------|------|-------|
 | `id` | `UUID` PK | |
 | `user_id` | `UUID` FK `users(id) ON DELETE CASCADE` | índice. |
 | `name` | `VARCHAR(100)` | único case-insensible por usuario (validado en service). |
-| `type` | `accounttype` | `BANK`, `SAVINGS`, `BROKERAGE`, `CRYPTO`, `CASH` (PHASE-21.2) + `CREDIT_CARD`, `LOAN`, `MORTGAGE` reservados para PHASE-22. |
-| `nature` | `accountnature` | `ASSET` (default) o `LIABILITY` (reservado). |
+| `type` | `accounttype` | `BANK`, `SAVINGS`, `BROKERAGE`, `CRYPTO`, `CASH` (assets) + `CREDIT_CARD`, `LOAN`, `MORTGAGE` (liabilities, PHASE-22). |
+| `nature` | `accountnature` | `ASSET` o `LIABILITY`. Se asigna automáticamente según `type` en el service (PHASE-22). |
 | `currency` | `VARCHAR(3)` | ISO 4217. Default `'EUR'`. |
 | `color` | `VARCHAR(7)` | hex `#RRGGBB`, opcional. |
 | `icon` | `VARCHAR(50)` | emoji, opcional. |
-| `opening_balance` | `NUMERIC(14, 2)` | default `0`. Saldo inicial declarado. |
+| `opening_balance` | `NUMERIC(14, 2)` | default `0`. Saldo inicial declarado. Para liabilities representa la deuda inicial (positivo = se debe). |
 | `opening_balance_date` | `DATE` | opcional. |
+| `apr` | `NUMERIC(6, 4)` | opcional (PHASE-22). Tasa **anual** como decimal (`0.035` = 3.5%). Sólo relevante en loans/mortgages/credit_cards. |
+| `term_months` | `INTEGER` | opcional (PHASE-22). Plazo del cuadro francés. Sólo relevante en loans/mortgages. |
+| `start_date` | `DATE` | opcional (PHASE-22). Fecha de inicio del cuadro francés. Sólo relevante en loans/mortgages. |
 | `display_order` | `INTEGER` | default `0`. Orden en UI. |
 | `is_archived` | `BOOLEAN` | default `FALSE`. Si TRUE, oculta del selector pero conserva histórico. |
 | `created_at`/`updated_at` | `TIMESTAMPTZ` | `now()`. |
@@ -243,6 +247,19 @@ otro campo, pero no se duplica la combinación exacta.
 `import_jobs.account_id` (nullable, FK SET NULL) y
 `fixed_expenses.account_id` (nullable, FK SET NULL) referencian
 esta tabla.
+
+**Inversión de signo en saldos (PHASE-22)**: la query
+`get_balances_for_user` calcula el `signed_amount` con un CASE que
+tiene en cuenta `nature` y `Category.kind`:
+
+- `LIABILITY` + `EXPENSE` → `+amount` (la compra sube la deuda)
+- `LIABILITY` + `INCOME` → `-amount` (un pago la baja)
+- `ASSET` + `EXPENSE` → `-amount`
+- `ASSET` + `INCOME` → `+amount`
+
+Esto permite tratar tarjetas de crédito como cuenta con saldo
+arrastrado (cada compra suma deuda, cada pago la resta) sin invertir
+las transacciones en sí.
 
 ### `exchange_rates` (`PHASE-8.1`)
 

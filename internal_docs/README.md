@@ -201,6 +201,12 @@ Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
 | 21.2 | Accounts module + onboarding + account_id obligatorio  | ✅     | —  |
 | 21.3 | Transfers + matcher + saldos + filtro cuenta + balances| ✅     | —  |
 
+### Fase 22 — Módulo de deuda
+
+| Fase | Nombre                                                 | Estado | PR |
+|------|--------------------------------------------------------|--------|----|
+| 22   | Liabilities + amortización francesa + KPIs salud deuda | ✅     | —  |
+
 ---
 
 ## Estructura de este directorio

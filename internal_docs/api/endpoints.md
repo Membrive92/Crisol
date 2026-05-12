@@ -366,22 +366,34 @@ Reglas:
 | GET    | `/accounts` | sí | `?include_archived=` | `200 list[Account]` |
 | GET    | `/accounts/{id}` | sí | — | `200 Account` |
 | GET    | `/accounts/balances` | sí | — | `200 AccountBalancesResponse { items, total_assets, total_liabilities, net_worth, mixed_currencies, reference_currency }` (PHASE-21.3) |
-| POST   | `/accounts` | sí | `{ name, type, currency?, color?, icon?, opening_balance?, opening_balance_date?, display_order? }` | `201 Account` (`409` si nombre duplicado, `400` si `type` reservado para PHASE-22) |
-| PUT    | `/accounts/{id}` | sí | partial | `200 Account` |
+| GET    | `/accounts/debt-health` | sí | — | `200 DebtHealthKpis { total_liabilities, total_assets, net_worth, debt_to_assets_ratio, dti_ratio, dti_status, monthly_debt_payment, monthly_income_avg, interest_paid_ytd, weighted_apr, time_to_payoff_months, reference_currency }` (PHASE-22) |
+| GET    | `/accounts/{id}/amortization-schedule` | sí | — | `200 AmortizationScheduleResponse { account_id, principal, apr, term_months, start_date, monthly_payment, total_interest, total_paid, rows[] }` (`400` si la cuenta no es loan/mortgage, falta APR/plazo/start_date o `opening_balance <= 0`) (PHASE-22) |
+| POST   | `/accounts` | sí | `{ name, type, currency?, color?, icon?, opening_balance?, opening_balance_date?, apr?, term_months?, start_date?, display_order? }` | `201 Account` (`409` si nombre duplicado, `400` si `type` no soportado) |
+| PUT    | `/accounts/{id}` | sí | partial (incluye `apr`, `term_months`, `start_date`) | `200 Account` |
 | DELETE | `/accounts/{id}` | sí | — | `204` (`409` si la cuenta tiene transacciones — usar `PUT { is_archived: true }`) |
 
 Reglas:
-- `type` permitido en PHASE-21.2: `bank | savings | brokerage |
-  crypto | cash`. Los `liability` (`credit_card | loan | mortgage`)
-  están reservados para PHASE-22.
+- `type` permitido: `bank | savings | brokerage | crypto | cash`
+  (assets) + `credit_card | loan | mortgage` (liabilities, PHASE-22).
+- `nature` se asigna automáticamente según el `type` (no se envía
+  desde el cliente).
+- `apr`, `term_months`, `start_date` sólo aplican a `loan` /
+  `mortgage`. Para otros tipos el backend los ignora.
 - Tras el wipe de PHASE-21.2, todo usuario empieza sin cuentas y
   el frontend bloquea en `/onboarding/accounts` hasta declarar al
   menos una.
-- `current_balance = opening_balance + Σ(income−expense)` en la
-  moneda nativa de la cuenta (excluye papelera; las transferencias
-  internas SÍ cuentan al saldo).
+- `current_balance` para assets: `opening_balance +
+  Σ(income−expense)`. Para liabilities el signo se invierte:
+  `opening_balance + Σ(expense−income)` (un gasto sube la deuda,
+  un ingreso/transferencia la baja). Excluye papelera.
 - `mixed_currencies=true` cuando las cuentas activas no comparten
   moneda — los totales son suma cruda sin conversión.
+- `/accounts/debt-health` opera sólo en la `reference_currency`
+  (primera cuenta no archivada por `display_order`). Cuentas en
+  otras divisas se ignoran silenciosamente.
+- `dti_status`: `healthy` (<0.36) · `caution` (0.36–0.43) ·
+  `stressed` (>0.43) · `unknown` (sin ingresos o sin pagos de
+  deuda registrados).
 
 ## Transfers (`PHASE-21.3`)
 
