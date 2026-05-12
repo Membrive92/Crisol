@@ -10,7 +10,11 @@ import {
 } from 'react-native';
 
 import type { Account, AccountType } from '@crisol/types';
-import { ASSET_ACCOUNT_TYPES } from '@crisol/types';
+import {
+  AMORTIZABLE_ACCOUNT_TYPES,
+  ASSET_ACCOUNT_TYPES,
+  LIABILITY_ACCOUNT_TYPES,
+} from '@crisol/types';
 import {
   DEFAULT_CATEGORY_COLOR,
   colors,
@@ -21,6 +25,7 @@ import {
 } from '@crisol/ui';
 
 import { AccountAppearanceFields } from './account-appearance-fields';
+import { DateInput } from '../ui/date-input';
 
 export interface AccountFormValues {
   name: string;
@@ -30,6 +35,16 @@ export interface AccountFormValues {
   icon: string | null;
   /** Decimal serializado como string. Vacío equivale a "0". */
   opening_balance: string;
+  /**
+   * APR anual en porcentaje (UI), p.ej. "3.5" para 3.5%. Vacío = sin
+   * valor. El caller transforma a decimal (`"0.035"`) antes de enviar
+   * al backend. Sólo aplica a tipos `loan` y `mortgage`.
+   */
+  apr_percent: string;
+  /** Plazo total en meses como string. Vacío = sin valor. */
+  term_months: string;
+  /** Fecha de inicio del préstamo en `YYYY-MM-DD`. Vacío = sin valor. */
+  start_date: string;
 }
 
 export interface AccountFormModalProps {
@@ -49,7 +64,6 @@ const TYPE_LABEL: Record<AccountType, string> = {
   brokerage: 'Bróker',
   crypto: 'Crypto',
   cash: 'Efectivo',
-  // PHASE-20 — no se exponen en PHASE-19.1, los dejamos por exhaustividad.
   credit_card: 'Tarjeta',
   loan: 'Préstamo',
   mortgage: 'Hipoteca',
@@ -62,7 +76,26 @@ export const DEFAULT_ACCOUNT_FORM: AccountFormValues = {
   color: DEFAULT_CATEGORY_COLOR,
   icon: null,
   opening_balance: '',
+  apr_percent: '',
+  term_months: '',
+  start_date: '',
 };
+
+/**
+ * Convierte un APR decimal serializado (ej. "0.035") al porcentaje que
+ * se muestra en UI ("3.5"). Recorta ceros finales para que "0.04" →
+ * "4". Devuelve cadena vacía si la entrada es null/no numérica.
+ */
+function aprDecimalToPercent(decimal: string | null): string {
+  if (!decimal) return '';
+  const numeric = Number(decimal);
+  if (!Number.isFinite(numeric)) return '';
+  return (numeric * 100).toString();
+}
+
+function isAmortizableType(type: AccountType): boolean {
+  return AMORTIZABLE_ACCOUNT_TYPES.includes(type);
+}
 
 function fromAccount(account: Account): AccountFormValues {
   return {
@@ -75,13 +108,20 @@ function fromAccount(account: Account): AccountFormValues {
       account.opening_balance && account.opening_balance !== '0.00'
         ? account.opening_balance
         : '',
+    apr_percent: aprDecimalToPercent(account.apr),
+    term_months: account.term_months ? String(account.term_months) : '',
+    start_date: account.start_date ?? '',
   };
 }
 
 /**
- * Modal espejo de `CategoryFormModal` para crear/editar cuentas.
- * Se reutiliza desde la pantalla settings-style (modo `full`) y desde
- * el onboarding (modo `minimal` — sólo nombre + tipo + moneda).
+ * Modal espejo de `CategoryFormModal` para crear/editar cuentas
+ * (PHASE-19.1, ampliado en PHASE-22 con campos de amortización).
+ *
+ * El picker de tipo separa "Activos" y "Pasivos / deuda" en dos chip
+ * rows. Para `loan` y `mortgage` se muestran tres TextInput extra
+ * (APR%, plazo en meses y fecha de inicio); al cambiar a otro tipo
+ * esos campos se limpian para no enviar valores residuales.
  */
 export function AccountFormModal({
   visible,
@@ -107,6 +147,22 @@ export function AccountFormModal({
     setValues((prev) => ({ ...prev, [field]: next }));
   }
 
+  function handleTypeChange(nextType: AccountType) {
+    // Al cambiar a un tipo no amortizable, limpiamos los campos
+    // específicos para que el caller no envíe valores residuales.
+    if (!isAmortizableType(nextType)) {
+      setValues((prev) => ({
+        ...prev,
+        type: nextType,
+        apr_percent: '',
+        term_months: '',
+        start_date: '',
+      }));
+      return;
+    }
+    setValues((prev) => ({ ...prev, type: nextType }));
+  }
+
   function handleSubmit() {
     setError(null);
     const trimmedName = values.name.trim();
@@ -124,6 +180,29 @@ export function AccountFormModal({
       setError('Importe inicial inválido.');
       return;
     }
+    if (isAmortizableType(values.type)) {
+      const aprRaw = values.apr_percent.trim().replace(',', '.');
+      if (aprRaw) {
+        const apr = Number(aprRaw);
+        if (!Number.isFinite(apr) || apr < 0) {
+          setError('APR inválido (porcentaje, ej. 3.5).');
+          return;
+        }
+      }
+      const term = values.term_months.trim();
+      if (term) {
+        const months = Number(term);
+        if (!Number.isInteger(months) || months <= 0) {
+          setError('Plazo en meses debe ser un entero positivo.');
+          return;
+        }
+      }
+      const start = values.start_date.trim();
+      if (start && !/^\d{4}-\d{2}-\d{2}$/.test(start)) {
+        setError('Fecha en formato YYYY-MM-DD.');
+        return;
+      }
+    }
     onSubmit({
       ...values,
       name: trimmedName,
@@ -131,6 +210,12 @@ export function AccountFormModal({
       opening_balance: opening,
     });
   }
+
+  const isLiability = LIABILITY_ACCOUNT_TYPES.includes(values.type);
+  const showAmortization = isAmortizableType(values.type);
+  const balanceLabel = isLiability
+    ? 'Capital pendiente (opcional)'
+    : 'Saldo inicial (opcional)';
 
   return (
     <Modal
@@ -164,13 +249,14 @@ export function AccountFormModal({
 
             <View>
               <Text style={styles.label}>Tipo</Text>
+              <Text style={styles.subLabel}>Activos</Text>
               <View style={styles.typeGrid}>
                 {ASSET_ACCOUNT_TYPES.map((opt) => {
                   const active = opt === values.type;
                   return (
                     <Pressable
                       key={opt}
-                      onPress={() => patch('type', opt)}
+                      onPress={() => handleTypeChange(opt)}
                       style={[
                         styles.typeChip,
                         active && styles.typeChipActive,
@@ -180,6 +266,34 @@ export function AccountFormModal({
                         style={[
                           styles.typeChipText,
                           active && styles.typeChipTextActive,
+                        ]}
+                      >
+                        {TYPE_LABEL[opt]}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Text style={[styles.subLabel, styles.subLabelSpaced]}>
+                Pasivos / deuda
+              </Text>
+              <View style={styles.typeGrid}>
+                {LIABILITY_ACCOUNT_TYPES.map((opt) => {
+                  const active = opt === values.type;
+                  return (
+                    <Pressable
+                      key={opt}
+                      onPress={() => handleTypeChange(opt)}
+                      style={[
+                        styles.typeChip,
+                        styles.typeChipLiability,
+                        active && styles.typeChipLiabilityActive,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.typeChipText,
+                          active && styles.typeChipLiabilityTextActive,
                         ]}
                       >
                         {TYPE_LABEL[opt]}
@@ -207,9 +321,12 @@ export function AccountFormModal({
             {variant === 'full' ? (
               <>
                 <View>
-                  <Text style={styles.label}>Saldo inicial (opcional)</Text>
+                  <Text style={styles.label}>{balanceLabel}</Text>
                   <TextInput
-                    style={styles.input}
+                    style={[
+                      styles.input,
+                      isLiability && { color: colors.danger },
+                    ]}
                     value={values.opening_balance}
                     onChangeText={(v) => patch('opening_balance', v)}
                     keyboardType="decimal-pad"
@@ -217,6 +334,45 @@ export function AccountFormModal({
                     placeholderTextColor={colors.textMuted}
                   />
                 </View>
+
+                {showAmortization ? (
+                  <View style={styles.amortBox}>
+                    <Text style={styles.amortLegend}>
+                      Cuadro de amortización (francés)
+                    </Text>
+                    <Text style={styles.amortHelp}>
+                      Rellena APR, plazo y fecha de inicio para calcular cuota
+                      mensual, intereses y saldo pendiente.
+                    </Text>
+                    <View>
+                      <Text style={styles.label}>APR anual (%)</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={values.apr_percent}
+                        onChangeText={(v) => patch('apr_percent', v)}
+                        keyboardType="decimal-pad"
+                        placeholder="3.50"
+                        placeholderTextColor={colors.textMuted}
+                      />
+                    </View>
+                    <View>
+                      <Text style={styles.label}>Plazo (meses)</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={values.term_months}
+                        onChangeText={(v) => patch('term_months', v)}
+                        keyboardType="number-pad"
+                        placeholder="360"
+                        placeholderTextColor={colors.textMuted}
+                      />
+                    </View>
+                    <DateInput
+                      label="Fecha de inicio"
+                      value={values.start_date}
+                      onChange={(v) => patch('start_date', v)}
+                    />
+                  </View>
+                ) : null}
 
                 <AccountAppearanceFields
                   color={values.color}
@@ -290,6 +446,15 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginBottom: spacing.xs,
   },
+  subLabel: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.semibold,
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: spacing.xs,
+  },
+  subLabelSpaced: { marginTop: spacing.sm },
   input: {
     backgroundColor: colors.surface,
     borderRadius: radius.sm,
@@ -318,6 +483,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primarySoft,
     borderColor: colors.primary,
   },
+  typeChipLiability: {
+    backgroundColor: colors.surface,
+  },
+  typeChipLiabilityActive: {
+    backgroundColor: colors.dangerSoft,
+    borderColor: colors.danger,
+  },
   typeChipText: {
     fontSize: fontSize.sm,
     color: colors.text,
@@ -326,6 +498,30 @@ const styles = StyleSheet.create({
   typeChipTextActive: {
     color: colors.primary,
     fontWeight: fontWeight.semibold,
+  },
+  typeChipLiabilityTextActive: {
+    color: colors.danger,
+    fontWeight: fontWeight.semibold,
+  },
+  amortBox: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceMuted,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  amortLegend: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.semibold,
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  amortHelp: {
+    fontSize: fontSize.xs,
+    color: colors.textMuted,
+    lineHeight: 16,
   },
   helper: {
     fontSize: fontSize.xs,

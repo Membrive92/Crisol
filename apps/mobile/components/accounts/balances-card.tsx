@@ -15,12 +15,17 @@ import {
 import { AccountSwatch } from './account-swatch';
 
 /**
- * Card de saldo agregado por cuenta mobile (PHASE-19.4). Espejo de
- * `apps/web/components/accounts/balances-card.tsx`. Muestra:
- *  - Patrimonio neto en `reference_currency` (suma cruda).
- *  - Subtotales activos / pasivos.
- *  - Lista compacta de cuentas activas con su `current_balance`.
- *  - Warning si `mixed_currencies === true` (totales sin convertir).
+ * Card de saldo agregado por cuenta mobile (PHASE-19.4, ampliada en
+ * PHASE-22). Espejo de `apps/web/components/accounts/balances-card.tsx`.
+ *
+ * - Patrimonio neto en `reference_currency` (suma cruda). Si es negativo
+ *   se pinta en `colors.danger`.
+ * - Subtotales Activos / Pasivos. Pasivos se muestra con prefijo "-"
+ *   y sólo aparece cuando `total_liabilities > 0`.
+ * - Desglose agrupado por nature (Activos primero, Pasivos luego).
+ *   Cada fila liability muestra su `current_balance` en color expense
+ *   con badge "DEUDA" para reforzar la semántica.
+ * - Warning si `mixed_currencies === true` (totales sin convertir).
  *
  * Las cuentas archivadas vienen en `data.items` pero se filtran del
  * desglose cruzando con `useAccounts({ includeArchived: true })` —
@@ -57,6 +62,12 @@ export function BalancesCard() {
   }
 
   const activeItems = data.items.filter((item) => !archivedIds.has(item.account_id));
+  const assetItems = activeItems.filter((item) => item.nature === 'asset');
+  const liabilityItems = activeItems.filter((item) => item.nature === 'liability');
+
+  const hasLiabilities = Number(data.total_liabilities) > 0;
+  const netWorthNegative = Number(data.net_worth) < 0;
+  const netWorthColor = netWorthNegative ? colors.danger : colors.text;
 
   return (
     <View style={styles.card}>
@@ -66,7 +77,7 @@ export function BalancesCard() {
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.eyebrow}>Patrimonio neto</Text>
-          <Text style={styles.netWorth}>
+          <Text style={[styles.netWorth, { color: netWorthColor }]}>
             {formatAmount(data.net_worth, data.reference_currency)}
           </Text>
         </View>
@@ -78,11 +89,13 @@ export function BalancesCard() {
           value={formatAmount(data.total_assets, data.reference_currency)}
           color={colors.income}
         />
-        <SubtotalRow
-          label="Pasivos"
-          value={formatAmount(data.total_liabilities, data.reference_currency)}
-          color={colors.textMuted}
-        />
+        {hasLiabilities ? (
+          <SubtotalRow
+            label="Pasivos"
+            value={`-${formatAmount(data.total_liabilities, data.reference_currency)}`}
+            color={colors.danger}
+          />
+        ) : null}
       </View>
 
       {data.mixed_currencies ? (
@@ -101,7 +114,14 @@ export function BalancesCard() {
         {activeItems.length === 0 ? (
           <Text style={styles.emptyText}>No hay cuentas activas.</Text>
         ) : (
-          activeItems.map((item) => <BalanceRow key={item.account_id} item={item} />)
+          <>
+            {assetItems.length > 0 ? (
+              <BalanceGroup title="Activos" items={assetItems} />
+            ) : null}
+            {liabilityItems.length > 0 ? (
+              <BalanceGroup title="Pasivos" items={liabilityItems} />
+            ) : null}
+          </>
         )}
       </View>
     </View>
@@ -123,20 +143,43 @@ function SubtotalRow({ label, value, color }: SubtotalRowProps) {
   );
 }
 
+interface BalanceGroupProps {
+  title: string;
+  items: AccountBalance[];
+}
+
+function BalanceGroup({ title, items }: BalanceGroupProps) {
+  return (
+    <View style={styles.group}>
+      <Text style={styles.groupTitle}>{title}</Text>
+      <View style={styles.groupBody}>
+        {items.map((item) => (
+          <BalanceRow key={item.account_id} item={item} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function BalanceRow({ item }: { item: AccountBalance }) {
   const isLiability = item.nature === 'liability';
+  const amountColor = isLiability ? colors.danger : colors.text;
+  const amountPrefix = isLiability ? '-' : '';
   return (
     <View style={styles.row}>
       <AccountSwatch color={item.color} icon={item.icon} size={24} />
-      <Text style={styles.rowName} numberOfLines={1}>
-        {item.name}
-      </Text>
-      <Text
-        style={[
-          styles.rowAmount,
-          isLiability && { color: colors.expense },
-        ]}
-      >
+      <View style={styles.rowNameWrap}>
+        <Text style={styles.rowName} numberOfLines={1}>
+          {item.name}
+        </Text>
+        {isLiability ? (
+          <View style={styles.debtBadge}>
+            <Text style={styles.debtBadgeText}>DEUDA</Text>
+          </View>
+        ) : null}
+      </View>
+      <Text style={[styles.rowAmount, { color: amountColor }]}>
+        {amountPrefix}
         {formatAmount(item.current_balance, item.currency)}
       </Text>
     </View>
@@ -180,7 +223,6 @@ const styles = StyleSheet.create({
   netWorth: {
     fontSize: fontSize.xl,
     fontWeight: fontWeight.bold,
-    color: colors.text,
     lineHeight: fontSize.xl + 4,
     marginTop: 2,
   },
@@ -228,6 +270,19 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
     paddingTop: spacing.sm,
+    gap: spacing.sm,
+  },
+  group: {
+    gap: spacing.xs,
+  },
+  groupTitle: {
+    fontSize: 11,
+    fontWeight: fontWeight.semibold,
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  groupBody: {
     gap: spacing.xs,
   },
   emptyText: {
@@ -239,16 +294,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
   },
-  rowName: {
+  rowNameWrap: {
     flex: 1,
     minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  rowName: {
+    flexShrink: 1,
     fontSize: fontSize.sm,
     color: colors.text,
+  },
+  debtBadge: {
+    backgroundColor: colors.dangerSoft,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: radius.sm,
+  },
+  debtBadgeText: {
+    fontSize: 10,
+    fontWeight: fontWeight.semibold,
+    color: colors.danger,
+    letterSpacing: 0.4,
   },
   rowAmount: {
     fontSize: fontSize.sm,
     fontWeight: fontWeight.semibold,
-    color: colors.text,
   },
   loadingText: {
     fontSize: fontSize.sm,

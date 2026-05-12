@@ -18,6 +18,7 @@ import type {
   AccountCreateRequest,
   AccountUpdateRequest,
 } from '@crisol/types';
+import { AMORTIZABLE_ACCOUNT_TYPES, LIABILITY_ACCOUNT_TYPES } from '@crisol/types';
 import {
   DEFAULT_CATEGORY_COLOR,
   colors,
@@ -35,21 +36,85 @@ import {
   type AccountFormValue,
 } from '@/components/accounts/account-form-fields';
 import { AccountSwatch } from '@/components/accounts/account-swatch';
+import { DebtPaymentWizard } from '@/components/accounts/debt-payment-wizard';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
+/**
+ * Convierte el porcentaje del UI (ej. "3.5") a decimal serializado
+ * para el backend (ej. "0.035"). Devuelve `null` si la entrada está
+ * vacía o no es numérica. La precisión se mantiene como string para
+ * evitar errores de float.
+ */
+function aprPercentToDecimal(percent: string): string | null {
+  const trimmed = percent.trim().replace(',', '.');
+  if (!trimmed) return null;
+  const numeric = Number(trimmed);
+  if (!Number.isFinite(numeric)) return null;
+  return (numeric / 100).toString();
+}
+
+/** Inverso de `aprPercentToDecimal`: serializado backend → string UI. */
+function aprDecimalToPercent(decimal: string | null): string {
+  if (!decimal) return '';
+  const numeric = Number(decimal);
+  if (!Number.isFinite(numeric)) return '';
+  // Recortamos ceros finales para que "0.035" → "3.5", "0.04" → "4".
+  return (numeric * 100).toString();
+}
+
 /** Convierte el form en payload para POST. */
 function toCreatePayload(form: AccountFormValue): AccountCreateRequest {
   const opening = form.opening_balance.trim().replace(',', '.');
-  return {
+  const payload: AccountCreateRequest = {
     name: form.name.trim(),
     type: form.type,
     currency: form.currency.trim().toUpperCase(),
     color: form.color,
     icon: form.icon,
-    ...(opening ? { opening_balance: opening } : {}),
   };
+  if (opening) payload.opening_balance = opening;
+  if (AMORTIZABLE_ACCOUNT_TYPES.includes(form.type)) {
+    const apr = aprPercentToDecimal(form.apr_percent);
+    if (apr !== null) payload.apr = apr;
+    const term = form.term_months.trim();
+    if (term) payload.term_months = Number(term);
+    const start = form.start_date.trim();
+    if (start) payload.start_date = start;
+  }
+  return payload;
+}
+
+function toUpdatePayload(form: AccountFormValue): AccountUpdateRequest {
+  const opening = form.opening_balance.trim().replace(',', '.');
+  const payload: AccountUpdateRequest = {
+    name: form.name.trim(),
+    type: form.type,
+    currency: form.currency.trim().toUpperCase(),
+    color: form.color,
+    icon: form.icon,
+  };
+  if (opening) payload.opening_balance = opening;
+  if (AMORTIZABLE_ACCOUNT_TYPES.includes(form.type)) {
+    const apr = aprPercentToDecimal(form.apr_percent);
+    // Si el usuario vacía el APR explícitamente, mandamos `null` para
+    // limpiar el valor en BD; si nunca lo tocó, igualmente apr === null
+    // (cadena vacía) y el backend lo trata como "sin cambio para los
+    // campos opcionales con null". Mismo razonamiento para term/start.
+    payload.apr = apr;
+    const term = form.term_months.trim();
+    payload.term_months = term ? Number(term) : null;
+    const start = form.start_date.trim();
+    payload.start_date = start ? start : null;
+  } else {
+    // Cambió a un tipo no amortizable — limpiamos los campos por si
+    // tenían valor previo (ya el form los reseteó visualmente).
+    payload.apr = null;
+    payload.term_months = null;
+    payload.start_date = null;
+  }
+  return payload;
 }
 
 function validate(form: AccountFormValue): AccountFormErrors | null {
@@ -61,6 +126,26 @@ function validate(form: AccountFormValue): AccountFormErrors | null {
   const opening = form.opening_balance.trim().replace(',', '.');
   if (opening && Number.isNaN(Number(opening))) {
     errors.opening_balance = 'Importe inválido';
+  }
+  if (AMORTIZABLE_ACCOUNT_TYPES.includes(form.type)) {
+    const aprRaw = form.apr_percent.trim().replace(',', '.');
+    if (aprRaw) {
+      const apr = Number(aprRaw);
+      if (!Number.isFinite(apr) || apr < 0) {
+        errors.apr_percent = 'APR inválido (porcentaje, ej. 3.5)';
+      }
+    }
+    const term = form.term_months.trim();
+    if (term) {
+      const months = Number(term);
+      if (!Number.isInteger(months) || months <= 0) {
+        errors.term_months = 'Plazo en meses (entero positivo)';
+      }
+    }
+    const start = form.start_date.trim();
+    if (start && !/^\d{4}-\d{2}-\d{2}$/.test(start)) {
+      errors.start_date = 'Fecha en formato YYYY-MM-DD';
+    }
   }
   return Object.keys(errors).length > 0 ? errors : null;
 }
@@ -326,9 +411,15 @@ function AccountRow({
   const remove = useDeleteAccount();
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [payingDebt, setPayingDebt] = useState(false);
   const [draft, setDraft] = useState<AccountFormValue>(() => fromAccount(account));
   const [errors, setErrors] = useState<AccountFormErrors | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
+
+  const isLiability = LIABILITY_ACCOUNT_TYPES.includes(account.type);
+  const isAmortizable = AMORTIZABLE_ACCOUNT_TYPES.includes(account.type);
+  const hasFullAmortization =
+    isAmortizable && !!account.apr && !!account.term_months && !!account.start_date;
 
   function startEdit() {
     setRowError(null);
@@ -345,16 +436,7 @@ function AccountRow({
       return;
     }
     setErrors(null);
-    const opening = draft.opening_balance.trim().replace(',', '.');
-    const payload: AccountUpdateRequest = {
-      name: draft.name.trim(),
-      type: draft.type,
-      currency: draft.currency.trim().toUpperCase(),
-      color: draft.color,
-      icon: draft.icon,
-      ...(opening ? { opening_balance: opening } : {}),
-    };
-    update.mutate(payload, {
+    update.mutate(toUpdatePayload(draft), {
       onSuccess: () => {
         setEditing(false);
         toast.success('Cuenta actualizada.');
@@ -431,6 +513,9 @@ function AccountRow({
     );
   }
 
+  const balanceColor = isLiability ? colors.danger : colors.text;
+  const balancePrefix = isLiability ? '-' : '';
+
   return (
     <div
       style={{
@@ -466,6 +551,23 @@ function AccountRow({
               (archivada)
             </span>
           ) : null}
+          {isLiability ? (
+            <span
+              style={{
+                marginLeft: spacing.xs,
+                fontSize: 10,
+                fontWeight: fontWeight.semibold,
+                color: colors.danger,
+                backgroundColor: colors.dangerSoft,
+                padding: '1px 6px',
+                borderRadius: radius.sm,
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+              }}
+            >
+              Deuda
+            </span>
+          ) : null}
         </div>
         <div style={{ fontSize: fontSize.xs, color: colors.textMuted }}>
           {TYPE_LABEL[account.type] ?? account.type} · {account.currency}
@@ -475,17 +577,42 @@ function AccountRow({
               <span
                 style={{
                   fontWeight: fontWeight.semibold,
-                  color: colors.text,
+                  color: balanceColor,
                   fontVariantNumeric: 'tabular-nums',
                 }}
               >
+                {balancePrefix}
                 {formatAmount(balance.current_balance, balance.currency)}
               </span>
             </>
           ) : null}
         </div>
+        {hasFullAmortization ? (
+          <div style={{ marginTop: 2 }}>
+            <Link
+              href={`/personal-finance/accounts/${account.id}/amortization`}
+              style={{
+                fontSize: fontSize.xs,
+                color: colors.primary,
+                textDecoration: 'none',
+                fontWeight: fontWeight.medium,
+              }}
+            >
+              Ver cuadro →
+            </Link>
+          </div>
+        ) : null}
       </div>
       <div style={{ display: 'flex', gap: spacing.xs, flexWrap: 'wrap' }}>
+        {isLiability && !account.is_archived ? (
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => setPayingDebt(true)}
+          >
+            Pagar cuota
+          </Button>
+        ) : null}
         <Button type="button" variant="ghost" onClick={startEdit}>
           Editar
         </Button>
@@ -528,6 +655,13 @@ function AccountRow({
         onConfirm={handleDelete}
         onCancel={() => setConfirming(false)}
       />
+      {isLiability && payingDebt ? (
+        <DebtPaymentWizard
+          liabilityAccount={account}
+          open={payingDebt}
+          onClose={() => setPayingDebt(false)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -543,5 +677,8 @@ function fromAccount(account: Account): AccountFormValue {
       account.opening_balance && account.opening_balance !== '0.00'
         ? account.opening_balance
         : '',
+    apr_percent: aprDecimalToPercent(account.apr),
+    term_months: account.term_months ? String(account.term_months) : '',
+    start_date: account.start_date ?? '',
   };
 }

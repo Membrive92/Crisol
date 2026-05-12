@@ -1,9 +1,7 @@
 /**
- * Tipos del dominio de cuentas (PHASE-19.1).
+ * Tipos del dominio de cuentas (PHASE-19.1, PHASE-22).
  *
  * Mantén el enum sincronizado con `backend/.../accounts/models.py`.
- * Los `liability` (`credit_card`, `loan`, `mortgage`) están reservados
- * para PHASE-20 — el frontend de PHASE-19.1 sólo expone los `asset`.
  */
 
 export type AccountType =
@@ -18,13 +16,32 @@ export type AccountType =
 
 export type AccountNature = 'asset' | 'liability';
 
-/** Tipos `asset` que la UI permite crear / editar en PHASE-19.1. */
+/** Tipos `asset` (dinero disponible). */
 export const ASSET_ACCOUNT_TYPES: readonly AccountType[] = [
   'bank',
   'savings',
   'brokerage',
   'crypto',
   'cash',
+] as const;
+
+/** Tipos `liability` (deuda). PHASE-22. */
+export const LIABILITY_ACCOUNT_TYPES: readonly AccountType[] = [
+  'credit_card',
+  'loan',
+  'mortgage',
+] as const;
+
+/** Cualquier tipo que el form expone al usuario. */
+export const SELECTABLE_ACCOUNT_TYPES: readonly AccountType[] = [
+  ...ASSET_ACCOUNT_TYPES,
+  ...LIABILITY_ACCOUNT_TYPES,
+] as const;
+
+/** Tipos a los que aplica el cuadro francés (apr/term/start_date). */
+export const AMORTIZABLE_ACCOUNT_TYPES: readonly AccountType[] = [
+  'loan',
+  'mortgage',
 ] as const;
 
 export interface Account {
@@ -40,6 +57,12 @@ export interface Account {
   opening_balance: string;
   /** YYYY-MM-DD o null. */
   opening_balance_date: string | null;
+  /** APR anual decimal (0.0350 = 3.50%). Sólo loan/mortgage. */
+  apr: string | null;
+  /** Plazo total en meses. Sólo loan/mortgage. */
+  term_months: number | null;
+  /** YYYY-MM-DD. Inicio del préstamo. Sólo loan/mortgage. */
+  start_date: string | null;
   display_order: number;
   is_archived: boolean;
   created_at: string;

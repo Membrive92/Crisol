@@ -20,6 +20,7 @@ import {
   type PeriodKey,
 } from '@/components/analysis/stitch-period-toggle';
 import { StitchSmartInsights } from '@/components/analysis/stitch-smart-insights';
+import { DebtHealthCard } from '@/components/dashboard/debt-health-card';
 import { Card } from '@/components/ui/card';
 import { ListIcon } from '@/components/ui/icons';
 
@@ -124,12 +125,21 @@ export default function AnalysisPage() {
         <StitchPeriodToggle value={period} onChange={setPeriod} />
       </header>
 
-      {/* Saldo agregado por cuenta — independiente del periodo
-          seleccionado (siempre snapshot actual). Va por delante del
-          bento porque responde la pregunta "¿cuánto tengo?" antes que
-          "¿cómo me he movido?". */}
-      <div style={{ marginBottom: spacing.md }}>
+      {/* Saldo agregado por cuenta + salud financiera (PHASE-22).
+          Independientes del periodo seleccionado (siempre snapshot
+          actual). Van por delante del bento porque responden las
+          preguntas "¿cuánto tengo?" y "¿estoy en buena salud?" antes
+          que "¿cómo me he movido?". */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+          gap: spacing.md,
+          marginBottom: spacing.md,
+        }}
+      >
         <BalancesCard />
+        <DebtHealthCard />
       </div>
 
       {/* Bento principal: chart + métricas */}

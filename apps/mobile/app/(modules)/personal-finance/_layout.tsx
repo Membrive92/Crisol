@@ -29,6 +29,10 @@ export default function PersonalFinanceLayout() {
         options={{ headerShown: true, title: 'Cuentas' }}
       />
       <Stack.Screen
+        name="accounts/[id]/amortization"
+        options={{ headerShown: true, title: 'Cuadro de amortización' }}
+      />
+      <Stack.Screen
         name="transfers"
         options={{ headerShown: true, title: 'Transferencias internas' }}
       />

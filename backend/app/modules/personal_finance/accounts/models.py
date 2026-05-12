@@ -83,6 +83,19 @@ class Account(Base):
         Numeric(14, 2), nullable=False, default=Decimal("0"), server_default="0"
     )
     opening_balance_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # PHASE-22.3: cuadro de amortización opcional para liabilities tipo
+    # `loan` / `mortgage`. Con APR + plazo + fecha de inicio, el backend
+    # genera la tabla francesa (cuota constante, intereses decrecientes,
+    # principal creciente). Tarjetas no usan estos campos — su saldo es
+    # arrastrado sin plan fijo. NULLABLE en todos para no romper assets.
+    apr: Mapped[Decimal | None] = mapped_column(
+        Numeric(6, 4), nullable=True
+    )
+    """APR anual como decimal (0.035 = 3.5%). NULL = sin cuadro."""
+    term_months: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    """Plazo total en meses. NULL = sin cuadro."""
+    start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    """Fecha de inicio del préstamo. NULL = sin cuadro."""
     display_order: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )

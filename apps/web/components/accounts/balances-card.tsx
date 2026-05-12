@@ -30,12 +30,15 @@ export interface BalancesCardProps {
 }
 
 /**
- * Card de saldo agregado por cuenta (PHASE-19.4).
+ * Card de saldo agregado por cuenta (PHASE-19.4, ampliada en PHASE-22).
  *
- * Muestra el patrimonio neto en `reference_currency` (suma cruda de
- * cuentas activas; los archivados están en `items` pero el backend ya
- * los excluye de los totales). Si `mixed_currencies` es true se pinta
- * un warning sutil porque los totales no convierten entre divisas.
+ * Muestra el patrimonio neto en `reference_currency` calculado como
+ * `total_assets - total_liabilities` (los pasivos llegan con magnitud
+ * positiva del backend y ya se restaron para `net_worth`). Cuando el
+ * patrimonio neto es negativo, el valor se pinta en color danger.
+ *
+ * Las liabilities se renderizan en su propia sección visual y cada fila
+ * pinta su `current_balance` en color expense con un badge "DEUDA".
  */
 export function BalancesCard({ variant = 'full' }: BalancesCardProps) {
   const { data, isLoading, isError } = useAccountBalances();
@@ -80,6 +83,13 @@ export function BalancesCard({ variant = 'full' }: BalancesCardProps) {
   // las muestra). Aquí queremos sólo activas.
   const activeItems = data.items.filter((item) => !archivedIds.has(item.account_id));
   const showDetail = variant === 'full' || expanded;
+
+  const assetItems = activeItems.filter((item) => item.nature === 'asset');
+  const liabilityItems = activeItems.filter((item) => item.nature === 'liability');
+
+  const hasLiabilities = Number(data.total_liabilities) > 0;
+  const netWorthNegative = Number(data.net_worth) < 0;
+  const netWorthColor = netWorthNegative ? colors.danger : colors.text;
 
   return (
     <Card
@@ -130,7 +140,7 @@ export function BalancesCard({ variant = 'full' }: BalancesCardProps) {
             style={{
               fontSize: fontSize.xl,
               fontWeight: fontWeight.bold,
-              color: colors.text,
+              color: netWorthColor,
               fontVariantNumeric: 'tabular-nums',
               letterSpacing: '-0.01em',
               lineHeight: 1.1,
@@ -154,11 +164,13 @@ export function BalancesCard({ variant = 'full' }: BalancesCardProps) {
           value={formatAmount(data.total_assets, data.reference_currency)}
           color={colors.income}
         />
-        <SubtotalRow
-          label="Pasivos"
-          value={formatAmount(data.total_liabilities, data.reference_currency)}
-          color={colors.textMuted}
-        />
+        {hasLiabilities ? (
+          <SubtotalRow
+            label="Pasivos"
+            value={`-${formatAmount(data.total_liabilities, data.reference_currency)}`}
+            color={colors.danger}
+          />
+        ) : null}
       </div>
 
       {data.mixed_currencies ? (
@@ -206,30 +218,30 @@ export function BalancesCard({ variant = 'full' }: BalancesCardProps) {
       ) : null}
 
       {showDetail ? (
-        <ul
+        <div
           style={{
-            listStyle: 'none',
-            margin: 0,
-            padding: 0,
             display: 'flex',
             flexDirection: 'column',
-            gap: spacing.xs,
+            gap: spacing.sm,
             borderTop: `1px solid ${colors.border}`,
             paddingTop: spacing.sm,
           }}
         >
           {activeItems.length === 0 ? (
-            <li
-              style={{ fontSize: fontSize.xs, color: colors.textMuted }}
-            >
+            <p style={{ margin: 0, fontSize: fontSize.xs, color: colors.textMuted }}>
               No hay cuentas activas.
-            </li>
+            </p>
           ) : (
-            activeItems.map((item) => (
-              <BalanceRow key={item.account_id} item={item} />
-            ))
+            <>
+              {assetItems.length > 0 ? (
+                <BalanceGroup title="Activos" items={assetItems} />
+              ) : null}
+              {liabilityItems.length > 0 ? (
+                <BalanceGroup title="Pasivos" items={liabilityItems} />
+              ) : null}
+            </>
           )}
-        </ul>
+        </div>
       ) : null}
     </Card>
   );
@@ -268,8 +280,49 @@ function SubtotalRow({
   );
 }
 
+function BalanceGroup({
+  title,
+  items,
+}: {
+  title: string;
+  items: AccountBalance[];
+}) {
+  return (
+    <section style={{ display: 'flex', flexDirection: 'column', gap: spacing.xs }}>
+      <h4
+        style={{
+          margin: 0,
+          fontSize: 11,
+          fontWeight: fontWeight.semibold,
+          color: colors.textMuted,
+          textTransform: 'uppercase',
+          letterSpacing: '0.04em',
+        }}
+      >
+        {title}
+      </h4>
+      <ul
+        style={{
+          listStyle: 'none',
+          margin: 0,
+          padding: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: spacing.xs,
+        }}
+      >
+        {items.map((item) => (
+          <BalanceRow key={item.account_id} item={item} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function BalanceRow({ item }: { item: AccountBalance }) {
   const isLiability = item.nature === 'liability';
+  const amountColor = isLiability ? colors.danger : colors.text;
+  const amountPrefix = isLiability ? '-' : '';
   return (
     <li
       style={{
@@ -288,22 +341,42 @@ function BalanceRow({ item }: { item: AccountBalance }) {
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: spacing.xs,
         }}
       >
         {item.name}
+        {isLiability ? (
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: fontWeight.semibold,
+              color: colors.danger,
+              backgroundColor: colors.dangerSoft,
+              padding: '1px 6px',
+              borderRadius: radius.sm,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+              flex: '0 0 auto',
+            }}
+          >
+            Deuda
+          </span>
+        ) : null}
       </span>
       <span
         style={{
           fontSize: fontSize.sm,
           fontWeight: fontWeight.semibold,
-          color: isLiability ? colors.expense : colors.text,
+          color: amountColor,
           fontVariantNumeric: 'tabular-nums',
           whiteSpace: 'nowrap',
         }}
       >
+        {amountPrefix}
         {formatAmount(item.current_balance, item.currency)}
       </span>
     </li>
   );
 }
-

@@ -19,6 +19,7 @@ import {
   type DonutKindFilter,
 } from '../../../../components/dashboard/category-donut';
 import { CurrencyPicker } from '../../../../components/dashboard/currency-picker';
+import { DebtHealthCard } from '../../../../components/dashboard/debt-health-card';
 import { KpiCards } from '../../../../components/dashboard/kpi-cards';
 import { MonthlyChart } from '../../../../components/dashboard/monthly-chart';
 import {
@@ -216,6 +217,7 @@ export default function AnalysisScreen() {
         <PeriodToggle value={period} onChange={setPeriod} />
 
         <BalancesCard />
+        <DebtHealthCard />
         <KpiCards summary={summaryQuery.data} isLoading={summaryQuery.isLoading} />
         <SavingsRateCard summary={summaryQuery.data} />
         <MonthlyChart

@@ -10,16 +10,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
+from app.modules.personal_finance.accounts.debt_health import compute_debt_health
 from app.modules.personal_finance.accounts.schemas import (
     AccountBalancesResponse,
     AccountCreate,
     AccountResponse,
     AccountUpdate,
+    AmortizationScheduleResponse,
+    DebtHealthKpis,
 )
 from app.modules.personal_finance.accounts.service import (
     create_account,
     delete_account,
     get_account,
+    get_amortization_schedule,
     get_balances,
     list_accounts,
     update_account,
@@ -55,6 +59,37 @@ async def balances_endpoint(
     monedas activas no son homogéneas, `mixed_currencies=true`.
     """
     return await get_balances(db, user.id)
+
+
+@router.get("/debt-health", response_model=DebtHealthKpis)
+async def debt_health_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> DebtHealthKpis:
+    """KPIs de salud financiera (PHASE-22.4): DTI, debt-to-assets,
+    intereses YTD, APR medio ponderado, proyección de tiempo hasta
+    saldar la deuda al ritmo actual.
+    """
+    return await compute_debt_health(db, user.id)
+
+
+@router.get(
+    "/{account_id}/amortization-schedule",
+    response_model=AmortizationScheduleResponse,
+)
+async def amortization_schedule_endpoint(
+    account_id: uuid.UUID,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AmortizationScheduleResponse:
+    """Cuadro francés de amortización para una liability `loan`/`mortgage`.
+
+    Devuelve la cuota mensual constante, el desglose de cada mes
+    (principal vs intereses) y los totales (intereses pagados durante
+    todo el plazo, total a pagar). 400 si la cuenta no es liability
+    apta o si faltan APR/plazo/fecha de inicio.
+    """
+    return await get_amortization_schedule(db, account_id, user.id)
 
 
 @router.get("/{account_id}", response_model=AccountResponse)

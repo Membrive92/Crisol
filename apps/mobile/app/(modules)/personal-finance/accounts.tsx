@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 
 import {
   formatApiError,
@@ -17,6 +17,10 @@ import type {
   AccountUpdateRequest,
 } from '@crisol/types';
 import {
+  AMORTIZABLE_ACCOUNT_TYPES,
+  LIABILITY_ACCOUNT_TYPES,
+} from '@crisol/types';
+import {
   colors,
   fontSize,
   fontWeight,
@@ -30,6 +34,7 @@ import {
   type AccountFormValues,
 } from '../../../components/accounts/account-form-modal';
 import { AccountSwatch } from '../../../components/accounts/account-swatch';
+import { DebtPaymentWizard } from '../../../components/accounts/debt-payment-wizard';
 import { ConfirmDialog } from '../../../components/ui/confirm-dialog';
 
 const TYPE_LABEL: Record<string, string> = {
@@ -44,9 +49,77 @@ const TYPE_LABEL: Record<string, string> = {
 };
 
 /**
- * Pantalla de gestión de cuentas mobile (PHASE-19.1). Espejo de
- * `categories.tsx`: lista agrupada (Activas / Archivadas), FAB para
- * crear, modal compartido para crear/editar.
+ * Convierte el porcentaje del UI (ej. "3.5") a decimal serializado para
+ * el backend (ej. "0.035"). Devuelve `null` si vacío o no numérico.
+ */
+function aprPercentToDecimal(percent: string): string | null {
+  const trimmed = percent.trim().replace(',', '.');
+  if (!trimmed) return null;
+  const numeric = Number(trimmed);
+  if (!Number.isFinite(numeric)) return null;
+  return (numeric / 100).toString();
+}
+
+/**
+ * Convierte un `AccountFormValues` a payload de creación, incluyendo
+ * los campos de amortización si el tipo es loan/mortgage.
+ */
+function toCreatePayload(values: AccountFormValues): AccountCreateRequest {
+  const payload: AccountCreateRequest = {
+    name: values.name,
+    type: values.type,
+    currency: values.currency,
+    color: values.color,
+    icon: values.icon,
+  };
+  if (values.opening_balance) payload.opening_balance = values.opening_balance;
+  if (AMORTIZABLE_ACCOUNT_TYPES.includes(values.type)) {
+    const apr = aprPercentToDecimal(values.apr_percent);
+    if (apr !== null) payload.apr = apr;
+    const term = values.term_months.trim();
+    if (term) payload.term_months = Number(term);
+    const start = values.start_date.trim();
+    if (start) payload.start_date = start;
+  }
+  return payload;
+}
+
+/**
+ * Variante de update: si el tipo es no-amortizable, fuerza null para
+ * los campos de amortización (limpia residuales del backend).
+ */
+function toUpdatePayload(values: AccountFormValues): AccountUpdateRequest {
+  const payload: AccountUpdateRequest = {
+    name: values.name,
+    type: values.type,
+    currency: values.currency,
+    color: values.color,
+    icon: values.icon,
+  };
+  if (values.opening_balance) payload.opening_balance = values.opening_balance;
+  if (AMORTIZABLE_ACCOUNT_TYPES.includes(values.type)) {
+    payload.apr = aprPercentToDecimal(values.apr_percent);
+    const term = values.term_months.trim();
+    payload.term_months = term ? Number(term) : null;
+    const start = values.start_date.trim();
+    payload.start_date = start ? start : null;
+  } else {
+    payload.apr = null;
+    payload.term_months = null;
+    payload.start_date = null;
+  }
+  return payload;
+}
+
+/**
+ * Pantalla de gestión de cuentas mobile (PHASE-19.1, ampliada en
+ * PHASE-22). Espejo de `categories.tsx`: lista agrupada (Activas /
+ * Archivadas), FAB para crear, modal compartido para crear/editar.
+ *
+ * PHASE-22 — para cuentas liability:
+ * - Saldo en rojo + badge "DEUDA".
+ * - Botón "Pagar cuota" si está activa, abre `DebtPaymentWizard`.
+ * - Link "Ver cuadro →" si tiene `apr`, `term_months` y `start_date`.
  *
  * Las cuentas con histórico no se pueden borrar — el backend devuelve
  * 409 con un detalle español que se muestra tal cual al usuario; en ese
@@ -63,6 +136,7 @@ export default function AccountsScreen() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Account | null>(null);
+  const [payingDebt, setPayingDebt] = useState<Account | null>(null);
 
   const items = list.data ?? [];
   const active = items.filter((a) => !a.is_archived);
@@ -89,17 +163,7 @@ export default function AccountsScreen() {
   }
 
   function handleCreate(values: AccountFormValues) {
-    const payload: AccountCreateRequest = {
-      name: values.name,
-      type: values.type,
-      currency: values.currency,
-      color: values.color,
-      icon: values.icon,
-      ...(values.opening_balance
-        ? { opening_balance: values.opening_balance }
-        : {}),
-    };
-    createMutation.mutate(payload, {
+    createMutation.mutate(toCreatePayload(values), {
       onSuccess: () => {
         toast.success('Cuenta creada.');
         setFormOpen(false);
@@ -169,6 +233,7 @@ export default function AccountsScreen() {
               balances={balanceByAccount}
               onEdit={openEdit}
               onDelete={setPendingDelete}
+              onPayDebt={setPayingDebt}
             />
             {includeArchived ? (
               <AccountGroup
@@ -177,6 +242,7 @@ export default function AccountsScreen() {
                 balances={balanceByAccount}
                 onEdit={openEdit}
                 onDelete={setPendingDelete}
+                onPayDebt={setPayingDebt}
               />
             ) : null}
           </>
@@ -222,6 +288,14 @@ export default function AccountsScreen() {
         onConfirm={confirmDelete}
         onCancel={() => setPendingDelete(null)}
       />
+
+      {payingDebt ? (
+        <DebtPaymentWizard
+          liabilityAccount={payingDebt}
+          visible={payingDebt !== null}
+          onClose={() => setPayingDebt(null)}
+        />
+      ) : null}
     </View>
   );
 }
@@ -241,17 +315,7 @@ function EditAccountModal({ visible, account, onClose }: EditAccountModalProps) 
   const update = useUpdateAccount(account.id);
 
   function handleSubmit(values: AccountFormValues) {
-    const payload: AccountUpdateRequest = {
-      name: values.name,
-      type: values.type,
-      currency: values.currency,
-      color: values.color,
-      icon: values.icon,
-      ...(values.opening_balance
-        ? { opening_balance: values.opening_balance }
-        : {}),
-    };
-    update.mutate(payload, {
+    update.mutate(toUpdatePayload(values), {
       onSuccess: () => {
         toast.success('Cuenta actualizada.');
         onClose();
@@ -278,6 +342,7 @@ interface AccountGroupProps {
   balances: Map<string, { current_balance: string; currency: string }>;
   onEdit: (a: Account) => void;
   onDelete: (a: Account) => void;
+  onPayDebt: (a: Account) => void;
 }
 
 function AccountGroup({
@@ -286,6 +351,7 @@ function AccountGroup({
   balances,
   onEdit,
   onDelete,
+  onPayDebt,
 }: AccountGroupProps) {
   if (items.length === 0) {
     return (
@@ -303,51 +369,106 @@ function AccountGroup({
         {title} · {items.length}
       </Text>
       <View style={styles.list}>
-        {items.map((account, idx) => {
-          const balance = balances.get(account.id);
-          const isLiability = account.nature === 'liability';
-          return (
-            <View
-              key={account.id}
-              style={[styles.row, idx === 0 && { borderTopWidth: 0 }]}
-            >
-              <AccountSwatch color={account.color} icon={account.icon} />
-              <View style={styles.rowBody}>
-                <Text style={styles.rowName} numberOfLines={1}>
-                  {account.name}
-                  {account.is_archived ? (
-                    <Text style={styles.rowMutedSuffix}> (archivada)</Text>
-                  ) : null}
-                </Text>
-                <Text style={styles.rowMeta} numberOfLines={1}>
-                  {TYPE_LABEL[account.type] ?? account.type} · {account.currency}
-                  {balance ? (
-                    <Text
-                      style={[
-                        styles.rowBalance,
-                        isLiability && { color: colors.expense },
-                      ]}
-                    >
-                      {' · '}
-                      {formatAmount(balance.current_balance, balance.currency)}
-                    </Text>
-                  ) : null}
-                </Text>
+        {items.map((account, idx) => (
+          <AccountRow
+            key={account.id}
+            account={account}
+            balance={balances.get(account.id)}
+            isFirst={idx === 0}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            onPayDebt={onPayDebt}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+interface AccountRowProps {
+  account: Account;
+  balance: { current_balance: string; currency: string } | undefined;
+  isFirst: boolean;
+  onEdit: (a: Account) => void;
+  onDelete: (a: Account) => void;
+  onPayDebt: (a: Account) => void;
+}
+
+function AccountRow({
+  account,
+  balance,
+  isFirst,
+  onEdit,
+  onDelete,
+  onPayDebt,
+}: AccountRowProps) {
+  const router = useRouter();
+  const isLiability = LIABILITY_ACCOUNT_TYPES.includes(account.type);
+  const isAmortizable = AMORTIZABLE_ACCOUNT_TYPES.includes(account.type);
+  const hasFullAmortization =
+    isAmortizable && !!account.apr && !!account.term_months && !!account.start_date;
+  const balanceColor = isLiability ? colors.danger : colors.text;
+  const balancePrefix = isLiability ? '-' : '';
+
+  return (
+    <View style={[styles.row, isFirst && { borderTopWidth: 0 }]}>
+      <View style={styles.rowMain}>
+        <AccountSwatch color={account.color} icon={account.icon} />
+        <View style={styles.rowBody}>
+          <View style={styles.rowNameLine}>
+            <Text style={styles.rowName} numberOfLines={1}>
+              {account.name}
+              {account.is_archived ? (
+                <Text style={styles.rowMutedSuffix}> (archivada)</Text>
+              ) : null}
+            </Text>
+            {isLiability ? (
+              <View style={styles.debtBadge}>
+                <Text style={styles.debtBadgeText}>DEUDA</Text>
               </View>
-              <Pressable onPress={() => onEdit(account)} style={styles.rowAction}>
-                <Text style={styles.rowActionText}>Editar</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => onDelete(account)}
-                style={styles.rowAction}
+            ) : null}
+          </View>
+          <Text style={styles.rowMeta} numberOfLines={1}>
+            {TYPE_LABEL[account.type] ?? account.type} · {account.currency}
+            {balance ? (
+              <Text
+                style={[styles.rowBalance, { color: balanceColor }]}
               >
-                <Text style={[styles.rowActionText, { color: colors.danger }]}>
-                  Borrar
-                </Text>
-              </Pressable>
-            </View>
-          );
-        })}
+                {' · '}
+                {balancePrefix}
+                {formatAmount(balance.current_balance, balance.currency)}
+              </Text>
+            ) : null}
+          </Text>
+          {hasFullAmortization ? (
+            <Pressable
+              onPress={() =>
+                router.push({
+                  pathname: '/(modules)/personal-finance/accounts/[id]/amortization',
+                  params: { id: account.id },
+                })
+              }
+              style={styles.amortLink}
+            >
+              <Text style={styles.amortLinkText}>Ver cuadro →</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
+      <View style={styles.rowActions}>
+        {isLiability && !account.is_archived ? (
+          <Pressable onPress={() => onPayDebt(account)} style={styles.rowAction}>
+            <Text style={styles.rowActionText}>Pagar cuota</Text>
+          </Pressable>
+        ) : null}
+        <Pressable onPress={() => onEdit(account)} style={styles.rowAction}>
+          <Text style={styles.rowActionText}>Editar</Text>
+        </Pressable>
+        <Pressable onPress={() => onDelete(account)} style={styles.rowAction}>
+          <Text style={[styles.rowActionText, { color: colors.danger }]}>
+            Borrar
+          </Text>
+        </Pressable>
       </View>
     </View>
   );
@@ -406,16 +527,26 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
     borderTopWidth: 1,
     borderTopColor: colors.border,
+    gap: spacing.sm,
+  },
+  rowMain: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
   },
   rowBody: { flex: 1, minWidth: 0 },
+  rowNameLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    flexWrap: 'wrap',
+  },
   rowName: {
+    flexShrink: 1,
     fontSize: fontSize.md,
     color: colors.text,
     fontWeight: fontWeight.medium,
@@ -428,8 +559,34 @@ const styles = StyleSheet.create({
   rowMeta: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: 2 },
   rowBalance: {
     fontSize: fontSize.xs,
-    color: colors.text,
     fontWeight: fontWeight.semibold,
+  },
+  debtBadge: {
+    backgroundColor: colors.dangerSoft,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: radius.sm,
+  },
+  debtBadgeText: {
+    fontSize: 10,
+    fontWeight: fontWeight.semibold,
+    color: colors.danger,
+    letterSpacing: 0.4,
+  },
+  amortLink: {
+    marginTop: spacing.xs,
+    alignSelf: 'flex-start',
+  },
+  amortLinkText: {
+    fontSize: fontSize.xs,
+    color: colors.primary,
+    fontWeight: fontWeight.medium,
+  },
+  rowActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    justifyContent: 'flex-end',
   },
   rowAction: {
     paddingHorizontal: spacing.xs,

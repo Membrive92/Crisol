@@ -412,4 +412,38 @@ SEED_CATEGORIES: list[SeedCategoryDef] = [
             _cc("TARJETA FINANCIADA"),
         ],
     },
+    # PHASE-22: intereses como expense diferenciado del principal.
+    # El wizard "Pagar deuda" splittea la cuota entre principal
+    # (transfer hacia la liability) y estos intereses (expense).
+    {
+        "name": "Intereses hipoteca",
+        "kind": CategoryKind.EXPENSE,
+        "color": "#475569",
+        "icon": "🏦",
+        "rules": [
+            _cc("INTERESES HIPOTECA"),
+            _cc("INTERESES HIPOTECARIOS"),
+        ],
+    },
+    {
+        "name": "Intereses préstamo",
+        "kind": CategoryKind.EXPENSE,
+        "color": "#64748b",
+        "icon": "💸",
+        "rules": [
+            _cc("INTERESES PRESTAMO"),
+            _cc("LIQUIDACION DE INTERESES"),
+        ],
+    },
+    {
+        "name": "Intereses tarjeta",
+        "kind": CategoryKind.EXPENSE,
+        "color": "#f97316",
+        "icon": "💳",
+        "rules": [
+            _cc("INTERESES TARJETA"),
+            _cc("INTERESES POR APLAZAMIENTO"),
+            _cc("INTERESES FINANCIACION"),
+        ],
+    },
 ]

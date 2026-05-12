@@ -10,8 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.modules.personal_finance.accounts.models import AccountNature, AccountType
 
-# Sólo los tipos `asset` se exponen al usuario en PHASE-19.1. Los
-# `liability` se gestionarán cuando llegue PHASE-20 (módulo deuda).
+# Tipos `asset` exponibles al usuario.
 ASSET_ACCOUNT_TYPES: frozenset[AccountType] = frozenset(
     {
         AccountType.BANK,
@@ -19,6 +18,16 @@ ASSET_ACCOUNT_TYPES: frozenset[AccountType] = frozenset(
         AccountType.BROKERAGE,
         AccountType.CRYPTO,
         AccountType.CASH,
+    }
+)
+
+# PHASE-22: tipos `liability` (deuda). El service asigna nature
+# automáticamente según el type.
+LIABILITY_ACCOUNT_TYPES: frozenset[AccountType] = frozenset(
+    {
+        AccountType.CREDIT_CARD,
+        AccountType.LOAN,
+        AccountType.MORTGAGE,
     }
 )
 
@@ -33,6 +42,11 @@ class AccountCreate(BaseModel):
     icon: str | None = Field(default=None, max_length=50)
     opening_balance: Decimal = Field(default=Decimal("0"), decimal_places=2)
     opening_balance_date: date | None = None
+    # PHASE-22.3: cuadro de amortización opcional para loan/mortgage.
+    apr: Decimal | None = Field(default=None, ge=Decimal("0"), le=Decimal("1"), decimal_places=4)
+    """APR anual como decimal (0.0350 = 3.50%)."""
+    term_months: int | None = Field(default=None, ge=1, le=600)
+    start_date: date | None = None
     display_order: int = Field(default=0, ge=0)
 
 
@@ -46,6 +60,9 @@ class AccountUpdate(BaseModel):
     icon: str | None = Field(default=None, max_length=50)
     opening_balance: Decimal | None = Field(default=None, decimal_places=2)
     opening_balance_date: date | None = None
+    apr: Decimal | None = Field(default=None, ge=Decimal("0"), le=Decimal("1"), decimal_places=4)
+    term_months: int | None = Field(default=None, ge=1, le=600)
+    start_date: date | None = None
     display_order: int | None = Field(default=None, ge=0)
     is_archived: bool | None = None
 
@@ -63,6 +80,9 @@ class AccountResponse(BaseModel):
     icon: str | None
     opening_balance: Decimal
     opening_balance_date: date | None
+    apr: Decimal | None = None
+    term_months: int | None = None
+    start_date: date | None = None
     display_order: int
     is_archived: bool
     created_at: datetime
@@ -89,6 +109,81 @@ class AccountBalance(BaseModel):
     cuenta."""
     current_balance: Decimal
     """`opening_balance + movements_balance`."""
+
+
+class DebtHealthKpis(BaseModel):
+    """KPIs de salud financiera basados en deudas activas (PHASE-22.4).
+
+    Todas las cifras vienen en `reference_currency` (la moneda
+    dominante entre cuentas activas, igual que en `/accounts/balances`).
+    `null` cuando no hay datos suficientes para computar (ej. sin
+    ingresos no se puede DTI).
+
+    `dti_status` interpreta `dti_ratio`:
+    - `healthy`   → < 0.36
+    - `caution`   → 0.36 a 0.43
+    - `stressed`  → > 0.43
+    - `unknown`   → no calculable
+
+    `time_to_payoff_months` proyecta el ritmo actual de amortización
+    de principal hacia adelante (lineal, sin asumir cuadro fijo).
+    Cuenta sólo los pagos `transfer` netos del último período hacia
+    cuentas liability.
+    """
+
+    total_liabilities: Decimal
+    total_assets: Decimal
+    net_worth: Decimal
+    debt_to_assets_ratio: float | None
+    """`total_liabilities / total_assets` cuando assets > 0."""
+    dti_ratio: float | None
+    """Cuota mensual estimada / ingreso mensual medio."""
+    dti_status: str
+    """`healthy | caution | stressed | unknown`."""
+    monthly_debt_payment: Decimal
+    """Suma de cuotas mensuales recurrentes (cuadros + tarjetas
+    estimadas). Tarjetas estiman con la cuota teórica del último mes."""
+    monthly_income_avg: Decimal
+    """Ingreso mensual medio de los últimos 6 meses (excluye
+    transferencias internas)."""
+    interest_paid_ytd: Decimal
+    """Intereses pagados desde el 1 de enero hasta hoy
+    (categorías de intereses)."""
+    weighted_apr: float | None
+    """APR medio ponderado por saldo entre liabilities con apr
+    declarado. `null` si ninguna lo tiene."""
+    time_to_payoff_months: int | None
+    """Meses restantes si mantienes el ritmo medio de amortización
+    actual. `null` si no hay actividad reciente."""
+    reference_currency: str
+
+
+class AmortizationRowResponse(BaseModel):
+    """Una fila del cuadro francés (PHASE-22.3)."""
+
+    month: int
+    due_date: date
+    payment: Decimal
+    interest: Decimal
+    principal: Decimal
+    remaining_balance: Decimal
+
+
+class AmortizationScheduleResponse(BaseModel):
+    """Cuadro completo + KPIs derivados (PHASE-22.3)."""
+
+    account_id: uuid.UUID
+    principal: Decimal
+    apr: Decimal
+    term_months: int
+    start_date: date
+    monthly_payment: Decimal
+    """Cuota constante (sistema francés)."""
+    total_interest: Decimal
+    """Intereses totales que pagarás durante el plazo completo."""
+    total_paid: Decimal
+    """Total a pagar (principal + intereses)."""
+    rows: list[AmortizationRowResponse]
 
 
 class AccountBalancesResponse(BaseModel):

@@ -8,7 +8,7 @@ from decimal import Decimal
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.personal_finance.accounts.models import Account
+from app.modules.personal_finance.accounts.models import Account, AccountNature
 from app.modules.personal_finance.categories.models import Category, CategoryKind
 from app.modules.personal_finance.transactions.models import Transaction
 
@@ -88,27 +88,39 @@ async def get_balances_for_user(
     """Suma neta de cada cuenta del usuario en la moneda nativa de la
     cuenta (sin conversión cross-currency).
 
-    Convención (PHASE-19.4):
-    - `kind=income`     → suma al saldo
-    - `kind=expense`    → resta al saldo
-    - sin categoría     → suma (signed amount es positivo y la
-                          interpretación por defecto es ingreso)
-    - txs en papelera   → no cuentan
-    - transferencias    → SÍ cuentan al saldo individual de su cuenta
-                          (el signo lo da el `kind` de su categoría
-                          igual que cualquier otra tx)
+    Convención del signo (PHASE-19.4 + PHASE-22):
+    - Cuenta `nature=asset` (cte, broker, ahorro, cripto, cash):
+        income suma, expense resta. Saldo positivo = dinero disponible.
+    - Cuenta `nature=liability` (tarjeta, préstamo, hipoteca):
+        expense **suma** (la compra aumenta la deuda), income **resta**
+        (un pago/transfer entrante reduce la deuda). Saldo positivo =
+        cuánto debes.
+    - Sin categoría: el signo natural por `nature` (asset suma, liability
+      suma como una entrada cualquiera).
+    - Txs en papelera no cuentan.
+    - Las transferencias internas SÍ cuentan al saldo individual de su
+      cuenta (el `transfer_pair_id` excluye sólo de los agregados del
+      dashboard, no del saldo por cuenta).
 
     Sólo agrega txs cuya `currency` coincide con la `currency` de la
-    cuenta — txs en otra moneda dentro de una cuenta multi-divisa se
-    ignoran de momento (PHASE-19.4 mínimo viable; PHASE-19.5 puede
-    sumar otras divisas convirtiéndolas).
+    cuenta. Multi-divisa dentro de una cuenta queda fuera.
 
     El saldo final del frontend es:
         opening_balance + balances[account_id]
-
-    Esta función NO añade el opening_balance — eso lo hace el caller.
     """
     signed_amount = case(
+        # Liability: signos invertidos respecto a asset.
+        (
+            (Account.nature == AccountNature.LIABILITY)
+            & (Category.kind == CategoryKind.EXPENSE),
+            Transaction.amount,
+        ),
+        (
+            (Account.nature == AccountNature.LIABILITY)
+            & (Category.kind == CategoryKind.INCOME),
+            -Transaction.amount,
+        ),
+        # Asset (default).
         (Category.kind == CategoryKind.EXPENSE, -Transaction.amount),
         (Category.kind == CategoryKind.INCOME, Transaction.amount),
         else_=Transaction.amount,
@@ -136,17 +148,26 @@ async def get_balance_for_account(
     user_id: uuid.UUID,
     *,
     account_currency: str,
+    account_nature: AccountNature = AccountNature.ASSET,
 ) -> Decimal:
     """Igual que `get_balances_for_user` pero para una sola cuenta.
 
-    `account_currency` se pasa porque la query filtra por igualdad de
-    currency contra la cuenta — el caller la conoce ya.
+    `account_nature` decide la convención del signo (ver
+    `get_balances_for_user`). Default `ASSET` para compatibilidad con
+    callers existentes.
     """
-    signed_amount = case(
-        (Category.kind == CategoryKind.EXPENSE, -Transaction.amount),
-        (Category.kind == CategoryKind.INCOME, Transaction.amount),
-        else_=Transaction.amount,
-    )
+    if account_nature == AccountNature.LIABILITY:
+        signed_amount = case(
+            (Category.kind == CategoryKind.EXPENSE, Transaction.amount),
+            (Category.kind == CategoryKind.INCOME, -Transaction.amount),
+            else_=Transaction.amount,
+        )
+    else:
+        signed_amount = case(
+            (Category.kind == CategoryKind.EXPENSE, -Transaction.amount),
+            (Category.kind == CategoryKind.INCOME, Transaction.amount),
+            else_=Transaction.amount,
+        )
     query = (
         select(func.coalesce(func.sum(signed_amount), 0))
         .select_from(Transaction)

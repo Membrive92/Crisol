@@ -3,6 +3,8 @@ import type {
   AccountBalancesResponse,
   AccountCreateRequest,
   AccountUpdateRequest,
+  AmortizationSchedule,
+  DebtHealthKpis,
 } from '@crisol/types';
 
 import { apiClient } from '../client';
@@ -23,6 +25,18 @@ export const accountsApi = {
   async balances(): Promise<AccountBalancesResponse> {
     const response = await apiClient.get<AccountBalancesResponse>(
       '/accounts/balances',
+    );
+    return response.data;
+  },
+
+  async debtHealth(): Promise<DebtHealthKpis> {
+    const response = await apiClient.get<DebtHealthKpis>('/accounts/debt-health');
+    return response.data;
+  },
+
+  async amortizationSchedule(id: string): Promise<AmortizationSchedule> {
+    const response = await apiClient.get<AmortizationSchedule>(
+      `/accounts/${id}/amortization-schedule`,
     );
     return response.data;
   },

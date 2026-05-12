@@ -79,18 +79,21 @@ async def test_create_rejects_duplicate_name(client: AsyncClient) -> None:
     assert second.status_code == 409
 
 
-async def test_create_rejects_liability_type_in_phase_19_1(
+async def test_create_liability_type_assigns_nature(
     client: AsyncClient,
 ) -> None:
-    """Tipos `liability` (credit_card, loan, mortgage) están reservados
-    para PHASE-20 — el endpoint los rechaza con 400."""
+    """Tipos `liability` (credit_card/loan/mortgage) se aceptan (PHASE-22)
+    y reciben `nature=liability` automáticamente."""
     token = await _setup_user(client, "liability@example.com")
     r = await client.post(
         "/accounts",
         json={"name": "Visa", "type": "credit_card"},
         headers=_auth(token),
     )
-    assert r.status_code == 400
+    assert r.status_code == 201
+    body = r.json()
+    assert body["nature"] == "liability"
+    assert body["type"] == "credit_card"
 
 
 async def test_update_account(client: AsyncClient) -> None:

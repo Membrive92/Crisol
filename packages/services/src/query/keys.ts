@@ -22,6 +22,9 @@ export const queryKeys = {
       [...queryKeys.accounts.all, 'list', includeArchived] as const,
     detail: (id: string) => [...queryKeys.accounts.all, 'detail', id] as const,
     balances: () => [...queryKeys.accounts.all, 'balances'] as const,
+    debtHealth: () => [...queryKeys.accounts.all, 'debt-health'] as const,
+    amortization: (id: string) =>
+      [...queryKeys.accounts.all, 'amortization', id] as const,
   },
   transfers: {
     all: ['transfers'] as const,

@@ -5,6 +5,8 @@ import type {
   AccountBalancesResponse,
   AccountCreateRequest,
   AccountUpdateRequest,
+  AmortizationSchedule,
+  DebtHealthKpis,
 } from '@crisol/types';
 
 import { accountsApi } from '../../api/endpoints/accounts';
@@ -62,5 +64,24 @@ export function useAccountBalances() {
     queryKey: queryKeys.accounts.balances(),
     queryFn: () => accountsApi.balances(),
     staleTime: 1000 * 60,
+  });
+}
+
+export function useDebtHealth() {
+  return useQuery<DebtHealthKpis, Error>({
+    queryKey: queryKeys.accounts.debtHealth(),
+    queryFn: () => accountsApi.debtHealth(),
+    staleTime: 1000 * 60,
+  });
+}
+
+export function useAmortizationSchedule(id: string | undefined) {
+  return useQuery<AmortizationSchedule, Error>({
+    queryKey: id
+      ? queryKeys.accounts.amortization(id)
+      : queryKeys.accounts.all,
+    queryFn: () => accountsApi.amortizationSchedule(id as string),
+    enabled: !!id,
+    staleTime: 1000 * 60 * 5,
   });
 }

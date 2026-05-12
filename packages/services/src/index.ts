@@ -43,7 +43,9 @@ export {
   useAccount,
   useAccountBalances,
   useAccounts,
+  useAmortizationSchedule,
   useCreateAccount,
+  useDebtHealth,
   useDeleteAccount,
   useUpdateAccount,
 } from './query/hooks/useAccounts';

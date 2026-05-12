@@ -12,11 +12,22 @@ export type {
   AccountNature,
   AccountType,
 } from './models/account';
-export { ASSET_ACCOUNT_TYPES } from './models/account';
+export {
+  AMORTIZABLE_ACCOUNT_TYPES,
+  ASSET_ACCOUNT_TYPES,
+  LIABILITY_ACCOUNT_TYPES,
+  SELECTABLE_ACCOUNT_TYPES,
+} from './models/account';
 export type {
   AccountBalance,
   AccountBalancesResponse,
 } from './models/account-balance';
+export type {
+  AmortizationRow,
+  AmortizationSchedule,
+  DebtHealthKpis,
+  DtiStatus,
+} from './models/debt';
 export type {
   TransferCandidate,
   TransferMatchResponse,

@@ -27,7 +27,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 
-const REDIRECT_TARGET = '/personal-finance';
+const REDIRECT_TARGET = '/personal-finance/analysis';
 
 function validate(form: AccountFormValue): AccountFormErrors | null {
   const errors: AccountFormErrors = {};
