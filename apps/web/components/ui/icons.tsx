@@ -9,7 +9,7 @@ import type { CSSProperties, ReactNode, SVGProps } from 'react';
  * icono es un componente puro de unos pocos paths.
  */
 
-interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'children'> {
+export interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'children'> {
   size?: number | undefined;
   style?: CSSProperties | undefined;
 }

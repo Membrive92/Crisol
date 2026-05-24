@@ -1,12 +1,22 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, type ComponentType } from 'react';
 
-import { MODULES, type AppModule } from '@crisol/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
+import { MODULES, type AppModule, type ModuleId } from '@crisol/types';
+import { colors, fontWeight, spacing } from '@crisol/ui';
 
-import { LockIcon, PlusIcon, XIcon } from '@/components/ui/icons';
+import {
+  BarChart3Icon,
+  HeartPulseIcon,
+  HomeIcon,
+  LayoutDashboardIcon,
+  PlusIcon,
+  TrendingUpIcon,
+  WalletIcon,
+  XIcon,
+  type IconProps,
+} from '@/components/ui/icons';
 
 export const SIDEBAR_WIDTH = 240;
 export const HEADER_ROW = 56;
@@ -19,6 +29,19 @@ export const HEADER_HEIGHT_BARE = HEADER_ROW; // sin tabs (módulos planos como 
 // también `MOBILE_NAV_GLOBAL_STYLES` en `(app)/layout.tsx`.
 export const MOBILE_BREAKPOINT_PX = 768;
 
+// PHASE-29.2: icono por módulo. Los módulos del registry no llevan icono
+// todavía (ver TODO en `packages/types/src/models/module.ts`) — lo
+// resolvemos aquí mientras tanto para no acoplar el shape del modelo al
+// chrome web.
+const MODULE_ICONS: Record<ModuleId, ComponentType<IconProps>> = {
+  dashboard: LayoutDashboardIcon,
+  'personal-finance': WalletIcon,
+  debt: HeartPulseIcon,
+  crypto: BarChart3Icon,
+  investments: TrendingUpIcon,
+  'real-estate': HomeIcon,
+};
+
 interface AppSidebarProps {
   active: AppModule;
   /** Estado del drawer mobile. En desktop (>=768px) este flag es ignorado por CSS. */
@@ -29,16 +52,26 @@ interface AppSidebarProps {
 
 /**
  * Sidebar lateral fija con la lista de **módulos** del producto.
- * El módulo activo se marca con dot + bg `surfaceMuted` + border-right
- * en `primary`. Los demás módulos del registro (`crypto`,
- * `investments`, `real-estate`) aparecen deshabilitados con caption
- * "Próximamente". Footer con CTA "+ Añadir transacción".
  *
- * Las secciones internas del módulo activo (Dashboard, Análisis,
- * etc.) NO viven aquí — viven en la barra superior, vía
- * `<ModuleSections>`.
+ * PHASE-29.2 — refactor del chrome:
+ *  - Brand: logo (radial-gradient inline, no bitmap) + "Crisol" 17px / 600.
+ *  - Items: padding generoso (10×12), gap 12, font 14 / 500, con
+ *    ico-wrap 30×30 (radius 7) en `surface-muted` que se llena de
+ *    `primary-soft` + copper al hover/active. La activa lleva un
+ *    `::before` de 3px copper en el borde izquierdo (logrado vía un
+ *    `<span>` absolutamente posicionado porque no usamos CSS modules).
+ *  - Categorías: overline "ESPACIO" + "PRÓXIMAMENTE" para separar los
+ *    módulos disponibles de los locked. Eliminado el `module-switcher`
+ *    chip bajo el logo que duplicaba "Espacio".
+ *  - CTA "Añadir transacción": gradient copper, 3 cols (plus + label
+ *    con subtítulo + kbd "N"), el plus rota 90° en hover.
+ *  - Footer: "Datos en este dispositivo" como caption para reforzar la
+ *    privacy stance.
  */
 export function AppSidebar({ active, mobileOpen = false, onCloseMobile }: AppSidebarProps) {
+  const enabled = MODULES.filter((m) => m.enabled);
+  const locked = MODULES.filter((m) => !m.enabled);
+
   return (
     <aside
       data-app-sidebar="true"
@@ -50,25 +83,14 @@ export function AppSidebar({ active, mobileOpen = false, onCloseMobile }: AppSid
         left: 0,
         bottom: 0,
         width: SIDEBAR_WIDTH,
-        // Chrome dark: el panel lateral se asienta en `background`, no
-        // `surface`. Las cards del contenido principal usan `surface`,
-        // así que se elevan visualmente sobre el chrome — patrón
-        // típico de UIs dark mode (Linear, Vercel, Stitch).
         backgroundColor: colors.background,
         borderRight: `1px solid ${colors.border}`,
         display: 'flex',
         flexDirection: 'column',
-        // Sube por encima del header (50) y backdrop (45) para que en
-        // modo drawer cubra el chrome al deslizarse. En desktop no
-        // entra en conflicto porque sidebar y header no se solapan.
         zIndex: 60,
       }}
     >
-      {/* Marca — único bloque de branding de la sidebar. Vive en el
-          top-left para que el corner superior pertenezca al panel
-          lateral y no a un hueco del header. La caption "Workspace ·
-          Almacenamiento local" se eliminó: era ruido sin información
-          accionable. */}
+      {/* Brand */}
       <div
         style={{
           height: 56,
@@ -84,21 +106,14 @@ export function AppSidebar({ active, mobileOpen = false, onCloseMobile }: AppSid
           style={{
             display: 'inline-flex',
             alignItems: 'center',
-            gap: spacing.sm,
-            fontSize: fontSize.lg,
-            fontWeight: fontWeight.bold,
+            gap: 10,
+            fontSize: 17,
+            fontWeight: fontWeight.semibold,
             color: colors.text,
-            letterSpacing: '-0.02em',
+            letterSpacing: '-0.01em',
           }}
         >
-          <img
-            src="/favicon.svg"
-            alt=""
-            aria-hidden="true"
-            width={24}
-            height={24}
-            style={{ display: 'block', flex: '0 0 auto' }}
-          />
+          <BrandDot />
           Crisol
         </span>
         <button
@@ -107,7 +122,7 @@ export function AppSidebar({ active, mobileOpen = false, onCloseMobile }: AppSid
           aria-label="Cerrar menú"
           onClick={onCloseMobile}
           style={{
-            display: 'none', // override en mobile vía media query global
+            display: 'none',
             alignItems: 'center',
             justifyContent: 'center',
             width: 36,
@@ -124,137 +139,344 @@ export function AppSidebar({ active, mobileOpen = false, onCloseMobile }: AppSid
         </button>
       </div>
 
-      {/* Lista de módulos */}
+      {/* Módulos disponibles + próximos */}
       <nav
         aria-label="Módulos"
-        style={{ padding: `${spacing.md}px ${spacing.sm}px 0`, marginBottom: spacing.md }}
+        style={{
+          padding: `${spacing.md}px ${spacing.md}px 0`,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: spacing.md,
+        }}
       >
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {MODULES.map((m) => (
-            <li key={m.id}>
-              <ModuleRow module={m} isActive={m.id === active.id} />
-            </li>
+        <Section title="Espacio">
+          {enabled.map((m) => (
+            <ModuleItem key={m.id} module={m} isActive={m.id === active.id} />
           ))}
-        </ul>
+        </Section>
+
+        {locked.length > 0 ? (
+          <Section title="Próximamente">
+            {locked.map((m) => (
+              <ModuleItem key={m.id} module={m} isActive={false} />
+            ))}
+          </Section>
+        ) : null}
       </nav>
 
       <div style={{ flex: 1 }} />
 
-      {/* Footer: CTA */}
+      {/* Footer: CTA + caption */}
       <div style={{ padding: spacing.md, borderTop: `1px solid ${colors.border}` }}>
-        <Link
-          href="/personal-finance/transactions/new"
+        <PrimaryCTA />
+        <p
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: spacing.xs,
-            width: '100%',
-            padding: `${spacing.sm + 2}px 0`,
-            backgroundColor: colors.primary,
-            color: colors.onPrimary,
-            border: `1px solid ${colors.primary}`,
-            borderRadius: radius.md,
-            fontSize: fontSize.sm,
-            fontWeight: fontWeight.semibold,
-            textDecoration: 'none',
+            margin: `${spacing.sm}px 0 0`,
+            fontSize: 11,
+            color: colors.textSubtle,
+            textAlign: 'center',
+            letterSpacing: '0.02em',
           }}
         >
-          <PlusIcon size={16} />
-          Añadir transacción
-        </Link>
+          Datos en este dispositivo
+        </p>
       </div>
     </aside>
   );
 }
 
-function ModuleRow({ module, isActive }: { module: AppModule; isActive: boolean }) {
+/* ---------- helpers internos ---------- */
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <p
+        style={{
+          margin: `0 ${spacing.sm + 4}px ${spacing.xs}px`,
+          fontSize: 10.5,
+          fontWeight: fontWeight.semibold,
+          color: colors.textSubtle,
+          letterSpacing: '0.08em',
+          textTransform: 'uppercase',
+        }}
+      >
+        {title}
+      </p>
+      <ul
+        style={{
+          listStyle: 'none',
+          margin: 0,
+          padding: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 2,
+        }}
+      >
+        {children}
+      </ul>
+    </div>
+  );
+}
+
+function ModuleItem({ module, isActive }: { module: AppModule; isActive: boolean }) {
   const [hovered, setHovered] = useState(false);
   const disabled = !module.enabled;
+  const Icon = MODULE_ICONS[module.id];
 
-  // Item activo (módulo en el que está el usuario): bg + border-right
-  // primary + texto strong + dot primary.
-  // Items habilitados pero no activos: link estándar — no aplica
-  // todavía (el MVP sólo tiene personal-finance habilitado).
-  // Items deshabilitados: bg neutro, color subtle, no clicables.
+  // Estado visual:
+  //  - locked  → ico-wrap apagado (.55), chip "Pronto" a la derecha.
+  //  - active  → ico-wrap copper-soft + copper icon, bar copper a la izq.
+  //  - hovered → ico-wrap copper-soft + copper icon, sin bar.
+  //  - normal  → ico-wrap surface-muted.
+  const filled = (!disabled && (isActive || hovered));
+  const wrapBg = filled ? colors.primarySoft : colors.surfaceMuted;
+  const wrapFg = filled ? colors.primary : colors.textMuted;
+  const wrapBorder = filled ? 'transparent' : colors.border;
+  const itemBg = isActive || hovered ? colors.surfaceMuted : 'transparent';
+  const itemFg = disabled
+    ? colors.textSubtle
+    : isActive
+      ? colors.text
+      : hovered
+        ? colors.text
+        : colors.textMuted;
+  const itemWeight = isActive ? fontWeight.semibold : fontWeight.medium;
+
+  const inner = (
+    <>
+      {/* Barra activa, posicionada a la izquierda del item. Sólo
+          aparece cuando el item está activo — vivimos sin pseudo
+          elementos porque usamos inline styles. */}
+      {isActive ? (
+        <span
+          aria-hidden
+          style={{
+            position: 'absolute',
+            left: -spacing.md + 2,
+            top: 10,
+            bottom: 10,
+            width: 3,
+            backgroundColor: colors.primary,
+            borderRadius: '0 3px 3px 0',
+          }}
+        />
+      ) : null}
+      <span
+        aria-hidden
+        style={{
+          width: 30,
+          height: 30,
+          borderRadius: 7,
+          display: 'grid',
+          placeItems: 'center',
+          backgroundColor: wrapBg,
+          color: wrapFg,
+          border: `1px solid ${wrapBorder}`,
+          flex: '0 0 auto',
+          transition:
+            'background-color 140ms ease, color 140ms ease, border-color 140ms ease',
+          opacity: disabled ? 0.55 : 1,
+        }}
+      >
+        {Icon ? <Icon size={16} /> : <span style={{ width: 8, height: 8 }} />}
+      </span>
+      <span style={{ flex: 1, minWidth: 0, lineHeight: 1.2 }}>{module.label}</span>
+      {disabled ? <SoonChip /> : null}
+    </>
+  );
+
+  const baseStyle: React.CSSProperties = {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    padding: '10px 12px',
+    borderRadius: 8,
+    backgroundColor: itemBg,
+    color: itemFg,
+    fontSize: 14,
+    fontWeight: itemWeight,
+    textDecoration: 'none',
+    transition: 'background-color 140ms ease, color 140ms ease',
+  };
 
   if (disabled) {
     return (
-      <div
-        aria-disabled
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: spacing.sm,
-          padding: `${spacing.sm + 2}px ${spacing.sm + 4}px`,
-          backgroundColor: 'transparent',
-          color: colors.textSubtle,
-          borderRadius: radius.md,
-          fontSize: fontSize.sm,
-          fontWeight: fontWeight.medium,
-          cursor: 'not-allowed',
-          opacity: 0.7,
-        }}
-      >
-        <LockIcon size={16} />
-        <span style={{ flex: 1 }}>{module.label}</span>
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: fontWeight.semibold,
-            color: colors.textSubtle,
-            letterSpacing: '0.04em',
-            textTransform: 'uppercase',
-          }}
+      <li>
+        <div
+          aria-disabled
+          style={{ ...baseStyle, cursor: 'not-allowed' }}
         >
-          Pronto
-        </span>
-      </div>
+          {inner}
+        </div>
+      </li>
     );
   }
 
-  // Habilitado — link al primer section o basePath.
   const target = module.sections[0]?.path ?? module.basePath;
-  // Activo → bg `primary-soft` (azul tinte) + texto y borde primarios.
-  // Hover → `surface` (un escalón por encima del chrome) sin azul para
-  // diferenciarlo del estado activo.
-  const bg = isActive ? colors.primarySoft : hovered ? colors.surface : 'transparent';
-  const fg = isActive ? colors.primary : colors.text;
-  const borderRight = isActive ? `2px solid ${colors.primary}` : '2px solid transparent';
-
   return (
-    <Link
-      href={target as never}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      aria-current={isActive ? 'page' : undefined}
+    <li>
+      <Link
+        href={target as never}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        aria-current={isActive ? 'page' : undefined}
+        style={{ ...baseStyle, cursor: 'pointer' }}
+      >
+        {inner}
+      </Link>
+    </li>
+  );
+}
+
+function SoonChip() {
+  return (
+    <span
+      aria-hidden
       style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: spacing.sm,
-        padding: `${spacing.sm + 2}px ${spacing.sm + 4}px`,
-        backgroundColor: bg,
-        color: fg,
-        borderRadius: radius.md,
-        borderRight,
-        fontSize: fontSize.sm,
-        fontWeight: isActive ? fontWeight.semibold : fontWeight.medium,
-        textDecoration: 'none',
-        lineHeight: 1.2,
-        transition: 'background-color 120ms ease, color 120ms ease',
+        marginLeft: 'auto',
+        fontSize: 9.5,
+        fontWeight: fontWeight.semibold,
+        color: colors.textSubtle,
+        backgroundColor: 'transparent',
+        border: `1px solid ${colors.border}`,
+        padding: '2px 7px',
+        borderRadius: 999,
+        letterSpacing: '0.08em',
+        textTransform: 'uppercase',
+        flex: '0 0 auto',
+      }}
+    >
+      Pronto
+    </span>
+  );
+}
+
+/**
+ * Logo dot del sidebar: radial-gradient cobre, inline. Reemplaza el
+ * favicon.svg en el chrome (el favicon sigue siendo el de la pestaña
+ * del navegador). 24×24, radius 7.
+ */
+function BrandDot() {
+  return (
+    <span
+      aria-hidden
+      style={{
+        position: 'relative',
+        display: 'inline-block',
+        width: 24,
+        height: 24,
+        borderRadius: 7,
+        background:
+          'radial-gradient(circle at 30% 30%, #ffb673 0%, #e07a3a 55%, #9a4a18 100%)',
+        boxShadow:
+          '0 0 0 1px rgba(224,122,58,.35), 0 0 16px rgba(224,122,58,.25), inset 0 1px 0 rgba(255,255,255,.35)',
+        flex: '0 0 auto',
       }}
     >
       <span
         aria-hidden
         style={{
-          width: 8,
-          height: 8,
-          borderRadius: '50%',
-          backgroundColor: isActive ? colors.primary : colors.borderStrong,
-          flex: '0 0 auto',
+          position: 'absolute',
+          inset: 4,
+          borderRadius: 4,
+          background:
+            'radial-gradient(circle at 40% 35%, #ffe5c4, #e07a3a 70%)',
         }}
       />
-      <span>{module.label}</span>
+    </span>
+  );
+}
+
+/**
+ * CTA "Añadir transacción": gradient copper, 3 columnas (plus + label
+ * con subtítulo + kbd "N"). El icono `+` rota 90° en hover para
+ * sugerir afordancia de "abrir". El atajo `n` aún no está cableado
+ * (TODO listener global) — el kbd es honest signage de la intención.
+ */
+function PrimaryCTA() {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <Link
+      href="/personal-finance/transactions/new"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        position: 'relative',
+        width: '100%',
+        display: 'grid',
+        gridTemplateColumns: '30px 1fr auto',
+        alignItems: 'center',
+        gap: 10,
+        padding: '10px 12px',
+        borderRadius: 10,
+        background: `linear-gradient(180deg, ${colors.primary} 0%, ${colors.primaryDark} 100%)`,
+        color: colors.onPrimary,
+        border: `1px solid ${colors.primaryDark}`,
+        fontSize: 13.5,
+        fontWeight: fontWeight.semibold,
+        cursor: 'pointer',
+        textDecoration: 'none',
+        boxShadow: hovered
+          ? 'inset 0 1px 0 rgba(255,255,255,.22), 0 2px 4px rgba(0,0,0,.2), 0 12px 28px -8px rgba(196,103,31,.7)'
+          : 'inset 0 1px 0 rgba(255,255,255,.22), 0 1px 2px rgba(0,0,0,.18), 0 8px 22px -10px rgba(196,103,31,.65)',
+        filter: hovered ? 'brightness(1.08)' : 'none',
+        transition: 'box-shadow 160ms ease, filter 160ms ease',
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 30,
+          height: 30,
+          borderRadius: 8,
+          backgroundColor: 'rgba(0,0,0,.18)',
+          display: 'grid',
+          placeItems: 'center',
+          color: colors.onPrimary,
+          transform: hovered ? 'rotate(90deg)' : 'rotate(0deg)',
+          transition: 'transform 200ms ease',
+        }}
+      >
+        <PlusIcon size={14} />
+      </span>
+      <span
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          textAlign: 'left',
+          minWidth: 0,
+          lineHeight: 1.15,
+        }}
+      >
+        <span>Añadir transacción</span>
+        <small
+          style={{
+            fontSize: 10.5,
+            fontWeight: fontWeight.medium,
+            opacity: 0.72,
+            marginTop: 2,
+          }}
+        >
+          Nuevo movimiento
+        </small>
+      </span>
+      <span
+        aria-hidden
+        style={{
+          minWidth: 22,
+          padding: '2px 6px',
+          borderRadius: 6,
+          backgroundColor: 'rgba(0,0,0,.22)',
+          fontSize: 11,
+          fontWeight: fontWeight.bold,
+          color: colors.onPrimary,
+          textAlign: 'center',
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
+        N
+      </span>
     </Link>
   );
 }
