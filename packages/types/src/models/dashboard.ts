@@ -55,3 +55,31 @@ export interface TopExpenseItem {
   /** Moneda original de la transacción (PHASE-8.4). */
   original_currency: string;
 }
+
+export interface CategoryMonthlyBucket {
+  month: string;
+  total: string;
+}
+
+/**
+ * PHASE-25 — Drill-down de una categoría desde el "Desglose de
+ * gastos" del dashboard. KPIs + evolución mensual + top tx.
+ */
+export interface CategoryDetail {
+  category_id: string;
+  category_name: string;
+  category_kind: CategoryKind;
+  category_color: string | null;
+  category_icon: string | null;
+  currency: string;
+  /** Total del rango (en `currency`). */
+  total: string;
+  /** Número de tx en el rango. */
+  count: number;
+  /** Ticket medio (`total / count`). */
+  average_amount: string;
+  /** Evolución mensual (cronológica). */
+  by_month: CategoryMonthlyBucket[];
+  /** Top 10 tx por importe en el rango. */
+  top_transactions: TopExpenseItem[];
+}

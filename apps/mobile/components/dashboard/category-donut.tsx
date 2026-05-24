@@ -1,3 +1,4 @@
+import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { PieChart } from 'react-native-gifted-charts';
@@ -34,6 +35,8 @@ interface Slice {
   color: string;
   pct: number;
   isOther: boolean;
+  /** PHASE-25: id real de la categoría para enlazar al drill-down. */
+  categoryId: string | null;
 }
 
 /**
@@ -55,14 +58,16 @@ export function CategoryDonut({
   onKindChange,
   topN = 5,
 }: CategoryDonutProps) {
+  const router = useRouter();
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [otherExpanded, setOtherExpanded] = useState(false);
 
   const sorted = [...(data ?? [])].sort(
     (a, b) => Number(b.total) - Number(a.total),
   );
   const total = sorted.reduce((acc, x) => acc + Number(x.total), 0);
-  const top = sorted.slice(0, topN);
-  const rest = sorted.slice(topN);
+  const top = otherExpanded ? sorted : sorted.slice(0, topN);
+  const rest = otherExpanded ? [] : sorted.slice(topN);
   const restTotal = rest.reduce((acc, x) => acc + Number(x.total), 0);
   const empty = !isLoading && total === 0;
 
@@ -79,6 +84,7 @@ export function CategoryDonut({
         colors.primary,
       pct: total > 0 ? (Number(item.total) / total) * 100 : 0,
       isOther: false,
+      categoryId: item.category_id,
     })),
   ];
   if (rest.length > 0) {
@@ -89,7 +95,20 @@ export function CategoryDonut({
       color: colors.borderStrong,
       pct: total > 0 ? (restTotal / total) * 100 : 0,
       isOther: true,
+      categoryId: null,
     });
+  }
+
+  function handlePress(slice: Slice) {
+    if (slice.isOther) {
+      setOtherExpanded(true);
+      return;
+    }
+    if (slice.categoryId) {
+      router.push(
+        `/(modules)/personal-finance/analysis/category/${slice.categoryId}` as never,
+      );
+    }
   }
 
   return (
@@ -146,7 +165,8 @@ export function CategoryDonut({
             {slices.map((s) => (
               <Pressable
                 key={s.id}
-                onPress={() =>
+                onPress={() => handlePress(s)}
+                onLongPress={() =>
                   setActiveId((current) => (current === s.id ? null : s.id))
                 }
                 style={[

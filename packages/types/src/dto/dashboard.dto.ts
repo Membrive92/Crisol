@@ -33,3 +33,13 @@ export interface DashboardTopExpensesQuery {
   date_to?: string;
   limit?: number;
 }
+
+/** PHASE-25 — Query del drill-down de categoría. */
+export interface DashboardCategoryDetailQuery {
+  currency?: string;
+  target_currency?: string;
+  date_from?: string;
+  date_to?: string;
+  /** Cuántos meses de evolución incluir (1-36, default 12). */
+  months_back?: number;
+}

@@ -23,7 +23,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Select, case, extract, func, literal, select
+from sqlalchemy import Select, case, extract, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.personal_finance.categories.models import Category, CategoryKind
@@ -40,13 +40,19 @@ async def list_user_currencies(
 ) -> list[str]:
     """Devuelve las monedas distintas en las transacciones del usuario.
 
-    Excluye soft-deleted (PHASE-10.1) — una moneda que sólo existe en
-    transacciones trasheadas no debe aparecer en el selector global.
+    Excluye soft-deleted (PHASE-10.1) y movimientos marcados como
+    transferencia interna (PHASE-19.3 pares + PHASE-23.1 is_transfer)
+    — una moneda que sólo aparece en transferencias no representa
+    cashflow real y no debe inundar el selector.
     """
     query = (
         select(Transaction.currency)
+        .select_from(Transaction)
+        .outerjoin(Category, Category.id == Transaction.category_id)
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
+        .where(Transaction.transfer_pair_id.is_(None))
+        .where(or_(Category.is_transfer.is_(None), Category.is_transfer.is_(False)))
         .distinct()
         .order_by(Transaction.currency)
     )
@@ -69,7 +75,7 @@ def _apply_scope[Q: Select[Any]](
     es None la query NO filtra por moneda — el caller está usando
     modo `target_currency` y agrega cross-currency.
 
-    PHASE-19.3: además excluye las txs con `transfer_pair_id IS NOT NULL`
+    PHASE-19.3: excluye las txs con `transfer_pair_id IS NOT NULL`
     — son movimientos internos entre cuentas del usuario y no afectan
     al flujo neto (sí al saldo individual de cada cuenta).
     """
@@ -83,6 +89,26 @@ def _apply_scope[Q: Select[Any]](
     if date_to is not None:
         query = query.where(Transaction.occurred_at <= date_to)
     return query
+
+
+def _exclude_transfer_kind(query: Any, *, outer_join: bool) -> Any:
+    """Excluye transacciones cuya categoría tenga `is_transfer = TRUE`.
+
+    PHASE-23.1: complementa la exclusión por pareja
+    (`transfer_pair_id`) para el caso "una sola pata importada".
+    Sustituye el filtro por kind=TRANSFER de PHASE-23, que rompía el
+    cálculo de saldos (el flag está en una columna separada para que
+    `kind` siga determinando el signo del balance).
+
+    `outer_join`: si la query hace `outerjoin(Category, ...)` hay que
+    permitir explícitamente NULL (tx sin categoría); con join inner
+    eso es imposible y basta `is_transfer = false`.
+    """
+    if outer_join:
+        return query.where(
+            or_(Category.is_transfer.is_(None), Category.is_transfer.is_(False))
+        )
+    return query.where(Category.is_transfer.is_(False))
 
 
 def _amount_expr(target_currency: str | None) -> Any:
@@ -119,6 +145,7 @@ async def get_totals_by_kind(
         date_from=date_from,
         date_to=date_to,
     )
+    query = _exclude_transfer_kind(query, outer_join=False)
 
     result = await db.execute(query)
     return {kind: Decimal(total) for kind, total in result.all()}
@@ -152,8 +179,11 @@ async def get_summary_aggregates(
     )
 
     if target_currency is not None:
-        unconv_subq = select(func.count()).select_from(Transaction).where(
-            ~amount_is_convertible_expr(target_currency)
+        unconv_subq = (
+            select(func.count())
+            .select_from(Transaction)
+            .outerjoin(Category, Category.id == Transaction.category_id)
+            .where(~amount_is_convertible_expr(target_currency))
         )
         unconv_subq = _apply_scope(
             unconv_subq,
@@ -162,6 +192,7 @@ async def get_summary_aggregates(
             date_from=date_from,
             date_to=date_to,
         )
+        unconv_subq = _exclude_transfer_kind(unconv_subq, outer_join=True)
         unconv_col = unconv_subq.scalar_subquery().label("unconvertible_count")
     else:
         unconv_col = literal(0).label("unconvertible_count")
@@ -183,6 +214,7 @@ async def get_summary_aggregates(
         date_from=date_from,
         date_to=date_to,
     )
+    query = _exclude_transfer_kind(query, outer_join=True)
 
     row = (await db.execute(query)).one()
     return (
@@ -246,6 +278,7 @@ async def get_breakdown_by_category(
         date_from=date_from,
         date_to=date_to,
     )
+    query = _exclude_transfer_kind(query, outer_join=True)
     if kind is not None:
         query = query.where(Category.kind == kind)
 
@@ -274,8 +307,11 @@ async def get_totals_by_month(
         .join(Category, Category.id == Transaction.category_id)
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
-        # PHASE-19.3: las transferencias internas no son cashflow real.
+        # PHASE-19.3 (pares emparejados) + PHASE-23.1 (flag is_transfer
+        # en la categoría) — ambos excluyen del cashflow agregado pero
+        # las txs siguen impactando al saldo individual de su cuenta.
         .where(Transaction.transfer_pair_id.is_(None))
+        .where(Category.is_transfer.is_(False))
         .where(year_col == year)
         .group_by(month_col, Category.kind)
     )
@@ -320,6 +356,114 @@ async def get_top_expenses(
     # no deben aparecer artificialmente arriba sólo por número grande.
     query = query.order_by(amount.desc().nulls_last()).limit(limit)
 
+    result = await db.execute(query)
+    return [
+        (tx, name, Decimal(converted) if converted is not None else None)
+        for tx, name, converted in result.all()
+    ]
+
+
+# ─────────────────────────────────────────────────────────────────────
+# PHASE-25 — Drill-down de categoría (KPIs + evolución + top tx)
+# ─────────────────────────────────────────────────────────────────────
+
+
+async def get_category_kpis(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    category_id: uuid.UUID,
+    currency: str | None = None,
+    target_currency: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+) -> tuple[Decimal, int]:
+    """Total + count para UNA categoría en el rango pedido. Mantiene
+    las exclusiones estándar (papelera, transferencias)."""
+    amount = _amount_expr(target_currency)
+    query = (
+        select(
+            func.coalesce(func.sum(amount), Decimal("0")),
+            func.count(Transaction.id),
+        )
+        .select_from(Transaction)
+        .outerjoin(Category, Category.id == Transaction.category_id)
+        .where(Transaction.category_id == category_id)
+    )
+    query = _apply_scope(
+        query,
+        user_id=user_id,
+        currency=currency,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    query = _exclude_transfer_kind(query, outer_join=True)
+    row = (await db.execute(query)).one()
+    return Decimal(row[0]), int(row[1])
+
+
+async def get_category_monthly_evolution(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    category_id: uuid.UUID,
+    currency: str | None = None,
+    target_currency: str | None = None,
+    months_back: int = 12,
+) -> list[tuple[str, Decimal]]:
+    """Evolución mensual de UNA categoría: últimos `months_back` meses
+    cerrados + el mes en curso (inclusivo). Devuelve `(YYYY-MM, total)`
+    ordenado cronológicamente. Meses sin actividad se omiten — el
+    frontend rellena gaps si lo necesita."""
+    month_col = func.to_char(Transaction.occurred_at, "YYYY-MM").label("month")
+    amount = _amount_expr(target_currency)
+    query = (
+        select(month_col, func.coalesce(func.sum(amount), Decimal("0")))
+        .select_from(Transaction)
+        .outerjoin(Category, Category.id == Transaction.category_id)
+        .where(Transaction.category_id == category_id)
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.deleted_at.is_(None))
+        .where(Transaction.transfer_pair_id.is_(None))
+        .where(or_(Category.is_transfer.is_(None), Category.is_transfer.is_(False)))
+        .group_by(month_col)
+        .order_by(month_col)
+    )
+    if currency is not None:
+        query = query.where(Transaction.currency == currency)
+    rows = (await db.execute(query)).all()
+    # Recortamos a los últimos `months_back` meses para evitar series
+    # gigantes en cuentas con histórico largo.
+    return [(month, Decimal(total)) for month, total in rows[-months_back:]]
+
+
+async def get_category_top_transactions(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    category_id: uuid.UUID,
+    currency: str | None = None,
+    target_currency: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    limit: int = 10,
+) -> list[tuple[Transaction, str | None, Decimal | None]]:
+    """Top N tx de la categoría en el rango, ordenadas por importe."""
+    amount = _amount_expr(target_currency)
+    query = (
+        select(Transaction, Category.name, amount.label("converted_amount"))
+        .outerjoin(Category, Category.id == Transaction.category_id)
+        .where(Transaction.category_id == category_id)
+    )
+    query = _apply_scope(
+        query,
+        user_id=user_id,
+        currency=currency,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    query = _exclude_transfer_kind(query, outer_join=True)
+    query = query.order_by(amount.desc().nulls_last()).limit(limit)
     result = await db.execute(query)
     return [
         (tx, name, Decimal(converted) if converted is not None else None)

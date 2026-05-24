@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
 
@@ -34,6 +35,10 @@ interface Slice {
   emoji: string | null;
   pct: number;
   isOther: boolean;
+  /** PHASE-25: id real de la categoría para enlazar al drill-down. */
+  categoryId: string | null;
+  /** PHASE-25: categorías agregadas dentro del "Otros" — null si no es Otros. */
+  groupedItems: CategoryBreakdownItem[] | null;
 }
 
 /**
@@ -47,10 +52,16 @@ export function StitchExpenseBreakdown({
   isLoading,
   topN = 5,
 }: StitchExpenseBreakdownProps) {
+  const router = useRouter();
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [otherExpanded, setOtherExpanded] = useState(false);
+
   const sorted = [...items].sort((a, b) => Number(b.total) - Number(a.total));
   const total = sorted.reduce((acc, x) => acc + Number(x.total), 0);
-  const top = sorted.slice(0, topN);
-  const rest = sorted.slice(topN);
+  // Si el usuario ha desplegado "Otros", mostramos TODAS las categorías
+  // y se omite el bucket agrupado. Si no, top N + Otros (PHASE-25).
+  const top = otherExpanded ? sorted : sorted.slice(0, topN);
+  const rest = otherExpanded ? [] : sorted.slice(topN);
   const restTotal = rest.reduce((acc, x) => acc + Number(x.total), 0);
   const empty = !isLoading && total === 0;
 
@@ -66,6 +77,8 @@ export function StitchExpenseBreakdown({
       emoji: item.category_icon,
       pct: total > 0 ? (Number(item.total) / total) * 100 : 0,
       isOther: false,
+      categoryId: item.category_id,
+      groupedItems: null,
     })),
   ];
   if (rest.length > 0) {
@@ -77,10 +90,20 @@ export function StitchExpenseBreakdown({
       emoji: null,
       pct: total > 0 ? (restTotal / total) * 100 : 0,
       isOther: true,
+      categoryId: null,
+      groupedItems: rest,
     });
   }
 
-  const [activeId, setActiveId] = useState<string | null>(null);
+  function handleSliceClick(slice: Slice) {
+    if (slice.isOther) {
+      setOtherExpanded(true);
+      return;
+    }
+    if (slice.categoryId) {
+      router.push(`/personal-finance/analysis/category/${slice.categoryId}` as never);
+    }
+  }
 
   return (
     <Card style={{ padding: spacing.lg }}>
@@ -141,6 +164,11 @@ export function StitchExpenseBreakdown({
                   animationDuration={500}
                   onMouseEnter={(_, idx) => setActiveId(slices[idx]?.id ?? null)}
                   onMouseLeave={() => setActiveId(null)}
+                  onClick={(_, idx) => {
+                    const s = slices[idx];
+                    if (s) handleSliceClick(s);
+                  }}
+                  cursor="pointer"
                   stroke={colors.surface}
                   strokeWidth={2}
                 >
@@ -198,6 +226,7 @@ export function StitchExpenseBreakdown({
                 currency={currency}
                 hovered={activeId === s.id}
                 onHover={(hovered) => setActiveId(hovered ? s.id : null)}
+                onClick={() => handleSliceClick(s)}
               />
             ))}
           </ul>
@@ -212,17 +241,33 @@ function LegendRow({
   currency,
   hovered,
   onHover,
+  onClick,
 }: {
   slice: Slice;
   currency: string;
   hovered: boolean;
   onHover: (next: boolean) => void;
+  onClick: () => void;
 }) {
   const Icon = slice.isOther ? FolderIcon : iconForCategoryName(slice.label);
+  const clickable = slice.isOther || slice.categoryId != null;
   return (
     <li
       onMouseEnter={() => onHover(true)}
       onMouseLeave={() => onHover(false)}
+      onClick={clickable ? onClick : undefined}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -231,7 +276,15 @@ function LegendRow({
         borderRadius: radius.sm,
         backgroundColor: hovered ? colors.surfaceMuted : 'transparent',
         transition: 'background-color 120ms ease',
+        cursor: clickable ? 'pointer' : 'default',
       }}
+      title={
+        slice.isOther
+          ? 'Expandir las categorías agrupadas'
+          : slice.categoryId
+            ? 'Ver desglose de esta categoría'
+            : undefined
+      }
     >
       <span
         aria-hidden
