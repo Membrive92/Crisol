@@ -7,10 +7,14 @@
  */
 
 :root {
-  --color-primary: #1976d2;
-  --color-primary-dark: #115293;
-  --color-on-primary: #f7f9fc;
-  --color-primary-soft: #e3eefb;
+  /* PHASE-29: copper/orange brand, alineado con el logo. Antes era
+     azul (#1976d2) y competía con el naranja del icono. on-primary
+     usa un blanco cálido (#fff8f0) para preservar AA sobre copper;
+     primary-soft es un tinte cálido (#fdf0e6) para chips y hovers. */
+  --color-primary: #c4671f;
+  --color-primary-dark: #8b461a;
+  --color-on-primary: #fff8f0;
+  --color-primary-soft: #fdf0e6;
   --color-danger: #d32f2f;
   --color-danger-soft: #fdecea;
   --color-success: #2e7d32;
@@ -38,10 +42,10 @@
      contraste cómodo y no canten contra el fondo. Los `*-soft` son los
      fondos tonales para chips y badges — tintados oscuros, NO pastel
      claros (eso es lo que canta y queda fatal en dark). */
-  --color-primary: #2f6fb8;
-  --color-primary-dark: #245690;
-  --color-on-primary: #f4f7fb;
-  --color-primary-soft: #1d2a3d;
+  --color-primary: #e07a3a;
+  --color-primary-dark: #a85820;
+  --color-on-primary: #1a0e05;
+  --color-primary-soft: #3a2418;
   --color-danger: #ef6e6e;
   --color-danger-soft: #3a1f1f;
   --color-success: #6dc788;

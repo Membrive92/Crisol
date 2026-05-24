@@ -3,14 +3,19 @@ version: alpha
 name: Crisol
 description: >
   Personal-finance suite with a modular, multi-portfolio shell. Tone is
-  calm and analytical: dark by default, neutral surfaces, blue brand
-  accent, semantic tonal chips for status. Privacy-first, local-first.
+  calm and analytical: dark by default, neutral surfaces, copper brand
+  accent (aligned with the logo crucible), semantic tonal chips for
+  status. Privacy-first, local-first.
+
+  PHASE-29 changed the primary from blue to copper to stop competing
+  with the orange logo. on-primary uses warm whites/darks for AA
+  contrast over copper; primary-soft is a warm tint instead of cool.
 
 colors:
-  primary: "#2f6fb8"
-  primary-dark: "#245690"
-  on-primary: "#f4f7fb"
-  primary-soft: "#1d2a3d"
+  primary: "#e07a3a"
+  primary-dark: "#a85820"
+  on-primary: "#1a0e05"
+  primary-soft: "#3a2418"
 
   background: "#0f1115"
   surface: "#171a21"
@@ -41,10 +46,10 @@ colors:
   light-text: "#1f1f1f"
   light-text-muted: "#666666"
   light-text-subtle: "#8a8a8a"
-  light-primary: "#1976d2"
-  light-primary-dark: "#115293"
-  light-primary-soft: "#e3eefb"
-  light-on-primary: "#f7f9fc"
+  light-primary: "#c4671f"
+  light-primary-dark: "#8b461a"
+  light-primary-soft: "#fdf0e6"
+  light-on-primary: "#fff8f0"
   light-success-soft: "#e8f5e9"
   light-danger-soft: "#fdecea"
   light-warning-soft: "#fff4e5"

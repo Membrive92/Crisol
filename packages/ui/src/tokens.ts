@@ -23,15 +23,15 @@ function color(varName: string, fallback: string): string {
 }
 
 export const colors = {
-  primary: color('primary', '#1976d2'),
-  primaryDark: color('primary-dark', '#115293'),
-  // Color de texto/icono sobre fondo `primary`. En lugar de usar `surface`
-  // (que invierte entre temas y daba botón gris-azul claro con texto oscuro
-  // en modo dark), usamos un tono neutro que funciona en ambos.
-  onPrimary: color('on-primary', '#f7f9fc'),
+  // PHASE-29: copper brand. Fallbacks usados por RN (que no parsea var()).
+  primary: color('primary', '#c4671f'),
+  primaryDark: color('primary-dark', '#8b461a'),
+  // Color de texto/icono sobre fondo `primary`. Blanco cálido para AA
+  // sobre copper (era #f7f9fc — frío y restaba contraste sobre naranja).
+  onPrimary: color('on-primary', '#fff8f0'),
   // Versión "soft" del primario para fondos tonales (badges, hovers, chips
   // suaves) — ya tintada por tema, no se aplica vía rgba en runtime.
-  primarySoft: color('primary-soft', '#e3eefb'),
+  primarySoft: color('primary-soft', '#fdf0e6'),
   danger: color('danger', '#d32f2f'),
   // `dangerSoft` / `successSoft` / `warningSoft` son los fondos tonales
   // semánticos. Cada tema define su propio valor para que los badges no
