@@ -5,7 +5,6 @@ import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 import {
   IconBank,
   IconImport,
-  IconLogo,
   IconRobot,
 } from '@/components/auth/icons';
 
@@ -126,9 +125,14 @@ export function BrandPanel() {
 
       <div style={{ position: 'relative', zIndex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm }}>
-          <span style={{ color: colors.primary, display: 'inline-flex' }}>
-            <IconLogo size={36} />
-          </span>
+          <img
+            src="/favicon.svg"
+            alt=""
+            aria-hidden="true"
+            width={36}
+            height={36}
+            style={{ display: 'block' }}
+          />
           <span
             style={{
               fontSize: fontSize.xl,
@@ -137,7 +141,7 @@ export function BrandPanel() {
               color: colors.text,
             }}
           >
-            Finanzas
+            Crisol
           </span>
         </div>
       </div>
@@ -206,7 +210,7 @@ export function BrandPanel() {
           color: colors.textSubtle,
         }}
       >
-        © {new Date().getFullYear()} Finanzas — open source, autoalojado.
+        © {new Date().getFullYear()} Crisol — open source, autoalojado.
       </div>
     </aside>
   );

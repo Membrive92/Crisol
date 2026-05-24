@@ -82,13 +82,24 @@ export function AppSidebar({ active, mobileOpen = false, onCloseMobile }: AppSid
       >
         <span
           style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: spacing.sm,
             fontSize: fontSize.lg,
             fontWeight: fontWeight.bold,
             color: colors.text,
             letterSpacing: '-0.02em',
           }}
         >
-          Finanzas
+          <img
+            src="/favicon.svg"
+            alt=""
+            aria-hidden="true"
+            width={24}
+            height={24}
+            style={{ display: 'block', flex: '0 0 auto' }}
+          />
+          Crisol
         </span>
         <button
           type="button"

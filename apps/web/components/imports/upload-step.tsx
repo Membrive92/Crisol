@@ -3,7 +3,7 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 
 import { useAccounts, useCategories } from '@crisol/services';
-import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, formatCategoryKind, radius, spacing } from '@crisol/ui';
 
 import { Button } from '../ui/button';
 import { Select, TextInput } from '../ui/field';
@@ -200,7 +200,7 @@ export function UploadStep({ onContinue }: UploadStepProps) {
         <option value="">— Sin categoría por defecto —</option>
         {(categories ?? []).map((c) => (
           <option key={c.id} value={c.id}>
-            {c.name} ({c.kind === 'income' ? 'Ingreso' : 'Gasto'})
+            {c.name} ({formatCategoryKind(c.kind)})
           </option>
         ))}
       </Select>

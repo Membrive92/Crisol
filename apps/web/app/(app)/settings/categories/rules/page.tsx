@@ -17,7 +17,7 @@ import type {
   RuleField,
   RuleMatchType,
 } from '@crisol/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, formatCategoryKind, radius, spacing } from '@crisol/ui';
 
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -266,7 +266,7 @@ function NewRuleForm({ categories, submitting, onSubmit }: NewRuleFormProps) {
           <option value="">— Elige —</option>
           {categories.map((c) => (
             <option key={c.id} value={c.id}>
-              {c.name} ({c.kind === 'income' ? 'Ingreso' : 'Gasto'})
+              {c.name} ({formatCategoryKind(c.kind)})
             </option>
           ))}
         </Select>

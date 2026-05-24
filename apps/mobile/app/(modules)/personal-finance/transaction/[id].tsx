@@ -1,11 +1,21 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
-import { useTransaction, useUpdateTransaction } from '@crisol/services';
+import {
+  formatApiError,
+  useTransaction,
+  useUpdateTransaction,
+} from '@crisol/services';
+import { toast } from '@crisol/store';
 import type { TransactionUpdateRequest } from '@crisol/types';
 import { colors, fontSize, spacing } from '@crisol/ui';
 
 import { TransactionForm } from '../../../../components/transaction-form';
+import {
+  ConvertToDebtBlock,
+  looksLikeFinancedOperation,
+} from '../../../../components/transfers/convert-to-debt-block';
+import { ConvertToTransferBlock } from '../../../../components/transfers/convert-to-transfer-block';
 
 export default function EditTransactionScreen() {
   const router = useRouter();
@@ -38,17 +48,56 @@ export default function EditTransactionScreen() {
   }
 
   return (
-    <TransactionForm
-      initial={data}
-      submitLabel="Guardar"
-      submitting={mutation.isPending}
-      onSubmit={(payload) => handleSubmit(payload as TransactionUpdateRequest)}
-      onCancel={() => router.back()}
-    />
+    <ScrollView contentContainerStyle={styles.scroll}>
+      <TransactionForm
+        initial={data}
+        submitLabel="Guardar"
+        submitting={mutation.isPending}
+        onSubmit={(payload) => handleSubmit(payload as TransactionUpdateRequest)}
+        onCancel={() => router.back()}
+      />
+      {data.transfer_pair_id === null ? (
+        <>
+          <ConvertToTransferBlock
+            transaction={data}
+            onConverted={(pair) => {
+              toast.success(
+                `Transferencia creada (${pair.amount} ${pair.currency}).`,
+              );
+              router.replace('/(modules)/personal-finance/transfers');
+            }}
+            onError={(err) =>
+              toast.error(formatApiError(err, 'No se pudo convertir.'))
+            }
+          />
+          {looksLikeFinancedOperation(data.description) ? (
+            <ConvertToDebtBlock
+              transaction={data}
+              onConverted={(pair) => {
+                toast.success(
+                  `Deuda registrada (${pair.amount} ${pair.currency}).`,
+                );
+                router.replace('/(modules)/personal-finance/accounts');
+              }}
+              onError={(err) =>
+                toast.error(
+                  formatApiError(err, 'No se pudo registrar la deuda.'),
+                )
+              }
+            />
+          ) : null}
+        </>
+      ) : null}
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
+  scroll: {
+    padding: spacing.md,
+    paddingBottom: spacing.xxl,
+    backgroundColor: colors.background,
+  },
   center: {
     flex: 1,
     alignItems: 'center',

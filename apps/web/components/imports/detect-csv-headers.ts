@@ -38,15 +38,37 @@ async function readFirstLine(file: File): Promise<string> {
   return newlineIndex === -1 ? truncated : truncated.slice(0, newlineIndex);
 }
 
+/**
+ * Lee un blob como texto con soporte de tildes españolas. Intenta UTF-8
+ * primero; si detecta el carácter de reemplazo Unicode `�` (señal de
+ * mojibake) reintenta con `windows-1252` — los extractos de bancos
+ * españoles antiguos suelen venir en esa codificación. Espeja la
+ * estrategia del backend (`parse_csv` prueba utf-8-sig → latin-1).
+ */
 function readBlobAsText(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
       const result = reader.result;
-      resolve(typeof result === 'string' ? result : '');
+      if (typeof result !== 'string') {
+        resolve('');
+        return;
+      }
+      if (!result.includes('�')) {
+        resolve(result);
+        return;
+      }
+      const fallback = new FileReader();
+      fallback.onload = () => {
+        const r = fallback.result;
+        resolve(typeof r === 'string' ? r : '');
+      };
+      fallback.onerror = () =>
+        reject(fallback.error ?? new Error('No se pudo leer el fichero'));
+      fallback.readAsText(blob, 'windows-1252');
     };
     reader.onerror = () => reject(reader.error ?? new Error('No se pudo leer el fichero'));
-    reader.readAsText(blob);
+    reader.readAsText(blob, 'utf-8');
   });
 }
 

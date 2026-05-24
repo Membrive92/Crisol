@@ -26,12 +26,19 @@ export type {
   AmortizationRow,
   AmortizationSchedule,
   DebtHealthKpis,
+  DebtHistoryPoint,
+  DebtHistoryPointKind,
+  DebtHistoryResponse,
   DtiStatus,
+  InstallmentPayRequest,
+  InstallmentUpdateRequest,
 } from './models/debt';
 export type {
   TransferCandidate,
+  TransferMarkResponse,
   TransferMatchResponse,
   TransferPair,
+  TransferSuspect,
 } from './models/transfer';
 export type { Category, CategoryKind } from './models/category';
 export type {
@@ -44,8 +51,10 @@ export type {
 } from './models/category-rule';
 export type { BudgetAlert, Transaction, TransactionSource } from './models/transaction';
 export type {
-  DashboardSummary,
   CategoryBreakdownItem,
+  CategoryDetail,
+  CategoryMonthlyBucket,
+  DashboardSummary,
   MonthlyBucket,
   TopExpenseItem,
 } from './models/dashboard';
@@ -93,7 +102,11 @@ export type {
 } from './dto/account.dto';
 
 export type {
+  NewLiabilityForDebt,
+  TransferFromSourceDebtRequest,
+  TransferFromSourceRequest,
   TransferLinkRequest,
+  TransferMarkRequest,
   TransferMatchOptions,
 } from './dto/transfer.dto';
 
@@ -110,9 +123,10 @@ export type {
 } from './dto/transaction.dto';
 
 export type {
-  DashboardSummaryQuery,
   DashboardByCategoryQuery,
   DashboardByMonthQuery,
+  DashboardCategoryDetailQuery,
+  DashboardSummaryQuery,
   DashboardTopExpensesQuery,
 } from './dto/dashboard.dto';
 

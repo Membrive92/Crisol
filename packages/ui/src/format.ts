@@ -4,6 +4,16 @@
  */
 
 /**
+ * Etiqueta corta del `kind` de una categoría — usada en dropdowns,
+ * badges y resúmenes. Aceptamos `string` en lugar de `CategoryKind`
+ * para evitar dependencia circular con `@crisol/types` (ADR 0001).
+ */
+export function formatCategoryKind(kind: string | null | undefined): string {
+  if (kind === 'income') return 'Ingreso';
+  return 'Gasto';
+}
+
+/**
  * Formatea un importe (string decimal) como moneda localizada.
  * Usa `Intl.NumberFormat` que funciona en Node, navegador y Hermes.
  */

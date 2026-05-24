@@ -96,7 +96,11 @@ export default function TransactionsScreen() {
   function renderItem({ item }: { item: Transaction }) {
     const category = findCategory(categories ?? [], item.category_id);
     const isIncome = category?.kind === 'income';
-    const isTransfer = item.transfer_pair_id !== null;
+    // PHASE-23.1: el badge "Transferencia" cubre tanto pares
+    // emparejados (transfer_pair_id) como txs cuya categoría tiene
+    // is_transfer=true (caso "una pata").
+    const isTransfer =
+      item.transfer_pair_id !== null || category?.is_transfer === true;
     return (
       <TouchableOpacity
         style={styles.row}

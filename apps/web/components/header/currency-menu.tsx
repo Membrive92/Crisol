@@ -54,6 +54,10 @@ export function CurrencyMenu() {
   const setCurrency = useCurrencyStore((s) => s.setCurrency);
   const convertAll = useCurrencyStore((s) => s.convertAll);
   const setConvertAll = useCurrencyStore((s) => s.setConvertAll);
+  const includeDebtInNetWorth = useCurrencyStore((s) => s.includeDebtInNetWorth);
+  const setIncludeDebtInNetWorth = useCurrencyStore(
+    (s) => s.setIncludeDebtInNetWorth,
+  );
   const currenciesQuery = useUserCurrencies();
   const userCurrencies = currenciesQuery.data;
 
@@ -175,44 +179,75 @@ export function CurrencyMenu() {
           {/* Toggle de conversión cross-currency. ON (default) suma
               todas las monedas convertidas a la activa; OFF mantiene
               el filtrado pre-PHASE-8.2. */}
-          <div
-            style={{
-              borderTop: `1px solid ${colors.border}`,
-              padding: `${spacing.sm}px ${spacing.md}px`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: spacing.sm,
-            }}
-          >
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <span
-                style={{
-                  fontSize: fontSize.sm,
-                  fontWeight: fontWeight.medium,
-                  color: colors.text,
-                }}
-              >
-                Convertir todas las monedas
-              </span>
-              <span
-                style={{
-                  fontSize: fontSize.xs,
-                  color: colors.textSubtle,
-                  marginTop: 2,
-                }}
-              >
-                Suma cross-currency a {currency}.
-              </span>
-            </div>
-            <Toggle
-              checked={convertAll}
-              onChange={setConvertAll}
-              ariaLabel="Convertir todas las monedas"
-            />
-          </div>
+          <ToggleRow
+            label="Convertir todas las monedas"
+            description={`Suma cross-currency a ${currency}.`}
+            checked={convertAll}
+            onChange={setConvertAll}
+          />
+
+          {/* Toggle de inclusión de deuda en el patrimonio neto.
+              ON (default) muestra `assets - liabilities`; OFF ignora
+              los pasivos para que el patrimonio refleje sólo activos
+              — útil para seguir el ahorro sin el arrastre de
+              hipoteca/préstamos a largo plazo. Sólo afecta a las
+              cards agregadas; el módulo Deuda sigue mostrando los
+              pasivos íntegros. */}
+          <ToggleRow
+            label="Incluir deuda en patrimonio neto"
+            description="Resta pasivos a los activos en las vistas de patrimonio."
+            checked={includeDebtInNetWorth}
+            onChange={setIncludeDebtInNetWorth}
+          />
         </div>
       )}
+    </div>
+  );
+}
+
+function ToggleRow({
+  label,
+  description,
+  checked,
+  onChange,
+}: {
+  label: string;
+  description: string;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <div
+      style={{
+        borderTop: `1px solid ${colors.border}`,
+        padding: `${spacing.sm}px ${spacing.md}px`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: spacing.sm,
+      }}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        <span
+          style={{
+            fontSize: fontSize.sm,
+            fontWeight: fontWeight.medium,
+            color: colors.text,
+          }}
+        >
+          {label}
+        </span>
+        <span
+          style={{
+            fontSize: fontSize.xs,
+            color: colors.textSubtle,
+            marginTop: 2,
+          }}
+        >
+          {description}
+        </span>
+      </div>
+      <Toggle checked={checked} onChange={onChange} ariaLabel={label} />
     </div>
   );
 }

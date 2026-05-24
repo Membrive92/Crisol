@@ -36,6 +36,19 @@ export const MODULES: readonly AppModule[] = [
     ],
   },
   {
+    // Módulo de deuda: hereda de personal-finance los accounts marcados
+    // como `nature=liability` y construye encima KPIs de salud (DTI,
+    // weighted APR, intereses YTD, time-to-payoff), evolución temporal
+    // y lista de pasivos. Es top-level porque la vista funciona como
+    // panel autónomo aunque las cuentas se siguen gestionando desde
+    // Finanzas Domésticas.
+    id: 'debt',
+    label: 'Deuda',
+    basePath: '/debt',
+    enabled: true,
+    sections: [],
+  },
+  {
     id: 'crypto',
     label: 'Criptomonedas',
     basePath: '/crypto',

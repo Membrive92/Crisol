@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 
 import {
   colors,
+  formatCategoryKind,
   fromDateInputValue,
   toDateInputValue,
 } from '@crisol/ui';
@@ -199,7 +200,7 @@ export function TransactionForm({
         <option value="">— Sin categoría —</option>
         {(categories ?? []).map((c: Category) => (
           <option key={c.id} value={c.id}>
-            {c.name} ({c.kind === 'income' ? 'Ingreso' : 'Gasto'})
+            {c.name} ({formatCategoryKind(c.kind)})
           </option>
         ))}
       </Select>

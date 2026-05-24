@@ -13,8 +13,19 @@ export interface CurrencyState {
    * monedas no aparecen.
    */
   convertAll: boolean;
+  /**
+   * Cuando `true` (default) las vistas de patrimonio neto restan los
+   * pasivos a los activos (`net_worth = assets - liabilities`).
+   * Cuando `false` se ignora la deuda y el patrimonio neto se muestra
+   * como sólo activos — útil para evaluar la evolución del ahorro sin
+   * el arrastre de la hipoteca o préstamos a largo plazo. El flag NO
+   * altera el desglose por cuenta ni el módulo Deuda: sólo cambia el
+   * agregado "Patrimonio neto" / "Salud financiera".
+   */
+  includeDebtInNetWorth: boolean;
   setCurrency: (currency: string) => void;
   setConvertAll: (convertAll: boolean) => void;
+  setIncludeDebtInNetWorth: (include: boolean) => void;
 }
 
 const FALLBACK_CURRENCY = 'EUR';
@@ -35,23 +46,31 @@ export const useCurrencyStore = create<CurrencyState>()(
     (set) => ({
       currency: FALLBACK_CURRENCY,
       convertAll: true,
+      includeDebtInNetWorth: true,
       setCurrency: (currency) => set({ currency }),
       setConvertAll: (convertAll) => set({ convertAll }),
+      setIncludeDebtInNetWorth: (includeDebtInNetWorth) =>
+        set({ includeDebtInNetWorth }),
     }),
     {
       name: 'finanzas:currency',
       storage,
-      // Bumped al introducir `convertAll` en PHASE-8.2: si un cliente
-      // tiene una versión antigua persistida (sin el campo), la inicia
-      // con `true` (igual que el default). Sin migración explícita
-      // perdería el campo y rompería el `setConvertAll`.
-      version: 1,
+      // v1: introduce `convertAll` (PHASE-8.2).
+      // v2: introduce `includeDebtInNetWorth` (PHASE-22+). Default `true`
+      // mantiene el comportamiento previo (net_worth = assets -
+      // liabilities). Sin migración el setter rompería para clientes
+      // con un blob v1 persistido.
+      version: 2,
       migrate: (persisted, version) => {
         if (!persisted || typeof persisted !== 'object') return persisted as CurrencyState;
+        let next = persisted as Partial<CurrencyState>;
         if (version < 1) {
-          return { convertAll: true, ...(persisted as Partial<CurrencyState>) } as CurrencyState;
+          next = { convertAll: true, ...next };
         }
-        return persisted as CurrencyState;
+        if (version < 2) {
+          next = { includeDebtInNetWorth: true, ...next };
+        }
+        return next as CurrencyState;
       },
     },
   ),

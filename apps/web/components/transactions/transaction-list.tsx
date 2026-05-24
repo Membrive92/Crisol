@@ -105,7 +105,7 @@ export function TransactionList({
     {
       key: 'description',
       header: 'Descripción',
-      render: ({ tx }) => (
+      render: ({ tx, category }) => (
         <span
           style={{
             display: 'inline-flex',
@@ -127,7 +127,9 @@ export function TransactionList({
           >
             {tx.description ?? '(sin descripción)'}
           </span>
-          {tx.transfer_pair_id !== null ? <TransferBadge /> : null}
+          {tx.transfer_pair_id !== null || category?.is_transfer ? (
+            <TransferBadge />
+          ) : null}
         </span>
       ),
     },

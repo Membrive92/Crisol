@@ -1,6 +1,7 @@
 export type ModuleId =
   | 'dashboard'
   | 'personal-finance'
+  | 'debt'
   | 'crypto'
   | 'investments'
   | 'real-estate';

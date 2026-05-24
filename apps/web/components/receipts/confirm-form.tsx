@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 
 import { useAccounts, useCategories } from '@crisol/services';
 import type { ReceiptConfirmRequest, ReceiptExtraction } from '@crisol/types';
-import { colors, fontSize, fontWeight, fromDateInputValue, spacing, toDateInputValue } from '@crisol/ui';
+import { colors, fontSize, fontWeight, formatCategoryKind, fromDateInputValue, spacing, toDateInputValue } from '@crisol/ui';
 
 import { Button } from '../ui/button';
 import { Select, TextArea, TextInput } from '../ui/field';
@@ -168,7 +168,7 @@ export function ReceiptConfirmForm({
         <option value="">— Sin categoría —</option>
         {(categories ?? []).map((c) => (
           <option key={c.id} value={c.id}>
-            {c.name} ({c.kind === 'income' ? 'Ingreso' : 'Gasto'})
+            {c.name} ({formatCategoryKind(c.kind)})
           </option>
         ))}
       </Select>
