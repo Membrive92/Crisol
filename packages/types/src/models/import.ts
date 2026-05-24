@@ -10,7 +10,8 @@ export type ImportSource =
   | 'pdfplumber_legacy'
   | 'vision'
   | 'csv'
-  | 'xlsx';
+  | 'xlsx'
+  | 'xlsx_smart';
 
 export interface ImportPreviewRow {
   amount: string;

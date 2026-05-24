@@ -52,7 +52,9 @@ function aprPercentToDecimal(percent: string): string | null {
   if (!trimmed) return null;
   const numeric = Number(trimmed);
   if (!Number.isFinite(numeric)) return null;
-  return (numeric / 100).toString();
+  // Backend caps APR at 4 decimal places (decimal_places=4). Avoid the
+  // float artefact where `5.9 / 100` stringifies as "0.05900000000000001".
+  return (numeric / 100).toFixed(4);
 }
 
 /** Inverso de `aprPercentToDecimal`: serializado backend → string UI. */
@@ -78,15 +80,39 @@ function toCreatePayload(form: AccountFormValue): AccountCreateRequest {
   if (AMORTIZABLE_ACCOUNT_TYPES.includes(form.type)) {
     const apr = aprPercentToDecimal(form.apr_percent);
     if (apr !== null) payload.apr = apr;
+    const tae = aprPercentToDecimal(form.tae_percent);
+    if (tae !== null) payload.tae = tae;
     const term = form.term_months.trim();
     if (term) payload.term_months = Number(term);
     const start = form.start_date.trim();
     if (start) payload.start_date = start;
+    const totalRaw = form.total_to_pay.trim().replace(',', '.');
+    if (totalRaw) payload.total_to_pay = totalRaw;
+    const interestOnlyRaw = form.interest_only_first_payment.trim().replace(',', '.');
+    if (interestOnlyRaw) payload.interest_only_first_payment = interestOnlyRaw;
   }
   return payload;
 }
 
-function toUpdatePayload(form: AccountFormValue): AccountUpdateRequest {
+/**
+ * Genera el payload de update. El campo `opening_balance` del form
+ * representa el SALDO ACTUAL que el usuario quiere ver, no el saldo
+ * de apertura crudo (para que coincida con lo que ve en la cabecera).
+ * Restamos los `movementsBalance` para que current_balance final
+ * cuadre con lo introducido.
+ *
+ * **Excepción PHASE-24.3**: para liabilities amortizables (loan,
+ * mortgage, credit_card con plan), el campo "Capital" NO debe
+ * controlar el opening_balance vía esta operación — el principal del
+ * cuadro vive en las cuotas persistidas y se modifica con
+ * "Regenerar cuadro". Si el usuario quiere ajustarlo, debe usar ese
+ * flujo. Aquí ignoramos el campo para evitar la trampa que pisaba
+ * el opening_balance y des-sincronizaba las cuotas.
+ */
+function toUpdatePayload(
+  form: AccountFormValue,
+  movementsBalance?: string,
+): AccountUpdateRequest {
   const opening = form.opening_balance.trim().replace(',', '.');
   const payload: AccountUpdateRequest = {
     name: form.name.trim(),
@@ -95,24 +121,42 @@ function toUpdatePayload(form: AccountFormValue): AccountUpdateRequest {
     color: form.color,
     icon: form.icon,
   };
-  if (opening) payload.opening_balance = opening;
+  const isAmortizable = AMORTIZABLE_ACCOUNT_TYPES.includes(form.type);
+  if (opening && !isAmortizable) {
+    if (movementsBalance !== undefined) {
+      // El campo es "saldo actual"; el backend almacena opening_balance.
+      // Ajustamos: opening = userInput − movements para que el saldo
+      // final cuadre con lo introducido (movimientos no se tocan).
+      const userValue = Number(opening);
+      const mov = Number(movementsBalance);
+      if (Number.isFinite(userValue) && Number.isFinite(mov)) {
+        payload.opening_balance = (userValue - mov).toFixed(2);
+      } else {
+        payload.opening_balance = opening;
+      }
+    } else {
+      payload.opening_balance = opening;
+    }
+  }
   if (AMORTIZABLE_ACCOUNT_TYPES.includes(form.type)) {
     const apr = aprPercentToDecimal(form.apr_percent);
-    // Si el usuario vacía el APR explícitamente, mandamos `null` para
-    // limpiar el valor en BD; si nunca lo tocó, igualmente apr === null
-    // (cadena vacía) y el backend lo trata como "sin cambio para los
-    // campos opcionales con null". Mismo razonamiento para term/start.
     payload.apr = apr;
+    payload.tae = aprPercentToDecimal(form.tae_percent);
     const term = form.term_months.trim();
     payload.term_months = term ? Number(term) : null;
     const start = form.start_date.trim();
     payload.start_date = start ? start : null;
+    const totalRaw = form.total_to_pay.trim().replace(',', '.');
+    payload.total_to_pay = totalRaw ? totalRaw : null;
+    const interestOnlyRaw = form.interest_only_first_payment.trim().replace(',', '.');
+    payload.interest_only_first_payment = interestOnlyRaw ? interestOnlyRaw : null;
   } else {
-    // Cambió a un tipo no amortizable — limpiamos los campos por si
-    // tenían valor previo (ya el form los reseteó visualmente).
     payload.apr = null;
+    payload.tae = null;
     payload.term_months = null;
     payload.start_date = null;
+    payload.total_to_pay = null;
+    payload.interest_only_first_payment = null;
   }
   return payload;
 }
@@ -126,6 +170,21 @@ function validate(form: AccountFormValue): AccountFormErrors | null {
   const opening = form.opening_balance.trim().replace(',', '.');
   if (opening && Number.isNaN(Number(opening))) {
     errors.opening_balance = 'Importe inválido';
+  }
+  // Para loan/mortgage el principal es obligatorio: sin él el cuadro
+  // de amortización no se puede generar (se quedaría con 0 cuotas y
+  // todos los cálculos de salud financiera saldrían a 0).
+  if (form.type === 'loan' || form.type === 'mortgage') {
+    if (!opening) {
+      errors.opening_balance =
+        'El capital del préstamo es obligatorio (sin él no se genera el cuadro de amortización).';
+    } else {
+      const value = Number(opening);
+      if (!Number.isFinite(value) || value <= 0) {
+        errors.opening_balance =
+          'El capital debe ser mayor que 0 para préstamos e hipotecas.';
+      }
+    }
   }
   if (AMORTIZABLE_ACCOUNT_TYPES.includes(form.type)) {
     const aprRaw = form.apr_percent.trim().replace(',', '.');
@@ -412,7 +471,9 @@ function AccountRow({
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [payingDebt, setPayingDebt] = useState(false);
-  const [draft, setDraft] = useState<AccountFormValue>(() => fromAccount(account));
+  const [draft, setDraft] = useState<AccountFormValue>(() =>
+    fromAccount(account, balance),
+  );
   const [errors, setErrors] = useState<AccountFormErrors | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
 
@@ -424,7 +485,7 @@ function AccountRow({
   function startEdit() {
     setRowError(null);
     setErrors(null);
-    setDraft(fromAccount(account));
+    setDraft(fromAccount(account, balance));
     setEditing(true);
   }
 
@@ -436,7 +497,7 @@ function AccountRow({
       return;
     }
     setErrors(null);
-    update.mutate(toUpdatePayload(draft), {
+    update.mutate(toUpdatePayload(draft, balance?.movements_balance), {
       onSuccess: () => {
         setEditing(false);
         toast.success('Cuenta actualizada.');
@@ -666,7 +727,21 @@ function AccountRow({
   );
 }
 
-function fromAccount(account: Account): AccountFormValue {
+/**
+ * Convierte una `Account` (+ su balance calculado opcional) al form.
+ *
+ * Para el campo "Capital / Saldo" mostramos el `current_balance`
+ * (opening_balance + movements) cuando está disponible, no el
+ * opening_balance crudo. Razón: para deudas creadas vía "Convertir
+ * en operación financiada" el importe vive como tx contraparte
+ * (movements_balance) y opening_balance es 0 — el usuario espera ver
+ * lo que realmente debe, no un 0 falso.
+ */
+function fromAccount(
+  account: Account,
+  balance?: { current_balance: string; movements_balance: string },
+): AccountFormValue {
+  const display = balance?.current_balance ?? account.opening_balance;
   return {
     name: account.name,
     type: account.type,
@@ -674,11 +749,12 @@ function fromAccount(account: Account): AccountFormValue {
     color: account.color ?? DEFAULT_CATEGORY_COLOR,
     icon: account.icon,
     opening_balance:
-      account.opening_balance && account.opening_balance !== '0.00'
-        ? account.opening_balance
-        : '',
+      display && display !== '0.00' ? display : '',
     apr_percent: aprDecimalToPercent(account.apr),
+    tae_percent: aprDecimalToPercent(account.tae ?? null),
     term_months: account.term_months ? String(account.term_months) : '',
     start_date: account.start_date ?? '',
+    total_to_pay: account.total_to_pay ?? '',
+    interest_only_first_payment: account.interest_only_first_payment ?? '',
   };
 }

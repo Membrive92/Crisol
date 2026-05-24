@@ -107,7 +107,18 @@ def parse_csv(payload: bytes) -> list[dict[str, str]]:
 
 
 def parse_xlsx(payload: bytes) -> list[dict[str, str]]:
-    """Parsea la primera hoja de un XLSX."""
+    """Parsea la primera hoja de un XLSX.
+
+    Tolera bloques de cabecera bancarios típicos: muchos extractos
+    (BBVA, Santander, ING, CaixaBank…) llevan 5-10 filas iniciales
+    con logo, periodo, saldo inicial, etc., y la cabecera real de la
+    tabla (Fecha | Concepto | Importe | Saldo) aparece más abajo.
+
+    Heurística: escanea hasta `_XLSX_HEADER_SCAN_LIMIT` filas y elige
+    como cabecera la primera con ≥2 celdas no vacías (un título
+    suelto en una sola columna no se confunde con cabecera). El
+    resto se procesa como datos a partir de ahí.
+    """
     try:
         workbook = load_workbook(io.BytesIO(payload), read_only=True, data_only=True)
     except Exception as e:
@@ -118,14 +129,23 @@ def parse_xlsx(payload: bytes) -> list[dict[str, str]]:
         raise ParseError("El XLSX no contiene hojas")
 
     iterator = sheet.iter_rows(values_only=True)
-    try:
-        header_row = next(iterator)
-    except StopIteration as e:
-        raise ParseError("El XLSX está vacío") from e
+    headers: list[str] = []
+    rows_scanned = 0
+    for raw_row in iterator:
+        rows_scanned += 1
+        candidate = [_stringify(cell).strip() for cell in raw_row]
+        non_empty = sum(1 for cell in candidate if cell)
+        if non_empty >= 2:
+            headers = candidate
+            break
+        if rows_scanned >= _XLSX_HEADER_SCAN_LIMIT:
+            break
 
-    headers = [_stringify(cell).strip() for cell in header_row]
-    if not any(headers):
-        raise ParseError("El XLSX no tiene cabecera")
+    if not headers:
+        raise ParseError(
+            "El XLSX no tiene cabecera detectable en las primeras "
+            f"{_XLSX_HEADER_SCAN_LIMIT} filas"
+        )
 
     rows: list[dict[str, str]] = []
     for raw_row in iterator:
@@ -137,6 +157,103 @@ def parse_xlsx(payload: bytes) -> list[dict[str, str]]:
             if i < len(headers) and headers[i]
         }
         rows.append(row)
+    return rows
+
+
+_XLSX_HEADER_SCAN_LIMIT = 30
+
+
+def parse_xlsx_smart(payload: bytes) -> list[dict[str, str]]:
+    """Espejo de `parse_pdf_smart` para XLSX: detecta los roles de las
+    columnas en lugar de pedir al usuario que las mapee.
+
+    Justificación: los XLSX de bancos españoles (BBVA, Santander, ING,
+    CaixaBank…) traen una sola columna "Concepto" con la descripción
+    del movimiento. El wizard de mapping del frontend la asigna a
+    `description` por defecto, dejando `category_name` vacío — y sin
+    `category_name` el backend no construye `bank_concept_groups`,
+    así que el autocompletado de categorías nunca se activa para XLSX.
+
+    Esta función reusa la heurística del PDF smart (`_classify_columns`,
+    `_AMOUNT_HEADER_HINTS`, etc.) para producir filas con keys fijas
+    `amount`, `occurred_at`, `description`, `category_name`. Cuando
+    sólo existe una columna tipo "Concepto", se copia su valor a las
+    dos (description + category_name) — mismo truco que el PDF smart.
+
+    Lanza `SmartParseAmbiguous` si no logra identificar columnas de
+    importe Y fecha; el caller cae al `parse_xlsx` legacy con el
+    mapping del usuario.
+    """
+    try:
+        workbook = load_workbook(io.BytesIO(payload), read_only=True, data_only=True)
+    except Exception as e:
+        raise ParseError(f"XLSX inválido: {e}") from e
+
+    sheet = workbook.active
+    if sheet is None:
+        raise ParseError("El XLSX no contiene hojas")
+
+    iterator = sheet.iter_rows(values_only=True)
+    headers: list[str] = []
+    rows_scanned = 0
+    for raw_row in iterator:
+        rows_scanned += 1
+        candidate = [_stringify(cell).strip() for cell in raw_row]
+        non_empty = sum(1 for cell in candidate if cell)
+        if non_empty >= 2:
+            headers = candidate
+            break
+        if rows_scanned >= _XLSX_HEADER_SCAN_LIMIT:
+            break
+
+    if not headers:
+        raise SmartParseAmbiguous(
+            "Sin cabecera detectable en las primeras "
+            f"{_XLSX_HEADER_SCAN_LIMIT} filas"
+        )
+
+    roles = _classify_columns(headers)
+    if "amount" not in roles or "occurred_at" not in roles:
+        # Sin columnas críticas no podemos seguir — el legacy parser
+        # con mapping manual del usuario lo arreglará.
+        raise SmartParseAmbiguous(
+            "No se reconocieron columnas de importe o fecha"
+        )
+
+    rows: list[dict[str, str]] = []
+    for raw_row in iterator:
+        if all(cell is None or str(cell).strip() == "" for cell in raw_row):
+            continue
+        cleaned = [_stringify(cell).strip() for cell in raw_row]
+
+        def get(role: str) -> str:
+            idx = roles.get(role)
+            if idx is None or idx >= len(cleaned):
+                return ""
+            return cleaned[idx]
+
+        description = get("description")
+        category_name = get("category_name")
+        # Mismo post-proceso que parse_pdf_smart: si no hay description,
+        # copiamos category_name; si los dos son idénticos, mantenemos
+        # description sola para no duplicar al usuario.
+        if not description:
+            description = category_name
+        elif description == category_name:
+            category_name = ""
+
+        rows.append(
+            {
+                "amount": get("amount"),
+                "occurred_at": get("occurred_at"),
+                "description": description,
+                "category_name": category_name,
+            }
+        )
+
+    if not rows:
+        raise SmartParseAmbiguous("Cabecera detectada pero sin filas de datos")
+
     return rows
 
 
@@ -157,7 +274,11 @@ def parse_pdf(payload: bytes) -> list[dict[str, str]]:
     try:
         pdf = pdfplumber.open(io.BytesIO(payload))
     except Exception as e:
-        raise ParseError(f"PDF inválido: {e}") from e
+        # `str(e)` viene vacío para varias excepciones de PDFs cifrados
+        # / corruptos. Caemos al tipo para que el usuario tenga al
+        # menos una pista accionable en el log.
+        detail = str(e) or f"{type(e).__name__} sin mensaje (probablemente PDF cifrado o corrupto)"
+        raise ParseError(f"PDF inválido: {detail}") from e
 
     tables: list[list[list[str | None]]] = []
     with pdf:
@@ -474,7 +595,11 @@ def parse_pdf_smart(payload: bytes) -> list[dict[str, str]]:
     try:
         pdf = pdfplumber.open(io.BytesIO(payload))
     except Exception as e:
-        raise ParseError(f"PDF inválido: {e}") from e
+        # `str(e)` viene vacío para varias excepciones de PDFs cifrados
+        # / corruptos. Caemos al tipo para que el usuario tenga al
+        # menos una pista accionable en el log.
+        detail = str(e) or f"{type(e).__name__} sin mensaje (probablemente PDF cifrado o corrupto)"
+        raise ParseError(f"PDF inválido: {detail}") from e
 
     candidates: list[list[list[str | None]]] = []
     full_text_parts: list[str] = []

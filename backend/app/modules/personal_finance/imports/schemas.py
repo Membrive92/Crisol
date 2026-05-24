@@ -31,6 +31,7 @@ class ImportSource(enum.StrEnum):
     VISION = "vision"
     CSV = "csv"
     XLSX = "xlsx"
+    XLSX_SMART = "xlsx_smart"
 
 
 class ImportColumnMappings(BaseModel):

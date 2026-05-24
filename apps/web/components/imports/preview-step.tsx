@@ -3,17 +3,19 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import type { Category, ImportPreviewResponse, ImportSource } from '@crisol/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, formatCategoryKind, radius, spacing } from '@crisol/ui';
 
 import { Button } from '../ui/button';
 import { Spinner } from '../ui/spinner';
+import { looksLikeFinancedOperation } from '../transfers/convert-to-debt-dialog';
 
 const SOURCE_LABEL: Record<ImportSource, string> = {
   pdfplumber_smart: 'PDF — tabla de transacciones detectada automáticamente',
   pdfplumber_legacy: 'PDF — modo manual (mapeo de columnas)',
   vision: 'PDF — procesado por IA local (visión)',
   csv: 'CSV',
-  xlsx: 'Excel (XLSX)',
+  xlsx: 'Excel (XLSX) — modo manual',
+  xlsx_smart: 'Excel (XLSX) — columnas detectadas automáticamente',
 };
 
 const SOURCE_HELP: Record<ImportSource, string> = {
@@ -25,6 +27,8 @@ const SOURCE_HELP: Record<ImportSource, string> = {
     'Procesamos el PDF como imágenes con el modelo local. Las filas pueden tener pequeñas variaciones respecto al texto original.',
   csv: 'Aplicamos el mapeo del paso anterior. Cada fila viene del fichero tal cual.',
   xlsx: 'Aplicamos el mapeo del paso anterior. Cada fila viene de la primera hoja del libro.',
+  xlsx_smart:
+    'Detectamos automáticamente las columnas de fecha, importe y concepto. Tu mapeo manual se ignoró porque ya no hace falta.',
 };
 
 export interface PreviewStepProps {
@@ -222,7 +226,28 @@ export function PreviewStep({
                 }}
               >
                 <td style={tdStyle}>{row.occurred_at || '—'}</td>
-                <td style={tdStyle}>{row.description || '—'}</td>
+                <td style={tdStyle}>
+                  {row.description || '—'}
+                  {looksLikeFinancedOperation(row.description ?? null) ? (
+                    <span
+                      style={{
+                        marginLeft: spacing.xs,
+                        padding: `2px ${spacing.xs}px`,
+                        borderRadius: radius.sm,
+                        fontSize: 10,
+                        fontWeight: fontWeight.semibold,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.04em',
+                        backgroundColor: colors.warningSoft,
+                        color: colors.warning,
+                        border: `1px solid ${colors.warning}`,
+                      }}
+                      title="Tras importar, ve al detalle de esta tx para registrarla como deuda."
+                    >
+                      Posible deuda
+                    </span>
+                  ) : null}
+                </td>
                 <td
                   style={{ ...tdStyle, color: colors.textMuted, fontSize: fontSize.xs }}
                 >
@@ -495,7 +520,7 @@ function BankConceptMappingSection({
                   <option value="">— Sin categoría —</option>
                   {categories.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.name} ({c.kind === 'income' ? 'Ingreso' : 'Gasto'})
+                      {c.name} ({formatCategoryKind(c.kind)})
                     </option>
                   ))}
                 </select>

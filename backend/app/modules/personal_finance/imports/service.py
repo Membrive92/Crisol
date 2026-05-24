@@ -47,6 +47,7 @@ from app.modules.personal_finance.imports.parser import (
     detect_format,
     parse_file,
     parse_pdf_smart,
+    parse_xlsx_smart,
     render_pdf_pages_to_png,
 )
 from app.modules.personal_finance.imports.repository import (
@@ -534,8 +535,19 @@ async def _parse_with_fallbacks(
         rows = parse_file(payload, filename, content_type)
         return rows, mappings, ImportSource.CSV
     if fmt == "xlsx":
-        rows = parse_file(payload, filename, content_type)
-        return rows, mappings, ImportSource.XLSX
+        # Intentamos primero el smart parser (mismo enfoque que PDF):
+        # detecta roles de columnas automáticamente y produce filas con
+        # `category_name` para que el preview agrupe por concepto del
+        # banco y dispare el autocompletado de categorías. Si la
+        # heurística no es confiable (cabeceras raras, columnas críticas
+        # ausentes), caemos al `parse_xlsx` legacy con el mapping del
+        # usuario — comportamiento histórico.
+        try:
+            rows = parse_xlsx_smart(payload)
+            return rows, SMART_FORCED_MAPPING, ImportSource.XLSX_SMART
+        except SmartParseAmbiguous:
+            rows = parse_file(payload, filename, content_type)
+            return rows, mappings, ImportSource.XLSX
 
     # PDF
     if force_vision:
