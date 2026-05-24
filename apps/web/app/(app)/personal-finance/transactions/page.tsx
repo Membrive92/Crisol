@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 import {
   useAccounts,
@@ -28,10 +29,30 @@ import { PlusIcon, ReceiptIcon, UploadIcon } from '@/components/ui/icons';
 const PAGE_SIZE = 20;
 
 export default function TransactionsPage() {
-  const [filters, setFilters] = useState<TransactionListQuery>({
-    limit: PAGE_SIZE,
-    offset: 0,
-  });
+  // Sincronizamos TODOS los filtros con la URL para que al volver del
+  // detalle de una transacción (o tras refrescar / abrir un link
+  // compartido) el usuario aterrice en la misma página y con los
+  // mismos filtros que tenía aplicados. El estado vive en el
+  // componente; añadimos un puente bidireccional con la URL.
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  const [filters, setFiltersState] = useState<TransactionListQuery>(() =>
+    filtersFromSearchParams(searchParams),
+  );
+
+  function setFilters(next: TransactionListQuery) {
+    setFiltersState(next);
+    const qs = filtersToSearchParams(next).toString();
+    // `replace` (no `push`) para no inflar el historial con un entry
+    // por cada cambio de filtro o cambio de página — el botón
+    // "atrás" del navegador debe seguir saliendo de la lista, no
+    // recorrer paginación.
+    router.replace(
+      `/personal-finance/transactions${qs ? `?${qs}` : ''}`,
+      { scroll: false },
+    );
+  }
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const currency = useCurrencyStore((s) => s.currency);
   const convertAll = useCurrencyStore((s) => s.convertAll);
@@ -322,7 +343,9 @@ export default function TransactionsPage() {
               offset={offset}
               limit={limit}
               pageItemCount={items.length}
-              onChange={(nextOffset) => setFilters({ ...filters, offset: nextOffset })}
+              onChange={(nextOffset) =>
+                setFilters({ ...filters, offset: nextOffset })
+              }
             />
           </>
         )}
@@ -357,6 +380,57 @@ export default function TransactionsPage() {
         onConfirm={confirmBulkDelete}
         onCancel={() => setConfirmingBulkDelete(false)}
       />
+
     </div>
   );
+}
+
+/**
+ * Reconstruye el estado de filtros desde la query string. Omitimos
+ * propiedades no presentes en lugar de ponerlas a `undefined`
+ * explícito (TS strict + `exactOptionalPropertyTypes` lo prohíbe).
+ * `limit` se fuerza al PAGE_SIZE — no es algo que el usuario controle
+ * desde la UI, así que no merece la pena meterlo en la URL.
+ */
+function filtersFromSearchParams(
+  searchParams: ReturnType<typeof useSearchParams>,
+): TransactionListQuery {
+  const rawOffset = searchParams.get('offset');
+  const parsedOffset = rawOffset ? Number(rawOffset) : 0;
+  const offset =
+    Number.isFinite(parsedOffset) && parsedOffset > 0
+      ? Math.floor(parsedOffset)
+      : 0;
+  const accountId = searchParams.get('account_id');
+  const categoryId = searchParams.get('category_id');
+  const dateFrom = searchParams.get('date_from');
+  const dateTo = searchParams.get('date_to');
+  const search = searchParams.get('search');
+  return {
+    limit: PAGE_SIZE,
+    offset,
+    ...(accountId ? { account_id: accountId } : {}),
+    ...(categoryId ? { category_id: categoryId } : {}),
+    ...(dateFrom ? { date_from: dateFrom } : {}),
+    ...(dateTo ? { date_to: dateTo } : {}),
+    ...(search ? { search } : {}),
+  };
+}
+
+/**
+ * Inverso de `filtersFromSearchParams`. `target_currency` y `limit`
+ * NO viajan a la URL: el primero lo deriva el page del store global,
+ * el segundo es fijo.
+ */
+function filtersToSearchParams(filters: TransactionListQuery): URLSearchParams {
+  const sp = new URLSearchParams();
+  if (filters.offset && filters.offset > 0) {
+    sp.set('offset', String(filters.offset));
+  }
+  if (filters.account_id) sp.set('account_id', filters.account_id);
+  if (filters.category_id) sp.set('category_id', filters.category_id);
+  if (filters.date_from) sp.set('date_from', filters.date_from);
+  if (filters.date_to) sp.set('date_to', filters.date_to);
+  if (filters.search) sp.set('search', filters.search);
+  return sp;
 }

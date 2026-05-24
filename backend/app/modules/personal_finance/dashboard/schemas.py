@@ -77,3 +77,58 @@ class TopExpenseItem(BaseModel):
     category_name: str | None
     original_amount: Decimal
     original_currency: str
+
+
+class CategoryMonthlyBucket(BaseModel):
+    """PHASE-25 — Total mensual de UNA categoría concreta."""
+
+    month: str
+    """Formato `YYYY-MM`."""
+    total: Decimal
+
+
+class CategoryDetailResponse(BaseModel):
+    """PHASE-25 — KPIs + evolución + top tx de una categoría concreta,
+    para la pantalla de drill-down del desglose del dashboard.
+
+    Todos los importes vienen en `currency` (la pedida por el caller).
+    El rango aplicado es `[date_from, date_to]` — el caller decide
+    (default: últimos 30 días en el frontend, igual que el resto).
+    """
+
+    category_id: uuid.UUID
+    category_name: str
+    category_kind: str
+    category_color: str | None = None
+    category_icon: str | None = None
+    currency: str
+    total: Decimal
+    """Total del rango."""
+    count: int
+    """Número de tx en el rango."""
+    average_amount: Decimal
+    """Ticket medio (`total / count`). 0 si count=0."""
+    by_month: list[CategoryMonthlyBucket]
+    """Evolución mensual ordenada cronológicamente. Default últimos
+    12 meses cerrados desde la fecha actual (el caller no lo controla
+    en esta primera versión)."""
+    top_transactions: list[TopExpenseItem]
+    """Top 10 tx del rango ordenadas por importe desc — para que el
+    usuario vea los movimientos más significativos sin abrir la lista
+    completa."""
+
+
+class CategoryAvailablePeriodItem(BaseModel):
+    """Año + meses (1-12) con transacciones activas de una categoría."""
+
+    year: int
+    months: list[int]
+
+
+class CategoryAvailablePeriodsResponse(BaseModel):
+    """Periodos con datos para una categoría. Alimenta el selector
+    temporal del drill-down — sólo se muestran chips para meses/años
+    en los que realmente hay movimientos de esa categoría.
+    """
+
+    periods: list[CategoryAvailablePeriodItem]

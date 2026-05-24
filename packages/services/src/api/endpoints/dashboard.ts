@@ -1,7 +1,9 @@
 import type {
   CategoryBreakdownItem,
+  CategoryDetail,
   DashboardByCategoryQuery,
   DashboardByMonthQuery,
+  DashboardCategoryDetailQuery,
   DashboardSummary,
   DashboardSummaryQuery,
   DashboardTopExpensesQuery,
@@ -43,5 +45,25 @@ export const dashboardApi = {
       params: query,
     });
     return response.data;
+  },
+
+  async categoryDetail(
+    categoryId: string,
+    query: DashboardCategoryDetailQuery = {},
+  ): Promise<CategoryDetail> {
+    const response = await apiClient.get<CategoryDetail>(
+      `/dashboard/category/${categoryId}`,
+      { params: query },
+    );
+    return response.data;
+  },
+
+  async categoryAvailablePeriods(
+    categoryId: string,
+  ): Promise<{ year: number; months: number[] }[]> {
+    const response = await apiClient.get<{
+      periods: { year: number; months: number[] }[];
+    }>(`/dashboard/category/${categoryId}/available-periods`);
+    return response.data.periods;
   },
 };

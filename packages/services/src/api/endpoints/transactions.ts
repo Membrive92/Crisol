@@ -88,4 +88,17 @@ export const transactionsApi = {
     );
     return response.data;
   },
+
+  /**
+   * Años + meses con transacciones activas del usuario. Los años
+   * llegan en orden descendente; los meses dentro de cada año en
+   * orden ascendente (1-12). Vacío si el usuario aún no tiene
+   * transacciones.
+   */
+  async availablePeriods(): Promise<{ year: number; months: number[] }[]> {
+    const response = await apiClient.get<{
+      periods: { year: number; months: number[] }[];
+    }>('/transactions/available-periods');
+    return response.data.periods;
+  },
 };

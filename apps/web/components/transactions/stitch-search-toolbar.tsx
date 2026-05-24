@@ -2,14 +2,12 @@
 
 import { useState } from 'react';
 
+import { useTransactionAvailablePeriods } from '@crisol/services';
 import type { Account, Category, TransactionListQuery } from '@crisol/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
-import {
-  CalendarIcon,
-  FilterIcon,
-  SearchIcon,
-} from '@/components/ui/icons';
+import { FilterIcon, SearchIcon } from '@/components/ui/icons';
+import { TimeSelector } from '@/components/ui/time-selector';
 
 export interface StitchSearchToolbarProps {
   value: TransactionListQuery;
@@ -32,6 +30,7 @@ export function StitchSearchToolbar({
   accounts,
 }: StitchSearchToolbarProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const { data: availablePeriods = [] } = useTransactionAvailablePeriods();
 
   function update<K extends keyof TransactionListQuery>(
     key: K,
@@ -40,20 +39,22 @@ export function StitchSearchToolbar({
     onChange({ ...value, [key]: next === '' ? undefined : next, offset: 0 });
   }
 
-  function applyThisMonth() {
-    const now = new Date();
-    const start = new Date(now.getFullYear(), now.getMonth(), 1);
-    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+  function applyTimeRange(range: {
+    dateFrom: string | undefined;
+    dateTo: string | undefined;
+  }) {
+    // Reconstruimos `value` omitiendo `date_from`/`date_to` para
+    // respetar `exactOptionalPropertyTypes` (no podemos asignar
+    // `undefined` explícito a un campo opcional).
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { date_from: _df, date_to: _dt, ...rest } = value;
     onChange({
-      ...value,
-      date_from: start.toISOString(),
-      date_to: end.toISOString(),
+      ...rest,
+      ...(range.dateFrom ? { date_from: range.dateFrom } : {}),
+      ...(range.dateTo ? { date_to: range.dateTo } : {}),
       offset: 0,
     });
   }
-
-  const isThisMonthActive =
-    value.date_from?.startsWith(new Date().toISOString().slice(0, 7)) ?? false;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
@@ -68,13 +69,13 @@ export function StitchSearchToolbar({
           active={filtersOpen}
           onClick={() => setFiltersOpen((v) => !v)}
         />
-        <ToolbarButton
-          label="Este mes"
-          icon={<CalendarIcon size={16} />}
-          active={isThisMonthActive}
-          onClick={applyThisMonth}
-        />
       </div>
+
+      <TimeSelector
+        availablePeriods={availablePeriods}
+        value={{ dateFrom: value.date_from, dateTo: value.date_to }}
+        onChange={applyTimeRange}
+      />
 
       {filtersOpen ? (
         <div

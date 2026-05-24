@@ -23,6 +23,13 @@ export const queryKeys = {
     detail: (id: string) => [...queryKeys.accounts.all, 'detail', id] as const,
     balances: () => [...queryKeys.accounts.all, 'balances'] as const,
     debtHealth: () => [...queryKeys.accounts.all, 'debt-health'] as const,
+    debtHistory: (monthsBack = 12, monthsAhead = 12) =>
+      [
+        ...queryKeys.accounts.all,
+        'debt-history',
+        monthsBack,
+        monthsAhead,
+      ] as const,
     amortization: (id: string) =>
       [...queryKeys.accounts.all, 'amortization', id] as const,
   },
@@ -31,6 +38,7 @@ export const queryKeys = {
     list: () => [...queryKeys.transfers.all, 'list'] as const,
     candidates: (windowDays = 3) =>
       [...queryKeys.transfers.all, 'candidates', windowDays] as const,
+    suspects: () => [...queryKeys.transfers.all, 'suspects'] as const,
   },
   categories: {
     all: ['categories'] as const,
@@ -44,6 +52,7 @@ export const queryKeys = {
     detail: (id: string) => [...queryKeys.transactions.all, 'detail', id] as const,
     trash: (query: { limit?: number; offset?: number } = {}) =>
       [...queryKeys.transactions.all, 'trash', normalizeQuery(query)] as const,
+    availablePeriods: () => [...queryKeys.transactions.all, 'available-periods'] as const,
   },
   dashboard: {
     all: ['dashboard'] as const,
@@ -56,6 +65,19 @@ export const queryKeys = {
     topExpenses: (query: DashboardTopExpensesQuery = {}) =>
       [...queryKeys.dashboard.all, 'top-expenses', normalizeQuery(query)] as const,
     currencies: () => [...queryKeys.dashboard.all, 'currencies'] as const,
+    categoryDetail: (categoryId: string, query: Record<string, unknown> = {}) =>
+      [
+        ...queryKeys.dashboard.all,
+        'category-detail',
+        categoryId,
+        normalizeQuery(query),
+      ] as const,
+    categoryAvailablePeriods: (categoryId: string) =>
+      [
+        ...queryKeys.dashboard.all,
+        'category-available-periods',
+        categoryId,
+      ] as const,
   },
   imports: {
     all: ['imports'] as const,

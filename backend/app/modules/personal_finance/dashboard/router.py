@@ -16,6 +16,7 @@ Modo de moneda: dos parámetros mutuamente excluyentes (gana
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from typing import Annotated
 
@@ -26,13 +27,17 @@ from app.core.database import get_db
 from app.core.deps import CurrentUser
 from app.modules.personal_finance.categories.models import CategoryKind
 from app.modules.personal_finance.dashboard.schemas import (
+    CategoryAvailablePeriodsResponse,
     CategoryBreakdownItem,
+    CategoryDetailResponse,
     MonthlyBucket,
     SummaryResponse,
     TopExpenseItem,
 )
 from app.modules.personal_finance.dashboard.service import (
     get_breakdown_by_category,
+    get_category_available_periods,
+    get_category_detail,
     get_monthly_breakdown,
     get_summary,
     get_top_expenses,
@@ -118,6 +123,54 @@ async def by_month_endpoint(
     cur, target = _resolve_currency_params(currency, target_currency)
     return await get_monthly_breakdown(
         db, user.id, year=year, currency=cur, target_currency=target
+    )
+
+
+@router.get(
+    "/category/{category_id}/available-periods",
+    response_model=CategoryAvailablePeriodsResponse,
+)
+async def category_available_periods_endpoint(
+    category_id: uuid.UUID,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> CategoryAvailablePeriodsResponse:
+    """Años + meses con transacciones activas para la categoría dada.
+
+    Alimenta el selector temporal del drill-down de categoría — sólo
+    mostramos chips para periodos que tienen datos reales. Excluye
+    papelera. Importante: ruta más específica antes que
+    `/category/{category_id}` para que FastAPI no la confunda.
+    """
+    return await get_category_available_periods(db, user.id, category_id)
+
+
+@router.get(
+    "/category/{category_id}", response_model=CategoryDetailResponse
+)
+async def category_detail_endpoint(
+    category_id: uuid.UUID,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
+    target_currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    months_back: Annotated[int, Query(ge=1, le=36)] = 12,
+) -> CategoryDetailResponse:
+    """PHASE-25 — Drill-down de una categoría: KPIs en el rango +
+    evolución mensual + top 10 transacciones. Para la pantalla que se
+    abre al pulsar un item del 'Desglose de gastos' del dashboard."""
+    cur, target = _resolve_currency_params(currency, target_currency)
+    return await get_category_detail(
+        db,
+        user.id,
+        category_id=category_id,
+        currency=cur,
+        target_currency=target,
+        date_from=date_from,
+        date_to=date_to,
+        months_back=months_back,
     )
 
 

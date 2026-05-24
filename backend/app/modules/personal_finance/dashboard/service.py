@@ -20,14 +20,21 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import Date as SQLDate
-from sqlalchemy import cast, select
+from sqlalchemy import cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.currency import service as currency_service
 from app.modules.personal_finance.categories.models import CategoryKind
+from fastapi import HTTPException, status
+
+from app.modules.personal_finance.categories.repository import get_category_by_id
 from app.modules.personal_finance.dashboard import repository
 from app.modules.personal_finance.dashboard.schemas import (
+    CategoryAvailablePeriodItem,
+    CategoryAvailablePeriodsResponse,
     CategoryBreakdownItem,
+    CategoryDetailResponse,
+    CategoryMonthlyBucket,
     MonthlyBucket,
     SummaryResponse,
     TopExpenseItem,
@@ -296,3 +303,137 @@ async def get_top_expenses(
         )
         for tx, category_name, converted in rows
     ]
+
+
+async def get_category_available_periods(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    category_id: uuid.UUID,
+) -> CategoryAvailablePeriodsResponse:
+    """Años + meses (1-12) con transacciones activas para una categoría.
+
+    Excluye papelera. Años descendente, meses ascendente. 404 si la
+    categoría no existe o no pertenece al usuario — fallback a 404
+    en lugar de devolver una lista vacía para no enmascarar errores
+    de routing en el cliente.
+    """
+    category = await get_category_by_id(db, category_id, user_id)
+    if category is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Categoría no encontrada.",
+        )
+    query = (
+        select(
+            func.extract("year", Transaction.occurred_at).label("year"),
+            func.extract("month", Transaction.occurred_at).label("month"),
+        )
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.category_id == category_id)
+        .where(Transaction.deleted_at.is_(None))
+        .distinct()
+    )
+    rows = (await db.execute(query)).all()
+    months_by_year: dict[int, set[int]] = {}
+    for year, month in rows:
+        if year is None or month is None:
+            continue
+        months_by_year.setdefault(int(year), set()).add(int(month))
+    items = [
+        CategoryAvailablePeriodItem(year=year, months=sorted(months_by_year[year]))
+        for year in sorted(months_by_year, reverse=True)
+    ]
+    return CategoryAvailablePeriodsResponse(periods=items)
+
+
+async def get_category_detail(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    category_id: uuid.UUID,
+    currency: str | None = None,
+    target_currency: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    months_back: int = 12,
+) -> CategoryDetailResponse:
+    """PHASE-25 — drill-down de una categoría: KPIs (total, count,
+    ticket medio) + evolución mensual (últimos `months_back` meses)
+    + top tx del rango.
+
+    404 si la categoría no existe / no es del usuario.
+    """
+    category = await get_category_by_id(db, category_id, user_id)
+    if category is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Categoría no encontrada.",
+        )
+    legacy, target, resolved_currency = _resolve_mode(currency, target_currency)
+    if target is not None:
+        await ensure_rates_for_user_scope(
+            db,
+            user_id,
+            target_currency=target,
+            date_from=date_from,
+            date_to=date_to,
+        )
+    total_raw, count = await repository.get_category_kpis(
+        db,
+        user_id,
+        category_id=category_id,
+        currency=legacy,
+        target_currency=target,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    # Quantize a céntimos para que la serialización de Pydantic produzca
+    # siempre "0.00" en vez de "0" cuando no hay datos.
+    total = total_raw.quantize(Decimal("0.01"))
+    monthly = await repository.get_category_monthly_evolution(
+        db,
+        user_id,
+        category_id=category_id,
+        currency=legacy,
+        target_currency=target,
+        months_back=months_back,
+    )
+    top = await repository.get_category_top_transactions(
+        db,
+        user_id,
+        category_id=category_id,
+        currency=legacy,
+        target_currency=target,
+        date_from=date_from,
+        date_to=date_to,
+        limit=10,
+    )
+    average = total / Decimal(count) if count > 0 else Decimal("0")
+    return CategoryDetailResponse(
+        category_id=category.id,
+        category_name=category.name,
+        category_kind=category.kind.value,
+        category_color=category.color,
+        category_icon=category.icon,
+        currency=resolved_currency,
+        total=total,
+        count=count,
+        average_amount=average.quantize(Decimal("0.01")),
+        by_month=[
+            CategoryMonthlyBucket(month=month, total=total_m)
+            for month, total_m in monthly
+        ],
+        top_transactions=[
+            TopExpenseItem(
+                transaction_id=tx.id,
+                description=tx.description,
+                amount=converted if converted is not None else tx.amount,
+                occurred_at=tx.occurred_at,
+                category_id=tx.category_id,
+                category_name=cat_name,
+                original_amount=tx.amount,
+                original_currency=tx.currency,
+            )
+            for tx, cat_name, converted in top
+        ],
+    )

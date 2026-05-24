@@ -523,3 +523,109 @@ async def test_currencies_isolated_per_user(client: AsyncClient) -> None:
 
     r = await client.get("/dashboard/currencies", headers=_auth(token_b))
     assert r.json() == []
+
+
+# ───────────────────────────────────────────────────────────────────
+# PHASE-25 — /dashboard/category/{id} drill-down
+# ───────────────────────────────────────────────────────────────────
+
+
+async def test_category_detail_returns_kpis_and_evolution(
+    client: AsyncClient,
+) -> None:
+    """`GET /dashboard/category/{id}` devuelve total + count + ticket
+    medio + evolución mensual + top tx."""
+    token, account_id = await _register(client, "catdetail@example.com")
+    cat_id = await _make_category(client, token, name="Comida", kind="expense")
+    # 3 tx en el mismo mes
+    await _make_tx(
+        client, token, account_id, amount="10",
+        occurred_at="2026-01-05T10:00:00Z", category_id=cat_id,
+    )
+    await _make_tx(
+        client, token, account_id, amount="20",
+        occurred_at="2026-01-15T10:00:00Z", category_id=cat_id,
+    )
+    await _make_tx(
+        client, token, account_id, amount="30",
+        occurred_at="2026-02-10T10:00:00Z", category_id=cat_id,
+    )
+
+    r = await client.get(
+        f"/dashboard/category/{cat_id}?currency=USD", headers=_auth(token)
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["category_id"] == cat_id
+    assert body["category_name"] == "Comida"
+    assert body["category_kind"] == "expense"
+    assert body["total"] == "60.00"
+    assert body["count"] == 3
+    assert body["average_amount"] == "20.00"
+    # Evolución: 2 meses (enero y febrero)
+    months = {m["month"]: m["total"] for m in body["by_month"]}
+    assert months["2026-01"] == "30.00"
+    assert months["2026-02"] == "30.00"
+    # Top tx: 3 ordenadas desc
+    tops = body["top_transactions"]
+    assert len(tops) == 3
+    assert tops[0]["amount"] == "30.00"
+    assert tops[1]["amount"] == "20.00"
+    assert tops[2]["amount"] == "10.00"
+
+
+async def test_category_detail_404_when_not_owned(client: AsyncClient) -> None:
+    """Aislamiento: user B no puede consultar categoría de user A."""
+    token_a, _ = await _register(client, "catdetail-a@example.com")
+    token_b, _ = await _register(client, "catdetail-b@example.com")
+    cat_id = await _make_category(client, token_a, name="Comida", kind="expense")
+    r = await client.get(
+        f"/dashboard/category/{cat_id}?currency=USD", headers=_auth(token_b)
+    )
+    assert r.status_code == 404
+
+
+async def test_category_detail_filters_by_date_range(
+    client: AsyncClient,
+) -> None:
+    """`date_from`/`date_to` afecta a `total`/`count`/`top_transactions`
+    pero NO al `by_month` (que mira los últimos N meses)."""
+    token, account_id = await _register(client, "catdetail-range@example.com")
+    cat_id = await _make_category(client, token, name="Comida", kind="expense")
+    await _make_tx(
+        client, token, account_id, amount="50",
+        occurred_at="2026-01-01T10:00:00Z", category_id=cat_id,
+    )
+    await _make_tx(
+        client, token, account_id, amount="80",
+        occurred_at="2026-02-01T10:00:00Z", category_id=cat_id,
+    )
+    r = await client.get(
+        f"/dashboard/category/{cat_id}?currency=USD"
+        "&date_from=2026-02-01T00:00:00Z",
+        headers=_auth(token),
+    )
+    body = r.json()
+    assert body["total"] == "80.00"
+    assert body["count"] == 1
+    # by_month sigue mostrando ambos meses (ignora date_from)
+    months = {m["month"] for m in body["by_month"]}
+    assert "2026-01" in months
+    assert "2026-02" in months
+
+
+async def test_category_detail_zero_count_when_no_tx(
+    client: AsyncClient,
+) -> None:
+    """Categoría sin tx: total=0, count=0, average=0, listas vacías."""
+    token, _account_id = await _register(client, "catdetail-empty@example.com")
+    cat_id = await _make_category(client, token, name="Vacía", kind="expense")
+    r = await client.get(
+        f"/dashboard/category/{cat_id}?currency=USD", headers=_auth(token)
+    )
+    body = r.json()
+    assert body["total"] == "0.00"
+    assert body["count"] == 0
+    assert body["average_amount"] == "0.00"
+    assert body["by_month"] == []
+    assert body["top_transactions"] == []

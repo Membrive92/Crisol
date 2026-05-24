@@ -46,14 +46,23 @@ export {
   useAmortizationSchedule,
   useCreateAccount,
   useDebtHealth,
+  useDebtHistory,
   useDeleteAccount,
+  usePayInstallment,
+  useRegenerateAmortization,
+  useUnpayInstallment,
   useUpdateAccount,
+  useUpdateInstallment,
 } from './query/hooks/useAccounts';
 export {
+  useConvertToDebt,
+  useConvertToTransfer,
   useLinkTransfer,
+  useMarkTransfer,
   useMatchTransfers,
   useTransferCandidates,
   useTransfers,
+  useTransferSuspects,
   useUnlinkTransfer,
 } from './query/hooks/useTransfers';
 export {
@@ -66,6 +75,7 @@ export {
 export {
   useTransactions,
   useTransaction,
+  useTransactionAvailablePeriods,
   useCreateTransaction,
   useUpdateTransaction,
   useDeleteTransaction,
@@ -77,9 +87,11 @@ export {
   useBulkPurgeTrash,
 } from './query/hooks/useTransactions';
 export {
-  useDashboardSummary,
+  useCategoryAvailablePeriods,
+  useCategoryDetail,
   useDashboardByCategory,
   useDashboardByMonth,
+  useDashboardSummary,
   useDashboardTopExpenses,
   useUserCurrencies,
 } from './query/hooks/useDashboard';

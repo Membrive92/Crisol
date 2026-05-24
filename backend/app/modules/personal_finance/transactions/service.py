@@ -7,6 +7,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from fastapi import HTTPException, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.personal_finance.accounts.service import ensure_account_exists
@@ -95,6 +96,38 @@ async def list_trashed_transactions(
 ) -> tuple[list[Transaction], int]:
     """Lista transacciones del usuario que están en papelera."""
     return await list_trashed_in_db(db, user_id, limit=limit, offset=offset)
+
+
+async def list_available_periods(
+    db: AsyncSession, user_id: uuid.UUID
+) -> list[tuple[int, list[int]]]:
+    """Devuelve los `(año, [meses])` con transacciones activas del
+    usuario (excluye papelera). Años ordenados descendente; meses
+    ordenados ascendente (1-12).
+
+    Alimenta el selector temporal de la UI para que sólo se muestren
+    los periodos con datos reales — el usuario no puede caer en un
+    mes vacío por error. Lista vacía si el usuario aún no tiene nada.
+    """
+    query = (
+        select(
+            func.extract("year", Transaction.occurred_at).label("year"),
+            func.extract("month", Transaction.occurred_at).label("month"),
+        )
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.deleted_at.is_(None))
+        .distinct()
+    )
+    rows = (await db.execute(query)).all()
+    months_by_year: dict[int, set[int]] = {}
+    for year, month in rows:
+        if year is None or month is None:
+            continue
+        months_by_year.setdefault(int(year), set()).add(int(month))
+    return [
+        (year, sorted(months_by_year[year]))
+        for year in sorted(months_by_year, reverse=True)
+    ]
 
 
 async def get_transaction(

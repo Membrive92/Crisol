@@ -32,6 +32,7 @@ from app.modules.personal_finance.transactions.service import (
     create_transaction,
     delete_transaction,
     get_transaction,
+    list_available_periods,
     list_transactions,
     list_trashed_transactions,
     purge_transaction,
@@ -56,6 +57,25 @@ class BulkPurgeResponse(BaseModel):
     """Respuesta del endpoint DELETE /transactions/trash (bulk)."""
 
     purged_count: int
+
+
+class AvailablePeriodItem(BaseModel):
+    """Un año con la lista de meses (1-12) que tienen transacciones."""
+
+    year: int
+    months: list[int]
+
+
+class AvailablePeriodsResponse(BaseModel):
+    """Años + meses con al menos una transacción activa para el usuario.
+
+    Sirve para construir filtros rápidos en la UI sin tener que pedir
+    al usuario que adivine qué rango introducir, y para no mostrar
+    botones de meses que no tienen datos. Excluye papelera.
+    """
+
+    periods: list[AvailablePeriodItem]
+
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -170,6 +190,28 @@ async def bulk_purge_trash_endpoint(
     count = await bulk_purge_trashed_transactions(db, user.id)
     await db.commit()
     return BulkPurgeResponse(purged_count=count)
+
+
+@router.get("/available-periods", response_model=AvailablePeriodsResponse)
+async def available_periods_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AvailablePeriodsResponse:
+    """Años + meses con transacciones activas del usuario.
+
+    Lo usa el filtro rápido del listado para mostrar sólo los años
+    y los meses que tienen datos, en lugar de listar todos los años
+    o forzar los 12 meses fijos. Importante: esta ruta estática debe
+    declararse ANTES de `/{transaction_id}` — si no, FastAPI matchea
+    "available-periods" como un UUID y devuelve 422.
+    """
+    periods = await list_available_periods(db, user.id)
+    return AvailablePeriodsResponse(
+        periods=[
+            AvailablePeriodItem(year=year, months=months)
+            for year, months in periods
+        ]
+    )
 
 
 @router.get("/{transaction_id}", response_model=TransactionResponse)

@@ -30,6 +30,20 @@ export function useTransaction(id: string | undefined) {
   });
 }
 
+/**
+ * Periodos (año + meses con datos) en los que el usuario tiene
+ * transacciones activas. Alimenta el selector rápido de la toolbar
+ * para que no muestre años ni meses vacíos. Se invalida implícitamente
+ * con el resto del grupo `transactions.all` al crear/borrar/restaurar.
+ */
+export function useTransactionAvailablePeriods() {
+  return useQuery<{ year: number; months: number[] }[], Error>({
+    queryKey: queryKeys.transactions.availablePeriods(),
+    queryFn: () => transactionsApi.availablePeriods(),
+    staleTime: 1000 * 60 * 5,
+  });
+}
+
 export function useCreateTransaction() {
   const queryClient = useQueryClient();
   return useMutation<Transaction, Error, TransactionCreateRequest>({
