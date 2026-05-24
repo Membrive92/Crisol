@@ -32,6 +32,9 @@ async def list_unmatched_active_transactions(
     """Lista todas las txs activas del usuario sin pareja, junto con
     el `kind` de su categoría (o None si no tiene). El matcher usa el
     kind para emparejar income con expense.
+
+    PHASE-23.1: excluye las txs cuya categoría tiene `is_transfer=true`
+    — ya están marcadas como transferencia y no necesitan emparejarse.
     """
     query = (
         select(Transaction, Category.kind)
@@ -40,6 +43,9 @@ async def list_unmatched_active_transactions(
             Transaction.user_id == user_id,
             Transaction.deleted_at.is_(None),
             Transaction.transfer_pair_id.is_(None),
+        )
+        .where(
+            (Category.is_transfer.is_(None)) | (Category.is_transfer.is_(False))
         )
         .order_by(Transaction.occurred_at.asc())
     )
@@ -208,6 +214,84 @@ def find_candidate_pairs(
             used.add(in_tx.id)
 
     return pairs
+
+
+async def list_suspect_transactions(
+    db: AsyncSession, user_id: uuid.UUID
+) -> list[tuple[Transaction, uuid.UUID | None, str | None]]:
+    """PHASE-23.1: lista txs activas, sin pareja, NO marcadas como
+    transfer (categoría con `is_transfer=true`), cuya `description`
+    contiene "transfer" (case insensitive).
+
+    Devuelve (tx, current_category_id, current_category_name) para que
+    el frontend muestre la categoría actual antes de remarcar.
+    """
+    query = (
+        select(Transaction, Category.id, Category.name)
+        .outerjoin(Category, Category.id == Transaction.category_id)
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.deleted_at.is_(None))
+        .where(Transaction.transfer_pair_id.is_(None))
+        .where(
+            (Category.is_transfer.is_(None)) | (Category.is_transfer.is_(False))
+        )
+        .where(Transaction.description.ilike("%transfer%"))
+        .order_by(Transaction.occurred_at.desc())
+    )
+    rows = await db.execute(query)
+    return [(tx, cat_id, cat_name) for tx, cat_id, cat_name in rows.all()]
+
+
+async def get_or_create_default_transfer_category(
+    db: AsyncSession, user_id: uuid.UUID, *, kind: CategoryKind
+) -> Category:
+    """Devuelve la primera categoría `is_transfer=true` del usuario con
+    el `kind` pedido (oldest por created_at). Si no existe ninguna,
+    crea "Transferencia interna (salida)" o "(entrada)" según kind.
+
+    Por qué dos categorías: PHASE-23.1 separa "es transferencia"
+    (flag is_transfer) del signo en el balance (kind). Necesitamos
+    una categoría con kind=EXPENSE para la pata saliente y otra con
+    kind=INCOME para la pata entrante — los saldos así reflejan el
+    movimiento correctamente.
+    """
+    query = (
+        select(Category)
+        .where(Category.user_id == user_id)
+        .where(Category.is_transfer.is_(True))
+        .where(Category.kind == kind)
+        .order_by(Category.created_at.asc())
+        .limit(1)
+    )
+    existing = (await db.execute(query)).scalar_one_or_none()
+    if existing is not None:
+        return existing
+
+    name = (
+        "Transferencia interna (salida)"
+        if kind == CategoryKind.EXPENSE
+        else "Transferencia interna (entrada)"
+    )
+    cat = Category(
+        user_id=user_id,
+        name=name,
+        kind=kind,
+        is_transfer=True,
+        color="#6B7280",
+        icon="↔️",
+    )
+    db.add(cat)
+    await db.flush()
+    await db.refresh(cat)
+    return cat
+
+
+async def assign_category(
+    db: AsyncSession, tx: Transaction, category_id: uuid.UUID
+) -> None:
+    """Asigna `category_id` a la tx y persiste el cambio."""
+    tx.category_id = category_id
+    await db.flush()
 
 
 def filter_unambiguous(

@@ -46,8 +46,11 @@ export default function CategoriesScreen() {
   const [pendingDelete, setPendingDelete] = useState<Category | null>(null);
 
   const items = list.data ?? [];
-  const expenseItems = items.filter((c) => c.kind === 'expense');
-  const incomeItems = items.filter((c) => c.kind === 'income');
+  // PHASE-23.1: is_transfer va a su propia sección, aunque tenga
+  // kind=expense o kind=income internamente.
+  const expenseItems = items.filter((c) => c.kind === 'expense' && !c.is_transfer);
+  const incomeItems = items.filter((c) => c.kind === 'income' && !c.is_transfer);
+  const transferItems = items.filter((c) => c.is_transfer);
 
   function openCreate() {
     setEditing(null);
@@ -143,6 +146,12 @@ export default function CategoriesScreen() {
             <CategoryGroup
               title="Ingresos"
               items={incomeItems}
+              onEdit={openEdit}
+              onDelete={setPendingDelete}
+            />
+            <CategoryGroup
+              title="Transferencias"
+              items={transferItems}
               onEdit={openEdit}
               onDelete={setPendingDelete}
             />

@@ -89,6 +89,7 @@ async def _upsert_category(
         kind=spec["kind"],
         color=spec["color"],
         icon=spec["icon"],
+        is_transfer=spec.get("is_transfer", False),
     )
     db.add(cat)
     await db.flush()

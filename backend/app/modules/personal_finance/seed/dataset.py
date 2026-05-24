@@ -40,12 +40,13 @@ class SeedRuleDef(TypedDict):
     priority: int
 
 
-class SeedCategoryDef(TypedDict):
+class SeedCategoryDef(TypedDict, total=False):
     name: str
     kind: CategoryKind
     color: str  # hex #RRGGBB
     icon: str  # emoji
     rules: list[SeedRuleDef]
+    is_transfer: bool  # PHASE-23.1 — opcional, default False
 
 
 # Helpers para reducir verbosidad.
@@ -345,6 +346,7 @@ SEED_CATEGORIES: list[SeedCategoryDef] = [
     {
         "name": "Transferencias",
         "kind": CategoryKind.EXPENSE,
+        "is_transfer": True,
         "color": "#64748b",
         "icon": "↔️",
         "rules": [

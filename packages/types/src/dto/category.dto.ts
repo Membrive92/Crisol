@@ -5,6 +5,8 @@ export interface CategoryCreateRequest {
   icon?: string | null;
   color?: string | null;
   kind: CategoryKind;
+  /** PHASE-23.1: marca la categoría como transferencia interna. */
+  is_transfer?: boolean;
 }
 
 export interface CategoryUpdateRequest {
@@ -12,4 +14,5 @@ export interface CategoryUpdateRequest {
   icon?: string | null;
   color?: string | null;
   kind?: CategoryKind;
+  is_transfer?: boolean;
 }

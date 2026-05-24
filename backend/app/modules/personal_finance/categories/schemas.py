@@ -17,6 +17,10 @@ class CategoryCreate(BaseModel):
     icon: str | None = Field(default=None, max_length=50)
     color: str | None = Field(default=None, max_length=7)
     kind: CategoryKind
+    is_transfer: bool = False
+    """PHASE-23.1: marca la categoría como transferencia interna —
+    sus txs quedan fuera del cashflow agregado pero conservan el
+    signo de `kind` al sumar al saldo de la cuenta."""
 
 
 class CategoryUpdate(BaseModel):
@@ -26,6 +30,7 @@ class CategoryUpdate(BaseModel):
     icon: str | None = None
     color: str | None = None
     kind: CategoryKind | None = None
+    is_transfer: bool | None = None
 
 
 class CategoryResponse(BaseModel):
@@ -37,6 +42,7 @@ class CategoryResponse(BaseModel):
     icon: str | None
     color: str | None
     kind: CategoryKind
+    is_transfer: bool
     created_at: datetime
     updated_at: datetime
 

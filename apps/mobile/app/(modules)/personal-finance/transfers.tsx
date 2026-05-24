@@ -6,16 +6,21 @@ import {
   formatApiError,
   useAccounts,
   useLinkTransfer,
+  useMarkTransfer,
   useMatchTransfers,
   useTransferCandidates,
+  useTransferSuspects,
   useTransfers,
   useUnlinkTransfer,
 } from '@crisol/services';
 import { toast } from '@crisol/store';
+import type { Account, TransferSuspect } from '@crisol/types';
 import {
   colors,
   fontSize,
   fontWeight,
+  formatAmount,
+  formatDate,
   radius,
   spacing,
 } from '@crisol/ui';
@@ -36,6 +41,7 @@ import { ConfirmDialog } from '../../../components/ui/confirm-dialog';
 export default function TransfersScreen() {
   const transfersQuery = useTransfers();
   const candidatesQuery = useTransferCandidates(3);
+  const suspectsQuery = useTransferSuspects();
   // includeArchived: cuentas archivadas pueden formar parte de pares
   // históricos — necesitamos su nombre/color/icon para resolver el
   // display, aunque ya no aparezcan en selectors.
@@ -44,6 +50,7 @@ export default function TransfersScreen() {
   const matchMutation = useMatchTransfers();
   const linkMutation = useLinkTransfer();
   const unlinkMutation = useUnlinkTransfer();
+  const markMutation = useMarkTransfer();
 
   const [pendingUnlink, setPendingUnlink] = useState<
     { outId: string; amount: string; currency: string } | null
@@ -51,6 +58,7 @@ export default function TransfersScreen() {
 
   const pairs = transfersQuery.data ?? [];
   const candidates = candidatesQuery.data ?? [];
+  const suspects = suspectsQuery.data ?? [];
   const accounts = accountsQuery.data ?? [];
 
   function handleAutoMatch() {
@@ -100,6 +108,18 @@ export default function TransfersScreen() {
     });
   }
 
+  function handleMark(transactionId: string) {
+    markMutation.mutate(
+      { transaction_id: transactionId },
+      {
+        onSuccess: (response) =>
+          toast.success(`Marcada como "${response.category_name}".`),
+        onError: (err) =>
+          toast.error(formatApiError(err, 'No se pudo marcar.')),
+      },
+    );
+  }
+
   // Sólo mostramos la sección "Sugerencias" si hay candidatos pendientes
   // — si la lista está vacía y no hay pares, esconder la sección entera
   // evita ruido en la primera carga.
@@ -130,7 +150,34 @@ export default function TransfersScreen() {
           </Text>
         </Pressable>
 
-        <Text style={styles.sectionHeading}>Pares activos</Text>
+        {suspects.length > 0 ? (
+          <>
+            <Text style={styles.sectionHeading}>Sospechosas</Text>
+            <Text style={styles.suggestionsHint}>
+              Estas transacciones llevan "transfer" en la descripción y no
+              tienen pareja detectada. Marca como transferencia las que
+              muevan dinero entre tus propias cuentas.
+            </Text>
+            {suspects.map((s) => {
+              const busy =
+                markMutation.isPending &&
+                markMutation.variables?.transaction_id === s.transaction_id;
+              return (
+                <SuspectCard
+                  key={s.transaction_id}
+                  suspect={s}
+                  accounts={accounts}
+                  busy={busy}
+                  onMark={() => handleMark(s.transaction_id)}
+                />
+              );
+            })}
+          </>
+        ) : null}
+
+        <Text style={[styles.sectionHeading, suspects.length > 0 && { marginTop: spacing.lg }]}>
+          Pares activos
+        </Text>
         {transfersQuery.isLoading ? (
           <Text style={styles.placeholder}>Cargando…</Text>
         ) : pairs.length === 0 ? (
@@ -274,4 +321,90 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     textAlign: 'center',
   },
+  suspectCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  suspectAmount: {
+    fontSize: fontSize.md,
+    fontWeight: fontWeight.semibold,
+    color: colors.text,
+  },
+  suspectMeta: {
+    fontSize: fontSize.xs,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  suspectDescription: {
+    fontSize: fontSize.sm,
+    color: colors.textMuted,
+    marginTop: spacing.xs,
+  },
+  suspectCategory: {
+    fontSize: fontSize.xs,
+    color: colors.textSubtle,
+    marginTop: 2,
+  },
+  suspectButton: {
+    marginTop: spacing.sm,
+    alignSelf: 'flex-start',
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  suspectButtonText: {
+    color: colors.primary,
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
+  },
 });
+
+interface SuspectCardProps {
+  suspect: TransferSuspect;
+  accounts: Account[];
+  busy: boolean;
+  onMark: () => void;
+}
+
+function SuspectCard({ suspect, accounts, busy, onMark }: SuspectCardProps) {
+  const account = accounts.find((a) => a.id === suspect.account_id);
+  const accountLabel = account?.name ?? 'Cuenta desconocida';
+  return (
+    <View style={styles.suspectCard}>
+      <Text style={styles.suspectAmount}>
+        {formatAmount(suspect.amount, suspect.currency)}
+      </Text>
+      <Text style={styles.suspectMeta}>
+        {accountLabel} · {formatDate(suspect.occurred_at)}
+      </Text>
+      {suspect.description ? (
+        <Text style={styles.suspectDescription} numberOfLines={2}>
+          {suspect.description}
+        </Text>
+      ) : null}
+      {suspect.current_category_name ? (
+        <Text style={styles.suspectCategory}>
+          Categoría actual: {suspect.current_category_name}
+        </Text>
+      ) : null}
+      <Pressable
+        onPress={onMark}
+        disabled={busy}
+        style={({ pressed }) => [
+          styles.suspectButton,
+          (pressed || busy) && { opacity: 0.6 },
+        ]}
+      >
+        <Text style={styles.suspectButtonText}>
+          {busy ? 'Marcando…' : 'Marcar como transferencia'}
+        </Text>
+      </Pressable>
+    </View>
+  );
+}

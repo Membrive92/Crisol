@@ -26,6 +26,7 @@ export interface CategoryFormValues {
   kind: CategoryKind;
   color: string;
   icon: string | null;
+  is_transfer: boolean;
 }
 
 export interface CategoryFormModalProps {
@@ -53,6 +54,7 @@ export function CategoryFormModal({
   const [kind, setKind] = useState<CategoryKind>('expense');
   const [color, setColor] = useState<string>(DEFAULT_CATEGORY_COLOR);
   const [icon, setIcon] = useState<string | null>(null);
+  const [isTransfer, setIsTransfer] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -61,6 +63,7 @@ export function CategoryFormModal({
     setKind(initial?.kind ?? 'expense');
     setColor(initial?.color ?? DEFAULT_CATEGORY_COLOR);
     setIcon(initial?.icon ?? null);
+    setIsTransfer(initial?.is_transfer ?? false);
     setError(null);
   }, [visible, initial]);
 
@@ -71,7 +74,7 @@ export function CategoryFormModal({
       setError('El nombre es obligatorio.');
       return;
     }
-    onSubmit({ name: trimmed, kind, color, icon });
+    onSubmit({ name: trimmed, kind, color, icon, is_transfer: isTransfer });
   }
 
   return (
@@ -138,6 +141,25 @@ export function CategoryFormModal({
               onColorChange={setColor}
               onIconChange={setIcon}
             />
+
+            <Pressable
+              onPress={() => setIsTransfer(!isTransfer)}
+              style={styles.transferToggle}
+            >
+              <View
+                style={[
+                  styles.checkbox,
+                  isTransfer && styles.checkboxChecked,
+                ]}
+              >
+                {isTransfer ? (
+                  <Text style={styles.checkboxMark}>✓</Text>
+                ) : null}
+              </View>
+              <Text style={styles.transferToggleLabel}>
+                Es transferencia interna (excluir del cashflow)
+              </Text>
+            </Pressable>
 
             {error ? <Text style={styles.error}>{error}</Text> : null}
           </ScrollView>
@@ -251,5 +273,33 @@ const styles = StyleSheet.create({
   actionPrimaryText: {
     color: colors.onPrimary,
     fontWeight: fontWeight.semibold,
+  },
+  transferToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  checkbox: {
+    width: 18,
+    height: 18,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  checkboxMark: {
+    color: colors.onPrimary,
+    fontSize: 12,
+    fontWeight: fontWeight.bold,
+  },
+  transferToggleLabel: {
+    fontSize: fontSize.sm,
+    color: colors.textMuted,
+    flex: 1,
   },
 });

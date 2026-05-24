@@ -33,6 +33,7 @@ interface FormState {
   kind: CategoryKind;
   color: string;
   icon: string | null;
+  is_transfer: boolean;
 }
 
 const EMPTY_FORM: FormState = {
@@ -40,6 +41,7 @@ const EMPTY_FORM: FormState = {
   kind: 'expense',
   color: DEFAULT_CATEGORY_COLOR,
   icon: null,
+  is_transfer: false,
 };
 
 export default function CategoriesSettingsPage() {
@@ -74,7 +76,13 @@ export default function CategoriesSettingsPage() {
       return;
     }
     create.mutate(
-      { name, kind: form.kind, color: form.color, icon: form.icon },
+      {
+        name,
+        kind: form.kind,
+        color: form.color,
+        icon: form.icon,
+        is_transfer: form.is_transfer,
+      },
       {
         onSuccess: () => setForm(EMPTY_FORM),
         onError: (err) => setCreateError(formatApiError(err, 'No se pudo crear')),
@@ -83,8 +91,12 @@ export default function CategoriesSettingsPage() {
   }
 
   const items = list.data ?? [];
-  const expenseItems = items.filter((c) => c.kind === 'expense');
-  const incomeItems = items.filter((c) => c.kind === 'income');
+  // PHASE-23.1: las is_transfer salen del agrupamiento por kind y se
+  // muestran en su propia sección "Transferencias", aunque internamente
+  // tengan kind=expense o kind=income.
+  const expenseItems = items.filter((c) => c.kind === 'expense' && !c.is_transfer);
+  const incomeItems = items.filter((c) => c.kind === 'income' && !c.is_transfer);
+  const transferItems = items.filter((c) => c.is_transfer);
 
   return (
     <div style={{ maxWidth: 760, margin: '0 auto', padding: spacing.lg }}>
@@ -193,6 +205,25 @@ export default function CategoriesSettingsPage() {
             onColorChange={(hex) => setForm({ ...form, color: hex })}
             onIconChange={(emoji) => setForm({ ...form, icon: emoji })}
           />
+          <label
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: spacing.sm,
+              fontSize: fontSize.sm,
+              color: colors.textMuted,
+              cursor: 'pointer',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={form.is_transfer}
+              onChange={(e) =>
+                setForm({ ...form, is_transfer: e.target.checked })
+              }
+            />
+            Es transferencia interna (excluir del cashflow)
+          </label>
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <Button type="submit" disabled={create.isPending}>
               {create.isPending ? 'Creando…' : 'Crear'}
@@ -222,6 +253,7 @@ export default function CategoriesSettingsPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg }}>
           <CategoryGroup title="Gastos" items={expenseItems} />
           <CategoryGroup title="Ingresos" items={incomeItems} />
+          <CategoryGroup title="Transferencias" items={transferItems} />
         </div>
       )}
     </div>
@@ -295,6 +327,9 @@ function CategoryRow({ category }: { category: Category }) {
     category.color ?? DEFAULT_CATEGORY_COLOR,
   );
   const [draftIcon, setDraftIcon] = useState<string | null>(category.icon);
+  const [draftIsTransfer, setDraftIsTransfer] = useState<boolean>(
+    category.is_transfer,
+  );
   const [rowError, setRowError] = useState<string | null>(null);
 
   const update = useUpdateCategory(category.id);
@@ -306,6 +341,7 @@ function CategoryRow({ category }: { category: Category }) {
     setDraftKind(category.kind);
     setDraftColor(category.color ?? DEFAULT_CATEGORY_COLOR);
     setDraftIcon(category.icon);
+    setDraftIsTransfer(category.is_transfer);
     setEditing(true);
   }
 
@@ -317,7 +353,13 @@ function CategoryRow({ category }: { category: Category }) {
       return;
     }
     update.mutate(
-      { name, kind: draftKind, color: draftColor, icon: draftIcon },
+      {
+        name,
+        kind: draftKind,
+        color: draftColor,
+        icon: draftIcon,
+        is_transfer: draftIsTransfer,
+      },
       {
         onSuccess: () => setEditing(false),
         onError: (err) => setRowError(formatApiError(err, 'No se pudo guardar')),
@@ -369,6 +411,23 @@ function CategoryRow({ category }: { category: Category }) {
           onColorChange={setDraftColor}
           onIconChange={setDraftIcon}
         />
+        <label
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: spacing.sm,
+            fontSize: fontSize.sm,
+            color: colors.textMuted,
+            cursor: 'pointer',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={draftIsTransfer}
+            onChange={(e) => setDraftIsTransfer(e.target.checked)}
+          />
+          Es transferencia interna (excluir del cashflow)
+        </label>
         <div style={{ display: 'flex', gap: spacing.xs, justifyContent: 'flex-end' }}>
           <Button type="button" variant="ghost" onClick={() => setEditing(false)}>
             Cancelar
@@ -404,7 +463,7 @@ function CategoryRow({ category }: { category: Category }) {
       >
         {category.name}
       </span>
-      <KindBadge kind={category.kind} />
+      <KindBadge kind={category.kind} isTransfer={category.is_transfer} />
       <div style={{ display: 'flex', gap: spacing.xs }}>
         <Button type="button" variant="ghost" onClick={startEdit}>
           Editar
@@ -458,8 +517,17 @@ function CategorySwatch({ color, icon }: { color: string | null; icon: string | 
   );
 }
 
-function KindBadge({ kind }: { kind: CategoryKind }) {
-  const isIncome = kind === 'income';
+function KindBadge({
+  kind,
+  isTransfer,
+}: {
+  kind: CategoryKind;
+  isTransfer: boolean;
+}) {
+  const baseLabel = kind === 'income' ? 'Ingreso' : 'Gasto';
+  const baseFg = kind === 'income' ? colors.income : colors.expense;
+  const label = isTransfer ? `${baseLabel} · Transfer` : baseLabel;
+  const fg = isTransfer ? colors.textMuted : baseFg;
   return (
     <span
       style={{
@@ -470,11 +538,11 @@ function KindBadge({ kind }: { kind: CategoryKind }) {
         textTransform: 'uppercase',
         letterSpacing: '0.04em',
         backgroundColor: 'transparent',
-        color: isIncome ? colors.income : colors.expense,
-        border: `1px solid ${isIncome ? colors.income : colors.expense}`,
+        color: fg,
+        border: `1px solid ${fg}`,
       }}
     >
-      {isIncome ? 'Ingreso' : 'Gasto'}
+      {label}
     </span>
   );
 }

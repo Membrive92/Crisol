@@ -2,10 +2,15 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type {
   TransferCandidate,
+  TransferFromSourceDebtRequest,
+  TransferFromSourceRequest,
   TransferLinkRequest,
+  TransferMarkRequest,
+  TransferMarkResponse,
   TransferMatchOptions,
   TransferMatchResponse,
   TransferPair,
+  TransferSuspect,
 } from '@crisol/types';
 
 import { transfersApi } from '../../api/endpoints/transfers';
@@ -75,5 +80,70 @@ export function useUnlinkTransfer() {
   return useMutation<void, Error, string>({
     mutationFn: (transactionId) => transfersApi.unlink(transactionId),
     onSuccess: () => invalidateAll(queryClient),
+  });
+}
+
+/**
+ * PHASE-23: txs sin pareja cuya descripción contiene "transfer" y
+ * todavía no están marcadas como transferencia. El usuario las revisa
+ * y decide cuáles marcar.
+ */
+export function useTransferSuspects() {
+  return useQuery<TransferSuspect[], Error>({
+    queryKey: queryKeys.transfers.suspects(),
+    queryFn: () => transfersApi.suspects(),
+    staleTime: 1000 * 60,
+  });
+}
+
+/**
+ * PHASE-23.1: marca una tx como transferencia interna (asigna
+ * categoría con is_transfer=true) — la saca del cashflow agregado
+ * pero conserva el signo en el saldo de la cuenta.
+ */
+export function useMarkTransfer() {
+  const queryClient = useQueryClient();
+  return useMutation<TransferMarkResponse, Error, TransferMarkRequest>({
+    mutationFn: (payload) => transfersApi.mark(payload),
+    onSuccess: () => {
+      invalidateAll(queryClient);
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.categories.all,
+      });
+    },
+  });
+}
+
+/**
+ * PHASE-23.1: convierte una tx existente en una transferencia interna
+ * creando la contraparte en la cuenta destino y emparejándolas. Tras
+ * el éxito, ambas cuentas reflejan el movimiento en saldo y el par
+ * queda excluido del cashflow agregado.
+ */
+export function useConvertToTransfer() {
+  const queryClient = useQueryClient();
+  return useMutation<TransferPair, Error, TransferFromSourceRequest>({
+    mutationFn: (payload) => transfersApi.fromSource(payload),
+    onSuccess: () => invalidateAll(queryClient),
+  });
+}
+
+/**
+ * PHASE-24: convierte una tx en operación financiada. La contraparte
+ * va a una cuenta liability (existente o creada al vuelo). Tras el
+ * éxito invalidamos también accounts.list (puede haberse creado una
+ * nueva cuenta) y debt KPIs.
+ */
+export function useConvertToDebt() {
+  const queryClient = useQueryClient();
+  return useMutation<TransferPair, Error, TransferFromSourceDebtRequest>({
+    mutationFn: (payload) => transfersApi.fromSourceDebt(payload),
+    onSuccess: () => {
+      invalidateAll(queryClient);
+      // Nueva liability + cuadro de amortización pueden ser nuevos.
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.accounts.all,
+      });
+    },
   });
 }

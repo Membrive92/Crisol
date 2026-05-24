@@ -45,3 +45,26 @@ export interface TransferMatchResponse {
    */
   pending_candidates: TransferCandidate[];
 }
+
+/**
+ * PHASE-23: tx sin pareja cuya descripción matchea el patrón
+ * "transferencia" — candidata a ser marcada manualmente como
+ * transferencia interna cuando sólo se importó una pata.
+ */
+export interface TransferSuspect {
+  transaction_id: string;
+  amount: string;
+  currency: string;
+  account_id: string;
+  occurred_at: string;
+  description: string | null;
+  current_category_id: string | null;
+  current_category_name: string | null;
+}
+
+/** Resultado de marcar una tx — devuelve la categoría asignada. */
+export interface TransferMarkResponse {
+  transaction_id: string;
+  category_id: string;
+  category_name: string;
+}
