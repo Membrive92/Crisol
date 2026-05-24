@@ -1,5 +1,12 @@
-import { useMemo } from 'react';
-import { FlatList, StyleSheet, Text, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import {
+  FlatList,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 
 import {
@@ -7,7 +14,12 @@ import {
   useAccount,
   useAccountBalances,
   useAmortizationSchedule,
+  usePayInstallment,
+  useRegenerateAmortization,
+  useUnpayInstallment,
+  useUpdateInstallment,
 } from '@crisol/services';
+import { toast } from '@crisol/store';
 import type { AmortizationRow } from '@crisol/types';
 import {
   colors,
@@ -20,6 +32,7 @@ import {
 } from '@crisol/ui';
 
 import { AccountSwatch } from '../../../../../components/accounts/account-swatch';
+import { ConfirmDialog } from '../../../../../components/ui/confirm-dialog';
 
 /**
  * Formatea un total de meses como "X años Y meses" o "Y meses" si <12.
@@ -139,11 +152,25 @@ function AmortizationContent({
   const elapsed = monthsElapsedSince(schedule.start_date, schedule.term_months);
   const remainingMonths = Math.max(0, schedule.term_months - elapsed);
   const aprPercent = (Number(schedule.apr) * 100).toFixed(2);
+  const taePercent =
+    schedule.tae != null ? (Number(schedule.tae) * 100).toFixed(2) : null;
+  const regen = useRegenerateAmortization();
+  const [confirmingRegen, setConfirmingRegen] = useState(false);
+
+  function handleRegenerate() {
+    setConfirmingRegen(false);
+    regen.mutate(schedule.account_id, {
+      onSuccess: () => toast.success('Cuadro regenerado.'),
+      onError: (err) =>
+        toast.error(formatApiError(err, 'No se pudo regenerar.')),
+    });
+  }
 
   // Header arriba (no sticky — RN sticky es costoso), después FlatList
   // con la tabla. Encapsulamos el header en `ListHeaderComponent`
   // para que el scroll incluya KPIs + cabecera de la tabla.
   return (
+    <>
     <FlatList
       data={schedule.rows}
       keyExtractor={(row: AmortizationRow) => String(row.month)}
@@ -181,13 +208,26 @@ function AmortizationContent({
               valueColor={colors.danger}
             />
             <KpiCard
-              label="Total a pagar"
-              value={formatAmount(schedule.total_paid, currency)}
+              label={
+                schedule.total_to_pay != null
+                  ? 'Total a pagar (banco)'
+                  : 'Total a pagar (cuadro)'
+              }
+              value={formatAmount(
+                schedule.total_to_pay ?? schedule.total_paid,
+                currency,
+              )}
+              {...(schedule.extra_charges != null &&
+              Number(schedule.extra_charges) !== 0
+                ? {
+                    footer: `+${formatAmount(schedule.extra_charges, currency)} cargos extra`,
+                  }
+                : {})}
             />
             <KpiCard
               label="Plazo restante"
               value={formatMonthsAsDuration(remainingMonths)}
-              footer={`${schedule.term_months} meses · ${aprPercent}% APR`}
+              footer={`${schedule.term_months} meses · TIN ${aprPercent}%${taePercent ? ` · TAE ${taePercent}%` : ''}`}
             />
           </View>
 
@@ -196,10 +236,22 @@ function AmortizationContent({
               <Text style={styles.tableTitle}>
                 Tabla completa · {schedule.rows.length} cuotas
               </Text>
-              <Text style={styles.tableSubtitle}>
-                Inicio: {formatDate(`${schedule.start_date}T00:00:00Z`)}
-              </Text>
+              <Pressable
+                onPress={() => setConfirmingRegen(true)}
+                disabled={regen.isPending}
+                style={({ pressed }) => [
+                  styles.regenButton,
+                  (pressed || regen.isPending) && { opacity: 0.6 },
+                ]}
+              >
+                <Text style={styles.regenButtonText}>
+                  {regen.isPending ? '…' : 'Regenerar'}
+                </Text>
+              </Pressable>
             </View>
+            <Text style={styles.tableSubtitle}>
+              Inicio: {formatDate(`${schedule.start_date}T00:00:00Z`)}
+            </Text>
             <View style={styles.tableHeadRow}>
               <Text style={[styles.tableHeadCell, styles.colMonth]}>Mes</Text>
               <Text style={[styles.tableHeadCell, styles.colDate]}>Fecha</Text>
@@ -222,19 +274,100 @@ function AmortizationContent({
       renderItem={({ item }) => <Row row={item} currency={currency} />}
       ItemSeparatorComponent={() => <View style={styles.separator} />}
     />
+    <ConfirmDialog
+      open={confirmingRegen}
+      title="¿Regenerar el cuadro?"
+      description="Se borrarán las cuotas actuales (incluido el estado de pago) y se recalcularán con los datos actuales (TIN, plazo, fecha de inicio)."
+      confirmLabel="Regenerar"
+      cancelLabel="Cancelar"
+      tone="primary"
+      loading={regen.isPending}
+      onConfirm={handleRegenerate}
+      onCancel={() => setConfirmingRegen(false)}
+    />
+    </>
   );
 }
 
 function Row({ row, currency }: { row: AmortizationRow; currency: string }) {
+  const [editing, setEditing] = useState(false);
+  const [payment, setPayment] = useState(row.payment);
+  const [dueDate, setDueDate] = useState(row.due_date);
+  const updateMut = useUpdateInstallment();
+  const payMut = usePayInstallment();
+  const unpayMut = useUnpayInstallment();
+  const paid = row.paid_at != null;
+  const id = row.id;
+
+  function save() {
+    if (!id) return;
+    const payload: { payment?: string; due_date?: string } = {};
+    const trimmedPayment = payment.trim().replace(',', '.');
+    if (trimmedPayment && trimmedPayment !== row.payment) {
+      payload.payment = trimmedPayment;
+    }
+    if (dueDate && dueDate !== row.due_date) {
+      payload.due_date = dueDate;
+    }
+    if (Object.keys(payload).length === 0) {
+      setEditing(false);
+      return;
+    }
+    updateMut.mutate(
+      { installmentId: id, payload },
+      {
+        onSuccess: () => setEditing(false),
+        onError: (err) =>
+          toast.error(formatApiError(err, 'No se pudo guardar la cuota')),
+      },
+    );
+  }
+
+  function togglePay() {
+    if (!id) return;
+    if (paid) {
+      unpayMut.mutate(id, {
+        onError: (err) => toast.error(formatApiError(err, 'No se pudo desmarcar')),
+      });
+    } else {
+      payMut.mutate(
+        { installmentId: id },
+        {
+          onError: (err) => toast.error(formatApiError(err, 'No se pudo marcar')),
+        },
+      );
+    }
+  }
+
   return (
-    <View style={styles.tableRow}>
+    <Pressable
+      onLongPress={() => id && setEditing((v) => !v)}
+      style={[styles.tableRow, paid && styles.tableRowPaid]}
+    >
       <Text style={[styles.tableCell, styles.colMonth]}>{row.month}</Text>
-      <Text style={[styles.tableCell, styles.colDate]} numberOfLines={1}>
-        {formatDate(`${row.due_date}T00:00:00Z`)}
-      </Text>
-      <Text style={[styles.tableCell, styles.colAmount]} numberOfLines={1}>
-        {formatAmount(row.payment, currency)}
-      </Text>
+      {editing ? (
+        <TextInput
+          style={[styles.tableCell, styles.colDate, styles.inlineInput]}
+          value={dueDate}
+          onChangeText={setDueDate}
+        />
+      ) : (
+        <Text style={[styles.tableCell, styles.colDate]} numberOfLines={1}>
+          {formatDate(`${row.due_date}T00:00:00Z`)}
+        </Text>
+      )}
+      {editing ? (
+        <TextInput
+          style={[styles.tableCell, styles.colAmount, styles.inlineInput]}
+          value={payment}
+          onChangeText={setPayment}
+          keyboardType="decimal-pad"
+        />
+      ) : (
+        <Text style={[styles.tableCell, styles.colAmount]} numberOfLines={1}>
+          {formatAmount(row.payment, currency)}
+        </Text>
+      )}
       <Text
         style={[styles.tableCell, styles.colAmount, { color: colors.danger }]}
         numberOfLines={1}
@@ -247,7 +380,45 @@ function Row({ row, currency }: { row: AmortizationRow; currency: string }) {
       <Text style={[styles.tableCell, styles.colSaldo]} numberOfLines={1}>
         {formatAmount(row.remaining_balance, currency)}
       </Text>
-    </View>
+      {id ? (
+        editing ? (
+          <View style={styles.rowActions}>
+            <Pressable onPress={save} style={styles.actionPrimary}>
+              <Text style={styles.actionPrimaryText}>
+                {updateMut.isPending ? '…' : '✓'}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                setEditing(false);
+                setPayment(row.payment);
+                setDueDate(row.due_date);
+              }}
+              style={styles.actionGhost}
+            >
+              <Text style={styles.actionGhostText}>✕</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <Pressable
+            onPress={togglePay}
+            style={[
+              styles.payBadge,
+              paid ? styles.payBadgePaid : styles.payBadgeUnpaid,
+            ]}
+          >
+            <Text
+              style={[
+                styles.payBadgeText,
+                paid ? styles.payBadgeTextPaid : styles.payBadgeTextUnpaid,
+              ]}
+            >
+              {paid ? '✓' : '○'}
+            </Text>
+          </Pressable>
+        )
+      ) : null}
+    </Pressable>
   );
 }
 
@@ -381,6 +552,18 @@ const styles = StyleSheet.create({
     borderTopRightRadius: radius.md,
     overflow: 'hidden',
   },
+  regenButton: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  regenButtonText: {
+    color: colors.primary,
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.semibold,
+  },
   tableHeaderLine: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -433,6 +616,49 @@ const styles = StyleSheet.create({
   colDate: { width: 70 },
   colAmount: { flex: 1, textAlign: 'right' },
   colSaldo: { flex: 1.1, textAlign: 'right' },
+  tableRowPaid: { backgroundColor: colors.successSoft },
+  inlineInput: {
+    paddingVertical: 0,
+    paddingHorizontal: spacing.xs,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    color: colors.text,
+  },
+  rowActions: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    marginLeft: spacing.xs,
+  },
+  actionPrimary: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  actionPrimaryText: { color: colors.onPrimary, fontWeight: fontWeight.bold },
+  actionGhost: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  actionGhostText: { color: colors.textMuted, fontWeight: fontWeight.bold },
+  payBadge: {
+    marginLeft: spacing.xs,
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  payBadgeUnpaid: { borderColor: colors.border, backgroundColor: 'transparent' },
+  payBadgePaid: { borderColor: colors.success, backgroundColor: colors.success },
+  payBadgeText: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
+  payBadgeTextUnpaid: { color: colors.textMuted },
+  payBadgeTextPaid: { color: colors.onPrimary },
   separator: {
     height: 1,
     backgroundColor: colors.border,

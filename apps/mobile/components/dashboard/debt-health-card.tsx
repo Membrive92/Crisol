@@ -1,6 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 
 import { useDebtHealth } from '@crisol/services';
+import { useCurrencyStore } from '@crisol/store';
 import type { DtiStatus } from '@crisol/types';
 import {
   colors,
@@ -61,6 +62,7 @@ function formatMonths(months: number | null): string {
  */
 export function DebtHealthCard() {
   const { data, isLoading, isError } = useDebtHealth();
+  const includeDebt = useCurrencyStore((s) => s.includeDebtInNetWorth);
 
   if (isLoading) {
     return (
@@ -82,8 +84,11 @@ export function DebtHealthCard() {
 
   const totalLiabilitiesNum = Number(data.total_liabilities);
   const hasDebt = totalLiabilitiesNum > 0;
-  const netWorthNum = Number(data.net_worth);
-  const netWorthColor = netWorthNum < 0 ? colors.danger : colors.text;
+  // Cuando el toggle "Incluir deuda" está OFF, la cifra grande pasa a
+  // ser sólo activos. El desglose Activos/Pasivos sigue visible.
+  const displayWorthValue = includeDebt ? data.net_worth : data.total_assets;
+  const displayWorthNum = Number(displayWorthValue);
+  const netWorthColor = displayWorthNum < 0 ? colors.danger : colors.text;
 
   const dtiTone = dtiStatusColors(data.dti_status);
   const dtiPercent =
@@ -102,9 +107,16 @@ export function DebtHealthCard() {
           <Text style={styles.iconBubbleText}>❤</Text>
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.eyebrow}>Salud financiera</Text>
+          <View style={styles.eyebrowRow}>
+            <Text style={styles.eyebrow}>Salud financiera</Text>
+            {!includeDebt && hasDebt ? (
+              <View style={styles.eyebrowBadge}>
+                <Text style={styles.eyebrowBadgeText}>Sin deuda</Text>
+              </View>
+            ) : null}
+          </View>
           <Text style={[styles.netWorth, { color: netWorthColor }]}>
-            {formatAmount(data.net_worth, data.reference_currency)}
+            {formatAmount(displayWorthValue, data.reference_currency)}
           </Text>
         </View>
       </View>
@@ -265,12 +277,29 @@ const styles = StyleSheet.create({
     color: colors.primary,
     lineHeight: fontSize.md + 4,
   },
+  eyebrowRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    flexWrap: 'wrap',
+  },
   eyebrow: {
     fontSize: 11,
     fontWeight: fontWeight.semibold,
     color: colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.6,
+  },
+  eyebrowBadge: {
+    backgroundColor: colors.surfaceMuted,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: radius.sm,
+  },
+  eyebrowBadgeText: {
+    fontSize: 10,
+    color: colors.textMuted,
+    letterSpacing: 0.4,
   },
   netWorth: {
     fontSize: fontSize.xl,

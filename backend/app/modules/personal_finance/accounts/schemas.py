@@ -42,11 +42,20 @@ class AccountCreate(BaseModel):
     icon: str | None = Field(default=None, max_length=50)
     opening_balance: Decimal = Field(default=Decimal("0"), decimal_places=2)
     opening_balance_date: date | None = None
-    # PHASE-22.3: cuadro de amortización opcional para loan/mortgage.
+    # PHASE-22.3 + PHASE-24.2: cuadro de amortización opcional para
+    # loan/mortgage/credit_card (financiadas).
     apr: Decimal | None = Field(default=None, ge=Decimal("0"), le=Decimal("1"), decimal_places=4)
-    """APR anual como decimal (0.0350 = 3.50%)."""
+    """TIN anual como decimal (0.0350 = 3.50%). Se usa para el cuadro."""
+    tae: Decimal | None = Field(default=None, ge=Decimal("0"), le=Decimal("1"), decimal_places=4)
+    """PHASE-24.2 — TAE (informativa, no afecta cálculo)."""
     term_months: int | None = Field(default=None, ge=1, le=600)
     start_date: date | None = None
+    total_to_pay: Decimal | None = Field(default=None, ge=Decimal("0"), decimal_places=2)
+    """PHASE-24.3 — Total a pagar contractualizado por el banco."""
+    interest_only_first_payment: Decimal | None = Field(
+        default=None, ge=Decimal("0"), decimal_places=2
+    )
+    """PHASE-24.3 — Primer pago especial sólo de intereses."""
     display_order: int = Field(default=0, ge=0)
 
 
@@ -61,8 +70,13 @@ class AccountUpdate(BaseModel):
     opening_balance: Decimal | None = Field(default=None, decimal_places=2)
     opening_balance_date: date | None = None
     apr: Decimal | None = Field(default=None, ge=Decimal("0"), le=Decimal("1"), decimal_places=4)
+    tae: Decimal | None = Field(default=None, ge=Decimal("0"), le=Decimal("1"), decimal_places=4)
     term_months: int | None = Field(default=None, ge=1, le=600)
     start_date: date | None = None
+    total_to_pay: Decimal | None = Field(default=None, ge=Decimal("0"), decimal_places=2)
+    interest_only_first_payment: Decimal | None = Field(
+        default=None, ge=Decimal("0"), decimal_places=2
+    )
     display_order: int | None = Field(default=None, ge=0)
     is_archived: bool | None = None
 
@@ -81,8 +95,11 @@ class AccountResponse(BaseModel):
     opening_balance: Decimal
     opening_balance_date: date | None
     apr: Decimal | None = None
+    tae: Decimal | None = None
     term_months: int | None = None
     start_date: date | None = None
+    total_to_pay: Decimal | None = None
+    interest_only_first_payment: Decimal | None = None
     display_order: int
     is_archived: bool
     created_at: datetime
@@ -159,22 +176,53 @@ class DebtHealthKpis(BaseModel):
 
 
 class AmortizationRowResponse(BaseModel):
-    """Una fila del cuadro francés (PHASE-22.3)."""
+    """Una fila del cuadro francés (PHASE-22.3 + PHASE-24.1).
 
+    PHASE-24.1 añade:
+    - `id`: identificador estable de la cuota persistida (necesario
+      para el editor: PATCH/POST/DELETE individuales).
+    - `paid_at` / `paid_transaction_id`: estado y trazabilidad.
+    """
+
+    id: uuid.UUID | None = None
+    """`None` sólo en el modo legacy on-the-fly (cuentas sin cuotas
+    persistidas todavía). Tras PHASE-24.1 backfill, siempre presente."""
     month: int
     due_date: date
     payment: Decimal
     interest: Decimal
     principal: Decimal
     remaining_balance: Decimal
+    paid_at: datetime | None = None
+    paid_transaction_id: uuid.UUID | None = None
+
+
+class InstallmentUpdateRequest(BaseModel):
+    """PATCH parcial de una cuota — sólo `payment` y/o `due_date`
+    (PHASE-24.1). El override NO recomputa cuotas siguientes."""
+
+    payment: Decimal | None = Field(default=None, decimal_places=2)
+    due_date: date | None = None
+
+
+class InstallmentPayRequest(BaseModel):
+    """POST /pay — marca cuota como pagada con timestamp + tx opcional."""
+
+    paid_at: datetime | None = None
+    """`None` → `now()`."""
+    paid_transaction_id: uuid.UUID | None = None
+    """Tx del extracto que liquidó la cuota — opcional, informativo."""
 
 
 class AmortizationScheduleResponse(BaseModel):
-    """Cuadro completo + KPIs derivados (PHASE-22.3)."""
+    """Cuadro completo + KPIs derivados (PHASE-22.3 + PHASE-24.2 + PHASE-24.3)."""
 
     account_id: uuid.UUID
     principal: Decimal
     apr: Decimal
+    """TIN — usado para calcular las cuotas."""
+    tae: Decimal | None = None
+    """PHASE-24.2 — TAE (informativa). NULL si no se declaró."""
     term_months: int
     start_date: date
     monthly_payment: Decimal
@@ -182,8 +230,60 @@ class AmortizationScheduleResponse(BaseModel):
     total_interest: Decimal
     """Intereses totales que pagarás durante el plazo completo."""
     total_paid: Decimal
-    """Total a pagar (principal + intereses)."""
+    """Total a pagar según el cuadro teórico (Σ cuotas + interest_only).
+    Para el "total contractualizado" del banco usar `total_to_pay`.
+    """
+    interest_only_first_payment: Decimal | None = None
+    """PHASE-24.3 — Primera cuota especial sólo de intereses."""
+    total_to_pay: Decimal | None = None
+    """PHASE-24.3 — Total contractualizado por el banco. Puede ser
+    mayor que `total_paid` cuando hay comisiones/cargos no
+    desglosados."""
+    extra_charges: Decimal | None = None
+    """PHASE-24.3 — Cargos derivados dinámicamente como
+    `total_to_pay − total_paid − interest_only_first_payment` cuando
+    hay datos suficientes. NULL si `total_to_pay` no está informado."""
     rows: list[AmortizationRowResponse]
+
+
+class DebtHistoryPoint(BaseModel):
+    """Un punto de la serie temporal de evolución de deuda (PHASE-22.1).
+
+    `kind` distingue puntos reales (`historical`) de la proyección
+    (`projected`). En histórico, `total_debt` es el cierre del mes;
+    `principal_paid` e `interest_paid` son lo amortizado y los
+    intereses pagados durante ese mes. En proyección,
+    `total_debt` es la deuda al cierre estimado y
+    `principal_paid`/`interest_paid` son los flujos estimados del mes.
+    """
+
+    month: str
+    """Mes en formato `YYYY-MM`."""
+    total_debt: Decimal
+    """Saldo total de pasivos al cierre del mes (en
+    `reference_currency`)."""
+    principal_paid: Decimal
+    """Principal amortizado durante el mes."""
+    interest_paid: Decimal
+    """Intereses pagados durante el mes (categorías de intereses)."""
+    kind: str
+    """`historical` o `projected`."""
+
+
+class DebtHistoryResponse(BaseModel):
+    """Serie temporal de deuda con histórico + proyección (PHASE-22.1).
+
+    El primer punto histórico es el primer mes con datos en la
+    ventana solicitada; el último histórico es el mes anterior al
+    actual (los meses cerrados). La proyección empieza en el mes en
+    curso y extiende `months_ahead` meses hacia adelante usando
+    cuadros francesas + cuota teórica de tarjetas.
+    """
+
+    items: list[DebtHistoryPoint]
+    reference_currency: str
+    months_historical: int
+    months_projected: int
 
 
 class AccountBalancesResponse(BaseModel):

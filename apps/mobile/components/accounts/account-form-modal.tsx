@@ -36,15 +36,21 @@ export interface AccountFormValues {
   /** Decimal serializado como string. Vacío equivale a "0". */
   opening_balance: string;
   /**
-   * APR anual en porcentaje (UI), p.ej. "3.5" para 3.5%. Vacío = sin
-   * valor. El caller transforma a decimal (`"0.035"`) antes de enviar
-   * al backend. Sólo aplica a tipos `loan` y `mortgage`.
+   * TIN anual en porcentaje (UI), p.ej. "5.9" para 5.9%. Vacío = sin
+   * valor. El caller transforma a decimal (`"0.0590"`) antes de enviar
+   * al backend. PHASE-24.2: aplica a loan/mortgage/credit_card.
    */
   apr_percent: string;
+  /** PHASE-24.2 — TAE anual (% UI). Informativa, no afecta cálculo. */
+  tae_percent: string;
   /** Plazo total en meses como string. Vacío = sin valor. */
   term_months: string;
   /** Fecha de inicio del préstamo en `YYYY-MM-DD`. Vacío = sin valor. */
   start_date: string;
+  /** PHASE-24.3 — Total contractualizado por el banco (€). */
+  total_to_pay: string;
+  /** PHASE-24.3 — Primer pago sólo de intereses (€). */
+  interest_only_first_payment: string;
 }
 
 export interface AccountFormModalProps {
@@ -77,8 +83,11 @@ export const DEFAULT_ACCOUNT_FORM: AccountFormValues = {
   icon: null,
   opening_balance: '',
   apr_percent: '',
+  tae_percent: '',
   term_months: '',
   start_date: '',
+  total_to_pay: '',
+  interest_only_first_payment: '',
 };
 
 /**
@@ -109,8 +118,11 @@ function fromAccount(account: Account): AccountFormValues {
         ? account.opening_balance
         : '',
     apr_percent: aprDecimalToPercent(account.apr),
+    tae_percent: aprDecimalToPercent(account.tae ?? null),
     term_months: account.term_months ? String(account.term_months) : '',
     start_date: account.start_date ?? '',
+    total_to_pay: account.total_to_pay ?? '',
+    interest_only_first_payment: account.interest_only_first_payment ?? '',
   };
 }
 
@@ -155,8 +167,11 @@ export function AccountFormModal({
         ...prev,
         type: nextType,
         apr_percent: '',
+        tae_percent: '',
         term_months: '',
         start_date: '',
+        total_to_pay: '',
+        interest_only_first_payment: '',
       }));
       return;
     }
@@ -214,7 +229,7 @@ export function AccountFormModal({
   const isLiability = LIABILITY_ACCOUNT_TYPES.includes(values.type);
   const showAmortization = isAmortizableType(values.type);
   const balanceLabel = isLiability
-    ? 'Capital pendiente (opcional)'
+    ? 'Capital (opcional)'
     : 'Saldo inicial (opcional)';
 
   return (
@@ -341,17 +356,28 @@ export function AccountFormModal({
                       Cuadro de amortización (francés)
                     </Text>
                     <Text style={styles.amortHelp}>
-                      Rellena APR, plazo y fecha de inicio para calcular cuota
-                      mensual, intereses y saldo pendiente.
+                      Rellena TIN, plazo y fecha de inicio para calcular
+                      cuota e intereses. TAE es informativa.
                     </Text>
                     <View>
-                      <Text style={styles.label}>APR anual (%)</Text>
+                      <Text style={styles.label}>TIN anual (%)</Text>
                       <TextInput
                         style={styles.input}
                         value={values.apr_percent}
                         onChangeText={(v) => patch('apr_percent', v)}
                         keyboardType="decimal-pad"
-                        placeholder="3.50"
+                        placeholder="5,90"
+                        placeholderTextColor={colors.textMuted}
+                      />
+                    </View>
+                    <View>
+                      <Text style={styles.label}>TAE anual (%) opc.</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={values.tae_percent}
+                        onChangeText={(v) => patch('tae_percent', v)}
+                        keyboardType="decimal-pad"
+                        placeholder="6,12"
                         placeholderTextColor={colors.textMuted}
                       />
                     </View>
@@ -362,7 +388,7 @@ export function AccountFormModal({
                         value={values.term_months}
                         onChangeText={(v) => patch('term_months', v)}
                         keyboardType="number-pad"
-                        placeholder="360"
+                        placeholder="12"
                         placeholderTextColor={colors.textMuted}
                       />
                     </View>
@@ -371,6 +397,32 @@ export function AccountFormModal({
                       value={values.start_date}
                       onChange={(v) => patch('start_date', v)}
                     />
+                    <View>
+                      <Text style={styles.label}>Total a pagar (€) opc.</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={values.total_to_pay}
+                        onChangeText={(v) => patch('total_to_pay', v)}
+                        keyboardType="decimal-pad"
+                        placeholder="913,86"
+                        placeholderTextColor={colors.textMuted}
+                      />
+                    </View>
+                    <View>
+                      <Text style={styles.label}>
+                        1er pago sólo intereses (€) opc.
+                      </Text>
+                      <TextInput
+                        style={styles.input}
+                        value={values.interest_only_first_payment}
+                        onChangeText={(v) =>
+                          patch('interest_only_first_payment', v)
+                        }
+                        keyboardType="decimal-pad"
+                        placeholder="0,00"
+                        placeholderTextColor={colors.textMuted}
+                      />
+                    </View>
                   </View>
                 ) : null}
 

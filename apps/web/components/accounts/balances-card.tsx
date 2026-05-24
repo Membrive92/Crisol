@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 
 import { useAccountBalances, useAccounts } from '@crisol/services';
+import { useCurrencyStore } from '@crisol/store';
 import type { AccountBalance } from '@crisol/types';
 import {
   colors,
@@ -46,6 +47,7 @@ export function BalancesCard({ variant = 'full' }: BalancesCardProps) {
   // sólo) pero la spec pide ocultarlas en el desglose. Necesitamos
   // el flag `is_archived` que vive en `Account`, así que cruzamos.
   const { data: accounts } = useAccounts({ includeArchived: true });
+  const includeDebt = useCurrencyStore((s) => s.includeDebtInNetWorth);
   // En `compact` el desglose arranca colapsado; en `full` siempre
   // visible. El estado sólo se usa cuando estamos en `compact`.
   const [expanded, setExpanded] = useState(false);
@@ -88,7 +90,11 @@ export function BalancesCard({ variant = 'full' }: BalancesCardProps) {
   const liabilityItems = activeItems.filter((item) => item.nature === 'liability');
 
   const hasLiabilities = Number(data.total_liabilities) > 0;
-  const netWorthNegative = Number(data.net_worth) < 0;
+  // Cuando `includeDebt` está OFF la cifra grande muestra sólo activos.
+  // El desglose de pasivos se mantiene visible para no esconder
+  // información — el toggle sólo afecta al agregado.
+  const displayWorth = includeDebt ? data.net_worth : data.total_assets;
+  const netWorthNegative = Number(displayWorth) < 0;
   const netWorthColor = netWorthNegative ? colors.danger : colors.text;
 
   return (
@@ -126,15 +132,31 @@ export function BalancesCard({ variant = 'full' }: BalancesCardProps) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <span
             style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: spacing.xs,
               fontSize: 11,
               fontWeight: fontWeight.semibold,
               color: colors.textMuted,
               textTransform: 'uppercase',
               letterSpacing: '0.04em',
-              display: 'block',
             }}
           >
             Patrimonio neto
+            {!includeDebt && hasLiabilities ? (
+              <span
+                style={{
+                  fontSize: 10,
+                  color: colors.textMuted,
+                  backgroundColor: colors.surfaceMuted,
+                  padding: '1px 6px',
+                  borderRadius: radius.sm,
+                  letterSpacing: '0.04em',
+                }}
+              >
+                Sin deuda
+              </span>
+            ) : null}
           </span>
           <span
             style={{
@@ -144,9 +166,10 @@ export function BalancesCard({ variant = 'full' }: BalancesCardProps) {
               fontVariantNumeric: 'tabular-nums',
               letterSpacing: '-0.01em',
               lineHeight: 1.1,
+              display: 'block',
             }}
           >
-            {formatAmount(data.net_worth, data.reference_currency)}
+            {formatAmount(displayWorth, data.reference_currency)}
           </span>
         </div>
       </div>

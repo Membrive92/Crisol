@@ -35,14 +35,20 @@ export interface AccountFormValue {
   /** Decimal serializado como string. Vacío equivale a "0". */
   opening_balance: string;
   /**
-   * APR anual (porcentaje en UI, ej. "3.5" para 3.5%). Vacío = sin valor.
-   * Sólo aplica a tipos `loan` y `mortgage`; en otros tipos se ignora.
+   * TIN anual (porcentaje en UI, ej. "5.9" para 5.9%). Vacío = sin valor.
+   * Aplica a tipos amortizables (loan/mortgage/credit_card PHASE-24.2).
    */
   apr_percent: string;
+  /** PHASE-24.2 — TAE anual (% UI). Informativa, no afecta cálculo. */
+  tae_percent: string;
   /** Plazo en meses como string para input numérico. Vacío = sin valor. */
   term_months: string;
   /** YYYY-MM-DD. Vacío = sin valor. */
   start_date: string;
+  /** PHASE-24.3 — Total contractualizado por el banco (€). */
+  total_to_pay: string;
+  /** PHASE-24.3 — Primer pago sólo de intereses (€). Casi siempre 0. */
+  interest_only_first_payment: string;
 }
 
 export interface AccountFormErrors {
@@ -50,8 +56,11 @@ export interface AccountFormErrors {
   currency?: string | undefined;
   opening_balance?: string | undefined;
   apr_percent?: string | undefined;
+  tae_percent?: string | undefined;
   term_months?: string | undefined;
   start_date?: string | undefined;
+  total_to_pay?: string | undefined;
+  interest_only_first_payment?: string | undefined;
 }
 
 export interface AccountFormFieldsProps {
@@ -81,8 +90,11 @@ export const DEFAULT_ACCOUNT_FORM: AccountFormValue = {
   icon: null,
   opening_balance: '',
   apr_percent: '',
+  tae_percent: '',
   term_months: '',
   start_date: '',
+  total_to_pay: '',
+  interest_only_first_payment: '',
 };
 
 function isLiabilityType(type: AccountType): boolean {
@@ -121,8 +133,11 @@ export function AccountFormFields({
         ...value,
         type: nextType,
         apr_percent: '',
+        tae_percent: '',
         term_months: '',
         start_date: '',
+        total_to_pay: '',
+        interest_only_first_payment: '',
       });
       return;
     }
@@ -131,7 +146,14 @@ export function AccountFormFields({
 
   const isLiability = isLiabilityType(value.type);
   const showAmortization = isAmortizableType(value.type);
-  const balanceLabel = isLiability ? 'Capital pendiente (opcional)' : 'Saldo inicial (opcional)';
+  // Para loan/mortgage el principal es obligatorio (sin él no se genera
+  // el cuadro). Para credit_card y assets el saldo inicial es opcional.
+  const capitalRequired = value.type === 'loan' || value.type === 'mortgage';
+  const balanceLabel = isLiability
+    ? capitalRequired
+      ? 'Capital'
+      : 'Capital (opcional)'
+    : 'Saldo inicial (opcional)';
   const balanceColor = isLiability ? colors.danger : undefined;
 
   return (
@@ -208,6 +230,7 @@ export function AccountFormFields({
               value={value.opening_balance}
               onChange={(e) => patch('opening_balance', e.target.value)}
               error={errors?.opening_balance}
+              required={capitalRequired}
               style={balanceColor ? { color: balanceColor } : undefined}
             />
           </div>
@@ -267,9 +290,10 @@ export function AccountFormFields({
               lineHeight: 1.4,
             }}
           >
-            Rellena APR, plazo y fecha de inicio para que la app calcule
-            la cuota mensual, los intereses y el saldo pendiente a lo
-            largo de la vida del préstamo.
+            Rellena TIN, plazo y fecha de inicio para que la app calcule
+            la cuota mensual, los intereses y el saldo pendiente. TAE es
+            informativa (la usan los bancos para legal disclosure) y
+            no afecta al cálculo.
           </p>
           <div
             style={{
@@ -281,13 +305,24 @@ export function AccountFormFields({
           >
             <div style={{ flex: '1 1 140px', minWidth: 0 }}>
               <TextInput
-                label="APR anual (%)"
+                label="TIN anual (%)"
                 type="text"
                 inputMode="decimal"
-                placeholder="3.50"
+                placeholder="5,90"
                 value={value.apr_percent}
                 onChange={(e) => patch('apr_percent', e.target.value)}
                 error={errors?.apr_percent}
+              />
+            </div>
+            <div style={{ flex: '1 1 140px', minWidth: 0 }}>
+              <TextInput
+                label="TAE anual (%) opc."
+                type="text"
+                inputMode="decimal"
+                placeholder="6,12"
+                value={value.tae_percent}
+                onChange={(e) => patch('tae_percent', e.target.value)}
+                error={errors?.tae_percent}
               />
             </div>
             <div style={{ flex: '1 1 140px', minWidth: 0 }}>
@@ -297,7 +332,7 @@ export function AccountFormFields({
                 inputMode="numeric"
                 min={1}
                 step={1}
-                placeholder="360"
+                placeholder="12"
                 value={value.term_months}
                 onChange={(e) => patch('term_months', e.target.value)}
                 error={errors?.term_months}
@@ -310,6 +345,53 @@ export function AccountFormFields({
                 value={value.start_date}
                 onChange={(e) => patch('start_date', e.target.value)}
                 error={errors?.start_date}
+              />
+            </div>
+          </div>
+          <p
+            style={{
+              margin: `${spacing.md}px 0 ${spacing.xs}px 0`,
+              fontSize: fontSize.xs,
+              color: colors.textMuted,
+              lineHeight: 1.4,
+            }}
+          >
+            Si copias estos datos de tu banco (ej. pantalla
+            "Datos de la financiación" en BBVA), puedes pegar el
+            <strong> Total a pagar</strong> tal cual — destaparemos
+            como "cargos extra" cualquier diferencia con el cuadro
+            teórico (comisiones que el banco no desglosa).
+          </p>
+          <div
+            style={{
+              display: 'flex',
+              gap: spacing.md,
+              flexWrap: 'wrap',
+              alignItems: 'flex-end',
+            }}
+          >
+            <div style={{ flex: '1 1 160px', minWidth: 0 }}>
+              <TextInput
+                label="Total a pagar (€) opc."
+                type="text"
+                inputMode="decimal"
+                placeholder="913,86"
+                value={value.total_to_pay}
+                onChange={(e) => patch('total_to_pay', e.target.value)}
+                error={errors?.total_to_pay}
+              />
+            </div>
+            <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+              <TextInput
+                label="1er pago sólo intereses (€) opc."
+                type="text"
+                inputMode="decimal"
+                placeholder="0,00"
+                value={value.interest_only_first_payment}
+                onChange={(e) =>
+                  patch('interest_only_first_payment', e.target.value)
+                }
+                error={errors?.interest_only_first_payment}
               />
             </div>
           </div>

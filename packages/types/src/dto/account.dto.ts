@@ -8,11 +8,17 @@ export interface AccountCreateRequest {
   icon?: string | null;
   opening_balance?: string;
   opening_balance_date?: string | null;
-  /** PHASE-22.3: APR anual decimal. Sólo loan/mortgage. */
+  /** TIN anual decimal. Sólo tipos amortizables (PHASE-24.2 incluye
+   * credit_card para tarjetas financiadas). */
   apr?: string | null;
-  /** Plazo total en meses. Sólo loan/mortgage. */
+  /** PHASE-24.2 — TAE anual decimal, informativa. */
+  tae?: string | null;
   term_months?: number | null;
   start_date?: string | null;
+  /** PHASE-24.3 — Total contractualizado (banco). */
+  total_to_pay?: string | null;
+  /** PHASE-24.3 — Primer pago sólo de intereses. */
+  interest_only_first_payment?: string | null;
   display_order?: number;
 }
 
@@ -25,8 +31,11 @@ export interface AccountUpdateRequest {
   opening_balance?: string;
   opening_balance_date?: string | null;
   apr?: string | null;
+  tae?: string | null;
   term_months?: number | null;
   start_date?: string | null;
+  total_to_pay?: string | null;
+  interest_only_first_payment?: string | null;
   display_order?: number;
   is_archived?: boolean;
 }

@@ -38,10 +38,12 @@ export const SELECTABLE_ACCOUNT_TYPES: readonly AccountType[] = [
   ...LIABILITY_ACCOUNT_TYPES,
 ] as const;
 
-/** Tipos a los que aplica el cuadro francés (apr/term/start_date). */
+/** Tipos a los que aplica el cuadro francés (apr/term/start_date).
+ * PHASE-24.2: tarjetas financiadas también lo aceptan. */
 export const AMORTIZABLE_ACCOUNT_TYPES: readonly AccountType[] = [
   'loan',
   'mortgage',
+  'credit_card',
 ] as const;
 
 export interface Account {
@@ -57,12 +59,18 @@ export interface Account {
   opening_balance: string;
   /** YYYY-MM-DD o null. */
   opening_balance_date: string | null;
-  /** APR anual decimal (0.0350 = 3.50%). Sólo loan/mortgage. */
+  /** TIN anual decimal (0.0350 = 3.50% TIN). Sólo tipos amortizables. */
   apr: string | null;
-  /** Plazo total en meses. Sólo loan/mortgage. */
+  /** PHASE-24.2 — TAE anual decimal. Informativa, no afecta cálculo. */
+  tae: string | null;
+  /** Plazo total en meses. Sólo tipos amortizables. */
   term_months: number | null;
-  /** YYYY-MM-DD. Inicio del préstamo. Sólo loan/mortgage. */
+  /** YYYY-MM-DD. Inicio del préstamo. Sólo tipos amortizables. */
   start_date: string | null;
+  /** PHASE-24.3 — Total contractualizado por el banco. */
+  total_to_pay?: string | null;
+  /** PHASE-24.3 — Primera cuota especial sólo de intereses. */
+  interest_only_first_payment?: string | null;
   display_order: number;
   is_archived: boolean;
   created_at: string;

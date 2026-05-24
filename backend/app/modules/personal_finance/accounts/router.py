@@ -11,13 +11,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.deps import CurrentUser
 from app.modules.personal_finance.accounts.debt_health import compute_debt_health
+from app.modules.personal_finance.accounts.debt_history import compute_debt_history
 from app.modules.personal_finance.accounts.schemas import (
     AccountBalancesResponse,
     AccountCreate,
     AccountResponse,
     AccountUpdate,
+    AmortizationRowResponse,
     AmortizationScheduleResponse,
     DebtHealthKpis,
+    DebtHistoryResponse,
+    InstallmentPayRequest,
+    InstallmentUpdateRequest,
 )
 from app.modules.personal_finance.accounts.service import (
     create_account,
@@ -26,7 +31,11 @@ from app.modules.personal_finance.accounts.service import (
     get_amortization_schedule,
     get_balances,
     list_accounts,
+    mark_installment_paid,
+    regenerate_amortization_schedule,
+    unmark_installment_paid,
     update_account,
+    update_installment,
 )
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
@@ -73,6 +82,25 @@ async def debt_health_endpoint(
     return await compute_debt_health(db, user.id)
 
 
+@router.get("/debt-history", response_model=DebtHistoryResponse)
+async def debt_history_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    months_back: Annotated[int, Query(ge=1, le=36)] = 12,
+    months_ahead: Annotated[int, Query(ge=0, le=36)] = 12,
+) -> DebtHistoryResponse:
+    """Serie temporal de evolución de deuda (PHASE-22.1).
+
+    Devuelve un array contiguo con `months_back` puntos históricos
+    (meses cerrados) + `months_ahead` puntos proyectados (a partir
+    del mes en curso) usando cuadros de amortización y cuota teórica
+    de tarjetas. `months_ahead=0` desactiva la proyección.
+    """
+    return await compute_debt_history(
+        db, user.id, months_back=months_back, months_ahead=months_ahead
+    )
+
+
 @router.get(
     "/{account_id}/amortization-schedule",
     response_model=AmortizationScheduleResponse,
@@ -90,6 +118,113 @@ async def amortization_schedule_endpoint(
     apta o si faltan APR/plazo/fecha de inicio.
     """
     return await get_amortization_schedule(db, account_id, user.id)
+
+
+@router.post(
+    "/{account_id}/amortization-schedule/regenerate",
+    response_model=AmortizationScheduleResponse,
+)
+async def regenerate_amortization_endpoint(
+    account_id: uuid.UUID,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AmortizationScheduleResponse:
+    """PHASE-24.3 — Borra y regenera el cuadro de amortización con
+    los datos actuales (apr/term/start). Usa el counterpart tx como
+    principal si existe (caso convert-to-debt); si no, opening_balance.
+    PIERDE el estado de pago (paid_at) de las cuotas anteriores."""
+    schedule = await regenerate_amortization_schedule(db, account_id, user.id)
+    await db.commit()
+    return schedule
+
+
+@router.patch(
+    "/installments/{installment_id}", response_model=AmortizationRowResponse
+)
+async def update_installment_endpoint(
+    installment_id: uuid.UUID,
+    body: InstallmentUpdateRequest,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AmortizationRowResponse:
+    """PHASE-24.1: override puntual de importe / fecha de una cuota.
+    No recomputa las siguientes."""
+    inst = await update_installment(
+        db,
+        installment_id,
+        user.id,
+        payment=body.payment,
+        due_date=body.due_date,
+    )
+    await db.commit()
+    return AmortizationRowResponse(
+        id=inst.id,
+        month=inst.installment_index,
+        due_date=inst.due_date,
+        payment=inst.payment,
+        interest=inst.interest,
+        principal=inst.principal,
+        remaining_balance=inst.remaining_balance,
+        paid_at=inst.paid_at,
+        paid_transaction_id=inst.paid_transaction_id,
+    )
+
+
+@router.post(
+    "/installments/{installment_id}/pay",
+    response_model=AmortizationRowResponse,
+)
+async def pay_installment_endpoint(
+    installment_id: uuid.UUID,
+    body: InstallmentPayRequest,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AmortizationRowResponse:
+    """PHASE-24.1: marca cuota como pagada (timestamp + tx opcional)."""
+    inst = await mark_installment_paid(
+        db,
+        installment_id,
+        user.id,
+        paid_at=body.paid_at,
+        paid_transaction_id=body.paid_transaction_id,
+    )
+    await db.commit()
+    return AmortizationRowResponse(
+        id=inst.id,
+        month=inst.installment_index,
+        due_date=inst.due_date,
+        payment=inst.payment,
+        interest=inst.interest,
+        principal=inst.principal,
+        remaining_balance=inst.remaining_balance,
+        paid_at=inst.paid_at,
+        paid_transaction_id=inst.paid_transaction_id,
+    )
+
+
+@router.delete(
+    "/installments/{installment_id}/pay",
+    response_model=AmortizationRowResponse,
+)
+async def unpay_installment_endpoint(
+    installment_id: uuid.UUID,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AmortizationRowResponse:
+    """PHASE-24.1: revierte el estado de la cuota a pendiente."""
+    inst = await unmark_installment_paid(db, installment_id, user.id)
+    await db.commit()
+    return AmortizationRowResponse(
+        id=inst.id,
+        month=inst.installment_index,
+        due_date=inst.due_date,
+        payment=inst.payment,
+        interest=inst.interest,
+        principal=inst.principal,
+        remaining_balance=inst.remaining_balance,
+        paid_at=inst.paid_at,
+        paid_transaction_id=inst.paid_transaction_id,
+    )
 
 
 @router.get("/{account_id}", response_model=AccountResponse)

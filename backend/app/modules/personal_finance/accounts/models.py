@@ -91,11 +91,36 @@ class Account(Base):
     apr: Mapped[Decimal | None] = mapped_column(
         Numeric(6, 4), nullable=True
     )
-    """APR anual como decimal (0.035 = 3.5%). NULL = sin cuadro."""
+    """TIN — tipo de interés nominal anual como decimal
+    (0.035 = 3.5% TIN). Se usa para calcular cuota e intereses del
+    cuadro francés. NULL = sin cuadro. Mantenemos el nombre `apr`
+    por compatibilidad con migraciones previas; el label en la UI es
+    "TIN"."""
+    tae: Mapped[Decimal | None] = mapped_column(
+        Numeric(6, 4), nullable=True
+    )
+    """PHASE-24.2 — TAE: tasa anual equivalente (informativa, no
+    afecta al cálculo). Obligatoria por regulación bancaria española;
+    incluye comisiones + capitalización. NULL = no declarada."""
     term_months: Mapped[int | None] = mapped_column(Integer, nullable=True)
     """Plazo total en meses. NULL = sin cuadro."""
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     """Fecha de inicio del préstamo. NULL = sin cuadro."""
+    total_to_pay: Mapped[Decimal | None] = mapped_column(
+        Numeric(14, 2), nullable=True
+    )
+    """PHASE-24.3 — total contractualizado por el banco (incluye
+    posibles comisiones/cargos no desglosados). Si está, la diferencia
+    con `Σ(cuotas) + interest_only_first_payment` aflora como
+    'cargos extra' en el cuadro de amortización. NULL = el cuadro
+    teórico es exacto, sin cargos ocultos."""
+    interest_only_first_payment: Mapped[Decimal | None] = mapped_column(
+        Numeric(14, 2), nullable=True
+    )
+    """PHASE-24.3 — primera cuota especial sólo de intereses cuando el
+    contrato no arranca en una fecha de cuota (ej. financias el 15 y
+    las cuotas son día 5 → mes 1 sólo paga intereses del medio mes).
+    NULL = no aplica."""
     display_order: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )

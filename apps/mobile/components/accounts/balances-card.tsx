@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { useAccountBalances, useAccounts } from '@crisol/services';
+import { useCurrencyStore } from '@crisol/store';
 import type { AccountBalance } from '@crisol/types';
 import {
   colors,
@@ -36,6 +37,7 @@ export function BalancesCard() {
   // Necesitamos `is_archived` para filtrar el desglose; el payload de
   // balances no lo trae, así que cruzamos con la lista de cuentas.
   const { data: accounts } = useAccounts({ includeArchived: true });
+  const includeDebt = useCurrencyStore((s) => s.includeDebtInNetWorth);
 
   const archivedIds = useMemo(() => {
     const set = new Set<string>();
@@ -66,7 +68,10 @@ export function BalancesCard() {
   const liabilityItems = activeItems.filter((item) => item.nature === 'liability');
 
   const hasLiabilities = Number(data.total_liabilities) > 0;
-  const netWorthNegative = Number(data.net_worth) < 0;
+  // Cuando `includeDebt` está OFF la cifra grande muestra sólo activos.
+  // El desglose de pasivos se mantiene visible.
+  const displayWorth = includeDebt ? data.net_worth : data.total_assets;
+  const netWorthNegative = Number(displayWorth) < 0;
   const netWorthColor = netWorthNegative ? colors.danger : colors.text;
 
   return (
@@ -76,9 +81,16 @@ export function BalancesCard() {
           <Text style={styles.iconBubbleText}>💼</Text>
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.eyebrow}>Patrimonio neto</Text>
+          <View style={styles.eyebrowRow}>
+            <Text style={styles.eyebrow}>Patrimonio neto</Text>
+            {!includeDebt && hasLiabilities ? (
+              <View style={styles.eyebrowBadge}>
+                <Text style={styles.eyebrowBadgeText}>Sin deuda</Text>
+              </View>
+            ) : null}
+          </View>
           <Text style={[styles.netWorth, { color: netWorthColor }]}>
-            {formatAmount(data.net_worth, data.reference_currency)}
+            {formatAmount(displayWorth, data.reference_currency)}
           </Text>
         </View>
       </View>
@@ -213,12 +225,29 @@ const styles = StyleSheet.create({
     fontSize: fontSize.md,
     lineHeight: fontSize.md + 4,
   },
+  eyebrowRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    flexWrap: 'wrap',
+  },
   eyebrow: {
     fontSize: 11,
     fontWeight: fontWeight.semibold,
     color: colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.6,
+  },
+  eyebrowBadge: {
+    backgroundColor: colors.surfaceMuted,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: radius.sm,
+  },
+  eyebrowBadgeText: {
+    fontSize: 10,
+    color: colors.textMuted,
+    letterSpacing: 0.4,
   },
   netWorth: {
     fontSize: fontSize.xl,

@@ -85,8 +85,14 @@ def build_schedule(
 ) -> list[AmortizationRow]:
     """Genera el cuadro francés completo.
 
-    El último mes ajusta el `principal_mes` para que el saldo final
-    sea exactamente 0 (compensa el redondeo acumulado).
+    Convención (PHASE-24.3, alineada con la presentación de BBVA y
+    otros bancos españoles): **todas las cuotas tienen el mismo
+    `payment` exacto**. El residuo de redondeo se absorbe en el
+    `principal` del último mes (su importe puede diferir uno o dos
+    céntimos vs los anteriores, pero la cuota total al usuario sigue
+    siendo idéntica). Esto asegura que `Σ(payments) == n × payment`
+    exactamente y permite que `extra_charges = total_to_pay − Σ`
+    coincida con la comisión real que cobra el banco.
     """
     if principal <= 0 or term_months <= 0:
         return []
@@ -96,23 +102,25 @@ def build_schedule(
     rows: list[AmortizationRow] = []
     for month_idx in range(1, term_months + 1):
         interest_month = _round_cents(remaining * i) if i > 0 else Decimal("0")
-        principal_month = _round_cents(payment - interest_month)
-        # Último mes: ajusta el principal para cerrar a 0 exacto.
+        # Último mes: ajustamos el `principal` para liquidar la deuda
+        # exactamente (`remaining → 0`); el `payment` mostrado al usuario
+        # sigue siendo el constante — el residuo de céntimos queda
+        # absorbido en `principal` vs el split teórico.
         if month_idx == term_months:
             principal_month = remaining
-            payment_this_month = _round_cents(principal_month + interest_month)
+            remaining = Decimal("0")
         else:
-            payment_this_month = payment
-        remaining = _round_cents(remaining - principal_month)
+            principal_month = _round_cents(payment - interest_month)
+            remaining = _round_cents(remaining - principal_month)
         due = _add_month(start_date, month_idx)
         rows.append(
             AmortizationRow(
                 month=month_idx,
                 due_date=due,
-                payment=payment_this_month,
+                payment=payment,
                 interest=interest_month,
                 principal=principal_month,
-                remaining_balance=remaining if remaining > 0 else Decimal("0"),
+                remaining_balance=remaining,
             )
         )
     return rows

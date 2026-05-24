@@ -76,19 +76,32 @@ function toCreatePayload(values: AccountFormValues): AccountCreateRequest {
   if (AMORTIZABLE_ACCOUNT_TYPES.includes(values.type)) {
     const apr = aprPercentToDecimal(values.apr_percent);
     if (apr !== null) payload.apr = apr;
+    const tae = aprPercentToDecimal(values.tae_percent);
+    if (tae !== null) payload.tae = tae;
     const term = values.term_months.trim();
     if (term) payload.term_months = Number(term);
     const start = values.start_date.trim();
     if (start) payload.start_date = start;
+    const totalRaw = values.total_to_pay.trim().replace(',', '.');
+    if (totalRaw) payload.total_to_pay = totalRaw;
+    const interestOnlyRaw = values.interest_only_first_payment.trim().replace(',', '.');
+    if (interestOnlyRaw) payload.interest_only_first_payment = interestOnlyRaw;
   }
   return payload;
 }
 
 /**
- * Variante de update: si el tipo es no-amortizable, fuerza null para
- * los campos de amortización (limpia residuales del backend).
+ * Variante de update: el campo `opening_balance` del form representa
+ * el SALDO ACTUAL que el usuario quiere ver (web y mobile alineados).
+ * Restamos los movimientos para derivar el opening_balance que persiste
+ * — así current_balance final = lo que el usuario tecleó.
+ *
+ * `movementsBalance` lo pasa el caller desde la query de balances.
  */
-function toUpdatePayload(values: AccountFormValues): AccountUpdateRequest {
+function toUpdatePayload(
+  values: AccountFormValues,
+  movementsBalance?: string,
+): AccountUpdateRequest {
   const payload: AccountUpdateRequest = {
     name: values.name,
     type: values.type,
@@ -96,17 +109,39 @@ function toUpdatePayload(values: AccountFormValues): AccountUpdateRequest {
     color: values.color,
     icon: values.icon,
   };
-  if (values.opening_balance) payload.opening_balance = values.opening_balance;
-  if (AMORTIZABLE_ACCOUNT_TYPES.includes(values.type)) {
+  const isAmortizable = AMORTIZABLE_ACCOUNT_TYPES.includes(values.type);
+  // PHASE-24.3: para liabilities amortizables el `opening_balance` no
+  // se controla aquí (vive en las cuotas; ajustar con "Regenerar").
+  if (values.opening_balance && !isAmortizable) {
+    if (movementsBalance !== undefined) {
+      const userValue = Number(values.opening_balance.replace(',', '.'));
+      const mov = Number(movementsBalance);
+      payload.opening_balance =
+        Number.isFinite(userValue) && Number.isFinite(mov)
+          ? (userValue - mov).toFixed(2)
+          : values.opening_balance;
+    } else {
+      payload.opening_balance = values.opening_balance;
+    }
+  }
+  if (isAmortizable) {
     payload.apr = aprPercentToDecimal(values.apr_percent);
+    payload.tae = aprPercentToDecimal(values.tae_percent);
     const term = values.term_months.trim();
     payload.term_months = term ? Number(term) : null;
     const start = values.start_date.trim();
     payload.start_date = start ? start : null;
+    const totalRaw = values.total_to_pay.trim().replace(',', '.');
+    payload.total_to_pay = totalRaw ? totalRaw : null;
+    const interestOnlyRaw = values.interest_only_first_payment.trim().replace(',', '.');
+    payload.interest_only_first_payment = interestOnlyRaw ? interestOnlyRaw : null;
   } else {
     payload.apr = null;
+    payload.tae = null;
     payload.term_months = null;
     payload.start_date = null;
+    payload.total_to_pay = null;
+    payload.interest_only_first_payment = null;
   }
   return payload;
 }
@@ -142,10 +177,14 @@ export default function AccountsScreen() {
   const active = items.filter((a) => !a.is_archived);
   const archived = items.filter((a) => a.is_archived);
   const balanceByAccount = useMemo(() => {
-    const map = new Map<string, { current_balance: string; currency: string }>();
+    const map = new Map<
+      string,
+      { current_balance: string; movements_balance: string; currency: string }
+    >();
     for (const item of balancesQuery.data?.items ?? []) {
       map.set(item.account_id, {
         current_balance: item.current_balance,
+        movements_balance: item.movements_balance,
         currency: item.currency,
       });
     }
@@ -261,6 +300,8 @@ export default function AccountsScreen() {
         <EditAccountModal
           visible={formOpen}
           account={editing}
+          movementsBalance={balanceByAccount.get(editing.id)?.movements_balance}
+          currentBalance={balanceByAccount.get(editing.id)?.current_balance}
           onClose={() => setFormOpen(false)}
         />
       ) : (
@@ -303,6 +344,12 @@ export default function AccountsScreen() {
 interface EditAccountModalProps {
   visible: boolean;
   account: Account;
+  /** PHASE-24.x: movements_balance del account, para que toUpdatePayload
+   * pueda derivar opening_balance desde el current_balance que escribe
+   * el usuario en el form. */
+  movementsBalance?: string | undefined;
+  /** Saldo actual computado — se pasa al modal para prefill. */
+  currentBalance?: string | undefined;
   onClose: () => void;
 }
 
@@ -311,11 +358,17 @@ interface EditAccountModalProps {
  * el id en construcción) en un sub-componente que se re-monta al
  * cambiar la cuenta editada — mismo patrón que `EditCategoryModal`.
  */
-function EditAccountModal({ visible, account, onClose }: EditAccountModalProps) {
+function EditAccountModal({
+  visible,
+  account,
+  movementsBalance,
+  currentBalance,
+  onClose,
+}: EditAccountModalProps) {
   const update = useUpdateAccount(account.id);
 
   function handleSubmit(values: AccountFormValues) {
-    update.mutate(toUpdatePayload(values), {
+    update.mutate(toUpdatePayload(values, movementsBalance), {
       onSuccess: () => {
         toast.success('Cuenta actualizada.');
         onClose();
@@ -325,10 +378,18 @@ function EditAccountModal({ visible, account, onClose }: EditAccountModalProps) 
     });
   }
 
+  // Para el prefill: pasamos al modal una copia del account con el
+  // opening_balance override = currentBalance, para que la UI muestre
+  // lo que el usuario debe (no el opening 0 crudo del convert-to-debt).
+  const accountForForm =
+    currentBalance !== undefined && currentBalance !== '0.00'
+      ? { ...account, opening_balance: currentBalance }
+      : account;
+
   return (
     <AccountFormModal
       visible={visible}
-      initial={account}
+      initial={accountForForm}
       submitting={update.isPending}
       onSubmit={handleSubmit}
       onCancel={onClose}

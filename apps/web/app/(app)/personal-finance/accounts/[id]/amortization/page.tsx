@@ -9,11 +9,18 @@ import {
   useAccount,
   useAccountBalances,
   useAmortizationSchedule,
+  useRegenerateAmortization,
 } from '@crisol/services';
+import { toast } from '@crisol/store';
+import type { AmortizationRow } from '@crisol/types';
 import { colors, fontSize, fontWeight, formatAmount, formatDate, radius, spacing } from '@crisol/ui';
+import { useState } from 'react';
 
 import { AccountSwatch } from '@/components/accounts/account-swatch';
+import { InstallmentEditDialog } from '@/components/debt/installment-edit-dialog';
+import { InstallmentPayButtons } from '@/components/debt/installment-pay-buttons';
 import { Card } from '@/components/ui/card';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { KpiCard } from '@/components/ui/kpi-card';
 
 /**
@@ -177,6 +184,21 @@ function AmortizationContent({
   const elapsed = monthsElapsedSince(schedule.start_date, schedule.term_months);
   const remainingMonths = Math.max(0, schedule.term_months - elapsed);
   const aprPercent = (Number(schedule.apr) * 100).toFixed(2);
+  const taePercent =
+    schedule.tae != null ? (Number(schedule.tae) * 100).toFixed(2) : null;
+  const paidCount = schedule.rows.filter((r) => r.paid_at != null).length;
+  const [editing, setEditing] = useState<AmortizationRow | null>(null);
+  const [confirmingRegen, setConfirmingRegen] = useState(false);
+  const regen = useRegenerateAmortization();
+
+  function handleRegenerate() {
+    setConfirmingRegen(false);
+    regen.mutate(schedule.account_id, {
+      onSuccess: () => toast.success('Cuadro regenerado.'),
+      onError: (err) =>
+        toast.error(formatApiError(err, 'No se pudo regenerar el cuadro.')),
+    });
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg }}>
@@ -197,15 +219,32 @@ function AmortizationContent({
           valueColor={colors.danger}
         />
         <KpiCard
-          label="Total a pagar"
-          value={formatAmount(schedule.total_paid, currency)}
+          label={
+            schedule.total_to_pay != null
+              ? 'Total a pagar (banco)'
+              : 'Total a pagar (cuadro)'
+          }
+          value={formatAmount(
+            schedule.total_to_pay ?? schedule.total_paid,
+            currency,
+          )}
+          footer={
+            schedule.extra_charges != null &&
+            Number(schedule.extra_charges) !== 0 ? (
+              <span style={{ fontSize: fontSize.xs, color: colors.textSubtle }}>
+                Incluye {formatAmount(schedule.extra_charges, currency)} de
+                cargos extra no desglosados
+              </span>
+            ) : undefined
+          }
         />
         <KpiCard
           label="Plazo restante"
           value={formatMonthsAsDuration(remainingMonths)}
           footer={
             <span style={{ fontSize: fontSize.xs, color: colors.textSubtle }}>
-              {schedule.term_months} meses totales · {aprPercent}% APR
+              {schedule.term_months} meses · TIN {aprPercent}%
+              {taePercent ? ` · TAE ${taePercent}%` : ''}
             </span>
           }
         />
@@ -231,11 +270,39 @@ function AmortizationContent({
               color: colors.text,
             }}
           >
-            Tabla completa · {schedule.rows.length} cuotas
+            Tabla completa · {paidCount} / {schedule.rows.length} pagadas
           </h2>
-          <span style={{ fontSize: fontSize.xs, color: colors.textMuted }}>
-            Inicio: {formatDate(`${schedule.start_date}T00:00:00Z`)}
-          </span>
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: spacing.md,
+              flexWrap: 'wrap',
+            }}
+          >
+            <span style={{ fontSize: fontSize.xs, color: colors.textMuted }}>
+              Inicio: {formatDate(`${schedule.start_date}T00:00:00Z`)} ·
+              Editar o marcar como pagada no recomputa las siguientes
+            </span>
+            <button
+              type="button"
+              onClick={() => setConfirmingRegen(true)}
+              disabled={regen.isPending}
+              style={{
+                padding: `${spacing.xs}px ${spacing.sm}px`,
+                fontSize: fontSize.xs,
+                fontWeight: fontWeight.semibold,
+                color: colors.primary,
+                backgroundColor: 'transparent',
+                border: `1px solid ${colors.primary}`,
+                borderRadius: radius.sm,
+                cursor: regen.isPending ? 'wait' : 'pointer',
+              }}
+              title="Borra y vuelve a generar las cuotas con los datos actuales (TIN, plazo, etc.). Pierde el estado de pago."
+            >
+              {regen.isPending ? 'Regenerando…' : 'Regenerar cuadro'}
+            </button>
+          </div>
         </div>
         <div
           style={{
@@ -266,30 +333,113 @@ function AmortizationContent({
                 <Th align="right">Intereses</Th>
                 <Th align="right">Principal</Th>
                 <Th align="right">Saldo pendiente</Th>
+                <Th align="right">Estado</Th>
               </tr>
             </thead>
             <tbody>
-              {schedule.rows.map((row) => (
-                <tr key={row.month}>
-                  <Td>{row.month}</Td>
-                  <Td>{formatDate(`${row.due_date}T00:00:00Z`)}</Td>
-                  <Td align="right">{formatAmount(row.payment, currency)}</Td>
-                  <Td align="right" color={colors.danger}>
-                    {formatAmount(row.interest, currency)}
-                  </Td>
-                  <Td align="right">{formatAmount(row.principal, currency)}</Td>
-                  <Td align="right">
-                    {formatAmount(row.remaining_balance, currency)}
-                  </Td>
-                </tr>
-              ))}
+              {schedule.rows.map((row) => {
+                const paid = row.paid_at != null;
+                return (
+                  <tr
+                    key={row.id ?? row.month}
+                    style={
+                      paid
+                        ? { backgroundColor: colors.successSoft, opacity: 0.85 }
+                        : undefined
+                    }
+                  >
+                    <Td>{row.month}</Td>
+                    <Td>{formatDate(`${row.due_date}T00:00:00Z`)}</Td>
+                    <Td align="right">{formatAmount(row.payment, currency)}</Td>
+                    <Td align="right" color={colors.danger}>
+                      {formatAmount(row.interest, currency)}
+                    </Td>
+                    <Td align="right">{formatAmount(row.principal, currency)}</Td>
+                    <Td align="right">
+                      {formatAmount(row.remaining_balance, currency)}
+                    </Td>
+                    <Td align="right">
+                      {row.id ? (
+                        <div
+                          style={{
+                            display: 'inline-flex',
+                            gap: spacing.xs,
+                            alignItems: 'center',
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setEditing(row)}
+                            style={inlineActionStyle}
+                            title="Editar importe o fecha"
+                          >
+                            Editar
+                          </button>
+                          <InstallmentPayButtons
+                            installmentId={row.id}
+                            paid={paid}
+                            onError={(err) =>
+                              toast.error(
+                                formatApiError(err, 'No se pudo actualizar la cuota'),
+                              )
+                            }
+                          />
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: fontSize.xs, color: colors.textSubtle }}>
+                          —
+                        </span>
+                      )}
+                    </Td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       </Card>
+
+      <InstallmentEditDialog
+        installment={editing}
+        currency={currency}
+        onClose={() => setEditing(null)}
+        onError={(err) =>
+          toast.error(formatApiError(err, 'No se pudo guardar el cambio'))
+        }
+      />
+
+      <ConfirmDialog
+        open={confirmingRegen}
+        title="¿Regenerar el cuadro?"
+        description={
+          <>
+            Se borrarán las cuotas actuales (incluido el estado de pago)
+            y se recalcularán con los datos actuales (TIN, plazo, fecha
+            de inicio). Útil cuando has cambiado parámetros y necesitas
+            que el cuadro vuelva a cuadrar con el banco.
+          </>
+        }
+        confirmLabel="Regenerar"
+        cancelLabel="Cancelar"
+        tone="primary"
+        loading={regen.isPending}
+        onConfirm={handleRegenerate}
+        onCancel={() => setConfirmingRegen(false)}
+      />
     </div>
   );
 }
+
+const inlineActionStyle: React.CSSProperties = {
+  padding: `2px ${spacing.sm}px`,
+  fontSize: fontSize.xs,
+  fontWeight: fontWeight.medium,
+  color: colors.primary,
+  backgroundColor: 'transparent',
+  border: `1px solid ${colors.primary}`,
+  borderRadius: radius.sm,
+  cursor: 'pointer',
+};
 
 function Th({
   children,

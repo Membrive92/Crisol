@@ -1,6 +1,7 @@
 'use client';
 
 import { useDebtHealth } from '@crisol/services';
+import { useCurrencyStore } from '@crisol/store';
 import type { DtiStatus } from '@crisol/types';
 import {
   colors,
@@ -57,6 +58,7 @@ function formatMonths(months: number | null): string {
  */
 export function DebtHealthCard() {
   const { data, isLoading, isError } = useDebtHealth();
+  const includeDebt = useCurrencyStore((s) => s.includeDebtInNetWorth);
 
   if (isLoading) {
     return (
@@ -80,8 +82,12 @@ export function DebtHealthCard() {
 
   const totalLiabilitiesNum = Number(data.total_liabilities);
   const hasDebt = totalLiabilitiesNum > 0;
-  const netWorthNum = Number(data.net_worth);
-  const netWorthColor = netWorthNum < 0 ? colors.danger : colors.text;
+  // Cuando el toggle "Incluir deuda" está OFF, la cifra grande pasa a
+  // ser sólo activos. El desglose Activos/Pasivos se mantiene siempre
+  // para que el usuario no pierda contexto de lo que está ignorando.
+  const displayWorthValue = includeDebt ? data.net_worth : data.total_assets;
+  const displayWorthNum = Number(displayWorthValue);
+  const netWorthColor = displayWorthNum < 0 ? colors.danger : colors.text;
 
   const dtiTone = dtiStatusColors(data.dti_status);
   const dtiPercent = data.dti_ratio !== null ? (data.dti_ratio * 100).toFixed(1) : null;
@@ -127,15 +133,31 @@ export function DebtHealthCard() {
         <div style={{ flex: 1, minWidth: 0 }}>
           <span
             style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: spacing.xs,
               fontSize: 11,
               fontWeight: fontWeight.semibold,
               color: colors.textMuted,
               textTransform: 'uppercase',
               letterSpacing: '0.04em',
-              display: 'block',
             }}
           >
             Salud financiera
+            {!includeDebt && hasDebt ? (
+              <span
+                style={{
+                  fontSize: 10,
+                  color: colors.textMuted,
+                  backgroundColor: colors.surfaceMuted,
+                  padding: '1px 6px',
+                  borderRadius: radius.sm,
+                  letterSpacing: '0.04em',
+                }}
+              >
+                Sin deuda
+              </span>
+            ) : null}
           </span>
           <span
             style={{
@@ -145,9 +167,10 @@ export function DebtHealthCard() {
               fontVariantNumeric: 'tabular-nums',
               letterSpacing: '-0.01em',
               lineHeight: 1.1,
+              display: 'block',
             }}
           >
-            {formatAmount(data.net_worth, data.reference_currency)}
+            {formatAmount(displayWorthValue, data.reference_currency)}
           </span>
         </div>
       </header>
