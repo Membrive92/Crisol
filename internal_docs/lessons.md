@@ -168,6 +168,108 @@ limpiar `Content-Type` cuando el body es `FormData` (o `Blob` con su propio
 boundary/encoding). Reutilizar headers de un envío previo asume que el body es
 idempotente; con multipart NO lo es.
 
+### [PHASE-28] Inferir la dirección de una transferencia desde `category.kind` falla cuando un import asigna la categoría equivocada
+**Error:** El endpoint `POST /transfers/from-source` derivaba el lado
+(ordenante / beneficiaria) de la tx origen mirando `category.kind`. Si la tx
+era un abono (entró dinero a BBVA) pero el bank-mapping del import le había
+puesto "Transferencias (Gasto)", el sistema asumía "salió de BBVA" y creaba
+la contraparte al revés — el saldo de BBVA pintaba un cargo de 3.102€ en
+lugar de un abono.
+**Causa:** Una sola señal (category.kind) para decidir DOS cosas: signo en
+el saldo de la cuenta + lado del par. Cuando la categoría miente sobre la
+dirección, ambas decisiones salen mal.
+**Solución:** Hacer la dirección **explícita** en la API.
+`originating_account_id` + `beneficiary_account_id` viajan en el body; el
+backend valida que la tx origen sea una de las dos y FUERZA la categoría
+del origen al kind canónico (origen=EXPENSE si es ordenante, INCOME si es
+beneficiaria). El modal web expone dos `Select` distintos para que el
+usuario lo declare en vez de inferirlo.
+**Regla:** Cuando una sola pista (categoría, descripción, signo del
+importe) puede mentir y deriva varias decisiones distintas, exponer la
+dirección como input explícito de la API y forzar el estado canónico
+después; no inferir.
+
+### [PHASE-26] Cabeceras XLSX en la fila 1 fallan con extractos bancarios reales
+**Error:** El parser XLSX asumía cabecera en la fila 1 (`next(iterator)`).
+Los XLSX de BBVA / Santander / ING / CaixaBank llevan 5-10 filas iniciales
+con logo, periodo, saldos resumen, etc., y la fila de cabecera real
+("Fecha | Concepto | Importe | Saldo") aparece más abajo. Resultado: 422
+"El XLSX no tiene cabecera" para imports legítimos que el usuario abría
+sin problema en Excel.
+**Causa:** Suposición rígida sobre el layout del fichero. Los bancos no
+exportan tabular limpio; meten un preámbulo cosmético antes.
+**Solución:** Escanear hasta 30 filas y usar como cabecera la primera con
+≥2 celdas no vacías (un título suelto en una columna no se confunde con
+cabecera). Además espejé el smart-parser del PDF en XLSX
+(`parse_xlsx_smart`) que clasifica columnas por rol (concepto, importe,
+fecha, descripción) usando los mismos hints — así un XLSX con "Concepto"
+único se mapea tanto a description como a category_name y dispara el
+autocompletado por bank-mapping igual que con PDF.
+**Regla:** Para parsers de ficheros producidos por terceros, no asumas el
+layout exacto. Heurística "primera fila con ≥N celdas con sentido" >
+"fila 1". Si tienes un smart-parser en un formato, espéjalo en el otro
+para que el usuario obtenga la misma UX cambie el formato que cambie.
+
+### [PHASE-26] El backend silencia errores de PDF cifrados (mensaje vacío)
+**Error:** Importar un PDF cifrado / corrupto devolvía 422 con detail
+`"PDF inválido: "` — la parte después del colon estaba vacía. El usuario
+no sabía si el problema era su fichero, una contraseña o un bug del
+backend.
+**Causa:** `pdfplumber.open()` lanza excepciones con `str(e) == ""` para
+varios casos de PDFs cifrados o con headers corruptos. El handler hacía
+`f"PDF inválido: {e}"` sin fallback.
+**Solución:** Si `str(e)` viene vacío, caer al `type(e).__name__` con un
+hint accionable: `"PDF inválido: <TipoExcepción> sin mensaje (probablemente
+PDF cifrado o corrupto)"`.
+**Regla:** Para excepciones de terceros propagadas como detail al usuario,
+asume que `str(e)` puede ser vacío. Encadena con `type(e).__name__` y un
+hint de qué suele ser. El usuario final no va a leer un stack trace, pero
+"PDF cifrado o corrupto" le redirige el debug.
+
+### [PHASE-26] Capital opcional en loan/mortgage permite crear cuentas en estado roto
+**Error:** El form de "Nueva cuenta" marcaba "Capital (opcional)" para
+todos los tipos liability. Si el usuario rellenaba TIN + plazo + fecha
+pero olvidaba Capital, el backend persistía `opening_balance=0`,
+`generate_installments_for_account` devolvía `[]` (porque
+`principal <= 0`) y la cuenta quedaba sin cuadro de amortización, sin
+saldo y sin contribuir al debt-health. Saldo "0,00 €" en el dashboard
+incluso teniendo TIN/plazo/fecha bien rellenados.
+**Causa:** El backend trataba todos los campos como independientes y
+opcionales. Sin Capital se podía persistir, pero el resto del módulo
+asume `principal > 0` y fallaba silenciosamente.
+**Solución:** Validación en capas. Frontend: label "Capital" (sin
+"opcional") cuando type=loan|mortgage + `validate()` rechaza Capital
+vacío o ≤ 0 con mensaje claro. Backend: en `create_account`, 400 si
+type∈{loan, mortgage} y `opening_balance <= 0` — defensa por si el
+cliente se salta la validación. credit_card sí permite 0 porque su
+deuda puede vivir en la tx contraparte (flujo convert-to-debt).
+**Regla:** Si un módulo asume cierto invariante (ej. `principal > 0`
+para que algo se genere), valida ese invariante en la frontera donde
+los datos entran, no donde se consumen. Y si tres campos son
+"un grupo" (Capital + TIN + plazo + fecha = "datos del préstamo"),
+no los trates como independientes: el form debe insistir en el grupo
+completo y el backend rechazar combinaciones rotas.
+
+### [PHASE-23.1] No metas dos responsabilidades ortogonales en el mismo enum
+**Error:** En PHASE-23 añadí `CategoryKind.TRANSFER` como tercer valor del enum
+para señalar "esta categoría es transferencia interna, exclúyela del cashflow".
+Pero `kind` ya tenía un trabajo: decidir el SIGNO con que la tx afecta al saldo
+de la cuenta (asset+expense → -amount, asset+income → +amount). Las txs con
+kind=TRANSFER cayeron al `else_=amount` del case statement de balance, inflando
+el saldo BBVA del usuario en +10.120€.
+**Causa:** Acoplar dos conceptos ortogonales en una misma columna. "Tipo de
+movimiento" (signo) y "es transferencia interna" (exclusión del cashflow) son
+independientes: una transferencia puede ser entrada (income) Y excluirse, o
+salida (expense) Y excluirse.
+**Solución:** Separar en dos columnas. `kind` sigue siendo `income | expense`
+(determina signo del balance). Nueva columna `is_transfer` booleana en
+`categories` (determina exclusión del cashflow). Migración restaura el kind
+original (inferencia por nombre) + marca `is_transfer=true`.
+**Regla:** Antes de añadir un valor a un enum, pregunta si el nuevo caso
+comparte TODAS las responsabilidades del enum existente. Si introduce una
+ortogonalidad nueva, es una columna separada, no un valor más. Aplica también
+a `status` enums que mezclan "estado del workflow" con "es tipo X".
+
 ### [PHASE-5.2] El dev server de Next.js corta los rewrites a 30s — incompatible con IA local
 **Error:** Subir un ticket en dev devolvía 500 con `socket hang up / ECONNRESET` exactamente
 a los 30s, sin que la petición llegara a aparecer en el log de uvicorn. Ollama estaba

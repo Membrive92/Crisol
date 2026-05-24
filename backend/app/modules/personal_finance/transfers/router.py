@@ -12,16 +12,25 @@ from app.core.database import get_db
 from app.core.deps import CurrentUser
 from app.modules.personal_finance.transfers.schemas import (
     TransferCandidate,
+    TransferFromSourceDebtRequest,
+    TransferFromSourceRequest,
     TransferLinkRequest,
+    TransferMarkRequest,
+    TransferMarkResponse,
     TransferMatchOptions,
     TransferMatchResponse,
     TransferPairResponse,
+    TransferSuspect,
 )
 from app.modules.personal_finance.transfers.service import (
     auto_match,
+    convert_to_debt_operation,
+    convert_to_internal_transfer,
     detect_candidates,
     link_manually,
     list_pairs,
+    list_suspects,
+    mark_as_transfer,
     unlink,
 )
 
@@ -97,3 +106,81 @@ async def unlink_endpoint(
     await unlink(db, user.id, transaction_id)
     await db.commit()
     return Response(status_code=204)
+
+
+@router.get("/suspects", response_model=list[TransferSuspect])
+async def suspects_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[TransferSuspect]:
+    """PHASE-23: txs candidatas a transferencia interna sin pareja —
+    cuya descripción contiene "transfer" y todavía no están marcadas
+    como transferencia (categoría kind=transfer)."""
+    return await list_suspects(db, user.id)
+
+
+@router.post("/mark", response_model=TransferMarkResponse, status_code=201)
+async def mark_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    body: TransferMarkRequest,
+) -> TransferMarkResponse:
+    """PHASE-23.1: marca una tx como transferencia interna asignándole
+    una categoría con `is_transfer=true` (creándola por defecto si
+    no existe). La tx sale del cashflow agregado pero su signo sigue
+    impactando al saldo de la cuenta."""
+    response = await mark_as_transfer(
+        db, user.id, transaction_id=body.transaction_id
+    )
+    await db.commit()
+    return response
+
+
+@router.post(
+    "/from-source", response_model=TransferPairResponse, status_code=201
+)
+async def from_source_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    body: TransferFromSourceRequest,
+) -> TransferPairResponse:
+    """PHASE-23.1: convierte una tx existente en una transferencia
+    interna creando automáticamente la contraparte en la cuenta destino
+    y emparejando ambas vía `transfer_pair_id`. Ambas cuentas reflejan
+    el movimiento en sus saldos individuales y el par queda fuera del
+    cashflow agregado."""
+    pair = await convert_to_internal_transfer(
+        db,
+        user.id,
+        source_transaction_id=body.source_transaction_id,
+        originating_account_id=body.originating_account_id,
+        beneficiary_account_id=body.beneficiary_account_id,
+    )
+    await db.commit()
+    return pair
+
+
+@router.post(
+    "/from-source-debt",
+    response_model=TransferPairResponse,
+    status_code=201,
+)
+async def from_source_debt_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    body: TransferFromSourceDebtRequest,
+) -> TransferPairResponse:
+    """PHASE-24: convierte una tx en operación financiada (deuda con
+    plan de pago). Crea la contraparte en una cuenta liability —
+    existente o nueva al vuelo — y empareja ambas. El saldo de la
+    liability sube por el importe (deuda contraída) y el par queda
+    fuera del cashflow agregado."""
+    pair = await convert_to_debt_operation(
+        db,
+        user.id,
+        source_transaction_id=body.source_transaction_id,
+        destination_account_id=body.destination_account_id,
+        new_liability=body.new_liability,
+    )
+    await db.commit()
+    return pair

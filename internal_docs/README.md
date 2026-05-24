@@ -207,6 +207,46 @@ Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
 |------|--------------------------------------------------------|--------|----|
 | 22   | Liabilities + amortización francesa + KPIs salud deuda | ✅     | —  |
 
+### Fase 23 — Transferencias internas: flag + convertir desde tx
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 23   | Tercer kind transfer + UI sospechosas en /transfers          | ✅     | —  |
+| 23.1 | `Category.is_transfer` flag + convertir tx a transferencia + cuenta destino | ✅     | —  |
+
+### Fase 24 — Operaciones financiadas (deuda con plan de pago)
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 24   | Convertir tx en operación financiada + crear liability al vuelo + badge en import preview | ✅     | —  |
+| 24.1 | Cuotas persistidas editables + marcar pagada                 | ✅     | —  |
+| 24.2 | TIN + TAE separados + tarjetas financiadas con plan fijo     | ✅     | —  |
+| 24.3 | Total a pagar (banco) + cargos derivados dinámicamente       | ✅     | —  |
+
+### Fase 25 — Drill-down de categoría desde el desglose
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 25   | Página de detalle al pinchar una categoría + "Otros" expandible | ✅     | —  |
+
+### Fase 26 — Imports hardening (XLSX smart + capital obligatorio + errores PDF)
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 26   | Parser XLSX inteligente (auto-roles) + tolerancia a cabeceras desplazadas + capital obligatorio en loan/mortgage + mensajes PDF claros | ✅     | —  |
+
+### Fase 27 — Selector temporal + filtros sincronizados con URL
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 27   | TimeSelector reutilizable (años + meses sólo con datos) en transacciones y drill-down de categoría + filtros viajan en la URL | ✅     | —  |
+
+### Fase 28 — Transferencias con cuenta ordenante / beneficiaria explícita
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 28   | Modal con dos slots (ordenante/beneficiaria) + fuerza categoría canónica al kind correcto (fix de la dirección inferida desde category.kind) | ✅     | —  |
+
 ---
 
 ## Estructura de este directorio

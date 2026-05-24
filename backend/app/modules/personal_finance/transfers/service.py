@@ -3,26 +3,67 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.personal_finance.transactions.models import Transaction
+from app.modules.personal_finance.accounts.models import (
+    Account,
+    AccountNature,
+    AccountType,
+)
+from app.modules.personal_finance.accounts.installments_repository import (
+    generate_installments_for_account,
+)
+from app.modules.personal_finance.accounts.repository import (
+    create_account as repo_create_account,
+    get_account_by_id,
+    get_account_by_name,
+)
+from app.modules.personal_finance.categories.models import Category, CategoryKind
+from app.modules.personal_finance.categories.repository import (
+    get_category_by_id,
+)
+from app.modules.personal_finance.transactions.models import (
+    Transaction,
+    TransactionSource,
+)
 from app.modules.personal_finance.transfers.repository import (
+    assign_category as repo_assign_category,
     filter_unambiguous,
     find_candidate_pairs,
+    get_or_create_default_transfer_category,
     get_pair as repo_get_pair,
     get_transaction as repo_get_tx,
     link_pair as repo_link_pair,
     list_pairs as repo_list_pairs,
+    list_suspect_transactions,
     list_unmatched_active_transactions,
     unlink_pair as repo_unlink_pair,
 )
 from app.modules.personal_finance.transfers.schemas import (
+    NewLiabilityForDebt,
     TransferCandidate,
+    TransferMarkResponse,
     TransferMatchResponse,
     TransferPairResponse,
+    TransferSuspect,
 )
+
+
+async def _source_kind(db: AsyncSession, source: Transaction) -> CategoryKind:
+    """Determina el `kind` efectivo de la tx origen para decidir la
+    dirección del transfer. Si no tiene categoría asumimos EXPENSE
+    (caso más común al convertir: "esto fue un envío de dinero"); el
+    usuario puede ajustar luego cambiando la categoría manualmente.
+    """
+    if source.category_id is None:
+        return CategoryKind.EXPENSE
+    cat = await get_category_by_id(db, source.category_id, source.user_id)
+    if cat is None:
+        return CategoryKind.EXPENSE
+    return cat.kind
 
 
 def _delta_days(tx_a: Transaction, tx_b: Transaction) -> int:
@@ -177,3 +218,424 @@ async def unlink(
         )
     tx_a, tx_b = pair
     await repo_unlink_pair(db, tx_a, tx_b)
+
+
+async def list_suspects(
+    db: AsyncSession, user_id: uuid.UUID
+) -> list[TransferSuspect]:
+    """PHASE-23: txs candidatas a transferencia interna sin pareja
+    (descripción contiene "transfer"). El usuario revisa y marca las
+    que correspondan via /transfers/mark.
+    """
+    rows = await list_suspect_transactions(db, user_id)
+    return [
+        TransferSuspect(
+            transaction_id=tx.id,
+            amount=tx.amount,
+            currency=tx.currency,
+            account_id=tx.account_id,
+            occurred_at=tx.occurred_at,
+            description=tx.description,
+            current_category_id=cat_id,
+            current_category_name=cat_name,
+        )
+        for tx, cat_id, cat_name in rows
+    ]
+
+
+_INCOMING_DESCRIPTION_HINTS = ("recibida", "recibido", "entrante", "entrada", "a favor")
+
+
+def _infer_transfer_kind(description: str | None) -> CategoryKind:
+    """Heurística para decidir si una tx es salida (EXPENSE) o entrada
+    (INCOME) cuando el usuario la marca como transferencia.
+
+    Por defecto EXPENSE (caso más común: extracto de la cuenta origen
+    con TRANSFERENCIA REALIZADA). Si la descripción contiene "recibida"
+    / "entrante" / "a favor" se asume INCOME.
+    """
+    if description is None:
+        return CategoryKind.EXPENSE
+    lowered = description.lower()
+    return (
+        CategoryKind.INCOME
+        if any(hint in lowered for hint in _INCOMING_DESCRIPTION_HINTS)
+        else CategoryKind.EXPENSE
+    )
+
+
+async def mark_as_transfer(
+    db: AsyncSession, user_id: uuid.UUID, *, transaction_id: uuid.UUID
+) -> TransferMarkResponse:
+    """PHASE-23.1: marca una tx como transferencia interna.
+
+    Asigna una categoría `is_transfer=true` con el `kind` adecuado para
+    preservar el signo de la tx en el saldo de la cuenta:
+    - El kind se infiere por descripción (REALIZADA → EXPENSE, RECIBIDA
+      → INCOME) o se hereda del kind actual si la tx ya tenía categoría.
+    - Si el usuario no tiene categoría is_transfer del kind necesario,
+      se crea "Transferencia interna (salida|entrada)" automáticamente.
+
+    Errores: 404 si la tx no existe / no es del usuario; 409 si ya
+    forma parte de un par (debe desenlazar antes).
+    """
+    tx = await repo_get_tx(db, transaction_id, user_id)
+    if tx is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="La transacción no existe o no es tuya.",
+        )
+    if tx.transfer_pair_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "La transacción ya forma parte de un par. Deshaz el "
+                "enlace antes de marcarla como transferencia individual."
+            ),
+        )
+    target_kind = _infer_transfer_kind(tx.description)
+    category = await get_or_create_default_transfer_category(
+        db, user_id, kind=target_kind
+    )
+    await repo_assign_category(db, tx, category.id)
+    return TransferMarkResponse(
+        transaction_id=tx.id,
+        category_id=category.id,
+        category_name=category.name,
+    )
+
+
+async def convert_to_internal_transfer(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    source_transaction_id: uuid.UUID,
+    originating_account_id: uuid.UUID,
+    beneficiary_account_id: uuid.UUID,
+) -> TransferPairResponse:
+    """PHASE-23.1: convierte una tx existente en una transferencia
+    interna entre las dos cuentas indicadas (ordenante + beneficiaria),
+    crea la contraparte y empareja ambas vía `transfer_pair_id`.
+
+    Reglas:
+    1. La tx origen debe pertenecer al usuario y no estar pareada ya.
+    2. Las dos cuentas deben ser distintas, del usuario y same currency
+       (cross-currency es follow-up).
+    3. La tx origen debe coincidir con la ordenante O con la
+       beneficiaria — no se admite "ninguna de las dos".
+    4. La categoría del origen se fuerza al kind correcto según su
+       rol (ordenante → EXPENSE, beneficiaria → INCOME). Así el
+       saldo de su cuenta refleja el signo real aunque el import
+       hubiera asignado la categoría equivocada.
+    5. Se crea la contraparte en la cuenta opuesta con el kind
+       complementario, source=MANUAL y categoría is_transfer.
+    6. Ambas quedan fuera del cashflow gracias a
+       `transfer_pair_id IS NOT NULL` (dashboard/budgets ya lo respetan).
+    """
+    source = await repo_get_tx(db, source_transaction_id, user_id)
+    if source is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="La transacción origen no existe o no es tuya.",
+        )
+    if source.transfer_pair_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "La transacción ya forma parte de un par. Deshaz el "
+                "enlace antes de convertirla."
+            ),
+        )
+
+    if originating_account_id == beneficiary_account_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La cuenta ordenante y la beneficiaria deben ser distintas.",
+        )
+
+    # La tx origen debe ser una de las dos. Si no coincide, el usuario
+    # ha elegido un par que no incluye la cuenta en la que vive la tx
+    # original — eso no se puede convertir (habría que crear AMBOS lados
+    # desde cero, que es otro flujo, "Nueva transferencia").
+    if source.account_id == originating_account_id:
+        source_role = "originating"
+        counterpart_account_id = beneficiary_account_id
+    elif source.account_id == beneficiary_account_id:
+        source_role = "beneficiary"
+        counterpart_account_id = originating_account_id
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "La transacción origen no está en la cuenta ordenante "
+                "ni en la beneficiaria seleccionadas."
+            ),
+        )
+
+    originating = await get_account_by_id(db, originating_account_id, user_id)
+    beneficiary = await get_account_by_id(db, beneficiary_account_id, user_id)
+    if originating is None or beneficiary is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Una de las cuentas indicadas no existe o no es tuya.",
+        )
+    if (
+        originating.currency != source.currency
+        or beneficiary.currency != source.currency
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Transferencias cross-currency no soportadas todavía — "
+                "ambas cuentas deben tener la misma moneda que la tx."
+            ),
+        )
+
+    # Kind canónico según el rol del origen:
+    #   - ordenante: el dinero SALE → EXPENSE en su cuenta.
+    #   - beneficiaria: el dinero ENTRA → INCOME en su cuenta.
+    source_kind = (
+        CategoryKind.EXPENSE if source_role == "originating" else CategoryKind.INCOME
+    )
+    counterpart_kind = (
+        CategoryKind.INCOME if source_kind == CategoryKind.EXPENSE else CategoryKind.EXPENSE
+    )
+
+    # Forzamos la categoría del origen al kind correcto — éste es el
+    # fix clave: si la tx vino con "Transferencias (Gasto)" pero
+    # realmente era un abono, la reemplazamos por "Transferencias
+    # (Ingreso)" para que el saldo de la cuenta deje de pintar un cargo.
+    canonical_source_category = await get_or_create_default_transfer_category(
+        db, user_id, kind=source_kind
+    )
+    if source.category_id != canonical_source_category.id:
+        await repo_assign_category(db, source, canonical_source_category.id)
+
+    counterpart_category = await get_or_create_default_transfer_category(
+        db, user_id, kind=counterpart_kind
+    )
+
+    # Descripción humana en la contraparte: "Transferencia desde X" si
+    # la contraparte recibe el dinero, "hacia X" si lo manda.
+    other_account = beneficiary if source_role == "originating" else originating
+    source_account_name = (
+        originating.name if source_role == "originating" else beneficiary.name
+    )
+    label = "desde" if counterpart_kind == CategoryKind.INCOME else "hacia"
+    counterpart = Transaction(
+        user_id=user_id,
+        account_id=counterpart_account_id,
+        category_id=counterpart_category.id,
+        amount=source.amount,
+        currency=source.currency,
+        occurred_at=source.occurred_at,
+        description=f"Transferencia {label} {source_account_name}",
+        source=TransactionSource.MANUAL,
+    )
+    _ = other_account  # explicitamente ignorado; se computó arriba para validación de scope
+    db.add(counterpart)
+    await db.flush()
+
+    await repo_link_pair(db, source, counterpart)
+
+    # Devolvemos el par siempre como (out, in) — el out es el ordenante,
+    # el in es la beneficiaria. Cualquiera de los dos puede ser el
+    # source o el counterpart según el rol elegido.
+    if source_role == "originating":
+        return _pair_to_schema(source, counterpart)
+    return _pair_to_schema(counterpart, source)
+
+
+_LIABILITY_TYPES = {
+    AccountType.CREDIT_CARD,
+    AccountType.LOAN,
+    AccountType.MORTGAGE,
+}
+# PHASE-24.2: tarjetas también pueden tener plan fijo (financiadas).
+_LIABILITY_TYPES_AMORT = {
+    AccountType.LOAN,
+    AccountType.MORTGAGE,
+    AccountType.CREDIT_CARD,
+}
+
+
+async def convert_to_debt_operation(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    source_transaction_id: uuid.UUID,
+    destination_account_id: uuid.UUID | None,
+    new_liability: NewLiabilityForDebt | None,
+) -> TransferPairResponse:
+    """PHASE-24: convierte una tx en operación financiada.
+
+    Modelo: la tx origen suele ser un ingreso en una cuenta asset (el
+    banco "te abona" el importe financiado). La contraparte se crea
+    como gasto en una cuenta liability (`credit_card` / `loan` /
+    `mortgage`) → el saldo de la liability sube por el importe (debt
+    contraída). Ambas quedan emparejadas → fuera del cashflow.
+
+    Exactamente uno de `destination_account_id` o `new_liability` debe
+    venir:
+    - `destination_account_id`: usa una liability existente del usuario.
+    - `new_liability`: crea la cuenta al vuelo (apr/term/start_date
+      opcionales pero recomendados para que el módulo de amortización
+      muestre el cuadro).
+    """
+    source = await repo_get_tx(db, source_transaction_id, user_id)
+    if source is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="La transacción origen no existe o no es tuya.",
+        )
+    if source.transfer_pair_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "La transacción ya forma parte de un par. Deshaz el "
+                "enlace antes de convertirla."
+            ),
+        )
+    if (destination_account_id is None) == (new_liability is None):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Debes indicar `destination_account_id` (liability "
+                "existente) o `new_liability` (crear nueva), pero no "
+                "ambos a la vez."
+            ),
+        )
+
+    if new_liability is not None:
+        liability = await _create_liability_for_debt(
+            db,
+            user_id,
+            spec=new_liability,
+            default_start=source.occurred_at.date(),
+            default_currency=source.currency,
+        )
+        # PHASE-24.1: generar cuotas con principal = importe financiado
+        # (la liability tiene opening_balance=0 porque la deuda se
+        # representa vía la tx contraparte que se crea más abajo).
+        await generate_installments_for_account(
+            db, liability, principal_override=source.amount
+        )
+    else:
+        assert destination_account_id is not None  # narrow for mypy
+        liability = await get_account_by_id(db, destination_account_id, user_id)
+        if liability is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="La cuenta destino no existe o no es tuya.",
+            )
+        if liability.nature != AccountNature.LIABILITY:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "La cuenta destino debe ser de tipo deuda "
+                    "(tarjeta, préstamo o hipoteca)."
+                ),
+            )
+
+    if liability.id == source.account_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La cuenta destino debe ser distinta a la del origen.",
+        )
+    if liability.currency != source.currency:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Operaciones financiadas cross-currency no soportadas "
+                "todavía — la cuenta de deuda debe tener la misma moneda."
+            ),
+        )
+
+    src_account = await get_account_by_id(db, source.account_id, user_id)
+    source_name = src_account.name if src_account is not None else "otra cuenta"
+
+    # La contraparte SIEMPRE es EXPENSE en la liability — eso hace que
+    # la deuda suba (liability+expense → +amount en balance). El kind
+    # del origen aquí no importa para la dirección como en transfer
+    # asset↔asset; el contrato es "deuda contraída" = liability sube.
+    counterpart_category = await get_or_create_default_transfer_category(
+        db, user_id, kind=CategoryKind.EXPENSE
+    )
+    counterpart = Transaction(
+        user_id=user_id,
+        account_id=liability.id,
+        category_id=counterpart_category.id,
+        amount=source.amount,
+        currency=source.currency,
+        occurred_at=source.occurred_at,
+        description=f"Deuda contraída desde {source_name}",
+        source=TransactionSource.MANUAL,
+    )
+    db.add(counterpart)
+    await db.flush()
+
+    await repo_link_pair(db, source, counterpart)
+
+    # Para el response, presentamos el par con el origen como "in"
+    # (entró dinero en BBVA) y la contraparte como "out" (deuda creada
+    # en la liability).
+    return _pair_to_schema(counterpart, source)
+
+
+async def _create_liability_for_debt(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    spec: NewLiabilityForDebt,
+    default_start: date,
+    default_currency: str,
+) -> Account:
+    """Crea una nueva cuenta liability con los datos del spec. Aplica
+    las mismas validaciones que `accounts.service.create_account`
+    (nombre único, tipo soportado, amortización sólo para loan/mortgage)
+    pero las hereda inline para no acoplar transfers con accounts.service.
+    """
+    try:
+        account_type = AccountType(spec.type)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tipo de cuenta no soportado.",
+        ) from exc
+    if account_type not in _LIABILITY_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Para registrar una operación financiada, el tipo de "
+                "cuenta nueva debe ser deuda (credit_card / loan / "
+                "mortgage)."
+            ),
+        )
+    duplicate = await get_account_by_name(db, user_id, name=spec.name)
+    if duplicate is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Ya tienes una cuenta con ese nombre.",
+        )
+    accepts_amortization = account_type in _LIABILITY_TYPES_AMORT
+    currency = (spec.currency or default_currency).upper()
+    account = Account(
+        user_id=user_id,
+        name=spec.name,
+        type=account_type,
+        nature=AccountNature.LIABILITY,
+        currency=currency,
+        color=spec.color,
+        icon=spec.icon,
+        apr=spec.apr if accepts_amortization else None,
+        tae=spec.tae if accepts_amortization else None,
+        term_months=spec.term_months if accepts_amortization else None,
+        start_date=(
+            (spec.start_date or default_start) if accepts_amortization else None
+        ),
+        total_to_pay=spec.total_to_pay if accepts_amortization else None,
+        interest_only_first_payment=(
+            spec.interest_only_first_payment if accepts_amortization else None
+        ),
+    )
+    return await repo_create_account(db, account)
