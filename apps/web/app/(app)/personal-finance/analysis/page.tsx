@@ -10,7 +10,7 @@ import {
 import { useCurrencyStore } from '@crisol/store';
 import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
 
-import { BalancesCard } from '@/components/accounts/balances-card';
+import { PositionHero } from '@/components/analysis/position-hero';
 import { StitchExpenseBreakdown } from '@/components/analysis/stitch-expense-breakdown';
 import { StitchIncomeVsExpenses } from '@/components/analysis/stitch-income-vs-expenses';
 import { StitchKeyMetrics } from '@/components/analysis/stitch-key-metrics';
@@ -20,7 +20,6 @@ import {
   type PeriodKey,
 } from '@/components/analysis/stitch-period-toggle';
 import { StitchSmartInsights } from '@/components/analysis/stitch-smart-insights';
-import { DebtHealthCard } from '@/components/dashboard/debt-health-card';
 import { Card } from '@/components/ui/card';
 import { ListIcon } from '@/components/ui/icons';
 
@@ -125,21 +124,12 @@ export default function AnalysisPage() {
         <StitchPeriodToggle value={period} onChange={setPeriod} />
       </header>
 
-      {/* Saldo agregado por cuenta + salud financiera (PHASE-22).
-          Independientes del periodo seleccionado (siempre snapshot
-          actual). Van por delante del bento porque responden las
-          preguntas "¿cuánto tengo?" y "¿estoy en buena salud?" antes
-          que "¿cómo me he movido?". */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-          gap: spacing.md,
-          marginBottom: spacing.md,
-        }}
-      >
-        <BalancesCard />
-        <DebtHealthCard />
+      {/* PHASE-29.5: PositionHero fusiona BalancesCard + DebtHealthCard
+          en una única card con 3 secciones (patrimonio neto, salud de
+          deuda, cuentas activas). Independiente del periodo (snapshot
+          actual). Las cards legacy siguen vivas en /dashboard. */}
+      <div style={{ marginBottom: spacing.md }}>
+        <PositionHero />
       </div>
 
       {/* Bento principal: chart + métricas */}
