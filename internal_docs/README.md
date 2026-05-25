@@ -247,6 +247,17 @@ Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
 |------|--------------------------------------------------------------|--------|----|
 | 28   | Modal con dos slots (ordenante/beneficiaria) + fuerza categoría canónica al kind correcto (fix de la dirección inferida desde category.kind) | ✅     | —  |
 
+### Fase 29 — Refactor visual Análisis + chrome global (copper brand)
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 29.1 | Copper brand tokens (azul → cobre alineado con el logo)      | ✅     | —  |
+| 29.2 | Sidebar refactor (items grandes + ico-wraps + CTA gradient)  | ✅     | —  |
+| 29.3 | Header chrome (bell+dot, currency pill, user chip, divisores) | ✅    | —  |
+| 29.4 | Section tabs con iconos + count badges + underline copper    | ✅     | —  |
+| 29.5 | PositionHero (fusión BalancesCard + DebtHealthCard) en /analysis | ✅ | —  |
+| 29.6 | Polish cards (donut hover-center, sparkline, centered bar, tooltip Neto) | ✅ | — |
+
 ---
 
 ## Estructura de este directorio
