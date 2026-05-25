@@ -20,7 +20,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.personal_finance.categories.models import Category
+from app.modules.personal_finance.categories.models import Category, CategoryRole
 from app.modules.personal_finance.category_rules.models import CategoryRule
 from app.modules.personal_finance.category_rules.repository import find_existing
 from app.modules.personal_finance.seed.dataset import (
@@ -79,6 +79,10 @@ async def _upsert_category(
             if c.icon is None:
                 c.icon = spec["icon"]
                 mutated = True
+            seed_role = spec.get("role", CategoryRole.GENERIC)
+            if c.role == CategoryRole.GENERIC and seed_role != CategoryRole.GENERIC:
+                c.role = seed_role
+                mutated = True
             if mutated:
                 await db.flush()
                 await db.refresh(c)
@@ -90,6 +94,7 @@ async def _upsert_category(
         color=spec["color"],
         icon=spec["icon"],
         is_transfer=spec.get("is_transfer", False),
+        role=spec.get("role", CategoryRole.GENERIC),
     )
     db.add(cat)
     await db.flush()

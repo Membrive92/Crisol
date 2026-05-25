@@ -37,7 +37,17 @@ async def get_category(db: AsyncSession, category_id: uuid.UUID, user_id: uuid.U
 
 
 async def create_category(db: AsyncSession, user_id: uuid.UUID, data: CategoryCreate) -> Category:
-    """Crea una nueva categoría para el usuario."""
+    """Crea una nueva categoría para el usuario.
+
+    PHASE-30.1: si la categoría se marca `is_transfer=True`, forzamos
+    `role=TRANSFER` aunque el caller pase otro role distinto, para
+    mantener consistencia entre las dos columnas mientras coexistan.
+    """
+    from app.modules.personal_finance.categories.models import CategoryRole
+
+    role = data.role
+    if data.is_transfer and role == CategoryRole.GENERIC:
+        role = CategoryRole.TRANSFER
     category = Category(
         user_id=user_id,
         name=data.name,
@@ -45,6 +55,7 @@ async def create_category(db: AsyncSession, user_id: uuid.UUID, data: CategoryCr
         color=data.color,
         kind=data.kind,
         is_transfer=data.is_transfer,
+        role=role,
     )
     return await persist_category(db, category)
 

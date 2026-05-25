@@ -18,8 +18,8 @@ Convenciones:
   enlazadas como `transfer_pair` que llegan a cuentas liability ese
   mes. Es el dinero que el usuario movió desde una cuenta corriente
   para amortizar.
-- `interest_paid` mensual = suma de expenses en
-  `INTEREST_CATEGORY_NAMES` ese mes.
+- `interest_paid` mensual = suma de expenses en categorías con
+  `role=DEBT_INTEREST` ese mes.
 - El saldo histórico al cierre de un mes se computa como
   `opening_balance + Σ(signed_amount hasta el mes)` con la misma
   inversión de signo que `get_balances_for_user`.
@@ -41,7 +41,6 @@ from app.modules.personal_finance.accounts.amortization import (
 )
 from app.modules.personal_finance.accounts.debt_health import (
     DEFAULT_REFERENCE_CURRENCY,
-    INTEREST_CATEGORY_NAMES,
 )
 from app.modules.personal_finance.accounts.models import (
     Account,
@@ -52,7 +51,11 @@ from app.modules.personal_finance.accounts.schemas import (
     DebtHistoryPoint,
     DebtHistoryResponse,
 )
-from app.modules.personal_finance.categories.models import Category, CategoryKind
+from app.modules.personal_finance.categories.models import (
+    Category,
+    CategoryKind,
+    CategoryRole,
+)
 from app.modules.personal_finance.transactions.models import Transaction
 
 
@@ -160,7 +163,7 @@ async def _compute_historical_points(
             .where(Transaction.deleted_at.is_(None))
             .where(Transaction.currency == reference_currency)
             .where(Category.kind == CategoryKind.EXPENSE)
-            .where(Category.name.in_(INTEREST_CATEGORY_NAMES))
+            .where(Category.role == CategoryRole.DEBT_INTEREST)
             .where(Transaction.occurred_at >= month_start)
             .where(Transaction.occurred_at <= month_end)
         )

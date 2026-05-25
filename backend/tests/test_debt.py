@@ -234,6 +234,78 @@ async def test_debt_health_empty_user(client: AsyncClient) -> None:
     assert body["time_to_payoff_months"] is None
 
 
+async def test_interest_paid_ytd_uses_role_not_category_name(
+    client: AsyncClient,
+) -> None:
+    """PHASE-30.1 — `interest_paid_ytd` filtra por `role=DEBT_INTEREST`,
+    no por nombres hardcoded. Una categoría con nombre arbitrario pero
+    `role=DEBT_INTEREST` debe contar; una con nombre "Intereses" pero
+    `role=GENERIC` debe ser ignorada (no es interés de deuda real).
+    """
+    token = await _register(client, "interest_role@example.com")
+    cte = await _create_account(
+        client, token, name="Cte", type="bank", currency="EUR",
+        opening_balance="5000",
+    )
+
+    # Categoría custom marcada DEBT_INTEREST — debe contar.
+    cat_di = await client.post(
+        "/categories",
+        json={
+            "name": "Comisiones leasing coche",
+            "kind": "expense",
+            "role": "DEBT_INTEREST",
+        },
+        headers=_auth(token),
+    )
+    assert cat_di.status_code == 201
+    di_cat_id = cat_di.json()["id"]
+
+    # Categoría con nombre engañoso pero role GENERIC — NO debe contar.
+    cat_generic = await client.post(
+        "/categories",
+        json={
+            "name": "Intereses (cuenta remunerada)",
+            "kind": "expense",
+        },
+        headers=_auth(token),
+    )
+    assert cat_generic.status_code == 201
+    generic_id = cat_generic.json()["id"]
+    assert cat_generic.json()["role"] == "GENERIC"
+
+    # 50€ en la custom DEBT_INTEREST + 999€ en la GENERIC con nombre
+    # "Intereses". Solo la primera debe sumar al KPI.
+    from datetime import UTC, datetime
+    year_now = datetime.now(UTC).year
+    await client.post(
+        "/transactions",
+        json={
+            "account_id": cte["id"],
+            "category_id": di_cat_id,
+            "amount": "50.00",
+            "occurred_at": f"{year_now}-03-15T12:00:00Z",
+            "description": "Comisión leasing",
+        },
+        headers=_auth(token),
+    )
+    await client.post(
+        "/transactions",
+        json={
+            "account_id": cte["id"],
+            "category_id": generic_id,
+            "amount": "999.00",
+            "occurred_at": f"{year_now}-03-15T12:00:00Z",
+            "description": "Cargo no de deuda",
+        },
+        headers=_auth(token),
+    )
+
+    r = await client.get("/accounts/debt-health", headers=_auth(token))
+    body = r.json()
+    assert Decimal(body["interest_paid_ytd"]) == Decimal("50.00")
+
+
 async def test_debt_health_basic_kpis(client: AsyncClient) -> None:
     """Patrimonio + cuota + APR medio se computan correctamente."""
     token = await _register(client, "dh_basic@example.com")

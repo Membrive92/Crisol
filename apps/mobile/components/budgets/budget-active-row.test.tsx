@@ -27,6 +27,7 @@ const categories: Category[] = [
     name: 'Comida',
     kind: 'expense',
     is_transfer: false,
+    role: 'GENERIC',
     icon: null,
     color: null,
     created_at: '2026-01-01T00:00:00Z',

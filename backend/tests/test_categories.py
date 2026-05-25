@@ -84,6 +84,51 @@ async def test_delete_category(client: AsyncClient) -> None:
     assert r3.status_code == 404
 
 
+async def test_create_category_defaults_role_generic(client: AsyncClient) -> None:
+    """PHASE-30.1 — sin especificar `role`, una categoría nueva nace GENERIC."""
+    token = await _register_and_get_token(client, "role_default@example.com")
+    r = await client.post(
+        "/categories",
+        json={"name": "Restaurantes", "kind": "expense"},
+        headers=_auth(token),
+    )
+    assert r.status_code == 201
+    assert r.json()["role"] == "GENERIC"
+
+
+async def test_create_category_with_role_debt_interest(client: AsyncClient) -> None:
+    """PHASE-30.1 — el caller puede crear DEBT_INTEREST custom y se persiste."""
+    token = await _register_and_get_token(client, "role_di@example.com")
+    r = await client.post(
+        "/categories",
+        json={
+            "name": "Intereses préstamo personal",
+            "kind": "expense",
+            "role": "DEBT_INTEREST",
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 201
+    assert r.json()["role"] == "DEBT_INTEREST"
+
+
+async def test_is_transfer_forces_role_transfer(client: AsyncClient) -> None:
+    """PHASE-30.1 — `is_transfer=true` sin role explícito → role=TRANSFER."""
+    token = await _register_and_get_token(client, "role_transfer@example.com")
+    r = await client.post(
+        "/categories",
+        json={
+            "name": "Transferencia auto",
+            "kind": "expense",
+            "is_transfer": True,
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 201
+    assert r.json()["is_transfer"] is True
+    assert r.json()["role"] == "TRANSFER"
+
+
 async def test_category_user_isolation(client: AsyncClient) -> None:
     """User A no ve categorías de User B."""
     token_a = await _register_and_get_token(client, "catA@example.com")

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from app.modules.personal_finance.categories.models import CategoryKind
+from app.modules.personal_finance.categories.models import CategoryKind, CategoryRole
 from app.modules.personal_finance.category_rules.models import (
     RuleField,
     RuleMatchType,
@@ -47,6 +47,7 @@ class SeedCategoryDef(TypedDict, total=False):
     icon: str  # emoji
     rules: list[SeedRuleDef]
     is_transfer: bool  # PHASE-23.1 — opcional, default False
+    role: CategoryRole  # PHASE-30.1 — opcional, default GENERIC
 
 
 # Helpers para reducir verbosidad.
@@ -355,6 +356,7 @@ SEED_CATEGORIES: list[SeedCategoryDef] = [
         "name": "Transferencias",
         "kind": CategoryKind.EXPENSE,
         "is_transfer": True,
+        "role": CategoryRole.TRANSFER,
         "color": "#64748b",
         "icon": "↔️",
         "rules": [
@@ -374,6 +376,7 @@ SEED_CATEGORIES: list[SeedCategoryDef] = [
         "name": "Transferencia a favor",
         "kind": CategoryKind.INCOME,
         "is_transfer": True,
+        "role": CategoryRole.TRANSFER,
         "color": "#d97706",
         "icon": "💰",
         "rules": [
@@ -389,6 +392,7 @@ SEED_CATEGORIES: list[SeedCategoryDef] = [
     {
         "name": "Préstamos e hipotecas",
         "kind": CategoryKind.EXPENSE,
+        "role": CategoryRole.DEBT_PAYMENT,
         "color": "#475569",
         "icon": "🏦",
         "rules": [
@@ -435,6 +439,7 @@ SEED_CATEGORIES: list[SeedCategoryDef] = [
     {
         "name": "Tarjeta de crédito",
         "kind": CategoryKind.EXPENSE,
+        "role": CategoryRole.DEBT_PAYMENT,
         "color": "#f59e0b",
         "icon": "💳",
         "rules": [
@@ -450,6 +455,7 @@ SEED_CATEGORIES: list[SeedCategoryDef] = [
     {
         "name": "Intereses hipoteca",
         "kind": CategoryKind.EXPENSE,
+        "role": CategoryRole.DEBT_INTEREST,
         "color": "#475569",
         "icon": "🏦",
         "rules": [
@@ -460,6 +466,7 @@ SEED_CATEGORIES: list[SeedCategoryDef] = [
     {
         "name": "Intereses préstamo",
         "kind": CategoryKind.EXPENSE,
+        "role": CategoryRole.DEBT_INTEREST,
         "color": "#64748b",
         "icon": "💸",
         "rules": [
@@ -470,6 +477,7 @@ SEED_CATEGORIES: list[SeedCategoryDef] = [
     {
         "name": "Intereses tarjeta",
         "kind": CategoryKind.EXPENSE,
+        "role": CategoryRole.DEBT_INTEREST,
         "color": "#f97316",
         "icon": "💳",
         "rules": [

@@ -6,7 +6,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -25,6 +25,32 @@ class CategoryKind(enum.StrEnum):
 
     INCOME = "income"
     EXPENSE = "expense"
+
+
+class CategoryRole(enum.StrEnum):
+    """PHASE-30.1 — Rol semántico de la categoría dentro del producto.
+
+    Sustituye al frozenset `INTEREST_CATEGORY_NAMES` (acoplado a strings
+    en español) y absorbe el flag `is_transfer` en un único atributo
+    declarativo. Los callers que necesitan "todas las categorías de
+    deuda" (debt_health, debt_history, /debt/category-summary) filtran
+    por `role IN (DEBT_PAYMENT, DEBT_INTEREST)`.
+
+    Mientras el módulo de deuda en dos capas (PHASE-30) está en
+    desarrollo, `is_transfer` se mantiene en la columna por
+    compatibilidad — la migración lo replica en `role=TRANSFER`. Su
+    eliminación queda como follow-up cuando todos los callers
+    consuman `role`.
+    """
+
+    GENERIC = "GENERIC"
+    """Categoría normal — la mayoría."""
+    TRANSFER = "TRANSFER"
+    """Transferencia interna — fuera del cashflow."""
+    DEBT_PAYMENT = "DEBT_PAYMENT"
+    """Pago de cuota de deuda (capital + intereses mezclados)."""
+    DEBT_INTEREST = "DEBT_INTEREST"
+    """Intereses puros + comisiones financieras de deuda."""
 
 
 class Category(Base):
@@ -49,6 +75,14 @@ class Category(Base):
     is_transfer: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false"
     )
+    role: Mapped[CategoryRole] = mapped_column(
+        Enum(CategoryRole, name="categoryrole", native_enum=True),
+        nullable=False,
+        server_default=CategoryRole.GENERIC.value,
+    )
+    """PHASE-30.1 — rol semántico (ver `CategoryRole`). El backfill de
+    la migración lo deriva de `is_transfer` y de los nombres del seed
+    (Intereses *, Préstamos e hipotecas, Tarjeta de crédito)."""
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

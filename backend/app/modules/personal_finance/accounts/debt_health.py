@@ -7,8 +7,8 @@ Definiciones (alineadas con literatura estándar de personal finance):
 
 - **DTI (debt-to-income)**: `Σ cuotas mensuales / ingreso mensual medio`.
 - **debt_to_assets**: `Σ liabilities / Σ assets`.
-- **interest_paid_ytd**: suma de expenses en las categorías "Intereses
-  hipoteca / préstamo / tarjeta" desde 1 de enero hasta hoy.
+- **interest_paid_ytd**: suma de expenses en categorías con
+  `role=DEBT_INTEREST` desde 1 de enero hasta hoy.
 - **weighted_apr**: APR medio ponderado por saldo entre liabilities
   que tienen `apr` declarado (las tarjetas con APR conocido cuentan).
 - **time_to_payoff**: proyección lineal. Mira el principal pagado
@@ -36,21 +36,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.personal_finance.accounts.amortization import compute_monthly_payment
 from app.modules.personal_finance.accounts.models import Account, AccountNature, AccountType
 from app.modules.personal_finance.accounts.schemas import DebtHealthKpis
-from app.modules.personal_finance.categories.models import Category, CategoryKind
+from app.modules.personal_finance.categories.models import Category, CategoryKind, CategoryRole
 from app.modules.personal_finance.transactions.models import Transaction
 
 DEFAULT_REFERENCE_CURRENCY = "EUR"
-
-# Nombres exactos de las categorías que cuentan como intereses (creadas
-# por el seed PHASE-22). Si el usuario renombra o borra una, no afecta
-# al cómputo de las que sí mantengan el nombre original.
-INTEREST_CATEGORY_NAMES: frozenset[str] = frozenset(
-    {
-        "Intereses hipoteca",
-        "Intereses préstamo",
-        "Intereses tarjeta",
-    }
-)
 
 
 def _today_utc() -> date:
@@ -136,7 +125,7 @@ async def _interest_paid_ytd(
         .where(Transaction.deleted_at.is_(None))
         .where(Transaction.currency == currency)
         .where(Category.kind == CategoryKind.EXPENSE)
-        .where(Category.name.in_(INTEREST_CATEGORY_NAMES))
+        .where(Category.role == CategoryRole.DEBT_INTEREST)
         .where(Transaction.occurred_at >= year_start)
     )
     return Decimal((await db.execute(query)).scalar_one())

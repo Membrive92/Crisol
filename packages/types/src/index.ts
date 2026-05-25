@@ -42,7 +42,7 @@ export type {
   TransferPair,
   TransferSuspect,
 } from './models/transfer';
-export type { Category, CategoryKind } from './models/category';
+export type { Category, CategoryKind, CategoryRole } from './models/category';
 export type {
   CategoryRule,
   CategoryRuleCreateRequest,

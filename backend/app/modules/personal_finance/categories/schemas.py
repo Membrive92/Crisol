@@ -7,7 +7,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.modules.personal_finance.categories.models import CategoryKind
+from app.modules.personal_finance.categories.models import CategoryKind, CategoryRole
 
 
 class CategoryCreate(BaseModel):
@@ -21,6 +21,10 @@ class CategoryCreate(BaseModel):
     """PHASE-23.1: marca la categoría como transferencia interna —
     sus txs quedan fuera del cashflow agregado pero conservan el
     signo de `kind` al sumar al saldo de la cuenta."""
+    role: CategoryRole = CategoryRole.GENERIC
+    """PHASE-30.1 — rol semántico. Default GENERIC. Cuando
+    `is_transfer=True` el service lo fuerza a TRANSFER por
+    consistencia (transición segura mientras `is_transfer` siga vivo)."""
 
 
 class CategoryUpdate(BaseModel):
@@ -31,6 +35,7 @@ class CategoryUpdate(BaseModel):
     color: str | None = None
     kind: CategoryKind | None = None
     is_transfer: bool | None = None
+    role: CategoryRole | None = None
 
 
 class CategoryResponse(BaseModel):
@@ -43,6 +48,7 @@ class CategoryResponse(BaseModel):
     color: str | None
     kind: CategoryKind
     is_transfer: bool
+    role: CategoryRole
     created_at: datetime
     updated_at: datetime
 
