@@ -19,7 +19,7 @@ import {
   SIDEBAR_WIDTH,
 } from '@/components/modules/app-sidebar';
 import { ModuleSections } from '@/components/modules/module-sections';
-import { BellIcon, MenuIcon } from '@/components/ui/icons';
+import { MenuIcon } from '@/components/ui/icons';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { Toaster } from '@/components/ui/toaster';
 
@@ -210,27 +210,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           >
             <MenuIcon size={20} />
           </IconButton>
-          <IconButton ariaLabel="Notificaciones">
-            <BellIcon size={18} />
-            {/* Notification dot — siempre encendido por ahora; cuando
-                tengamos un canal real de notificaciones se conectará
-                a un hook que devuelva `hasUnread`. El border-2 sobre
-                background "corta" el dot contra el icono. */}
-            <span
-              aria-hidden
-              style={{
-                position: 'absolute',
-                top: 8,
-                right: 8,
-                width: 7,
-                height: 7,
-                borderRadius: '50%',
-                backgroundColor: colors.danger,
-                border: `2px solid ${colors.background}`,
-              }}
-            />
-          </IconButton>
-          <HeaderDivider />
+          {/* PHASE-29.7: campana ocultada — no hay canal de
+              notificaciones todavía. El botón + el dot se mantienen
+              comentados en el código para reactivar trivialmente
+              cuando el canal exista (ver `hasUnread` futuro). */}
           <CurrencyMenu />
           <ThemeToggle />
           <HeaderDivider />

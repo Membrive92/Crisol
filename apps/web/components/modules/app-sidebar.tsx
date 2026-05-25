@@ -280,7 +280,21 @@ function ModuleItem({ module, isActive }: { module: AppModule; isActive: boolean
       >
         {Icon ? <Icon size={16} /> : <span style={{ width: 8, height: 8 }} />}
       </span>
-      <span style={{ flex: 1, minWidth: 0, lineHeight: 1.2 }}>{module.label}</span>
+      <span
+        style={{
+          flex: 1,
+          minWidth: 0,
+          lineHeight: 1.2,
+          // Sin estas tres reglas el label largo (ej. "Criptomonedas")
+          // se desborda visualmente por encima del chip "Pronto", aunque
+          // el chip tenga `flex: 0 0 auto`. El truncado evita el solape.
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+      >
+        {module.label}
+      </span>
       {disabled ? <SoonChip /> : null}
     </>
   );
@@ -334,17 +348,19 @@ function SoonChip() {
     <span
       aria-hidden
       style={{
-        marginLeft: 'auto',
-        fontSize: 9.5,
+        marginLeft: 4,
+        fontSize: 9,
         fontWeight: fontWeight.semibold,
         color: colors.textSubtle,
         backgroundColor: 'transparent',
         border: `1px solid ${colors.border}`,
-        padding: '2px 7px',
+        padding: '1px 6px',
         borderRadius: 999,
-        letterSpacing: '0.08em',
+        letterSpacing: '0.06em',
         textTransform: 'uppercase',
+        lineHeight: 1.4,
         flex: '0 0 auto',
+        whiteSpace: 'nowrap',
       }}
     >
       Pronto
@@ -404,6 +420,10 @@ function PrimaryCTA() {
       style={{
         position: 'relative',
         width: '100%',
+        // `border-box` para que el padding+border NO se sumen por
+        // encima del 100% (content-box por defecto haría el botón
+        // ~26px más ancho que la sidebar y se saldría por la derecha).
+        boxSizing: 'border-box',
         display: 'grid',
         gridTemplateColumns: '30px 1fr auto',
         alignItems: 'center',
@@ -417,9 +437,13 @@ function PrimaryCTA() {
         fontWeight: fontWeight.semibold,
         cursor: 'pointer',
         textDecoration: 'none',
+        // Glow cobre más compacto: el `spread` negativo (-12/-14) y el
+        // `blur` reducido evitan que el halo se desborde por el lado
+        // derecho de la sidebar (la sidebar mide 240px y el contenedor
+        // del footer ya recorta visualmente).
         boxShadow: hovered
-          ? 'inset 0 1px 0 rgba(255,255,255,.22), 0 2px 4px rgba(0,0,0,.2), 0 12px 28px -8px rgba(196,103,31,.7)'
-          : 'inset 0 1px 0 rgba(255,255,255,.22), 0 1px 2px rgba(0,0,0,.18), 0 8px 22px -10px rgba(196,103,31,.65)',
+          ? 'inset 0 1px 0 rgba(255,255,255,.22), 0 2px 4px rgba(0,0,0,.2), 0 6px 14px -10px rgba(196,103,31,.55)'
+          : 'inset 0 1px 0 rgba(255,255,255,.22), 0 1px 2px rgba(0,0,0,.18), 0 4px 12px -14px rgba(196,103,31,.5)',
         filter: hovered ? 'brightness(1.08)' : 'none',
         transition: 'box-shadow 160ms ease, filter 160ms ease',
       }}
