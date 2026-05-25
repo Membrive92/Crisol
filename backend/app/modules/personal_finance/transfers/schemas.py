@@ -81,6 +81,42 @@ class TransferSuspect(BaseModel):
     current_category_name: str | None
 
 
+class MisclassifiedTransfer(BaseModel):
+    """PHASE-31.2 — tx con categoría is_transfer cuyo kind no encaja
+    con la dirección que indica la descripción. Candidata a recategorización
+    en bloque desde la UI.
+    """
+
+    transaction_id: uuid.UUID
+    amount: Decimal
+    currency: str
+    account_id: uuid.UUID
+    occurred_at: datetime
+    description: str | None
+    current_category_id: uuid.UUID
+    current_category_name: str
+    current_category_kind: str
+    suggested_kind: str
+    """`income` si la descripción es entrante, `expense` si es saliente."""
+
+
+class ReclassifyBulkRequest(BaseModel):
+    """PHASE-31.2 — recategorizar en bloque tx detectadas como
+    mal direccionadas. Si no se pasa `target_category_id`, el service
+    busca/crea la categoría is_transfer del kind opuesto al actual de
+    cada tx (uno a uno: una tx entrante mal puesta en EXPENSE va a
+    INCOME; una saliente mal puesta en INCOME va a EXPENSE).
+    """
+
+    transaction_ids: list[uuid.UUID]
+    target_category_id: uuid.UUID | None = None
+
+
+class ReclassifyBulkResponse(BaseModel):
+    reclassified: int
+    errors: list[str]
+
+
 class TransferMarkRequest(BaseModel):
     """PHASE-23: marcar una tx como transferencia interna asignándole
     una categoría kind=transfer. Si el usuario no tiene ninguna, el

@@ -11,6 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.deps import CurrentUser
 from app.modules.personal_finance.transfers.schemas import (
+    MisclassifiedTransfer,
+    ReclassifyBulkRequest,
+    ReclassifyBulkResponse,
     TransferCandidate,
     TransferFromSourceDebtRequest,
     TransferFromSourceRequest,
@@ -28,9 +31,11 @@ from app.modules.personal_finance.transfers.service import (
     convert_to_internal_transfer,
     detect_candidates,
     link_manually,
+    list_misclassified,
     list_pairs,
     list_suspects,
     mark_as_transfer,
+    reclassify_bulk,
     unlink,
 )
 
@@ -117,6 +122,42 @@ async def suspects_endpoint(
     cuya descripción contiene "transfer" y todavía no están marcadas
     como transferencia (categoría kind=transfer)."""
     return await list_suspects(db, user.id)
+
+
+@router.get(
+    "/misclassified", response_model=list[MisclassifiedTransfer]
+)
+async def misclassified_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[MisclassifiedTransfer]:
+    """PHASE-31.2: tx con categoría is_transfer cuyo kind no encaja
+    con la dirección de la descripción (ej. RECIBIDA en categoría
+    EXPENSE). Candidatas a recategorización en bloque desde la UI."""
+    return await list_misclassified(db, user.id)
+
+
+@router.post(
+    "/reclassify-bulk", response_model=ReclassifyBulkResponse
+)
+async def reclassify_bulk_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    body: ReclassifyBulkRequest,
+) -> ReclassifyBulkResponse:
+    """PHASE-31.2: recategoriza en bloque tx mal direccionadas. Sin
+    `target_category_id` el service asigna a cada tx la categoría
+    is_transfer del kind opuesto al actual (el caso típico tras
+    detectar bulk: las inbounds van a INCOME, las outbounds a
+    EXPENSE)."""
+    response = await reclassify_bulk(
+        db,
+        user.id,
+        transaction_ids=body.transaction_ids,
+        target_category_id=body.target_category_id,
+    )
+    await db.commit()
+    return response
 
 
 @router.post("/mark", response_model=TransferMarkResponse, status_code=201)

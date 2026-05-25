@@ -39,6 +39,7 @@ export const queryKeys = {
     candidates: (windowDays = 3) =>
       [...queryKeys.transfers.all, 'candidates', windowDays] as const,
     suspects: () => [...queryKeys.transfers.all, 'suspects'] as const,
+    misclassified: () => [...queryKeys.transfers.all, 'misclassified'] as const,
   },
   categories: {
     all: ['categories'] as const,

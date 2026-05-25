@@ -1086,3 +1086,120 @@ async def test_from_source_debt_persists_amortization_fields_for_loan(
     assert loan["apr"] == "0.0590"
     assert loan["term_months"] == 60
     assert loan["start_date"] == "2026-04-15"
+
+
+# ---------------------------------------------------------------------------
+# PHASE-31.2 — UI bulk-fix de transferencias mal direccionadas.
+# ---------------------------------------------------------------------------
+
+
+async def _seed_user_with_two_transfer_cats(
+    client: AsyncClient, email: str
+) -> tuple[str, dict[str, str], dict[str, str], str, str]:
+    """Helper: registra un usuario con seed (que ya trae las dos
+    categorías is_transfer tras PHASE-31.1) y crea dos cuentas bank
+    EUR. Devuelve (token, expense_cat, income_cat, acc_a, acc_b)."""
+    token, _expense_cat, acc_a, acc_b = await _setup_user_with_two_accounts(
+        client, email
+    )
+    cats = (await client.get("/categories", headers=_auth(token))).json()
+    transfer_cats = [c for c in cats if c["is_transfer"]]
+    expense_cat = next(c for c in transfer_cats if c["kind"] == "expense")
+    income_cat = next(c for c in transfer_cats if c["kind"] == "income")
+    return token, expense_cat, income_cat, acc_a, acc_b
+
+
+async def test_misclassified_detects_recibida_in_expense_category(
+    client: AsyncClient,
+) -> None:
+    """Tx "RECIBIDA" asignada a categoría EXPENSE 'Transferencias'
+    aparece en /transfers/misclassified con suggested_kind=income."""
+    token, expense_cat, _income_cat, acc_a, _acc_b = (
+        await _seed_user_with_two_transfer_cats(
+            client, "misclassified-recibida@example.com"
+        )
+    )
+    src_id = await _create_tx(
+        client,
+        token,
+        account_id=acc_a,
+        amount="500.00",
+        occurred_at="2026-04-15T12:00:00Z",
+        category_id=expense_cat["id"],
+        description="TRANSFERENCIA RECIBIDA DE Jose",
+    )
+    r = await client.get("/transfers/misclassified", headers=_auth(token))
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body) == 1
+    assert body[0]["transaction_id"] == src_id
+    assert body[0]["current_category_kind"] == "expense"
+    assert body[0]["suggested_kind"] == "income"
+
+
+async def test_misclassified_excludes_ambiguous_descriptions(
+    client: AsyncClient,
+) -> None:
+    """Texto que matchea ambos lados o ninguno NO aparece."""
+    token, expense_cat, _income_cat, acc_a, _acc_b = (
+        await _seed_user_with_two_transfer_cats(
+            client, "misclassified-ambiguous@example.com"
+        )
+    )
+    await _create_tx(
+        client,
+        token,
+        account_id=acc_a,
+        amount="100.00",
+        occurred_at="2026-04-15T12:00:00Z",
+        category_id=expense_cat["id"],
+        description="TRANSFERENCIA REALIZADA Y RECIBIDA",
+    )
+    await _create_tx(
+        client,
+        token,
+        account_id=acc_a,
+        amount="200.00",
+        occurred_at="2026-04-15T12:00:00Z",
+        category_id=expense_cat["id"],
+        description="Movimiento sin contexto claro",
+    )
+    r = await client.get("/transfers/misclassified", headers=_auth(token))
+    assert r.json() == []
+
+
+async def test_reclassify_bulk_moves_to_opposite_kind(
+    client: AsyncClient,
+) -> None:
+    """Sin target_category_id, las tx flipean al kind opuesto
+    (EXPENSE → INCOME) usando las categorías is_transfer existentes."""
+    token, expense_cat, income_cat, acc_a, _acc_b = (
+        await _seed_user_with_two_transfer_cats(
+            client, "reclassify-bulk-flip@example.com"
+        )
+    )
+    ids = []
+    for i in range(3):
+        ids.append(
+            await _create_tx(
+                client,
+                token,
+                account_id=acc_a,
+                amount=f"{100 + i}.00",
+                occurred_at="2026-04-15T12:00:00Z",
+                category_id=expense_cat["id"],
+                description=f"TRANSFERENCIA RECIBIDA DE X{i}",
+            )
+        )
+    r = await client.post(
+        "/transfers/reclassify-bulk",
+        json={"transaction_ids": ids},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["reclassified"] == 3
+    assert body["errors"] == []
+    for tx_id in ids:
+        tx = await client.get(f"/transactions/{tx_id}", headers=_auth(token))
+        assert tx.json()["category_id"] == income_cat["id"]

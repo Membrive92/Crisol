@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
+import sqlalchemy as sa
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -240,6 +241,94 @@ async def list_suspect_transactions(
     )
     rows = await db.execute(query)
     return [(tx, cat_id, cat_name) for tx, cat_id, cat_name in rows.all()]
+
+
+# PHASE-31.2 — patrones SQL para detectar dirección desde la descripción.
+# Espejo de los hints en `transfers/service.py::_INCOMING/_OUTGOING_HINTS`
+# pero formateados para `ILIKE` (con %), sin acentos para tolerar
+# extractos descabezados, y sin solapamiento entre listas (un texto
+# que matchee ambos sería ambiguo y queda fuera).
+_INCOMING_PATTERNS_SQL = (
+    "%RECIBIDA%",
+    "%RECIBIDO%",
+    "%ABONO POR TRANSFER%",
+    "%ABONO TRANSFER%",
+    "%INGRESO POR TRANSFER%",
+    "%TRANSFERENCIA DESDE%",
+    "%TRASPASO RECIBIDO%",
+)
+_OUTGOING_PATTERNS_SQL = (
+    "%TRANSFERENCIA REALIZADA%",
+    "%TRANSFERENCIA HACIA%",
+    "%CARGO POR TRANSFER%",
+    "%ORDEN DE PAGO%",
+    "%TRASPASO ENVIADO%",
+)
+
+
+def _description_matches_any(patterns: tuple[str, ...]) -> sa.ColumnElement[bool]:
+    """Devuelve un `OR(ILIKE pattern...)` para Transaction.description.
+    Helper para mantener el query de misclassified legible.
+    """
+    from sqlalchemy import or_
+
+    return or_(*(Transaction.description.ilike(p) for p in patterns))
+
+
+async def list_misclassified_transfers(
+    db: AsyncSession, user_id: uuid.UUID
+) -> list[tuple[Transaction, Category, CategoryKind]]:
+    """PHASE-31.2 — tx con categoría is_transfer cuyo kind no encaja con
+    la dirección que dicta la descripción. Devuelve tuplas
+    (tx, current_category, suggested_kind) para que la UI muestre el
+    estado actual y la sugerencia.
+
+    Reglas:
+      - Categoría is_transfer=true (sino, no es candidata).
+      - Si categoría kind=EXPENSE pero descripción matchea hints
+        de INCOME → suggested INCOME.
+      - Si categoría kind=INCOME pero descripción matchea hints
+        de EXPENSE → suggested EXPENSE.
+      - `transfer_pair_id IS NULL` para no tocar pares confirmados.
+      - `deleted_at IS NULL` (no papelera).
+
+    Si la descripción matchea ambos lados (texto ambiguo o muy raro),
+    queda fuera — no se sugiere recategorización sin certeza.
+    """
+    from sqlalchemy import and_, or_
+
+    incoming_match = _description_matches_any(_INCOMING_PATTERNS_SQL)
+    outgoing_match = _description_matches_any(_OUTGOING_PATTERNS_SQL)
+    mislabeled_expense = and_(
+        Category.kind == CategoryKind.EXPENSE,
+        incoming_match,
+        ~outgoing_match,  # no ambiguo
+    )
+    mislabeled_income = and_(
+        Category.kind == CategoryKind.INCOME,
+        outgoing_match,
+        ~incoming_match,
+    )
+    query = (
+        select(Transaction, Category)
+        .join(Category, Category.id == Transaction.category_id)
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.deleted_at.is_(None))
+        .where(Transaction.transfer_pair_id.is_(None))
+        .where(Category.is_transfer.is_(True))
+        .where(or_(mislabeled_expense, mislabeled_income))
+        .order_by(Transaction.occurred_at.desc())
+    )
+    rows = await db.execute(query)
+    out: list[tuple[Transaction, Category, CategoryKind]] = []
+    for tx, cat in rows.all():
+        suggested = (
+            CategoryKind.INCOME
+            if cat.kind == CategoryKind.EXPENSE
+            else CategoryKind.EXPENSE
+        )
+        out.append((tx, cat, suggested))
+    return out
 
 
 async def get_or_create_default_transfer_category(

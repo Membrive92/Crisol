@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type {
+  MisclassifiedTransfer,
+  ReclassifyBulkResponse,
   TransferCandidate,
   TransferFromSourceDebtRequest,
   TransferFromSourceRequest,
@@ -124,6 +126,35 @@ export function useConvertToTransfer() {
   const queryClient = useQueryClient();
   return useMutation<TransferPair, Error, TransferFromSourceRequest>({
     mutationFn: (payload) => transfersApi.fromSource(payload),
+    onSuccess: () => invalidateAll(queryClient),
+  });
+}
+
+/**
+ * PHASE-31.2 — tx con categoría is_transfer y dirección dudosa.
+ * Refresca con cualquier cambio en transfers o transactions.
+ */
+export function useMisclassifiedTransfers() {
+  return useQuery<MisclassifiedTransfer[], Error>({
+    queryKey: queryKeys.transfers.misclassified(),
+    queryFn: () => transfersApi.misclassified(),
+    staleTime: 1000 * 30,
+  });
+}
+
+/**
+ * PHASE-31.2 — recategorización en bloque de transferencias mal
+ * direccionadas. Tras el éxito invalida todo el grupo de transfers
+ * + transactions + balances + dashboard (los saldos cambian).
+ */
+export function useReclassifyBulk() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    ReclassifyBulkResponse,
+    Error,
+    { transaction_ids: string[]; target_category_id?: string }
+  >({
+    mutationFn: (payload) => transfersApi.reclassifyBulk(payload),
     onSuccess: () => invalidateAll(queryClient),
   });
 }

@@ -37,13 +37,16 @@ from app.modules.personal_finance.transfers.repository import (
     get_pair as repo_get_pair,
     get_transaction as repo_get_tx,
     link_pair as repo_link_pair,
+    list_misclassified_transfers,
     list_pairs as repo_list_pairs,
     list_suspect_transactions,
     list_unmatched_active_transactions,
     unlink_pair as repo_unlink_pair,
 )
 from app.modules.personal_finance.transfers.schemas import (
+    MisclassifiedTransfer,
     NewLiabilityForDebt,
+    ReclassifyBulkResponse,
     TransferCandidate,
     TransferMarkResponse,
     TransferMatchResponse,
@@ -241,6 +244,109 @@ async def list_suspects(
         )
         for tx, cat_id, cat_name in rows
     ]
+
+
+async def list_misclassified(
+    db: AsyncSession, user_id: uuid.UUID
+) -> list[MisclassifiedTransfer]:
+    """PHASE-31.2 — tx con categoría is_transfer cuyo kind no encaja con
+    la dirección de su descripción. La UI las muestra agrupadas para
+    recategorizar en bloque."""
+    rows = await list_misclassified_transfers(db, user_id)
+    return [
+        MisclassifiedTransfer(
+            transaction_id=tx.id,
+            amount=tx.amount,
+            currency=tx.currency,
+            account_id=tx.account_id,
+            occurred_at=tx.occurred_at,
+            description=tx.description,
+            current_category_id=cat.id,
+            current_category_name=cat.name,
+            current_category_kind=cat.kind.value,
+            suggested_kind=suggested.value,
+        )
+        for tx, cat, suggested in rows
+    ]
+
+
+async def reclassify_bulk(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    transaction_ids: list[uuid.UUID],
+    target_category_id: uuid.UUID | None = None,
+) -> ReclassifyBulkResponse:
+    """PHASE-31.2 — recategorizar en bloque las tx seleccionadas.
+
+    Si `target_category_id` viene, se aplica a TODAS las tx (validando
+    que pertenece al usuario y que su kind tiene sentido para is_transfer).
+
+    Si NO viene, para cada tx el service infiere el kind opuesto al
+    actual (las tx de la UI ya vienen identificadas como mal direccionadas)
+    y busca/crea la categoría is_transfer del kind correcto vía
+    `get_or_create_default_transfer_category`. Esto cubre el caso típico
+    del bulk-fix tras un import: el usuario marca varias y se mueven al
+    par opuesto sin tener que elegir categoría destino.
+
+    Devuelve `{reclassified: N, errors: [...]}`. Una tx que no exista o
+    no sea del usuario suma a `errors` con su id y mensaje, no aborta
+    el resto.
+    """
+    if target_category_id is not None:
+        target_cat = await get_category_by_id(db, target_category_id, user_id)
+        if target_cat is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="La categoría destino no existe o no es tuya.",
+            )
+        if not target_cat.is_transfer:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "La categoría destino debe ser una transferencia "
+                    "(is_transfer=true)."
+                ),
+            )
+
+    reclassified = 0
+    errors: list[str] = []
+    for tx_id in transaction_ids:
+        tx = await repo_get_tx(db, tx_id, user_id)
+        if tx is None:
+            errors.append(f"{tx_id}: no encontrada")
+            continue
+        if tx.transfer_pair_id is not None:
+            errors.append(f"{tx_id}: ya está en un par, no se toca")
+            continue
+        chosen_cat_id: uuid.UUID
+        if target_category_id is not None:
+            chosen_cat_id = target_category_id
+        else:
+            current_cat = (
+                await get_category_by_id(db, tx.category_id, user_id)
+                if tx.category_id
+                else None
+            )
+            if current_cat is None or not current_cat.is_transfer:
+                errors.append(
+                    f"{tx_id}: la tx no está en una categoría is_transfer; "
+                    "no se puede inferir el destino sin target_category_id"
+                )
+                continue
+            opposite = (
+                CategoryKind.INCOME
+                if current_cat.kind == CategoryKind.EXPENSE
+                else CategoryKind.EXPENSE
+            )
+            opposite_cat = await get_or_create_default_transfer_category(
+                db, user_id, kind=opposite
+            )
+            chosen_cat_id = opposite_cat.id
+        await repo_assign_category(db, tx, chosen_cat_id)
+        reclassified += 1
+
+    return ReclassifyBulkResponse(reclassified=reclassified, errors=errors)
 
 
 _INCOMING_DESCRIPTION_HINTS = (

@@ -1,4 +1,6 @@
 import type {
+  MisclassifiedTransfer,
+  ReclassifyBulkResponse,
   TransferCandidate,
   TransferFromSourceDebtRequest,
   TransferFromSourceRequest,
@@ -75,6 +77,26 @@ export const transfersApi = {
   ): Promise<TransferPair> {
     const response = await apiClient.post<TransferPair>(
       '/transfers/from-source-debt',
+      payload,
+    );
+    return response.data;
+  },
+
+  /** PHASE-31.2 — tx con categoría is_transfer y dirección dudosa. */
+  async misclassified(): Promise<MisclassifiedTransfer[]> {
+    const response = await apiClient.get<MisclassifiedTransfer[]>(
+      '/transfers/misclassified',
+    );
+    return response.data;
+  },
+
+  /** PHASE-31.2 — recategorización en bloque. */
+  async reclassifyBulk(payload: {
+    transaction_ids: string[];
+    target_category_id?: string;
+  }): Promise<ReclassifyBulkResponse> {
+    const response = await apiClient.post<ReclassifyBulkResponse>(
+      '/transfers/reclassify-bulk',
       payload,
     );
     return response.data;

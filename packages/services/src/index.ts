@@ -60,6 +60,8 @@ export {
   useLinkTransfer,
   useMarkTransfer,
   useMatchTransfers,
+  useMisclassifiedTransfers,
+  useReclassifyBulk,
   useTransferCandidates,
   useTransfers,
   useTransferSuspects,

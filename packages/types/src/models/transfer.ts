@@ -68,3 +68,28 @@ export interface TransferMarkResponse {
   category_id: string;
   category_name: string;
 }
+
+/**
+ * PHASE-31.2 — tx con categoría is_transfer cuyo kind no encaja con
+ * la dirección que indica la descripción. Candidata a recategorización
+ * en bloque desde la UI.
+ */
+export interface MisclassifiedTransfer {
+  transaction_id: string;
+  amount: string;
+  currency: string;
+  account_id: string;
+  occurred_at: string;
+  description: string | null;
+  current_category_id: string;
+  current_category_name: string;
+  /** `expense` o `income`. */
+  current_category_kind: string;
+  /** `income` si la descripción es entrante, `expense` si saliente. */
+  suggested_kind: string;
+}
+
+export interface ReclassifyBulkResponse {
+  reclassified: number;
+  errors: string[];
+}

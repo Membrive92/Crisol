@@ -23,6 +23,7 @@ import {
 } from '@crisol/ui';
 import type { Account, TransferSuspect } from '@crisol/types';
 
+import { MisclassifiedSection } from '@/components/transfers/misclassified-section';
 import { TransferPairCard } from '@/components/transfers/transfer-pair-card';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -156,6 +157,13 @@ export default function TransfersPage() {
           {matchMutation.isPending ? 'Detectando…' : 'Detectar automáticas'}
         </Button>
       </header>
+
+      {/* PHASE-31.2 — sección bulk-fix arriba del todo: si hay tx mal
+          direccionadas el saldo está afectado y conviene resolverlo
+          antes de tocar pares sueltos. */}
+      <div style={{ marginBottom: spacing.xl }}>
+        <MisclassifiedSection />
+      </div>
 
       {suspects.length > 0 ? (
         <section style={{ marginBottom: spacing.xl }}>

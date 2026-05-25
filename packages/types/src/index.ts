@@ -34,6 +34,8 @@ export type {
   InstallmentUpdateRequest,
 } from './models/debt';
 export type {
+  MisclassifiedTransfer,
+  ReclassifyBulkResponse,
   TransferCandidate,
   TransferMarkResponse,
   TransferMatchResponse,
