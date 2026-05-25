@@ -433,7 +433,7 @@ function DebtHealthSection({ debt }: { debt: ReturnType<typeof useDebtHealth>['d
             letterSpacing: '0.04em',
           }}
         >
-          DTI · {dtiTone.label}
+          Esfuerzo · {dtiTone.label}
         </span>
       </header>
 
@@ -458,7 +458,7 @@ function DebtHealthSection({ debt }: { debt: ReturnType<typeof useDebtHealth>['d
           {dtiPct !== null ? `${dtiPct.toFixed(1)} %` : '—'}
         </span>
         <span style={{ fontSize: fontSize.xs, color: colors.textSubtle, textAlign: 'right' }}>
-          ratio deuda / ingresos
+          tasa de esfuerzo (BdE)
           <br />
           umbral 35 %
         </span>

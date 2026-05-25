@@ -1,30 +1,41 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 
-import { useAccountBalances, useDebtHistory } from '@crisol/services';
+import {
+  useAccountBalances,
+  useDebtCategorySummary,
+  useDebtHealth,
+  useDebtHistory,
+} from '@crisol/services';
+import type { DebtTimeRange } from '@crisol/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
-import { DebtHealthCard } from '@/components/dashboard/debt-health-card';
+import { DebtCompositionDonut } from '@/components/debt/debt-composition-donut';
 import { DebtList } from '@/components/debt/debt-list';
+import { DebtMonthlyEvolution } from '@/components/debt/debt-monthly-evolution';
 import { DebtTrendChart } from '@/components/debt/debt-trend-chart';
+import { EffortRatioSection } from '@/components/debt/effort-ratio-section';
+import { PaymentsSummaryCard } from '@/components/debt/payments-summary-card';
+import { RecurringQuotasList } from '@/components/debt/recurring-quotas-list';
 
 /**
- * Página de aterrizaje del módulo deuda (PHASE-22+, promocionado a
- * top-level).
+ * Página `/debt` rediseñada en PHASE-30.3.
  *
- * Concentra en una sola vista:
- * - Hero con `DebtHealthCard` (patrimonio neto + KPIs de salud).
- * - Chart de evolución histórico + proyección de la deuda total.
- * - Lista de pasivos activos con cuotas estimadas y enlaces a sus
- *   cuadros de amortización.
+ * Capa 1 (flujo de categorías) primero, sin requerir liability
+ * accounts: tasa de esfuerzo, pagos a deuda en el rango, composición
+ * por tipo, evolución mensual y cuotas recurrentes detectadas.
  *
- * La página es snapshot — no aplica el toggle de periodo del análisis
- * porque la deuda es un saldo, no un flujo. Las cuentas siguen
- * gestionándose desde Finanzas Domésticas (`/settings/accounts`).
+ * Capa 2 (contratos concretos) abajo: lista de liabilities con sus
+ * cuotas + chart de evolución del saldo. Empty state pide vincular
+ * cuando hay cuotas recurrentes pero ningún liability declarado.
  */
 export default function DebtPage() {
+  const [range, setRange] = useState<DebtTimeRange>('ytd');
+
+  const summaryQuery = useDebtCategorySummary(range);
+  const healthQuery = useDebtHealth();
   const balancesQuery = useAccountBalances();
   const historyQuery = useDebtHistory({ monthsBack: 12, monthsAhead: 12 });
 
@@ -36,93 +47,262 @@ export default function DebtPage() {
     [balancesQuery.data],
   );
 
+  const summary = summaryQuery.data;
+  const health = healthQuery.data;
+
   const referenceCurrency =
+    summary?.reference_currency ??
+    health?.reference_currency ??
     historyQuery.data?.reference_currency ??
     balancesQuery.data?.reference_currency ??
     'EUR';
 
+  // El numerador estricto es la cuota mensual estimada (lo que el
+  // backend devuelve en debt-health). Si no está cargado todavía,
+  // mostramos guion. El numerador ampliado lo derivamos del ratio
+  // ampliado y el income — backend ya hizo el cálculo correcto pero
+  // no expone el numerador absoluto.
+  const monthlyIncome = summary?.monthly_income_avg ?? '0';
+  const monthlyDebtPayment = health?.monthly_debt_payment ?? '0';
+  const monthlyDebtPaymentExtended =
+    summary && summary.effort_ratio_extended !== null
+      ? (
+          summary.effort_ratio_extended * Number(monthlyIncome)
+        ).toFixed(2)
+      : monthlyDebtPayment;
+
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: spacing.lg }}>
-      <header
-        style={{
-          display: 'flex',
-          alignItems: 'flex-end',
-          justifyContent: 'space-between',
-          gap: spacing.md,
-          flexWrap: 'wrap',
-          marginBottom: spacing.xl,
-        }}
-      >
-        <div>
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: fontWeight.semibold,
-              color: colors.primary,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              display: 'block',
-              marginBottom: spacing.xs,
-            }}
-          >
-            DEUDA
-          </span>
-          <h1
-            style={{
-              margin: 0,
-              fontSize: fontSize.xxl,
-              fontWeight: fontWeight.bold,
-              color: colors.text,
-              letterSpacing: '-0.02em',
-              lineHeight: 1.1,
-            }}
-          >
-            Deuda
-          </h1>
-          <p
-            style={{
-              margin: `${spacing.xs}px 0 0 0`,
-              color: colors.textMuted,
-              fontSize: fontSize.sm,
-              maxWidth: 640,
-              lineHeight: 1.5,
-            }}
-          >
-            Patrimonio, salud financiera, evolución y cada pasivo con su
-            cuota — todo el panorama de deuda sin saltar entre pantallas.
-          </p>
-        </div>
-        <Link
-          href="/settings/accounts"
+      <PageHeader />
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
+        <EffortRatioSection
+          strictRatio={summary?.effort_ratio_strict ?? null}
+          strictStatus={summary?.effort_ratio_strict_status ?? 'unknown'}
+          extendedRatio={summary?.effort_ratio_extended ?? null}
+          extendedStatus={summary?.effort_ratio_extended_status ?? 'unknown'}
+          monthlyIncome={monthlyIncome}
+          monthlyDebtPayment={monthlyDebtPayment}
+          monthlyDebtPaymentExtended={monthlyDebtPaymentExtended}
+          currency={referenceCurrency}
+          isLoading={summaryQuery.isLoading}
+        />
+
+        <PaymentsSummaryCard
+          range={range}
+          onRangeChange={setRange}
+          totalPayments={summary?.total_payments ?? '0'}
+          interestsAndFees={summary?.interests_and_fees ?? '0'}
+          capitalAmortized={summary?.capital_amortized ?? '0'}
+          currency={referenceCurrency}
+          isLoading={summaryQuery.isLoading}
+        />
+
+        <div
           style={{
-            display: 'inline-block',
-            padding: `${spacing.sm}px ${spacing.md}px`,
-            borderRadius: radius.md,
-            backgroundColor: colors.primary,
-            color: colors.onPrimary,
-            fontSize: fontSize.sm,
-            fontWeight: fontWeight.semibold,
-            textDecoration: 'none',
-            border: `1px solid ${colors.primary}`,
+            display: 'grid',
+            gridTemplateColumns: 'minmax(280px, 1fr) minmax(360px, 1.6fr)',
+            gap: spacing.md,
           }}
         >
-          Añadir deuda
-        </Link>
-      </header>
+          <DebtCompositionDonut
+            items={summary?.by_type ?? []}
+            total={summary?.total_payments ?? '0'}
+            currency={referenceCurrency}
+            isLoading={summaryQuery.isLoading}
+          />
+          <DebtMonthlyEvolution
+            items={summary?.monthly_series ?? []}
+            currency={referenceCurrency}
+            isLoading={summaryQuery.isLoading}
+          />
+        </div>
 
-      <div style={{ marginBottom: spacing.md }}>
-        <DebtHealthCard />
-      </div>
-
-      <div style={{ marginBottom: spacing.md }}>
-        <DebtTrendChart
-          data={historyQuery.data?.items ?? []}
+        <RecurringQuotasList
+          items={summary?.recurring_quotas ?? []}
           currency={referenceCurrency}
-          isLoading={historyQuery.isLoading}
+          isLoading={summaryQuery.isLoading}
         />
-      </div>
 
-      <DebtList liabilities={liabilities} loading={balancesQuery.isLoading} />
+        <Layer2Section
+          hasLiabilities={liabilities.length > 0}
+          hasRecurringQuotas={(summary?.recurring_quotas.length ?? 0) > 0}
+        >
+          {historyQuery.data && historyQuery.data.items.length > 0 ? (
+            <DebtTrendChart
+              data={historyQuery.data.items}
+              currency={referenceCurrency}
+              isLoading={historyQuery.isLoading}
+            />
+          ) : null}
+          <DebtList
+            liabilities={liabilities}
+            loading={balancesQuery.isLoading}
+          />
+        </Layer2Section>
+      </div>
     </div>
+  );
+}
+
+function PageHeader() {
+  return (
+    <header
+      style={{
+        display: 'flex',
+        alignItems: 'flex-end',
+        justifyContent: 'space-between',
+        gap: spacing.md,
+        flexWrap: 'wrap',
+        marginBottom: spacing.xl,
+      }}
+    >
+      <div>
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: fontWeight.semibold,
+            color: colors.primary,
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+            display: 'block',
+            marginBottom: spacing.xs,
+          }}
+        >
+          DEUDA
+        </span>
+        <h1
+          style={{
+            margin: 0,
+            fontSize: fontSize.xxl,
+            fontWeight: fontWeight.bold,
+            color: colors.text,
+            letterSpacing: '-0.02em',
+            lineHeight: 1.1,
+          }}
+        >
+          Deuda
+        </h1>
+        <p
+          style={{
+            margin: `${spacing.xs}px 0 0 0`,
+            color: colors.textMuted,
+            fontSize: fontSize.sm,
+            maxWidth: 640,
+            lineHeight: 1.5,
+          }}
+        >
+          Tu salud financiera de un vistazo: cuánto destinas a deuda
+          frente a tus ingresos, qué proporción es interés puro y
+          cómo evoluciona mes a mes.
+        </p>
+      </div>
+      <Link
+        href="/settings/accounts"
+        style={{
+          display: 'inline-block',
+          padding: `${spacing.sm}px ${spacing.md}px`,
+          borderRadius: radius.md,
+          backgroundColor: colors.primary,
+          color: colors.onPrimary,
+          fontSize: fontSize.sm,
+          fontWeight: fontWeight.semibold,
+          textDecoration: 'none',
+          border: `1px solid ${colors.primary}`,
+        }}
+      >
+        Añadir deuda
+      </Link>
+    </header>
+  );
+}
+
+function Layer2Section({
+  hasLiabilities,
+  hasRecurringQuotas,
+  children,
+}: {
+  hasLiabilities: boolean;
+  hasRecurringQuotas: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(hasLiabilities);
+
+  return (
+    <section
+      style={{
+        backgroundColor: colors.surface,
+        border: `1px solid ${colors.border}`,
+        borderRadius: radius.md,
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          width: '100%',
+          background: 'transparent',
+          border: 'none',
+          padding: `${spacing.md}px ${spacing.lg}px`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          cursor: 'pointer',
+          textAlign: 'left',
+        }}
+        aria-expanded={open}
+      >
+        <span>
+          <span
+            style={{
+              fontSize: fontSize.md,
+              fontWeight: fontWeight.semibold,
+              color: colors.text,
+              letterSpacing: '-0.01em',
+            }}
+          >
+            Detalle por contrato
+          </span>
+          <span
+            style={{
+              display: 'block',
+              fontSize: fontSize.xs,
+              color: colors.textMuted,
+              marginTop: 2,
+            }}
+          >
+            {hasLiabilities
+              ? 'Tus pasivos declarados con sus cuotas y cuadros de amortización.'
+              : hasRecurringQuotas
+                ? 'Cuotas detectadas pero sin contrato vinculado — añade uno para que cuenten en tu patrimonio.'
+                : 'Vacío. Añade un préstamo / hipoteca / tarjeta cuando tengas un contrato real.'}
+          </span>
+        </span>
+        <span
+          aria-hidden
+          style={{
+            fontSize: fontSize.lg,
+            color: colors.textMuted,
+            transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+            transition: 'transform 120ms ease',
+          }}
+        >
+          ▾
+        </span>
+      </button>
+
+      {open ? (
+        <div
+          style={{
+            padding: `0 ${spacing.lg}px ${spacing.lg}px`,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: spacing.md,
+          }}
+        >
+          {children}
+        </div>
+      ) : null}
+    </section>
   );
 }

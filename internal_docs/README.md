@@ -269,7 +269,7 @@ y [`design-explorations/debt-redesign-30/wireframe.md`](design-explorations/debt
 |------|--------------------------------------------------------------|--------|----|
 | 30.1 | Enum `categories.role` + migración backfill desde `is_transfer` | ✅  | —  |
 | 30.2 | Endpoint `/debt/category-summary` + bandas BdE 30/35% + fix `time_to_payoff` | ✅ | — |
-| 30.3 | Web: rediseño `/debt` con Capa 1 hero                        | 📋     | —  |
+| 30.3 | Web: rediseño `/debt` con Capa 1 hero                        | ✅     | —  |
 | 30.4 | Web: Capa 2 condensada + vinculación contrato-categoría      | 📋     | —  |
 | 30.5 | Mobile parity (opcional, aplazable)                          | 📋     | —  |
 
@@ -277,13 +277,15 @@ y [`design-explorations/debt-redesign-30/wireframe.md`](design-explorations/debt
 
 | Fase | Nombre                                                       | Estado | PR |
 |------|--------------------------------------------------------------|--------|----|
-| 31.1 | Seed bidireccional de transferencias + categoría INCOME + migración con backfill | 📋 | — |
-| 31.2 | UI bulk-fix: detección y corrección de transferencias con dirección dudosa | 📋 | — |
-| 31.3 | `else_=0` para tx sin categoría + banner UX                  | 📋     | —  |
-| 31.4 | Brokerage/crypto fuera del patrimonio neto agregado          | 📋     | —  |
-| 31.5 | `_infer_transfer_kind` robustecido (no asume EXPENSE arbitrario, respeta categoría preexistente) | 📋 | — |
+| 31.1 | Seed bidireccional de transferencias + categoría INCOME + migración con backfill | ✅ | — |
+| 31.2 | UI bulk-fix: detección y corrección de transferencias con dirección dudosa | ✅ | — |
+| 31.3 | `else_=0` para tx sin categoría + banner UX                  | ✅     | —  |
+| 31.4 | Brokerage/crypto fuera del patrimonio neto agregado          | ✅     | —  |
+| 31.5 | `_infer_transfer_kind` robustecido (no asume EXPENSE arbitrario, respeta categoría preexistente) | ✅ | — |
 
-> Bloquea PHASE-30. Hotfix SQL disponible en `phase-31-account-integrity.md` para corregir saldos en BD local antes del despliegue completo.
+> Pre-requisito completado antes de PHASE-30. Hotfix SQL aplicado al
+> usuario `membrij7@gmail.com` (~7 tx, ~€11.7k recategorizadas) durante
+> la implementación.
 
 ---
 
