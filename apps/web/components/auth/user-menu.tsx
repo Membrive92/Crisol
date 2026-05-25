@@ -10,7 +10,6 @@ import {
   ChevronDownIcon,
   LogOutIcon,
   SettingsIcon,
-  UserIcon,
 } from '@/components/ui/icons';
 
 export interface UserMenuProps {
@@ -45,43 +44,11 @@ export function UserMenu({ user, onLogout }: UserMenuProps) {
 
   return (
     <div ref={containerRef} style={{ position: 'relative' }}>
-      <button
-        type="button"
+      <UserChipTrigger
+        user={user}
+        open={open}
         onClick={() => setOpen((v) => !v)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="Menú de usuario"
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 4,
-          padding: 2,
-          paddingRight: 8,
-          backgroundColor: open ? colors.surfaceMuted : 'transparent',
-          border: `1px solid ${open ? colors.borderStrong : colors.border}`,
-          borderRadius: 9999,
-          cursor: 'pointer',
-          color: colors.textMuted,
-          transition: 'background-color 120ms ease, border-color 120ms ease',
-        }}
-      >
-        <span
-          aria-hidden
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 28,
-            height: 28,
-            borderRadius: '50%',
-            backgroundColor: colors.surfaceMuted,
-            color: colors.text,
-          }}
-        >
-          <UserIcon size={16} />
-        </span>
-        <ChevronDownIcon size={14} style={{ color: colors.textSubtle }} />
-      </button>
+      />
 
       {open && (
         <div
@@ -156,6 +123,124 @@ export function UserMenu({ user, onLogout }: UserMenuProps) {
       )}
     </div>
   );
+}
+
+/**
+ * Trigger del UserMenu rediseñado (PHASE-29.3): avatar circular con
+ * iniciales sobre gradient copper + nombre del usuario + "Personal"
+ * como rol/contexto + chevron. Mismo patrón de glow tonal que el
+ * CurrencyPillTrigger para que el header se sienta cohesivo.
+ */
+function UserChipTrigger({
+  user,
+  open,
+  onClick,
+}: {
+  user: User | null;
+  open: boolean;
+  onClick: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const active = open || hovered;
+  const displayName = user?.display_name ?? user?.email ?? 'Usuario';
+  const initials = initialsFrom(displayName);
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      aria-haspopup="menu"
+      aria-expanded={open}
+      aria-label="Menú de usuario"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '3px 10px 3px 3px',
+        borderRadius: 999,
+        backgroundColor: active ? colors.surfaceMuted : 'transparent',
+        border: `1px solid ${active ? colors.border : 'transparent'}`,
+        cursor: 'pointer',
+        color: colors.text,
+        boxShadow: active ? `0 0 0 3px ${colors.primarySoft}` : 'none',
+        transition:
+          'background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease',
+        maxWidth: 220,
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 30,
+          height: 30,
+          borderRadius: '50%',
+          background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.primaryDark} 100%)`,
+          color: colors.onPrimary,
+          fontSize: 11.5,
+          fontWeight: fontWeight.bold,
+          letterSpacing: '0.02em',
+          flex: '0 0 auto',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,.18)',
+        }}
+      >
+        {initials}
+      </span>
+      <span
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          minWidth: 0,
+          lineHeight: 1.15,
+          textAlign: 'left',
+        }}
+      >
+        <span
+          style={{
+            fontSize: 13,
+            fontWeight: fontWeight.semibold,
+            color: colors.text,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            maxWidth: 140,
+          }}
+        >
+          {displayName}
+        </span>
+        <span
+          style={{
+            fontSize: 11,
+            color: colors.textMuted,
+            fontWeight: fontWeight.medium,
+          }}
+        >
+          Personal
+        </span>
+      </span>
+      <ChevronDownIcon size={12} style={{ color: colors.textSubtle, flex: '0 0 auto' }} />
+    </button>
+  );
+}
+
+/** "JM Membrive" → "JM"; "membrij7@gmail.com" → "ME"; "Juan" → "JU". */
+function initialsFrom(name: string): string {
+  const cleaned = name.trim();
+  if (!cleaned) return '··';
+  // Si parece email, usar la parte antes del @.
+  const base = cleaned.includes('@') ? cleaned.split('@')[0] ?? cleaned : cleaned;
+  const parts = base.split(/[\s._-]+/).filter(Boolean);
+  if (parts.length >= 2) {
+    const first = parts[0]?.[0] ?? '';
+    const second = parts[1]?.[0] ?? '';
+    return (first + second).toUpperCase();
+  }
+  const word = parts[0] ?? base;
+  return word.slice(0, 2).toUpperCase();
 }
 
 function MenuItem({

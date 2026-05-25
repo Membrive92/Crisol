@@ -6,7 +6,7 @@ import { useUserCurrencies } from '@crisol/services';
 import { useCurrencyStore } from '@crisol/store';
 import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
-import { CheckCircleIcon, ChevronDownIcon, WalletIcon } from '@/components/ui/icons';
+import { CheckCircleIcon, ChevronDownIcon } from '@/components/ui/icons';
 
 // Símbolos para las monedas más comunes. Para el resto se muestra el
 // código (USD, MXN, …) — sigue siendo identificable y evita mantener
@@ -106,32 +106,11 @@ export function CurrencyMenu() {
 
   return (
     <div ref={containerRef} style={{ position: 'relative' }}>
-      <button
-        type="button"
+      <CurrencyPillTrigger
+        currency={currency}
+        open={open}
         onClick={() => setOpen((v) => !v)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={`Moneda activa: ${currency}. Cambiar.`}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 6,
-          height: 36,
-          padding: `0 ${spacing.sm}px`,
-          backgroundColor: open ? colors.surfaceMuted : 'transparent',
-          color: open ? colors.text : colors.textMuted,
-          border: 'none',
-          borderRadius: 8,
-          cursor: 'pointer',
-          fontSize: fontSize.sm,
-          fontWeight: fontWeight.semibold,
-          transition: 'background-color 120ms ease, color 120ms ease',
-        }}
-      >
-        <WalletIcon size={18} />
-        <span>{currency}</span>
-        <ChevronDownIcon size={12} style={{ color: colors.textSubtle }} />
-      </button>
+      />
 
       {open && (
         <div
@@ -294,6 +273,80 @@ function Toggle({
           transition: 'left 120ms ease',
         }}
       />
+    </button>
+  );
+}
+
+/**
+ * Trigger del CurrencyMenu rediseñado (PHASE-29.3): pill con el símbolo
+ * de la moneda en un cuadrito tonal (`primary-soft` → `primary` al
+ * hover) + código + chevron. El glow tonal del hover (box-shadow
+ * `primary-soft`) le da presencia frente al icon-btn de tema/notif.
+ */
+function CurrencyPillTrigger({
+  currency,
+  open,
+  onClick,
+}: {
+  currency: string;
+  open: boolean;
+  onClick: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const active = open || hovered;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      aria-haspopup="menu"
+      aria-expanded={open}
+      aria-label={`Moneda activa: ${currency}. Cambiar.`}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '5px 10px 5px 5px',
+        borderRadius: 8,
+        backgroundColor: active ? colors.surfaceMuted : 'transparent',
+        border: `1px solid ${active ? colors.border : 'transparent'}`,
+        cursor: 'pointer',
+        color: colors.text,
+        boxShadow: active ? `0 0 0 3px ${colors.primarySoft}` : 'none',
+        transition:
+          'background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease',
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 26,
+          height: 26,
+          borderRadius: 6,
+          backgroundColor: active ? colors.primary : colors.primarySoft,
+          color: active ? colors.onPrimary : colors.primary,
+          fontSize: 14,
+          fontWeight: fontWeight.bold,
+          transition: 'background-color 140ms ease, color 140ms ease',
+          flex: '0 0 auto',
+        }}
+      >
+        {symbolFor(currency)}
+      </span>
+      <span
+        style={{
+          fontSize: 13,
+          fontWeight: fontWeight.semibold,
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
+        {currency}
+      </span>
+      <ChevronDownIcon size={12} style={{ color: colors.textSubtle }} />
     </button>
   );
 }

@@ -196,8 +196,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'flex-end',
-            gap: spacing.xs,
-            padding: `0 ${spacing.lg}px`,
+            gap: 6,
+            padding: `0 16px 0 ${spacing.lg}px`,
             height: 56,
             boxSizing: 'border-box',
           }}
@@ -211,10 +211,29 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <MenuIcon size={20} />
           </IconButton>
           <IconButton ariaLabel="Notificaciones">
-            <BellIcon size={20} />
+            <BellIcon size={18} />
+            {/* Notification dot — siempre encendido por ahora; cuando
+                tengamos un canal real de notificaciones se conectará
+                a un hook que devuelva `hasUnread`. El border-2 sobre
+                background "corta" el dot contra el icono. */}
+            <span
+              aria-hidden
+              style={{
+                position: 'absolute',
+                top: 8,
+                right: 8,
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                backgroundColor: colors.danger,
+                border: `2px solid ${colors.background}`,
+              }}
+            />
           </IconButton>
+          <HeaderDivider />
           <CurrencyMenu />
           <ThemeToggle />
+          <HeaderDivider />
           <UserMenu user={user} onLogout={handleLogout} />
         </div>
 
@@ -295,33 +314,58 @@ function IconButton({
   style?: React.CSSProperties;
 }) {
   const [hovered, setHovered] = useState(false);
+  const [pressed, setPressed] = useState(false);
   return (
     <button
       type="button"
       aria-label={ariaLabel}
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onMouseLeave={() => {
+        setHovered(false);
+        setPressed(false);
+      }}
+      onMouseDown={() => setPressed(true)}
+      onMouseUp={() => setPressed(false)}
       {...(dataMobileOnly ? { 'data-mobile-only': 'true' } : {})}
       style={{
-        // Cuando es mobile-only el default es 'none' y la media query
-        // global lo eleva a 'inline-flex'. En el resto de IconButtons
-        // se comporta como antes.
+        position: 'relative',
         display: dataMobileOnly ? 'none' : 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
         width: 36,
         height: 36,
+        // PHASE-29.3: hover copper (era text neutro). Glow tonal via
+        // bg `surface-muted`. Active press: scale .94.
         backgroundColor: hovered ? colors.surfaceMuted : 'transparent',
-        color: hovered ? colors.text : colors.textMuted,
+        color: hovered ? colors.primary : colors.textMuted,
         border: 'none',
         borderRadius: 8,
         cursor: 'pointer',
-        transition: 'background-color 120ms ease, color 120ms ease',
+        transform: pressed ? 'scale(.94)' : 'scale(1)',
+        transition:
+          'background-color 140ms ease, color 140ms ease, transform 90ms ease',
         ...style,
       }}
     >
       {children}
     </button>
+  );
+}
+
+/** Línea vertical 1×24 que separa grupos de controles en el header. */
+function HeaderDivider() {
+  return (
+    <span
+      aria-hidden
+      style={{
+        display: 'inline-block',
+        width: 1,
+        height: 24,
+        backgroundColor: colors.border,
+        margin: '0 4px',
+        flex: '0 0 auto',
+      }}
+    />
   );
 }
