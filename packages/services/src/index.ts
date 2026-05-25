@@ -11,6 +11,7 @@ export { passkeysApi, type PasskeyResponse } from './api/endpoints/passkeys';
 export { accountsApi, type AccountListQuery } from './api/endpoints/accounts';
 export { transfersApi } from './api/endpoints/transfers';
 export { categoriesApi } from './api/endpoints/categories';
+export { debtApi } from './api/endpoints/debt';
 export { transactionsApi } from './api/endpoints/transactions';
 export { dashboardApi } from './api/endpoints/dashboard';
 export { budgetsApi } from './api/endpoints/budgets';
@@ -74,6 +75,7 @@ export {
   useUpdateCategory,
   useDeleteCategory,
 } from './query/hooks/useCategories';
+export { useDebtCategorySummary } from './query/hooks/useDebt';
 export {
   useTransactions,
   useTransaction,

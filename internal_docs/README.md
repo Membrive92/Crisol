@@ -267,8 +267,8 @@ y [`design-explorations/debt-redesign-30/wireframe.md`](design-explorations/debt
 
 | Fase | Nombre                                                       | Estado | PR |
 |------|--------------------------------------------------------------|--------|----|
-| 30.1 | Enum `categories.role` + migración backfill desde `is_transfer` | 📋  | —  |
-| 30.2 | Endpoint `/debt/category-summary` + bandas BdE 30/35% + fix `time_to_payoff` | 📋 | — |
+| 30.1 | Enum `categories.role` + migración backfill desde `is_transfer` | ✅  | —  |
+| 30.2 | Endpoint `/debt/category-summary` + bandas BdE 30/35% + fix `time_to_payoff` | ✅ | — |
 | 30.3 | Web: rediseño `/debt` con Capa 1 hero                        | 📋     | —  |
 | 30.4 | Web: Capa 2 condensada + vinculación contrato-categoría      | 📋     | —  |
 | 30.5 | Mobile parity (opcional, aplazable)                          | 📋     | —  |

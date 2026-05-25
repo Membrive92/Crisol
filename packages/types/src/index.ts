@@ -25,13 +25,20 @@ export type {
 export type {
   AmortizationRow,
   AmortizationSchedule,
+  DebtCategorySummary,
   DebtHealthKpis,
   DebtHistoryPoint,
   DebtHistoryPointKind,
   DebtHistoryResponse,
+  DebtTimeRange,
+  DebtTypeBreakdown,
+  DebtTypeBucket,
   DtiStatus,
+  EffortStatus,
   InstallmentPayRequest,
   InstallmentUpdateRequest,
+  MonthlyDebtPoint,
+  RecurringQuotaRef,
 } from './models/debt';
 export type {
   MisclassifiedTransfer,

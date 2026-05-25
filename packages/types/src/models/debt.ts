@@ -86,3 +86,54 @@ export interface DebtHistoryResponse {
   months_historical: number;
   months_projected: number;
 }
+
+/* PHASE-30.2 — Capa 1 del módulo deuda: KPIs derivados del flujo de
+ * categorías marcadas como deuda. Cubre /debt/category-summary. */
+
+export type DebtTimeRange = 'ytd' | '12m' | 'month';
+
+export type EffortStatus = 'healthy' | 'caution' | 'stressed' | 'unknown';
+
+export type DebtTypeBucket = 'mortgage' | 'loan' | 'credit_card' | 'other';
+
+export interface DebtTypeBreakdown {
+  type: DebtTypeBucket;
+  amount: string;
+  /** Fracción en [0, 1]. */
+  percent: number;
+}
+
+export interface MonthlyDebtPoint {
+  /** `YYYY-MM`. */
+  month: string;
+  payments: string;
+  interests: string;
+  capital: string;
+}
+
+export interface RecurringQuotaRef {
+  fixed_expense_id: string;
+  merchant: string;
+  amount: string;
+  currency: string;
+  category_id: string | null;
+  category_name: string | null;
+}
+
+export interface DebtCategorySummary {
+  reference_currency: string;
+  range: DebtTimeRange;
+  range_start: string;
+  range_end: string;
+  total_payments: string;
+  interests_and_fees: string;
+  capital_amortized: string;
+  by_type: DebtTypeBreakdown[];
+  monthly_series: MonthlyDebtPoint[];
+  monthly_income_avg: string;
+  effort_ratio_strict: number | null;
+  effort_ratio_strict_status: EffortStatus;
+  effort_ratio_extended: number | null;
+  effort_ratio_extended_status: EffortStatus;
+  recurring_quotas: RecurringQuotaRef[];
+}

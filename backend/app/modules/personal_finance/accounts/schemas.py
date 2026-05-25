@@ -137,23 +137,30 @@ class AccountBalance(BaseModel):
 
 
 class DebtHealthKpis(BaseModel):
-    """KPIs de salud financiera basados en deudas activas (PHASE-22.4).
+    """KPIs de salud financiera basados en deudas activas (PHASE-22.4
+    + PHASE-30.2).
 
     Todas las cifras vienen en `reference_currency` (la moneda
     dominante entre cuentas activas, igual que en `/accounts/balances`).
     `null` cuando no hay datos suficientes para computar (ej. sin
-    ingresos no se puede DTI).
+    ingresos no se puede calcular la tasa de esfuerzo).
 
-    `dti_status` interpreta `dti_ratio`:
-    - `healthy`   → < 0.36
-    - `caution`   → 0.36 a 0.43
-    - `stressed`  → > 0.43
+    `dti_status` interpreta `dti_ratio` con las bandas del Banco de
+    España (PHASE-30.2 recalibró las antiguas 36%/43% estadounidenses
+    a 30%/35% europeas, más conservadoras y sobre ingresos netos):
+    - `healthy`   → < 0.30
+    - `caution`   → 0.30 a 0.35
+    - `stressed`  → > 0.35
     - `unknown`   → no calculable
 
-    `time_to_payoff_months` proyecta el ritmo actual de amortización
-    de principal hacia adelante (lineal, sin asumir cuadro fijo).
-    Cuenta sólo los pagos `transfer` netos del último período hacia
-    cuentas liability.
+    Los nombres de campo siguen siendo `dti_*` por compatibilidad con
+    clientes existentes; la UI nueva los renombra a "tasa de esfuerzo".
+
+    `time_to_payoff_months` (PHASE-30.2): prefiere las cuotas restantes
+    del cuadro francés cuando la liability tiene `apr + term_months
+    + start_date`; fallback a proyección lineal sólo para tarjetas o
+    liabilities sin schedule. Devuelve el máximo individual entre
+    todas las liabilities con saldo > 0.
     """
 
     total_liabilities: Decimal
@@ -162,9 +169,11 @@ class DebtHealthKpis(BaseModel):
     debt_to_assets_ratio: float | None
     """`total_liabilities / total_assets` cuando assets > 0."""
     dti_ratio: float | None
-    """Cuota mensual estimada / ingreso mensual medio."""
+    """Tasa de esfuerzo: cuota mensual estimada / ingreso mensual medio.
+    Se mantiene el nombre `dti_ratio` por compatibilidad de API."""
     dti_status: str
-    """`healthy | caution | stressed | unknown`."""
+    """`healthy | caution | stressed | unknown` con bandas BdE 30/35%
+    (PHASE-30.2)."""
     monthly_debt_payment: Decimal
     """Suma de cuotas mensuales recurrentes (cuadros + tarjetas
     estimadas). Tarjetas estiman con la cuota teórica del último mes."""
@@ -173,13 +182,14 @@ class DebtHealthKpis(BaseModel):
     transferencias internas)."""
     interest_paid_ytd: Decimal
     """Intereses pagados desde el 1 de enero hasta hoy
-    (categorías de intereses)."""
+    (categorías con `role=DEBT_INTEREST`)."""
     weighted_apr: float | None
     """APR medio ponderado por saldo entre liabilities con apr
     declarado. `null` si ninguna lo tiene."""
     time_to_payoff_months: int | None
-    """Meses restantes si mantienes el ritmo medio de amortización
-    actual. `null` si no hay actividad reciente."""
+    """Meses restantes hasta saldar toda la deuda. Usa el schedule
+    cuando está disponible; fallback a proyección lineal para
+    liabilities sin cuadro. `null` si no se puede estimar."""
     reference_currency: str
 
 

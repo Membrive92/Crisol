@@ -33,6 +33,11 @@ export const queryKeys = {
     amortization: (id: string) =>
       [...queryKeys.accounts.all, 'amortization', id] as const,
   },
+  debt: {
+    all: ['debt'] as const,
+    categorySummary: (range: 'ytd' | '12m' | 'month' = 'ytd') =>
+      [...queryKeys.debt.all, 'category-summary', range] as const,
+  },
   transfers: {
     all: ['transfers'] as const,
     list: () => [...queryKeys.transfers.all, 'list'] as const,

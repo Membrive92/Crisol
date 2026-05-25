@@ -391,9 +391,41 @@ Reglas:
 - `/accounts/debt-health` opera sólo en la `reference_currency`
   (primera cuenta no archivada por `display_order`). Cuentas en
   otras divisas se ignoran silenciosamente.
-- `dti_status`: `healthy` (<0.36) · `caution` (0.36–0.43) ·
-  `stressed` (>0.43) · `unknown` (sin ingresos o sin pagos de
-  deuda registrados).
+- `dti_status` (recalibrado en PHASE-30.2): `healthy` (<0.30) ·
+  `caution` (0.30–0.35) · `stressed` (>0.35) · `unknown` (sin
+  ingresos o sin pagos de deuda registrados). Bandas BdE
+  ("tasa de esfuerzo" sobre ingresos netos); reemplazan a las
+  estadounidenses 36%/43% sobre ingresos brutos.
+- `time_to_payoff_months` (recalibrado en PHASE-30.2): cuando la
+  liability tiene cuadro (`apr + term_months + start_date`), usa
+  las cuotas restantes del schedule; fallback a proyección
+  lineal sólo para tarjetas o liabilities sin cuadro. Devuelve
+  el máximo individual.
+
+## Debt (Capa 1) (`PHASE-30.2`)
+
+| Método | Ruta | Auth | Body / Query | Response |
+|--------|------|------|--------------|----------|
+| GET    | `/debt/category-summary` | sí | `?range=ytd|12m|month` (def `ytd`) | `200 DebtCategorySummary { reference_currency, range, range_start, range_end, total_payments, interests_and_fees, capital_amortized, by_type[], monthly_series[], monthly_income_avg, effort_ratio_strict, effort_ratio_strict_status, effort_ratio_extended, effort_ratio_extended_status, recurring_quotas[] }` |
+
+Reglas:
+- Capa 1 = KPIs derivados del flujo de transacciones con
+  `category.role IN (DEBT_PAYMENT, DEBT_INTEREST)`. No requiere
+  liability accounts — basta con que el usuario categorice sus pagos.
+- `total_payments` = `interests_and_fees + capital_amortized`.
+- `by_type` clasifica por nombre de la categoría (hipoteca / tarjeta
+  / préstamo / other) para el donut de composición.
+- `monthly_series` tiene longitud determinista por rango: 12 puntos
+  para `12m`, 1 para `month`, `mes_actual` para `ytd`. Meses sin
+  actividad caen en 0.
+- `effort_ratio_strict` = `monthly_debt_payment / monthly_income_avg`
+  sobre los últimos 6 meses cerrados (independiente del `range_`).
+  `effort_ratio_extended` añade al numerador los `fixed_expenses`
+  confirmados con cadencia mensual cuya categoría NO sea de deuda
+  (evita doble cómputo).
+- `recurring_quotas` lista `fixed_expenses` confirmados con
+  `category.role` de deuda — la UI los presenta como "Cuotas
+  recurrentes detectadas".
 
 ## Transfers (`PHASE-21.3`)
 
