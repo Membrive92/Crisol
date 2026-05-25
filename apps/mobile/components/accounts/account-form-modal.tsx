@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 
+import { useCategories } from '@crisol/services';
 import type { Account, AccountType } from '@crisol/types';
 import {
   AMORTIZABLE_ACCOUNT_TYPES,
@@ -51,6 +52,9 @@ export interface AccountFormValues {
   total_to_pay: string;
   /** PHASE-24.3 — Primer pago sólo de intereses (€). */
   interest_only_first_payment: string;
+  /** PHASE-30.5 — Categoría de pagos vinculada (sólo liabilities).
+   * Vacío = sin vincular. */
+  category_id: string;
 }
 
 export interface AccountFormModalProps {
@@ -88,6 +92,7 @@ export const DEFAULT_ACCOUNT_FORM: AccountFormValues = {
   start_date: '',
   total_to_pay: '',
   interest_only_first_payment: '',
+  category_id: '',
 };
 
 /**
@@ -123,6 +128,7 @@ function fromAccount(account: Account): AccountFormValues {
     start_date: account.start_date ?? '',
     total_to_pay: account.total_to_pay ?? '',
     interest_only_first_payment: account.interest_only_first_payment ?? '',
+    category_id: account.category_id ?? '',
   };
 }
 
@@ -145,6 +151,10 @@ export function AccountFormModal({
 }: AccountFormModalProps) {
   const [values, setValues] = useState<AccountFormValues>(DEFAULT_ACCOUNT_FORM);
   const [error, setError] = useState<string | null>(null);
+  const categoriesQuery = useCategories();
+  const debtCategories = (categoriesQuery.data ?? []).filter(
+    (c) => c.role === 'DEBT_PAYMENT' || c.role === 'DEBT_INTEREST',
+  );
 
   useEffect(() => {
     if (!visible) return;
@@ -160,6 +170,7 @@ export function AccountFormModal({
   }
 
   function handleTypeChange(nextType: AccountType) {
+    const nextIsLiability = LIABILITY_ACCOUNT_TYPES.includes(nextType);
     // Al cambiar a un tipo no amortizable, limpiamos los campos
     // específicos para que el caller no envíe valores residuales.
     if (!isAmortizableType(nextType)) {
@@ -172,10 +183,17 @@ export function AccountFormModal({
         start_date: '',
         total_to_pay: '',
         interest_only_first_payment: '',
+        // PHASE-30.5: category_id sólo aplica a liabilities. Al
+        // cambiar a asset, limpiar para no enviar un vínculo inválido.
+        category_id: nextIsLiability ? prev.category_id : '',
       }));
       return;
     }
-    setValues((prev) => ({ ...prev, type: nextType }));
+    setValues((prev) => ({
+      ...prev,
+      type: nextType,
+      category_id: nextIsLiability ? prev.category_id : '',
+    }));
   }
 
   function handleSubmit() {
@@ -349,6 +367,71 @@ export function AccountFormModal({
                     placeholderTextColor={colors.textMuted}
                   />
                 </View>
+
+                {isLiability ? (
+                  <View>
+                    <Text style={styles.label}>
+                      Categoría de pagos vinculada (opcional)
+                    </Text>
+                    {debtCategories.length === 0 ? (
+                      <Text style={styles.helper}>
+                        No tienes categorías con rol de deuda todavía. Crea
+                        una en Ajustes › Categorías marcando rol
+                        DEBT_PAYMENT o DEBT_INTEREST.
+                      </Text>
+                    ) : (
+                      <>
+                        <View style={styles.categoryChipRow}>
+                          <Pressable
+                            onPress={() => patch('category_id', '')}
+                            style={[
+                              styles.categoryChip,
+                              !values.category_id && styles.categoryChipActive,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.categoryChipText,
+                                !values.category_id && styles.categoryChipTextActive,
+                              ]}
+                            >
+                              Sin vincular
+                            </Text>
+                          </Pressable>
+                          {debtCategories.map((c) => {
+                            const active = values.category_id === c.id;
+                            return (
+                              <Pressable
+                                key={c.id}
+                                onPress={() => patch('category_id', c.id)}
+                                style={[
+                                  styles.categoryChip,
+                                  active && styles.categoryChipActive,
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.categoryChipText,
+                                    active && styles.categoryChipTextActive,
+                                  ]}
+                                  numberOfLines={1}
+                                >
+                                  {c.icon ? `${c.icon} ` : ''}
+                                  {c.name}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                        <Text style={styles.helper}>
+                          Si las cuotas de este contrato aparecen como una
+                          categoría en tus transacciones, vincúlala para
+                          cruzar Capa 1 (flujo) con Capa 2 (saldo).
+                        </Text>
+                      </>
+                    )}
+                  </View>
+                ) : null}
 
                 {showAmortization ? (
                   <View style={styles.amortBox}>
@@ -554,6 +637,34 @@ const styles = StyleSheet.create({
   typeChipLiabilityTextActive: {
     color: colors.danger,
     fontWeight: fontWeight.semibold,
+  },
+  categoryChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  categoryChip: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    maxWidth: 200,
+  },
+  categoryChipActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
+  },
+  categoryChipText: {
+    fontSize: 12,
+    fontWeight: fontWeight.semibold,
+    color: colors.textMuted,
+  },
+  categoryChipTextActive: {
+    color: colors.primary,
   },
   amortBox: {
     borderWidth: 1,

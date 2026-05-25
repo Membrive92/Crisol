@@ -2,7 +2,8 @@ import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
-import type { Account, AccountBalance } from '@crisol/types';
+import { useCategories } from '@crisol/services';
+import type { Account, AccountBalance, Category } from '@crisol/types';
 import { AMORTIZABLE_ACCOUNT_TYPES } from '@crisol/types';
 import {
   colors,
@@ -48,6 +49,13 @@ export function DebtList({ balances, accounts, isLoading, onPayDebt }: DebtListP
     for (const a of accounts) map.set(a.id, a);
     return map;
   }, [accounts]);
+
+  const categoriesQuery = useCategories();
+  const categoriesById = useMemo(() => {
+    const map = new Map<string, Category>();
+    for (const c of categoriesQuery.data ?? []) map.set(c.id, c);
+    return map;
+  }, [categoriesQuery.data]);
 
   if (isLoading && liabilities.length === 0) {
     return (
@@ -100,7 +108,23 @@ export function DebtList({ balances, accounts, isLoading, onPayDebt }: DebtListP
                 <Text style={styles.rowName} numberOfLines={1}>
                   {b.name}
                 </Text>
-                <Text style={styles.rowType}>{TYPE_LABEL[b.type] ?? b.type}</Text>
+                <View style={styles.rowTypeRow}>
+                  <Text style={styles.rowType}>{TYPE_LABEL[b.type] ?? b.type}</Text>
+                  {full?.category_id ? (() => {
+                    const cat = categoriesById.get(full.category_id);
+                    if (!cat) return null;
+                    return (
+                      <View style={styles.categoryChip}>
+                        {cat.icon ? (
+                          <Text style={styles.categoryChipIcon}>{cat.icon}</Text>
+                        ) : null}
+                        <Text style={styles.categoryChipText} numberOfLines={1}>
+                          {cat.name}
+                        </Text>
+                      </View>
+                    );
+                  })() : null}
+                </View>
               </View>
               <Text style={styles.rowBalance}>
                 {formatAmount(b.current_balance, b.currency)}
@@ -192,7 +216,32 @@ const styles = StyleSheet.create({
   rowType: {
     fontSize: fontSize.xs,
     color: colors.textMuted,
+  },
+  rowTypeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
     marginTop: 2,
+    flexWrap: 'wrap',
+  },
+  categoryChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  categoryChipIcon: {
+    fontSize: 11,
+  },
+  categoryChipText: {
+    fontSize: 11,
+    fontWeight: fontWeight.semibold,
+    color: colors.primary,
+    maxWidth: 120,
   },
   rowBalance: {
     fontSize: fontSize.md,

@@ -271,15 +271,7 @@ y [`design-explorations/debt-redesign-30/wireframe.md`](design-explorations/debt
 | 30.2 | Endpoint `/debt/category-summary` + bandas BdE 30/35% + fix `time_to_payoff` | ✅ | — |
 | 30.3 | Web: rediseño `/debt` con Capa 1 hero                        | ✅     | —  |
 | 30.4 | Web: Capa 2 condensada + vinculación contrato-categoría      | ✅     | —  |
-| 30.5 | Mobile parity (opcional, aplazable)                          | ⏸     | —  |
-
-> PHASE-30.5 queda **aplazada** por decisión explícita del plan
-> (`opcional, aplazable`): el módulo móvil sigue funcionando con la
-> arquitectura previa (DebtHealthCard + DebtTrendChart + DebtList) y
-> el endpoint nuevo `/debt/category-summary` está disponible cuando
-> se aborde la parity. El form de cuenta mobile no expone aún el
-> selector de categoría vinculada (PHASE-30.4) — limita la
-> vinculación al frontend web hasta que se ejecute esta fase.
+| 30.5 | Mobile parity                                                | ✅     | —  |
 
 ### Fase 31 — Saneamiento de cuentas e integridad de saldos
 

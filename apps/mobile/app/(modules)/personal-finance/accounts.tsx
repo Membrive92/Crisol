@@ -87,6 +87,11 @@ function toCreatePayload(values: AccountFormValues): AccountCreateRequest {
     const interestOnlyRaw = values.interest_only_first_payment.trim().replace(',', '.');
     if (interestOnlyRaw) payload.interest_only_first_payment = interestOnlyRaw;
   }
+  // PHASE-30.5: vinculación contrato↔categoría sólo aplica a liabilities.
+  const isLiability = ['credit_card', 'loan', 'mortgage'].includes(values.type);
+  if (isLiability && values.category_id) {
+    payload.category_id = values.category_id;
+  }
   return payload;
 }
 
@@ -143,6 +148,14 @@ function toUpdatePayload(
     payload.total_to_pay = null;
     payload.interest_only_first_payment = null;
   }
+  // PHASE-30.5: vinculación contrato↔categoría. Liabilities envían el
+  // id seleccionado o `null` (desvincular). Assets fuerzan null para
+  // evitar valores residuales tras un cambio de tipo.
+  const isLiabilityForCategory = [
+    'credit_card', 'loan', 'mortgage',
+  ].includes(values.type);
+  payload.category_id =
+    isLiabilityForCategory && values.category_id ? values.category_id : null;
   return payload;
 }
 
