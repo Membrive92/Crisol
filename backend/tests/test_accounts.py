@@ -253,3 +253,136 @@ async def test_transaction_with_foreign_account_id_returns_404(
         headers=_auth(token_b),
     )
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# PHASE-31.3 — tx sin categoría no contribuye al saldo (`else_=0`).
+# ---------------------------------------------------------------------------
+
+
+async def test_uncategorized_tx_does_not_affect_balance(
+    client: AsyncClient,
+) -> None:
+    """Una tx sin `category_id` no cuenta al saldo. Antes el fallback
+    `else_=Transaction.amount` la sumaba arbitrariamente — PHASE-31.3
+    lo cambia a `else_=0`."""
+    token = await _setup_user(client, "uncat-balance@example.com")
+    acc = await client.post(
+        "/accounts",
+        json={"name": "Test", "type": "bank", "currency": "EUR"},
+        headers=_auth(token),
+    )
+    aid = acc.json()["id"]
+
+    # Crear una tx SIN categoría.
+    tx = await client.post(
+        "/transactions",
+        json={
+            "amount": "500.00",
+            "currency": "EUR",
+            "occurred_at": "2026-04-15T12:00:00Z",
+            "account_id": aid,
+        },
+        headers=_auth(token),
+    )
+    assert tx.status_code == 201
+
+    balances = await client.get("/accounts/balances", headers=_auth(token))
+    by_id = {b["account_id"]: b for b in balances.json()["items"]}
+    # La tx no contribuye al saldo hasta que tenga categoría.
+    assert by_id[aid]["movements_balance"] == "0"
+
+
+async def test_uncategorized_summary_endpoint(client: AsyncClient) -> None:
+    """`GET /transactions/uncategorized-summary` devuelve conteo y total
+    de tx sin categorizar para alimentar el banner UX."""
+    token = await _setup_user(client, "uncat-summary@example.com")
+    acc = await client.post(
+        "/accounts",
+        json={"name": "Test", "type": "bank", "currency": "EUR"},
+        headers=_auth(token),
+    )
+    aid = acc.json()["id"]
+
+    # Crear 3 tx sin categoría.
+    for amount in ("10.00", "20.00", "30.00"):
+        r = await client.post(
+            "/transactions",
+            json={
+                "amount": amount,
+                "currency": "EUR",
+                "occurred_at": "2026-04-15T12:00:00Z",
+                "account_id": aid,
+            },
+            headers=_auth(token),
+        )
+        assert r.status_code == 201
+
+    summary = await client.get(
+        "/transactions/uncategorized-summary", headers=_auth(token)
+    )
+    assert summary.status_code == 200
+    body = summary.json()
+    assert body["count"] == 3
+    # 10 + 20 + 30
+    assert body["total_amount"] == "60.00"
+    assert body["currency"] == "EUR"
+
+
+# ---------------------------------------------------------------------------
+# PHASE-31.4 — brokerage/crypto fuera del patrimonio neto agregado.
+# ---------------------------------------------------------------------------
+
+
+async def test_brokerage_account_marked_unvalued(client: AsyncClient) -> None:
+    """Una cuenta brokerage tiene `is_unvalued=true` en /accounts/balances."""
+    token = await _setup_user(client, "brokerage-flag@example.com")
+    r = await client.post(
+        "/accounts",
+        json={"name": "Broker", "type": "brokerage", "currency": "EUR"},
+        headers=_auth(token),
+    )
+    assert r.status_code == 201
+
+    balances = await client.get("/accounts/balances", headers=_auth(token))
+    items = balances.json()["items"]
+    assert len(items) == 1
+    assert items[0]["is_unvalued"] is True
+
+
+async def test_brokerage_account_excluded_from_net_worth(
+    client: AsyncClient,
+) -> None:
+    """Una cuenta brokerage con opening_balance=10000 no suma a
+    `total_assets`. Solo las cuentas valoradas (bank, savings, cash)
+    cuentan al patrimonio neto agregado hasta que exista el módulo de
+    inversión."""
+    token = await _setup_user(client, "brokerage-aggregate@example.com")
+    await client.post(
+        "/accounts",
+        json={
+            "name": "Bank",
+            "type": "bank",
+            "currency": "EUR",
+            "opening_balance": "5000.00",
+        },
+        headers=_auth(token),
+    )
+    await client.post(
+        "/accounts",
+        json={
+            "name": "Broker",
+            "type": "brokerage",
+            "currency": "EUR",
+            "opening_balance": "10000.00",
+        },
+        headers=_auth(token),
+    )
+
+    balances = await client.get("/accounts/balances", headers=_auth(token))
+    body = balances.json()
+    # Total assets = solo bank (5000), brokerage (10000) excluido.
+    assert body["total_assets"] == "5000.00"
+    assert body["net_worth"] == "5000.00"
+    # Ambas cuentas siguen apareciendo en `items`.
+    assert len(body["items"]) == 2

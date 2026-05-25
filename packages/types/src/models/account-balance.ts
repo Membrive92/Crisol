@@ -18,6 +18,13 @@ export interface AccountBalance {
   movements_balance: string;
   /** `opening_balance + movements_balance`. */
   current_balance: string;
+  /**
+   * PHASE-31.4 — `true` para cuentas que NO entran al agregado de
+   * patrimonio (brokerage / crypto, hasta que exista módulo de
+   * inversión real). Siguen visibles y siguen siendo destino válido
+   * de transferencias.
+   */
+  is_unvalued?: boolean;
 }
 
 export interface AccountBalancesResponse {

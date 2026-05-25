@@ -21,6 +21,7 @@ import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
 import { StitchSearchToolbar } from '@/components/transactions/stitch-search-toolbar';
 import { StitchTransactionsKpiRow } from '@/components/transactions/stitch-transactions-kpi-row';
 import { TransactionList } from '@/components/transactions/transaction-list';
+import { UncategorizedBanner } from '@/components/transactions/uncategorized-banner';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Pagination } from '@/components/ui/pagination';
@@ -278,6 +279,20 @@ export default function TransactionsPage() {
           currency={currency}
           dateFrom={dateFrom}
           dateTo={dateTo}
+        />
+
+        <UncategorizedBanner
+          onSeeUncategorized={() => {
+            // PHASE-31.3 — atajo al filtro de sin categoría. El backend
+            // todavía no acepta `category_id=null` como query, así que
+            // de momento el banner se queda informativo cuando no hay
+            // filtro custom. Cuando se añada el filtro, basta con
+            // `setFilters({ ...filters, category_id: 'none', offset: 0 })`.
+            //
+            // Aquí, hasta que llegue, hacemos scroll a la lista para
+            // que el usuario al menos las vea pasar.
+            window.scrollTo({ top: 400, behavior: 'smooth' });
+          }}
         />
 
         <StitchSearchToolbar

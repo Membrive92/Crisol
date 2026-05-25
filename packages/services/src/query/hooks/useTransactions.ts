@@ -36,6 +36,21 @@ export function useTransaction(id: string | undefined) {
  * para que no muestre años ni meses vacíos. Se invalida implícitamente
  * con el resto del grupo `transactions.all` al crear/borrar/restaurar.
  */
+/**
+ * PHASE-31.3 — conteo + suma de tx sin categoría. Refresca con cada
+ * crear/borrar/categorizar tx (invalidación del grupo `transactions.all`).
+ */
+export function useUncategorizedSummary() {
+  return useQuery<
+    { count: number; total_amount: string; currency: string },
+    Error
+  >({
+    queryKey: queryKeys.transactions.uncategorizedSummary(),
+    queryFn: () => transactionsApi.uncategorizedSummary(),
+    staleTime: 1000 * 30,
+  });
+}
+
 export function useTransactionAvailablePeriods() {
   return useQuery<{ year: number; months: number[] }[], Error>({
     queryKey: queryKeys.transactions.availablePeriods(),

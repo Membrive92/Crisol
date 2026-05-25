@@ -9,6 +9,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel
+from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -211,6 +212,57 @@ async def available_periods_endpoint(
             AvailablePeriodItem(year=year, months=months)
             for year, months in periods
         ]
+    )
+
+
+class UncategorizedSummaryResponse(BaseModel):
+    """PHASE-31.3 — Conteo + suma de tx sin categoría para el banner UX."""
+
+    count: int
+    total_amount: Decimal
+    currency: str
+
+
+@router.get("/uncategorized-summary", response_model=UncategorizedSummaryResponse)
+async def uncategorized_summary_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> UncategorizedSummaryResponse:
+    """Cuántas tx activas (no papelera) tiene el usuario sin categoría
+    y por qué importe total. Alimenta el banner que invita a
+    categorizar — tras PHASE-31.3 estas tx ya no contaminan el saldo,
+    así que conviene que el usuario las vea explícitamente."""
+    from sqlalchemy import func as sql_func
+
+    rows = (
+        await db.execute(
+            sa_select(
+                sql_func.count(Transaction.id),
+                sql_func.coalesce(sql_func.sum(Transaction.amount), 0),
+                Transaction.currency,
+            )
+            .where(Transaction.user_id == user.id)
+            .where(Transaction.deleted_at.is_(None))
+            .where(Transaction.category_id.is_(None))
+            .group_by(Transaction.currency)
+        )
+    ).all()
+    # Si el usuario tiene tx sin categoría en varias monedas, devolvemos
+    # la moneda mayoritaria (más tx) y el total en esa moneda. Es
+    # razonable para el banner — un caso bordes que no debería pasar
+    # con un usuario disciplinado.
+    if not rows:
+        return UncategorizedSummaryResponse(
+            count=0, total_amount=Decimal("0"), currency="EUR"
+        )
+    rows_sorted = sorted(rows, key=lambda r: r[0], reverse=True)
+    count, amount, currency = rows_sorted[0]
+    total_count = sum(int(r[0]) for r in rows)
+    _ = count  # noqa: F841 — kept for clarity above; total_count wins
+    return UncategorizedSummaryResponse(
+        count=total_count,
+        total_amount=Decimal(amount or 0),
+        currency=currency,
     )
 
 

@@ -90,6 +90,25 @@ export const transactionsApi = {
   },
 
   /**
+   * PHASE-31.3 — conteo + suma de tx sin categoría. Alimenta el
+   * banner que invita a categorizar. Las tx sin categoría ya no
+   * contaminan el saldo (`else_=0`), así que conviene que el
+   * usuario las vea para no perderlas de vista.
+   */
+  async uncategorizedSummary(): Promise<{
+    count: number;
+    total_amount: string;
+    currency: string;
+  }> {
+    const response = await apiClient.get<{
+      count: number;
+      total_amount: string;
+      currency: string;
+    }>('/transactions/uncategorized-summary');
+    return response.data;
+  },
+
+  /**
    * Años + meses con transacciones activas del usuario. Los años
    * llegan en orden descendente; los meses dentro de cada año en
    * orden ascendente (1-12). Vacío si el usuario aún no tiene

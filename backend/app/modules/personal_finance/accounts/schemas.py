@@ -126,6 +126,14 @@ class AccountBalance(BaseModel):
     cuenta."""
     current_balance: Decimal
     """`opening_balance + movements_balance`."""
+    is_unvalued: bool = False
+    """PHASE-31.4 — `True` para cuentas cuyo saldo NO entra al agregado
+    de patrimonio neto porque su valoración real depende del mercado y
+    no se computa por `Σ(movimientos)` (hoy: brokerage y crypto).
+    Siguen apareciendo en `items` para que el usuario las vea y para
+    que sigan siendo destino válido de transferencias. Cuando exista
+    un módulo de inversión real con valoración propia, se
+    reincorporarán al patrimonio."""
 
 
 class DebtHealthKpis(BaseModel):

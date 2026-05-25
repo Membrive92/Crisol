@@ -123,7 +123,13 @@ async def get_balances_for_user(
         # Asset (default).
         (Category.kind == CategoryKind.EXPENSE, -Transaction.amount),
         (Category.kind == CategoryKind.INCOME, Transaction.amount),
-        else_=Transaction.amount,
+        # PHASE-31.3 — tx sin categoría (kind=NULL tras outerjoin) o con
+        # categoría sin kind no contribuye al saldo. Antes era
+        # `else_=Transaction.amount`, que producía un cargo / abono
+        # arbitrario en función del importe firmado en la BD — ruido
+        # silencioso cuando un import fallaba y la tx quedaba sin
+        # categorizar. El banner UX educa al usuario para categorizar.
+        else_=Decimal("0"),
     )
     query = (
         select(
@@ -156,17 +162,18 @@ async def get_balance_for_account(
     `get_balances_for_user`). Default `ASSET` para compatibilidad con
     callers existentes.
     """
+    # PHASE-31.3 — `else_=Decimal("0")` igual que `get_balances_for_user`.
     if account_nature == AccountNature.LIABILITY:
         signed_amount = case(
             (Category.kind == CategoryKind.EXPENSE, Transaction.amount),
             (Category.kind == CategoryKind.INCOME, -Transaction.amount),
-            else_=Transaction.amount,
+            else_=Decimal("0"),
         )
     else:
         signed_amount = case(
             (Category.kind == CategoryKind.EXPENSE, -Transaction.amount),
             (Category.kind == CategoryKind.INCOME, Transaction.amount),
-            else_=Transaction.amount,
+            else_=Decimal("0"),
         )
     query = (
         select(func.coalesce(func.sum(signed_amount), 0))

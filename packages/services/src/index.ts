@@ -76,6 +76,7 @@ export {
   useTransactions,
   useTransaction,
   useTransactionAvailablePeriods,
+  useUncategorizedSummary,
   useCreateTransaction,
   useUpdateTransaction,
   useDeleteTransaction,

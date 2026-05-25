@@ -54,6 +54,14 @@ def _nature_for_type(account_type: AccountType) -> AccountNature:
 
 DEFAULT_REFERENCE_CURRENCY = "EUR"
 
+# PHASE-31.4 — tipos de cuenta cuya valoración real no se computa por
+# `Σ(movimientos)` mientras no exista un módulo de inversión propio.
+# Quedan visibles en `items` (display + destino de transferencias) pero
+# fuera del agregado de patrimonio neto. Se reincorporarán cuando el
+# módulo de inversiones (locked en el registry) llegue con valoración
+# real (precio de mercado × cantidad).
+_UNVALUED_ACCOUNT_TYPES = frozenset({AccountType.BROKERAGE, AccountType.CRYPTO})
+
 
 async def list_accounts(
     db: AsyncSession,
@@ -242,6 +250,7 @@ async def get_balances(
     for account in accounts:
         movements_balance = movements.get(account.id, Decimal("0"))
         current_balance = account.opening_balance + movements_balance
+        is_unvalued = account.type in _UNVALUED_ACCOUNT_TYPES
         items.append(
             AccountBalance(
                 account_id=account.id,
@@ -254,11 +263,18 @@ async def get_balances(
                 opening_balance=account.opening_balance,
                 movements_balance=movements_balance,
                 current_balance=current_balance,
+                is_unvalued=is_unvalued,
             )
         )
         if account.is_archived:
             continue
         active_currencies.add(account.currency)
+        # PHASE-31.4 — brokerage/crypto no entran al agregado de
+        # patrimonio: su valor real depende del mercado y `Σ(movimientos)`
+        # no lo representa. Siguen visibles en `items` y siendo destino
+        # válido de transferencias.
+        if is_unvalued:
+            continue
         if account.nature == AccountNature.LIABILITY:
             total_liabilities += current_balance
         else:

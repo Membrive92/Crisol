@@ -685,6 +685,24 @@ function AccountTile({ item }: { item: AccountBalance }) {
               Deuda
             </span>
           ) : null}
+          {item.is_unvalued ? (
+            <span
+              title="Esta cuenta no entra al cálculo de patrimonio neto. Cuando exista el módulo de inversión real, se reincorporará con su valoración de mercado."
+              style={{
+                marginLeft: 6,
+                fontSize: 9.5,
+                fontWeight: fontWeight.semibold,
+                color: colors.textMuted,
+                backgroundColor: colors.surfaceMuted,
+                padding: '1px 5px',
+                borderRadius: 4,
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+              }}
+            >
+              No valorada
+            </span>
+          ) : null}
         </span>
         <span
           style={{
