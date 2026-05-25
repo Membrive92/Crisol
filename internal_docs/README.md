@@ -258,6 +258,33 @@ Plan completo en [phases/phase-8-roadmap.md](phases/phase-8-roadmap.md).
 | 29.5 | PositionHero (fusión BalancesCard + DebtHealthCard) en /analysis | ✅ | —  |
 | 29.6 | Polish cards (donut hover-center, sparkline, centered bar, tooltip Neto) | ✅ | — |
 
+### Fase 30 — Rediseño módulo deuda en dos capas
+
+Planificación + ADR + wireframe en
+[`phases/README.md`](phases/README.md) (plan ejecutivo conjunto con
+PHASE-31), [`decisions/0003-debt-module-two-layer-architecture.md`](decisions/0003-debt-module-two-layer-architecture.md)
+y [`design-explorations/debt-redesign-30/wireframe.md`](design-explorations/debt-redesign-30/wireframe.md).
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 30.1 | Enum `categories.role` + migración backfill desde `is_transfer` | 📋  | —  |
+| 30.2 | Endpoint `/debt/category-summary` + bandas BdE 30/35% + fix `time_to_payoff` | 📋 | — |
+| 30.3 | Web: rediseño `/debt` con Capa 1 hero                        | 📋     | —  |
+| 30.4 | Web: Capa 2 condensada + vinculación contrato-categoría      | 📋     | —  |
+| 30.5 | Mobile parity (opcional, aplazable)                          | 📋     | —  |
+
+### Fase 31 — Saneamiento de cuentas e integridad de saldos
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 31.1 | Seed bidireccional de transferencias + categoría INCOME + migración con backfill | 📋 | — |
+| 31.2 | UI bulk-fix: detección y corrección de transferencias con dirección dudosa | 📋 | — |
+| 31.3 | `else_=0` para tx sin categoría + banner UX                  | 📋     | —  |
+| 31.4 | Brokerage/crypto fuera del patrimonio neto agregado          | 📋     | —  |
+| 31.5 | `_infer_transfer_kind` robustecido (no asume EXPENSE arbitrario, respeta categoría preexistente) | 📋 | — |
+
+> Bloquea PHASE-30. Hotfix SQL disponible en `phase-31-account-integrity.md` para corregir saldos en BD local antes del despliegue completo.
+
 ---
 
 ## Estructura de este directorio
