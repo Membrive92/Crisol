@@ -243,25 +243,71 @@ async def list_suspects(
     ]
 
 
-_INCOMING_DESCRIPTION_HINTS = ("recibida", "recibido", "entrante", "entrada", "a favor")
+_INCOMING_DESCRIPTION_HINTS = (
+    "recibida",
+    "recibido",
+    "entrante",
+    "entrada",
+    "a favor",
+    "abono por transfer",
+    "abono transfer",
+    "ingreso por transfer",
+    "transferencia desde",
+    "transf desde",
+    "traspaso recibido",
+    "traspaso de",
+    "provisión de",
+    "provision de",
+)
+
+_OUTGOING_DESCRIPTION_HINTS = (
+    "realizada",
+    "realizado",
+    "enviada",
+    "enviado",
+    "saliente",
+    "salida",
+    "transferencia hacia",
+    "transf hacia",
+    "cargo por transfer",
+    "orden de pago",
+    "ordenes pago",
+    "traspaso enviado",
+    "traspaso a",
+)
 
 
-def _infer_transfer_kind(description: str | None) -> CategoryKind:
-    """Heurística para decidir si una tx es salida (EXPENSE) o entrada
-    (INCOME) cuando el usuario la marca como transferencia.
+def _infer_transfer_kind(
+    description: str | None,
+    *,
+    existing_category_kind: CategoryKind | None = None,
+) -> CategoryKind | None:
+    """PHASE-31.5 — Heurística para decidir si una tx es salida
+    (EXPENSE) o entrada (INCOME) cuando el usuario la marca como
+    transferencia.
 
-    Por defecto EXPENSE (caso más común: extracto de la cuenta origen
-    con TRANSFERENCIA REALIZADA). Si la descripción contiene "recibida"
-    / "entrante" / "a favor" se asume INCOME.
+    Orden de señales:
+    1. Si la tx ya tiene categoría con kind explícito, respetarlo —
+       asumimos que el rules engine + el usuario lo decidieron bien y
+       no queremos sobreescribir esa decisión sólo porque la
+       descripción no matchea nuestros hints.
+    2. Si la descripción matchea hints INCOME → INCOME.
+    3. Si la descripción matchea hints EXPENSE → EXPENSE.
+    4. Si nada matchea, devolver `None` — el caller decide si fallar
+       o pedir input al usuario. Antes devolvía EXPENSE por defecto,
+       lo que producía cargos falsos cuando la descripción era
+       ambigua (caso reportado).
     """
+    if existing_category_kind is not None:
+        return existing_category_kind
     if description is None:
-        return CategoryKind.EXPENSE
+        return None
     lowered = description.lower()
-    return (
-        CategoryKind.INCOME
-        if any(hint in lowered for hint in _INCOMING_DESCRIPTION_HINTS)
-        else CategoryKind.EXPENSE
-    )
+    if any(hint in lowered for hint in _INCOMING_DESCRIPTION_HINTS):
+        return CategoryKind.INCOME
+    if any(hint in lowered for hint in _OUTGOING_DESCRIPTION_HINTS):
+        return CategoryKind.EXPENSE
+    return None
 
 
 async def mark_as_transfer(
@@ -293,7 +339,26 @@ async def mark_as_transfer(
                 "enlace antes de marcarla como transferencia individual."
             ),
         )
-    target_kind = _infer_transfer_kind(tx.description)
+    # PHASE-31.5 — pasamos la categoría preexistente como señal primaria
+    # para no sobrescribirla con la heurística de descripción.
+    existing_kind: CategoryKind | None = None
+    if tx.category_id is not None:
+        existing_cat = await get_category_by_id(db, tx.category_id, user_id)
+        if existing_cat is not None:
+            existing_kind = existing_cat.kind
+    target_kind = _infer_transfer_kind(
+        tx.description, existing_category_kind=existing_kind
+    )
+    if target_kind is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "No podemos determinar si esta transferencia es entrante o "
+                "saliente desde la descripción. Edita la categoría "
+                "manualmente o usa 'Convertir en transferencia' "
+                "especificando las dos cuentas."
+            ),
+        )
     category = await get_or_create_default_transfer_category(
         db, user_id, kind=target_kind
     )

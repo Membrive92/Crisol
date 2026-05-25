@@ -545,9 +545,11 @@ async def test_mark_infers_income_kind_from_recibida_description(
     client: AsyncClient,
 ) -> None:
     """Una tx con "RECIBIDA" en descripción se marca con kind=INCOME.
-    Como el seed sólo trae una categoría is_transfer=expense
-    ("Transferencias"), el helper crea "Transferencia interna (entrada)"
-    para preservar +amount al saldo (asset+income → +amount).
+    Tras PHASE-31.1 el seed trae "Transferencia a favor" (INCOME,
+    is_transfer) lista — `get_or_create_default_transfer_category`
+    devuelve esa en lugar de crear "Transferencia interna (entrada)".
+    Lo importante es que la asignación preserva +amount al saldo
+    (asset+income → +amount), no el nombre exacto.
     """
     token, _cat, acc_a, _acc_b = await _setup_user_with_two_accounts(
         client, "mark-incoming@example.com"
@@ -566,7 +568,13 @@ async def test_mark_infers_income_kind_from_recibida_description(
         headers=_auth(token),
     )
     assert r.status_code == 201
-    assert "(entrada)" in r.json()["category_name"]
+    # La categoría asignada debe ser is_transfer=true + INCOME, sin
+    # importar si la creó el seed (PHASE-31.1) o el helper legacy.
+    body = r.json()
+    cats_all = await client.get("/categories", headers=_auth(token))
+    target_cat = next(c for c in cats_all.json() if c["id"] == body["category_id"])
+    assert target_cat["kind"] == "income"
+    assert target_cat["is_transfer"] is True
 
     cats = await client.get("/categories", headers=_auth(token))
     income_transfer = [

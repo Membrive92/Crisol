@@ -344,16 +344,46 @@ SEED_CATEGORIES: list[SeedCategoryDef] = [
         ],
     },
     {
+        # PHASE-31.1 — Sólo cubre transferencias SALIENTES con patrones
+        # inequívocos. Las reglas genéricas `_cc("TRANSFERENCIA", 80)` /
+        # `_cc("TRANSFERENCIAS", 80)` se eliminaron porque matcheaban
+        # tanto "TRANSFERENCIA REALIZADA" como "TRANSFERENCIA RECIBIDA"
+        # y secuestraban ingresos asignándolos a gasto (caso reportado
+        # con desviación ~21k€ en una cuenta). Una tx que sólo dice
+        # "TRANSFERENCIA" sin más queda sin categorizar y el usuario
+        # decide — preferible a adivinar mal sistemáticamente.
         "name": "Transferencias",
         "kind": CategoryKind.EXPENSE,
         "is_transfer": True,
         "color": "#64748b",
         "icon": "↔️",
         "rules": [
-            _cc("TRANSFERENCIA", 80),
-            _cc("TRANSFERENCIAS", 80),
-            _cc("ORDENES PAGO", 80),
-            _cc("ORDEN DE PAGO", 80),
+            _cc("TRANSFERENCIA REALIZADA", 20),
+            _cc("TRANSFERENCIA HACIA", 20),
+            _cc("CARGO POR TRANSFERENCIA", 20),
+            _cc("ORDENES PAGO", 20),
+            _cc("ORDEN DE PAGO", 20),
+            _cc("TRASPASO ENVIADO", 25),
+            _cc("TRASPASO A", 25),
+        ],
+    },
+    {
+        # PHASE-31.1 — Contraparte INCOME del par anterior. Captura las
+        # transferencias entrantes para que el saldo de la cuenta refleje
+        # el signo correcto. Mismas reglas espejo (RECIBIDA / DESDE / etc).
+        "name": "Transferencia a favor",
+        "kind": CategoryKind.INCOME,
+        "is_transfer": True,
+        "color": "#d97706",
+        "icon": "💰",
+        "rules": [
+            _cc("TRANSFERENCIA RECIBIDA", 20),
+            _cc("TRANSFERENCIA A FAVOR", 20),
+            _cc("ABONO POR TRANSFERENCIA", 20),
+            _cc("ABONO TRANSFERENCIA", 20),
+            _cc("INGRESO POR TRANSFERENCIA", 20),
+            _cc("TRANSFERENCIA DESDE", 25),
+            _cc("TRASPASO RECIBIDO", 25),
         ],
     },
     {
