@@ -159,6 +159,12 @@ interface ComparisonTooltipProps {
 }
 
 function ComparisonTooltip({ monthLabel, entries, currency }: ComparisonTooltipProps) {
+  // PHASE-29.6: añadimos línea "Neto" debajo, separada por un
+  // border-top, con color según signo. Se calcula a partir de los
+  // entries (income − expenses) sin asumir un orden concreto.
+  const income = entries.find((e) => e.name === 'Ingresos')?.value ?? 0;
+  const expenses = entries.find((e) => e.name === 'Gastos')?.value ?? 0;
+  const net = income - expenses;
   return (
     <div
       style={{
@@ -166,7 +172,7 @@ function ComparisonTooltip({ monthLabel, entries, currency }: ComparisonTooltipP
         border: `1px solid ${colors.border}`,
         borderRadius: radius.sm,
         padding: `${spacing.xs}px ${spacing.sm}px`,
-        minWidth: 140,
+        minWidth: 160,
         boxShadow: '0 8px 24px rgba(0, 0, 0, 0.32)',
       }}
     >
@@ -190,6 +196,26 @@ function ComparisonTooltip({ monthLabel, entries, currency }: ComparisonTooltipP
           <span>{formatAmount(String(entry.value.toFixed(2)), currency)}</span>
         </div>
       ))}
+      <div
+        style={{
+          marginTop: 4,
+          paddingTop: 4,
+          borderTop: `1px solid ${colors.border}`,
+          display: 'flex',
+          justifyContent: 'space-between',
+          gap: spacing.sm,
+          fontSize: fontSize.sm,
+          fontWeight: fontWeight.semibold,
+          color: net >= 0 ? colors.income : colors.danger,
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
+        <span>Neto</span>
+        <span>
+          {net >= 0 ? '+' : ''}
+          {formatAmount(String(net.toFixed(2)), currency)}
+        </span>
+      </div>
     </div>
   );
 }

@@ -192,19 +192,21 @@ export function StitchExpenseBreakdown({
                 alignItems: 'center',
                 justifyContent: 'center',
                 pointerEvents: 'none',
+                padding: spacing.sm,
+                textAlign: 'center',
               }}
             >
-              <span style={{ fontSize: fontSize.xs, color: colors.textMuted }}>Total</span>
-              <span
-                style={{
-                  fontSize: fontSize.lg,
-                  fontWeight: fontWeight.semibold,
-                  color: colors.text,
-                  fontVariantNumeric: 'tabular-nums',
-                }}
-              >
-                {formatAmount(String(total.toFixed(2)), currency)}
-              </span>
+              {/* PHASE-29.6: el centro reacciona al hover de un slice.
+                  Sin slice activo → "Total · {amount}". Con uno →
+                  "{label} · {value} · {pct}%". Transición opacidad
+                  para evitar el salto duro. */}
+              <DonutCenter
+                activeSlice={
+                  activeId ? slices.find((s) => s.id === activeId) ?? null : null
+                }
+                total={total}
+                currency={currency}
+              />
             </div>
           </div>
 
@@ -233,6 +235,62 @@ export function StitchExpenseBreakdown({
         </div>
       )}
     </Card>
+  );
+}
+
+function DonutCenter({
+  activeSlice,
+  total,
+  currency,
+}: {
+  activeSlice: Slice | null;
+  total: number;
+  currency: string;
+}) {
+  const showSlice = activeSlice !== null;
+  return (
+    <>
+      <span
+        style={{
+          fontSize: fontSize.xs,
+          color: showSlice ? activeSlice.color : colors.textMuted,
+          fontWeight: showSlice ? fontWeight.semibold : fontWeight.medium,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          maxWidth: '88%',
+          transition: 'color 120ms ease, opacity 120ms ease',
+        }}
+      >
+        {showSlice ? activeSlice.label : 'Total'}
+      </span>
+      <span
+        style={{
+          fontSize: fontSize.lg,
+          fontWeight: fontWeight.semibold,
+          color: colors.text,
+          fontVariantNumeric: 'tabular-nums',
+          marginTop: 2,
+        }}
+      >
+        {formatAmount(
+          String((showSlice ? activeSlice.value : total).toFixed(2)),
+          currency,
+        )}
+      </span>
+      {showSlice ? (
+        <span
+          style={{
+            fontSize: 11,
+            color: colors.textMuted,
+            fontVariantNumeric: 'tabular-nums',
+            marginTop: 2,
+          }}
+        >
+          {activeSlice.pct.toFixed(0)}% del total
+        </span>
+      ) : null}
+    </>
   );
 }
 

@@ -146,7 +146,7 @@ export default function AnalysisPage() {
           currency={currency}
           isLoading={monthlyQuery.isLoading}
         />
-        <StitchKeyMetrics summary={summary} currency={currency} />
+        <StitchKeyMetrics summary={summary} currency={currency} monthly={monthly} />
       </div>
 
       {/* Bento secundario: desglose + insights */}
