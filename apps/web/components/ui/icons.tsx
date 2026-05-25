@@ -447,3 +447,22 @@ export const UnfoldMoreIcon = (p: IconProps) => (
     <polyline points="8 6 12 2 16 6" />
   </Icon>
 );
+
+/** PHASE-29.4 — target/objetivo (presupuestos). Círculos concéntricos. */
+export const TargetIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="10" />
+    <circle cx="12" cy="12" r="6" />
+    <circle cx="12" cy="12" r="2" />
+  </Icon>
+);
+
+/** PHASE-29.4 — repeat/loop (gastos fijos recurrentes). */
+export const RepeatIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <polyline points="17 1 21 5 17 9" />
+    <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+    <polyline points="7 23 3 19 7 15" />
+    <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+  </Icon>
+);
