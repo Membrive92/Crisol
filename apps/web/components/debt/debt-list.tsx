@@ -3,8 +3,8 @@
 import Link from 'next/link';
 import { useState } from 'react';
 
-import { useAccounts } from '@crisol/services';
-import type { Account, AccountBalance, AccountType } from '@crisol/types';
+import { useAccounts, useCategories } from '@crisol/services';
+import type { Account, AccountBalance, AccountType, Category } from '@crisol/types';
 import { AMORTIZABLE_ACCOUNT_TYPES } from '@crisol/types';
 import {
   colors,
@@ -88,6 +88,10 @@ export function DebtList({ liabilities, loading }: DebtListProps) {
   // la práctica, balances ya filtra archivadas.
   const accountsQuery = useAccounts({ includeArchived: true });
   const accounts = accountsQuery.data ?? [];
+  const categoriesQuery = useCategories();
+  const categoriesById = new Map<string, Category>(
+    (categoriesQuery.data ?? []).map((c) => [c.id, c]),
+  );
 
   if (loading) {
     return (
@@ -201,11 +205,16 @@ export function DebtList({ liabilities, loading }: DebtListProps) {
       >
         {liabilities.map((item) => {
           const account = accounts.find((a) => a.id === item.account_id);
+          const category =
+            account?.category_id != null
+              ? categoriesById.get(account.category_id) ?? null
+              : null;
           return (
             <DebtRow
               key={item.account_id}
               balance={item}
               {...(account ? { account } : {})}
+              {...(category ? { category } : {})}
             />
           );
         })}
@@ -217,9 +226,10 @@ export function DebtList({ liabilities, loading }: DebtListProps) {
 interface DebtRowProps {
   balance: AccountBalance;
   account?: Account;
+  category?: Category;
 }
 
-function DebtRow({ balance, account }: DebtRowProps) {
+function DebtRow({ balance, account, category }: DebtRowProps) {
   const [payingDebt, setPayingDebt] = useState(false);
 
   const isAmortizable =
@@ -278,6 +288,27 @@ function DebtRow({ balance, account }: DebtRowProps) {
           >
             {typeLabel}
           </span>
+          {category ? (
+            <span
+              title={`Categoría vinculada: ${category.name}`}
+              style={{
+                fontSize: 10,
+                fontWeight: fontWeight.semibold,
+                color: colors.primary,
+                backgroundColor: 'transparent',
+                padding: '1px 6px',
+                borderRadius: radius.sm,
+                letterSpacing: '0.04em',
+                border: `1px solid ${colors.primary}`,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 3,
+              }}
+            >
+              {category.icon ? <span aria-hidden>{category.icon}</span> : null}
+              <span>{category.name}</span>
+            </span>
+          ) : null}
         </div>
         <div
           style={{

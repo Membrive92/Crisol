@@ -19,6 +19,7 @@ import { useState } from 'react';
 import { AccountSwatch } from '@/components/accounts/account-swatch';
 import { InstallmentEditDialog } from '@/components/debt/installment-edit-dialog';
 import { InstallmentPayButtons } from '@/components/debt/installment-pay-buttons';
+import { ScheduleCondensed } from '@/components/debt/schedule-condensed';
 import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { KpiCard } from '@/components/ui/kpi-card';
@@ -189,7 +190,36 @@ function AmortizationContent({
   const paidCount = schedule.rows.filter((r) => r.paid_at != null).length;
   const [editing, setEditing] = useState<AmortizationRow | null>(null);
   const [confirmingRegen, setConfirmingRegen] = useState(false);
+  const [viewMode, setViewMode] = useState<'condensed' | 'full'>('condensed');
   const regen = useRegenerateAmortization();
+
+  function rowActions(row: AmortizationRow) {
+    const paid = row.paid_at != null;
+    if (!row.id) {
+      return (
+        <span style={{ fontSize: fontSize.xs, color: colors.textSubtle }}>—</span>
+      );
+    }
+    return (
+      <span style={{ display: 'inline-flex', gap: spacing.xs, alignItems: 'center' }}>
+        <button
+          type="button"
+          onClick={() => setEditing(row)}
+          style={inlineActionStyle}
+          title="Editar importe o fecha"
+        >
+          Editar
+        </button>
+        <InstallmentPayButtons
+          installmentId={row.id}
+          paid={paid}
+          onError={(err) =>
+            toast.error(formatApiError(err, 'No se pudo actualizar la cuota'))
+          }
+        />
+      </span>
+    );
+  }
 
   function handleRegenerate() {
     setConfirmingRegen(false);
@@ -270,8 +300,10 @@ function AmortizationContent({
               color: colors.text,
             }}
           >
-            Tabla completa · {paidCount} / {schedule.rows.length} pagadas
+            {viewMode === 'condensed' ? 'Cuadro por año' : 'Tabla completa'} ·{' '}
+            {paidCount} / {schedule.rows.length} pagadas
           </h2>
+          <ViewModeToggle mode={viewMode} onChange={setViewMode} />
           <div
             style={{
               display: 'inline-flex',
@@ -304,6 +336,15 @@ function AmortizationContent({
             </button>
           </div>
         </div>
+        {viewMode === 'condensed' ? (
+          <div style={{ padding: spacing.md }}>
+            <ScheduleCondensed
+              rows={schedule.rows}
+              currency={currency}
+              renderRow={rowActions}
+            />
+          </div>
+        ) : (
         <div
           style={{
             maxHeight: 540,
@@ -397,6 +438,7 @@ function AmortizationContent({
             </tbody>
           </table>
         </div>
+        )}
       </Card>
 
       <InstallmentEditDialog
@@ -427,6 +469,67 @@ function AmortizationContent({
         onCancel={() => setConfirmingRegen(false)}
       />
     </div>
+  );
+}
+
+function ViewModeToggle({
+  mode,
+  onChange,
+}: {
+  mode: 'condensed' | 'full';
+  onChange: (m: 'condensed' | 'full') => void;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Modo de visualización del cuadro"
+      style={{
+        display: 'inline-flex',
+        padding: 2,
+        backgroundColor: colors.surfaceMuted,
+        border: `1px solid ${colors.border}`,
+        borderRadius: radius.sm,
+        fontSize: fontSize.xs,
+        fontWeight: fontWeight.semibold,
+      }}
+    >
+      <ToggleBtn active={mode === 'condensed'} onClick={() => onChange('condensed')}>
+        Por año
+      </ToggleBtn>
+      <ToggleBtn active={mode === 'full'} onClick={() => onChange('full')}>
+        Detalle mensual
+      </ToggleBtn>
+    </div>
+  );
+}
+
+function ToggleBtn({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      style={{
+        padding: `${spacing.xs}px ${spacing.sm}px`,
+        backgroundColor: active ? colors.surface : 'transparent',
+        color: active ? colors.text : colors.textMuted,
+        border: 'none',
+        borderRadius: radius.sm,
+        cursor: 'pointer',
+        boxShadow: active ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
+      }}
+    >
+      {children}
+    </button>
   );
 }
 

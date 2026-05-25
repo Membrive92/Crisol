@@ -52,6 +52,63 @@ def _nature_for_type(account_type: AccountType) -> AccountNature:
         return AccountNature.LIABILITY
     return AccountNature.ASSET
 
+
+async def _validate_debt_category_link(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    account_type: AccountType,
+    category_id: uuid.UUID | None,
+) -> None:
+    """PHASE-30.4 — Verifica que el `category_id` propuesto se puede
+    asociar a esta cuenta.
+
+    Reglas:
+    - `None` se acepta siempre (desvincular).
+    - La cuenta debe ser liability (no tiene sentido para assets).
+    - La categoría debe existir y pertenecer al usuario.
+    - La categoría debe tener `role IN (DEBT_PAYMENT, DEBT_INTEREST)`.
+
+    Lanza 400 con mensaje claro en cualquier violación; nunca 404 para
+    no filtrar existencia de categorías ajenas.
+    """
+    if category_id is None:
+        return
+    if account_type not in LIABILITY_ACCOUNT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Sólo las cuentas de deuda pueden vincularse a una "
+                "categoría de pagos."
+            ),
+        )
+    from sqlalchemy import select
+
+    from app.modules.personal_finance.categories.models import (
+        Category,
+        CategoryRole,
+    )
+
+    result = await db.execute(
+        select(Category)
+        .where(Category.id == category_id)
+        .where(Category.user_id == user_id)
+    )
+    category = result.scalar_one_or_none()
+    if category is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La categoría seleccionada no existe.",
+        )
+    if category.role not in {CategoryRole.DEBT_PAYMENT, CategoryRole.DEBT_INTEREST}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "La categoría vinculada debe tener rol de deuda "
+                "(DEBT_PAYMENT o DEBT_INTEREST)."
+            ),
+        )
+
 DEFAULT_REFERENCE_CURRENCY = "EUR"
 
 # PHASE-31.4 — tipos de cuenta cuya valoración real no se computa por
@@ -139,6 +196,9 @@ async def create_account(
         AccountType.MORTGAGE,
         AccountType.CREDIT_CARD,  # PHASE-24.2: tarjetas financiadas con plan fijo.
     }
+    await _validate_debt_category_link(
+        db, user_id, account_type=data.type, category_id=data.category_id
+    )
     account = Account(
         user_id=user_id,
         name=data.name,
@@ -158,6 +218,7 @@ async def create_account(
             data.interest_only_first_payment if accepts_amortization else None
         ),
         display_order=data.display_order,
+        category_id=data.category_id,
     )
     persisted = await persist_account(db, account)
     # PHASE-24.1: si es loan/mortgage con todos los campos, generar las
@@ -198,6 +259,14 @@ async def update_account(
             )
     if "currency" in payload and payload["currency"] is not None:
         payload["currency"] = payload["currency"].upper()
+    if "category_id" in payload:
+        effective_type = payload.get("type") or account.type
+        await _validate_debt_category_link(
+            db,
+            user_id,
+            account_type=effective_type,
+            category_id=payload["category_id"],
+        )
     for field, value in payload.items():
         setattr(account, field, value)
     await db.flush()

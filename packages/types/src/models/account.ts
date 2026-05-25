@@ -73,6 +73,9 @@ export interface Account {
   interest_only_first_payment?: string | null;
   display_order: number;
   is_archived: boolean;
+  /** PHASE-30.4 — Categoría de pagos vinculada (chip en Capa 2 de
+   * /debt). NULL = sin vincular. Sólo significativo en liabilities. */
+  category_id?: string | null;
   created_at: string;
   updated_at: string;
 }

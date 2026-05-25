@@ -639,6 +639,144 @@ async def test_extra_charges_null_when_total_to_pay_not_set(
     assert body["extra_charges"] is None
 
 
+# ─────────────────────────────────────────────────────────────────────
+# PHASE-30.4: vinculación contrato-categoría
+# ─────────────────────────────────────────────────────────────────────
+
+
+async def _create_category(
+    client: AsyncClient, token: str, name: str, kind: str = "expense", role: str = "GENERIC"
+) -> str:
+    r = await client.post(
+        "/categories",
+        json={"name": name, "kind": kind, "role": role},
+        headers=_auth(token),
+    )
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+async def test_create_liability_with_debt_category_link(
+    client: AsyncClient,
+) -> None:
+    """PHASE-30.4 — Una liability acepta `category_id` apuntando a una
+    categoría con role DEBT_PAYMENT y la devuelve en la respuesta."""
+    token = await _register(client, "link_ok@example.com")
+    cat_id = await _create_category(
+        client, token, "Hipoteca BBVA", role="DEBT_PAYMENT"
+    )
+    body = await _create_account(
+        client,
+        token,
+        name="Hipoteca BBVA",
+        type="mortgage",
+        currency="EUR",
+        opening_balance="200000",
+        apr="0.035",
+        term_months=240,
+        start_date="2026-01-01",
+        category_id=cat_id,
+    )
+    assert body["category_id"] == cat_id
+
+
+async def test_create_liability_with_generic_category_rejected(
+    client: AsyncClient,
+) -> None:
+    """Vincular a una categoría con role GENERIC → 400 claro."""
+    token = await _register(client, "link_bad_role@example.com")
+    cat_id = await _create_category(client, token, "Comida")  # GENERIC default
+    r = await client.post(
+        "/accounts",
+        json={
+            "name": "Hipoteca rota",
+            "type": "mortgage",
+            "currency": "EUR",
+            "opening_balance": "100000",
+            "apr": "0.03",
+            "term_months": 120,
+            "start_date": "2026-01-01",
+            "category_id": cat_id,
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 400
+    assert "DEBT" in r.json()["detail"]
+
+
+async def test_create_asset_with_category_id_rejected(
+    client: AsyncClient,
+) -> None:
+    """Una cuenta asset no puede vincularse a una categoría — 400."""
+    token = await _register(client, "link_asset@example.com")
+    cat_id = await _create_category(
+        client, token, "Hipoteca", role="DEBT_PAYMENT"
+    )
+    r = await client.post(
+        "/accounts",
+        json={
+            "name": "Cuenta corriente",
+            "type": "bank",
+            "currency": "EUR",
+            "opening_balance": "1000",
+            "category_id": cat_id,
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 400
+
+
+async def test_create_liability_with_other_user_category_rejected(
+    client: AsyncClient,
+) -> None:
+    """Si la categoría no pertenece al usuario, 400 (no 404 para no
+    filtrar existencia)."""
+    token_a = await _register(client, "link_a@example.com")
+    token_b = await _register(client, "link_b@example.com")
+    cat_b = await _create_category(
+        client, token_b, "Hipoteca B", role="DEBT_PAYMENT"
+    )
+    r = await client.post(
+        "/accounts",
+        json={
+            "name": "Hipoteca",
+            "type": "mortgage",
+            "currency": "EUR",
+            "opening_balance": "100000",
+            "apr": "0.03",
+            "term_months": 120,
+            "start_date": "2026-01-01",
+            "category_id": cat_b,
+        },
+        headers=_auth(token_a),
+    )
+    assert r.status_code == 400
+
+
+async def test_update_account_can_unlink_category(client: AsyncClient) -> None:
+    """PUT con `category_id: null` desvincula la categoría."""
+    token = await _register(client, "unlink@example.com")
+    cat_id = await _create_category(
+        client, token, "Tarjeta", role="DEBT_PAYMENT"
+    )
+    acc = await _create_account(
+        client,
+        token,
+        name="Visa",
+        type="credit_card",
+        currency="EUR",
+        category_id=cat_id,
+    )
+    assert acc["category_id"] == cat_id
+    r = await client.put(
+        f"/accounts/{acc['id']}",
+        json={"category_id": None},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200
+    assert r.json()["category_id"] is None
+
+
 async def test_installment_isolation_between_users(client: AsyncClient) -> None:
     """Un usuario no puede tocar cuotas de otro — 404 por aislamiento."""
     token_a = await _register(client, "phase241-iso-a@example.com")

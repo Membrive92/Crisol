@@ -91,6 +91,12 @@ function toCreatePayload(form: AccountFormValue): AccountCreateRequest {
     const interestOnlyRaw = form.interest_only_first_payment.trim().replace(',', '.');
     if (interestOnlyRaw) payload.interest_only_first_payment = interestOnlyRaw;
   }
+  // PHASE-30.4: vinculación contrato↔categoría. Sólo se envía en
+  // liabilities (el backend rechazaría una asset con category_id).
+  const isLiability = ['credit_card', 'loan', 'mortgage'].includes(form.type);
+  if (isLiability && form.category_id) {
+    payload.category_id = form.category_id;
+  }
   return payload;
 }
 
@@ -158,6 +164,14 @@ function toUpdatePayload(
     payload.total_to_pay = null;
     payload.interest_only_first_payment = null;
   }
+  // PHASE-30.4: vinculación contrato↔categoría. Para liabilities
+  // enviamos el id o `null` (desvincular). Para assets fuerza null
+  // siempre para no dejar valores residuales tras cambiar de tipo.
+  const isLiabilityForCategory = [
+    'credit_card', 'loan', 'mortgage',
+  ].includes(form.type);
+  payload.category_id =
+    isLiabilityForCategory && form.category_id ? form.category_id : null;
   return payload;
 }
 
@@ -756,5 +770,6 @@ function fromAccount(
     start_date: account.start_date ?? '',
     total_to_pay: account.total_to_pay ?? '',
     interest_only_first_payment: account.interest_only_first_payment ?? '',
+    category_id: account.category_id ?? '',
   };
 }

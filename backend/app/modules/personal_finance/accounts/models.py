@@ -124,6 +124,16 @@ class Account(Base):
     display_order: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+    category_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("categories.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    """PHASE-30.4 — Categoría de pagos vinculada. Sólo válida cuando la
+    cuenta es liability y la categoría tiene `role IN (DEBT_PAYMENT,
+    DEBT_INTEREST)`. Permite cruzar la deuda declarada (Capa 2) con
+    el flujo categorizado (Capa 1) — la UI marca la categoría como chip
+    y futuras detecciones de cuotas recurrentes pueden ofrecer
+    auto-vinculación. NULL hasta que el usuario la asocie."""
     is_archived: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )

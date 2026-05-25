@@ -1,5 +1,6 @@
 'use client';
 
+import { useCategories } from '@crisol/services';
 import type { AccountType } from '@crisol/types';
 import {
   AMORTIZABLE_ACCOUNT_TYPES,
@@ -49,6 +50,10 @@ export interface AccountFormValue {
   total_to_pay: string;
   /** PHASE-24.3 — Primer pago sólo de intereses (€). Casi siempre 0. */
   interest_only_first_payment: string;
+  /** PHASE-30.4 — Categoría de pagos vinculada. Sólo se rellena en
+   * liabilities; el wizard la envía como `category_id` al backend
+   * (cadena vacía = sin vincular). */
+  category_id: string;
 }
 
 export interface AccountFormErrors {
@@ -95,6 +100,7 @@ export const DEFAULT_ACCOUNT_FORM: AccountFormValue = {
   start_date: '',
   total_to_pay: '',
   interest_only_first_payment: '',
+  category_id: '',
 };
 
 function isLiabilityType(type: AccountType): boolean {
@@ -121,6 +127,11 @@ export function AccountFormFields({
   variant = 'full',
   errors,
 }: AccountFormFieldsProps) {
+  const categoriesQuery = useCategories();
+  const debtCategories = (categoriesQuery.data ?? []).filter(
+    (c) => c.role === 'DEBT_PAYMENT' || c.role === 'DEBT_INTEREST',
+  );
+
   function patch<K extends keyof AccountFormValue>(field: K, next: AccountFormValue[K]) {
     onChange({ ...value, [field]: next });
   }
@@ -138,10 +149,17 @@ export function AccountFormFields({
         start_date: '',
         total_to_pay: '',
         interest_only_first_payment: '',
+        // category_id sólo aplica a liabilities. Al cambiar a asset
+        // limpiamos para no enviar un vínculo inválido al backend.
+        category_id: isLiabilityType(nextType) ? value.category_id : '',
       });
       return;
     }
-    onChange({ ...value, type: nextType });
+    onChange({
+      ...value,
+      type: nextType,
+      category_id: isLiabilityType(nextType) ? value.category_id : '',
+    });
   }
 
   const isLiability = isLiabilityType(value.type);
@@ -256,6 +274,37 @@ export function AccountFormFields({
           Podrás añadir color, icono y saldo inicial más adelante desde Ajustes.
         </p>
       )}
+
+      {isLiability && variant === 'full' ? (
+        <div>
+          <Select
+            label="Categoría de pagos vinculada (opcional)"
+            value={value.category_id}
+            onChange={(e) => patch('category_id', e.target.value)}
+            disabled={categoriesQuery.isLoading || debtCategories.length === 0}
+          >
+            <option value="">— Sin vincular —</option>
+            {debtCategories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.icon ? `${c.icon} ` : ''}
+                {c.name}
+              </option>
+            ))}
+          </Select>
+          <p
+            style={{
+              margin: `${spacing.xs}px 0 0 0`,
+              fontSize: fontSize.xs,
+              color: colors.textMuted,
+              lineHeight: 1.4,
+            }}
+          >
+            {debtCategories.length === 0
+              ? 'No tienes categorías con rol de deuda todavía. Crea una en Ajustes › Categorías marcando rol DEBT_PAYMENT o DEBT_INTEREST.'
+              : 'Si las cuotas de este contrato aparecen en tus transacciones bajo una categoría, vincúlala aquí para cruzar Capa 1 (flujo) con Capa 2 (saldo) en el módulo de deuda.'}
+          </p>
+        </div>
+      ) : null}
 
       {showAmortization && variant === 'full' ? (
         <fieldset

@@ -368,7 +368,7 @@ Reglas:
 | GET    | `/accounts/balances` | sí | — | `200 AccountBalancesResponse { items, total_assets, total_liabilities, net_worth, mixed_currencies, reference_currency }` (PHASE-21.3) |
 | GET    | `/accounts/debt-health` | sí | — | `200 DebtHealthKpis { total_liabilities, total_assets, net_worth, debt_to_assets_ratio, dti_ratio, dti_status, monthly_debt_payment, monthly_income_avg, interest_paid_ytd, weighted_apr, time_to_payoff_months, reference_currency }` (PHASE-22) |
 | GET    | `/accounts/{id}/amortization-schedule` | sí | — | `200 AmortizationScheduleResponse { account_id, principal, apr, term_months, start_date, monthly_payment, total_interest, total_paid, rows[] }` (`400` si la cuenta no es loan/mortgage, falta APR/plazo/start_date o `opening_balance <= 0`) (PHASE-22) |
-| POST   | `/accounts` | sí | `{ name, type, currency?, color?, icon?, opening_balance?, opening_balance_date?, apr?, term_months?, start_date?, display_order? }` | `201 Account` (`409` si nombre duplicado, `400` si `type` no soportado) |
+| POST   | `/accounts` | sí | `{ name, type, currency?, color?, icon?, opening_balance?, opening_balance_date?, apr?, term_months?, start_date?, display_order?, category_id? }` | `201 Account` (`409` si nombre duplicado, `400` si `type` no soportado o `category_id` inválido) |
 | PUT    | `/accounts/{id}` | sí | partial (incluye `apr`, `term_months`, `start_date`) | `200 Account` |
 | DELETE | `/accounts/{id}` | sí | — | `204` (`409` si la cuenta tiene transacciones — usar `PUT { is_archived: true }`) |
 
@@ -379,6 +379,11 @@ Reglas:
   desde el cliente).
 - `apr`, `term_months`, `start_date` sólo aplican a `loan` /
   `mortgage`. Para otros tipos el backend los ignora.
+- `category_id` (PHASE-30.4): vinculación opcional contrato↔categoría.
+  Sólo aceptable en liabilities cuya categoría tiene
+  `role IN (DEBT_PAYMENT, DEBT_INTEREST)`; otro caso devuelve 400.
+  Enviar `null` desvincula. La categoría borrada hace `SET NULL` en la
+  cuenta (FK con `ON DELETE SET NULL`).
 - Tras el wipe de PHASE-21.2, todo usuario empieza sin cuentas y
   el frontend bloquea en `/onboarding/accounts` hasta declarar al
   menos una.

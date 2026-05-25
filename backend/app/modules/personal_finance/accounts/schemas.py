@@ -57,6 +57,10 @@ class AccountCreate(BaseModel):
     )
     """PHASE-24.3 — Primer pago especial sólo de intereses."""
     display_order: int = Field(default=0, ge=0)
+    category_id: uuid.UUID | None = None
+    """PHASE-30.4 — Categoría de pagos vinculada (sólo liability +
+    role DEBT_*). El service valida ambas condiciones; pasa por aquí
+    NULL desde formularios donde no se haya escogido."""
 
 
 class AccountUpdate(BaseModel):
@@ -79,6 +83,9 @@ class AccountUpdate(BaseModel):
     )
     display_order: int | None = Field(default=None, ge=0)
     is_archived: bool | None = None
+    category_id: uuid.UUID | None = None
+    """PHASE-30.4 — Mismo contrato que en `AccountCreate`. Para
+    desvincular, enviar explícitamente `null`."""
 
 
 class AccountResponse(BaseModel):
@@ -102,6 +109,7 @@ class AccountResponse(BaseModel):
     interest_only_first_payment: Decimal | None = None
     display_order: int
     is_archived: bool
+    category_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
 
