@@ -51,6 +51,9 @@ from app.modules.personal_finance.accounts.amortization import (
 from app.modules.personal_finance.accounts.models import Account, AccountNature, AccountType
 from app.modules.personal_finance.accounts.schemas import DebtHealthKpis
 from app.modules.personal_finance.categories.models import Category, CategoryKind, CategoryRole
+from app.modules.personal_finance.dashboard.conversion import (
+    converted_amount_expr,
+)
 from app.modules.personal_finance.transactions.models import Transaction
 
 DEFAULT_REFERENCE_CURRENCY = "EUR"
@@ -90,7 +93,12 @@ def classify_effort(ratio: float | None) -> str:
 
 
 async def monthly_income_avg(
-    db: AsyncSession, user_id: uuid.UUID, currency: str, *, months: int = 6
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    currency: str,
+    *,
+    months: int = 6,
+    target_currency: str | None = None,
 ) -> Decimal:
     """Media de ingresos mensuales en los últimos `months` meses
     completos. Excluye papelera y transferencias internas.
@@ -98,6 +106,11 @@ async def monthly_income_avg(
     Compartido entre `compute_debt_health` (Capa 2) y
     `debt/service.compute_category_summary` (Capa 1) para que ambos
     expongan la misma definición de "ingreso medio".
+
+    PHASE-30.6 — cuando `target_currency` se pasa, convierte cada tx
+    a esa moneda con la tasa del día (`converted_amount_expr`) y NO
+    filtra por `Transaction.currency`. Ingresos en monedas sin tasa
+    quedan excluidos.
     """
     today = _today_utc()
     # Último día del mes pasado (no incluimos el mes en curso porque
@@ -126,18 +139,24 @@ async def monthly_income_avg(
         tzinfo=UTC,
     )
 
+    amount_expr = (
+        converted_amount_expr(target_currency)
+        if target_currency is not None
+        else Transaction.amount
+    )
     query = (
-        select(func.coalesce(func.sum(Transaction.amount), 0))
+        select(func.coalesce(func.sum(amount_expr), 0))
         .select_from(Transaction)
         .join(Category, Category.id == Transaction.category_id)
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
         .where(Transaction.transfer_pair_id.is_(None))
-        .where(Transaction.currency == currency)
         .where(Category.kind == CategoryKind.INCOME)
         .where(Transaction.occurred_at >= window_start)
         .where(Transaction.occurred_at <= window_end)
     )
+    if target_currency is None:
+        query = query.where(Transaction.currency == currency)
     total = Decimal((await db.execute(query)).scalar_one())
     if total <= 0:
         return Decimal("0")
@@ -145,22 +164,34 @@ async def monthly_income_avg(
 
 
 async def _interest_paid_ytd(
-    db: AsyncSession, user_id: uuid.UUID, currency: str
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    currency: str,
+    *,
+    target_currency: str | None = None,
 ) -> Decimal:
-    """Suma de expenses en categorías de intereses desde 1-enero hasta hoy."""
+    """Suma de expenses en categorías de intereses desde 1-enero hasta hoy.
+
+    PHASE-30.6 — Mismo modo dual que `monthly_income_avg`."""
     today = _today_utc()
     year_start = datetime(today.year, 1, 1, tzinfo=UTC)
+    amount_expr = (
+        converted_amount_expr(target_currency)
+        if target_currency is not None
+        else Transaction.amount
+    )
     query = (
-        select(func.coalesce(func.sum(Transaction.amount), 0))
+        select(func.coalesce(func.sum(amount_expr), 0))
         .select_from(Transaction)
         .join(Category, Category.id == Transaction.category_id)
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
-        .where(Transaction.currency == currency)
         .where(Category.kind == CategoryKind.EXPENSE)
         .where(Category.role == CategoryRole.DEBT_INTEREST)
         .where(Transaction.occurred_at >= year_start)
     )
+    if target_currency is None:
+        query = query.where(Transaction.currency == currency)
     return Decimal((await db.execute(query)).scalar_one())
 
 
@@ -204,6 +235,8 @@ async def _time_to_payoff_months(
     liability_balances: dict[uuid.UUID, Decimal],
     reference_currency: str,
     total_liabilities: Decimal,
+    *,
+    target_currency: str | None = None,
 ) -> int | None:
     """PHASE-30.2 — combina schedule + fallback lineal por liability.
 
@@ -237,7 +270,12 @@ async def _time_to_payoff_months(
     linear_estimate: int | None = None
     if no_schedule_ids and no_schedule_balance > 0:
         principal_3m = await _principal_paid_last_n_months(
-            db, user_id, no_schedule_ids, reference_currency, months=3
+            db,
+            user_id,
+            no_schedule_ids,
+            reference_currency,
+            months=3,
+            target_currency=target_currency,
         )
         if principal_3m > 0:
             monthly_principal = principal_3m / Decimal(3)
@@ -260,6 +298,8 @@ async def _principal_paid_last_n_months(
     liability_ids: list[uuid.UUID],
     currency: str,
     months: int = 3,
+    *,
+    target_currency: str | None = None,
 ) -> Decimal:
     """Suma del principal amortizado en los últimos `months` meses
     completos a las liabilities del usuario.
@@ -297,23 +337,72 @@ async def _principal_paid_last_n_months(
         tzinfo=UTC,
     )
 
+    amount_expr = (
+        converted_amount_expr(target_currency)
+        if target_currency is not None
+        else Transaction.amount
+    )
     query = (
-        select(func.coalesce(func.sum(Transaction.amount), 0))
+        select(func.coalesce(func.sum(amount_expr), 0))
         .where(Transaction.user_id == user_id)
         .where(Transaction.account_id.in_(liability_ids))
         .where(Transaction.deleted_at.is_(None))
         .where(Transaction.transfer_pair_id.is_not(None))
-        .where(Transaction.currency == currency)
         .where(Transaction.occurred_at >= window_start)
         .where(Transaction.occurred_at <= window_end)
     )
+    if target_currency is None:
+        query = query.where(Transaction.currency == currency)
     return Decimal((await db.execute(query)).scalar_one())
 
 
+async def _convert_at_today(
+    db: AsyncSession,
+    amount: Decimal,
+    *,
+    from_currency: str,
+    target_currency: str,
+) -> Decimal | None:
+    """Helper local: convierte `amount` con la tasa de hoy o
+    devuelve `None` si no hay tasa. Se replica aquí (y en
+    `debt/service.py`) en lugar de importarlo para evitar
+    dependencias circulares — la lógica vive en
+    `currency.service.convert`."""
+    from app.modules.currency.service import convert as currency_convert
+
+    result = await currency_convert(
+        db,
+        amount=amount,
+        from_currency=from_currency,
+        to_currency=target_currency,
+        at_date=_today_utc(),
+    )
+    if result.fallback == "missing":
+        return None
+    return result.amount
+
+
 async def compute_debt_health(
-    db: AsyncSession, user_id: uuid.UUID
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    target_currency: str | None = None,
 ) -> DebtHealthKpis:
-    """Computa todos los KPIs de salud financiera para el usuario."""
+    """Computa todos los KPIs de salud financiera para el usuario.
+
+    PHASE-30.6 — Cuando se pasa `target_currency`, todos los importes
+    devueltos se expresan en esa moneda:
+
+    - Saldos de cuentas: convertidos con la tasa **de hoy** (snapshot
+      simple — el patrón "saldo en otra divisa" del producto).
+    - Income, intereses y principal amortizado: convertidos per-tx
+      vía `converted_amount_expr` (tasa del día de cada tx).
+    - Cuotas teóricas de liabilities: convertidas con la tasa de hoy.
+
+    Cuando falta tasa para convertir un saldo de cuenta, esa cuenta
+    queda excluida del agregado (mismo principio que `mixed_currencies`
+    en `/balances`).
+    """
     # 1. Cuentas activas y agregados de saldo.
     query = (
         select(Account)
@@ -335,12 +424,14 @@ async def compute_debt_health(
             interest_paid_ytd=Decimal("0"),
             weighted_apr=None,
             time_to_payoff_months=None,
-            reference_currency=DEFAULT_REFERENCE_CURRENCY,
+            reference_currency=(target_currency or DEFAULT_REFERENCE_CURRENCY).upper(),
         )
 
-    # Reference currency = primera no archivada por display_order.
+    # Reference currency = primera no archivada por display_order
+    # (o target_currency si se ha pasado).
     accounts_sorted = sorted(accounts, key=lambda a: (a.display_order, a.name))
-    reference_currency = accounts_sorted[0].currency
+    native_currency = accounts_sorted[0].currency
+    effective_currency = (target_currency or native_currency).upper()
 
     # 2. Saldos por cuenta. Reusamos el repository sólo para movimientos.
     from app.modules.personal_finance.accounts.repository import get_balances_for_user
@@ -351,19 +442,41 @@ async def compute_debt_health(
     liabilities: list[Account] = []
     liability_balances: dict[uuid.UUID, Decimal] = {}
     for account in accounts:
-        if account.currency != reference_currency:
-            # Para PHASE-22.4 mínimo viable, ignoramos cuentas en otras
-            # divisas. Mismo enfoque que `mixed_currencies` en /balances.
-            continue
-        current_balance = account.opening_balance + movements.get(
+        # Saldo nativo de la cuenta (siempre en su propia divisa, igual
+        # que en /balances).
+        native_balance = account.opening_balance + movements.get(
             account.id, Decimal("0")
         )
-        if account.nature == AccountNature.LIABILITY:
-            total_liabilities += current_balance
-            liabilities.append(account)
-            liability_balances[account.id] = current_balance
+
+        # Decidir el balance "agregable" según el modo:
+        # - Sin target: como antes, sólo cuentas en reference_currency.
+        # - Con target: convertir todas al target con la tasa de hoy.
+        if target_currency is None:
+            if account.currency != native_currency:
+                continue
+            aggregable_balance = native_balance
         else:
-            total_assets += current_balance
+            if account.currency.upper() == effective_currency:
+                aggregable_balance = native_balance
+            else:
+                converted = await _convert_at_today(
+                    db,
+                    native_balance,
+                    from_currency=account.currency,
+                    target_currency=effective_currency,
+                )
+                if converted is None:
+                    # Sin tasa → no contamos la cuenta (mismo contrato
+                    # que mixed_currencies).
+                    continue
+                aggregable_balance = converted
+
+        if account.nature == AccountNature.LIABILITY:
+            total_liabilities += aggregable_balance
+            liabilities.append(account)
+            liability_balances[account.id] = aggregable_balance
+        else:
+            total_assets += aggregable_balance
 
     net_worth = total_assets - total_liabilities
     debt_to_assets = (
@@ -379,13 +492,17 @@ async def compute_debt_health(
         balance = liability_balances.get(liab.id, Decimal("0"))
         if balance <= 0:
             continue
+        # Cuota nativa (en la divisa de la liability). La convertimos al
+        # target una vez calculada.
+        native_cuota = Decimal("0")
         if liab.type in {AccountType.LOAN, AccountType.MORTGAGE}:
             if liab.apr is not None and liab.term_months is not None:
                 # Usar el principal inicial declarado para la cuota
                 # (no el saldo actual; la cuota francesa es constante).
-                monthly_payment_total += compute_monthly_payment(
+                native_cuota = compute_monthly_payment(
                     liab.opening_balance, liab.apr, liab.term_months
                 )
+                # weighted_apr opera sobre el balance ya en effective.
                 weighted_apr_num += liab.apr * balance
                 weighted_apr_den += balance
         elif liab.type == AccountType.CREDIT_CARD:
@@ -396,15 +513,36 @@ async def compute_debt_health(
             if liab.apr is not None:
                 weighted_apr_num += liab.apr * balance
                 weighted_apr_den += balance
-                # Cuota teórica de 12 meses con apr.
-                monthly_payment_total += compute_monthly_payment(
-                    balance, liab.apr, 12
+                # Cuota teórica de 12 meses con apr — sobre el saldo
+                # nativo, no el convertido, para que sea fiel a la
+                # liability real.
+                native_card_balance = liab.opening_balance + movements.get(
+                    liab.id, Decimal("0")
+                )
+                native_cuota = compute_monthly_payment(
+                    native_card_balance, liab.apr, 12
                 )
             else:
-                # Pago mínimo estimado: 3% del saldo.
-                monthly_payment_total += (balance * Decimal("0.03")).quantize(
+                native_card_balance = liab.opening_balance + movements.get(
+                    liab.id, Decimal("0")
+                )
+                native_cuota = (native_card_balance * Decimal("0.03")).quantize(
                     Decimal("0.01")
                 )
+
+        if native_cuota <= 0:
+            continue
+        if target_currency is None or liab.currency.upper() == effective_currency:
+            monthly_payment_total += native_cuota
+        else:
+            converted_cuota = await _convert_at_today(
+                db,
+                native_cuota,
+                from_currency=liab.currency,
+                target_currency=effective_currency,
+            )
+            if converted_cuota is not None:
+                monthly_payment_total += converted_cuota
 
     weighted_apr = (
         float(weighted_apr_num / weighted_apr_den)
@@ -414,7 +552,11 @@ async def compute_debt_health(
 
     # 4. Income medio + DTI.
     monthly_income = await monthly_income_avg(
-        db, user_id, reference_currency, months=6
+        db,
+        user_id,
+        native_currency,
+        months=6,
+        target_currency=target_currency,
     )
     dti_ratio = (
         float(monthly_payment_total / monthly_income)
@@ -424,7 +566,9 @@ async def compute_debt_health(
     dti_status = classify_effort(dti_ratio)
 
     # 5. Intereses YTD.
-    interest_ytd = await _interest_paid_ytd(db, user_id, reference_currency)
+    interest_ytd = await _interest_paid_ytd(
+        db, user_id, native_currency, target_currency=target_currency
+    )
 
     # 6. Time-to-payoff (PHASE-30.2): prefer schedule over linear projection.
     time_to_payoff = await _time_to_payoff_months(
@@ -432,14 +576,15 @@ async def compute_debt_health(
         user_id,
         liabilities,
         liability_balances,
-        reference_currency,
+        native_currency,
         total_liabilities,
+        target_currency=target_currency,
     )
 
     return DebtHealthKpis(
-        total_liabilities=total_liabilities,
-        total_assets=total_assets,
-        net_worth=net_worth,
+        total_liabilities=total_liabilities.quantize(Decimal("0.01")),
+        total_assets=total_assets.quantize(Decimal("0.01")),
+        net_worth=net_worth.quantize(Decimal("0.01")),
         debt_to_assets_ratio=debt_to_assets,
         dti_ratio=dti_ratio,
         dti_status=dti_status,
@@ -448,7 +593,7 @@ async def compute_debt_health(
         interest_paid_ytd=interest_ytd,
         weighted_apr=weighted_apr,
         time_to_payoff_months=time_to_payoff,
-        reference_currency=reference_currency,
+        reference_currency=effective_currency,
     )
 
 

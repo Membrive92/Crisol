@@ -1,4 +1,18 @@
-"""Queries de agregación de Capa 1 del módulo deuda (PHASE-30.2)."""
+"""Queries de agregación de Capa 1 del módulo deuda (PHASE-30.2).
+
+PHASE-30.6 — Soporte cross-currency. Las tres queries aceptan dos
+modos mutuamente excluyentes:
+
+- **Native** (`currency=str, target_currency=None`): filtra
+  `Transaction.currency == currency` y agrega importes crudos.
+  Comportamiento previo, lo que devuelve el endpoint por defecto.
+- **Converted** (`target_currency=str, currency` se ignora): no
+  filtra por moneda; cada `Transaction.amount` se convierte a
+  `target_currency` con la tasa **del día de su `occurred_at`**
+  (vía `converted_amount_expr` del módulo dashboard). Txs sin tasa
+  disponible quedan excluidas del SUM (NULL → SUM ignora), mismo
+  contrato que el dashboard.
+"""
 
 from __future__ import annotations
 
@@ -6,11 +20,16 @@ import calendar
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.modules.personal_finance.categories.models import Category, CategoryRole
+from app.modules.personal_finance.dashboard.conversion import (
+    converted_amount_expr,
+)
 from app.modules.personal_finance.transactions.models import Transaction
 
 DEBT_ROLES: frozenset[CategoryRole] = frozenset(
@@ -27,6 +46,14 @@ def _month_end_utc(d: date) -> datetime:
     return datetime(d.year, d.month, last_day, 23, 59, 59, tzinfo=UTC)
 
 
+def _amount_expr(target_currency: str | None) -> ColumnElement[Any]:
+    """Devuelve la expresión de importe a sumar. Convertida si hay
+    `target_currency`, cruda si no."""
+    if target_currency is not None:
+        return converted_amount_expr(target_currency)
+    return Transaction.amount
+
+
 async def aggregate_debt_payments_by_role(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -34,6 +61,7 @@ async def aggregate_debt_payments_by_role(
     *,
     start: datetime,
     end: datetime,
+    target_currency: str | None = None,
 ) -> dict[CategoryRole, Decimal]:
     """Σ amount agrupado por `Category.role` para categorías de deuda.
 
@@ -41,26 +69,28 @@ async def aggregate_debt_payments_by_role(
     en ambos roles cuando no hay datos para que el caller no tenga que
     distinguir entre "no hay key" y "hay key con 0".
     """
+    amount = _amount_expr(target_currency)
     query = (
-        select(Category.role, func.coalesce(func.sum(Transaction.amount), 0))
+        select(Category.role, func.coalesce(func.sum(amount), 0))
         .select_from(Transaction)
         .join(Category, Category.id == Transaction.category_id)
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
         .where(Transaction.transfer_pair_id.is_(None))
-        .where(Transaction.currency == currency)
         .where(Category.role.in_(DEBT_ROLES))
         .where(Transaction.occurred_at >= start)
         .where(Transaction.occurred_at <= end)
         .group_by(Category.role)
     )
+    if target_currency is None:
+        query = query.where(Transaction.currency == currency)
     result = await db.execute(query)
     totals: dict[CategoryRole, Decimal] = {
         CategoryRole.DEBT_PAYMENT: Decimal("0"),
         CategoryRole.DEBT_INTEREST: Decimal("0"),
     }
-    for role, amount in result.all():
-        totals[role] = Decimal(amount)
+    for role, total in result.all():
+        totals[role] = Decimal(total)
     return totals
 
 
@@ -71,29 +101,32 @@ async def aggregate_debt_payments_by_category(
     *,
     start: datetime,
     end: datetime,
+    target_currency: str | None = None,
 ) -> list[tuple[str, CategoryRole, Decimal]]:
     """Devuelve `(category_name, role, total)` para construir el donut
     de composición por tipo. El service mapea name → bucket
     (mortgage/loan/credit_card/other)."""
+    amount = _amount_expr(target_currency)
     query = (
         select(
             Category.name,
             Category.role,
-            func.coalesce(func.sum(Transaction.amount), 0),
+            func.coalesce(func.sum(amount), 0),
         )
         .select_from(Transaction)
         .join(Category, Category.id == Transaction.category_id)
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
         .where(Transaction.transfer_pair_id.is_(None))
-        .where(Transaction.currency == currency)
         .where(Category.role.in_(DEBT_ROLES))
         .where(Transaction.occurred_at >= start)
         .where(Transaction.occurred_at <= end)
         .group_by(Category.name, Category.role)
     )
+    if target_currency is None:
+        query = query.where(Transaction.currency == currency)
     rows = (await db.execute(query)).all()
-    return [(name, role, Decimal(amount)) for name, role, amount in rows]
+    return [(name, role, Decimal(total)) for name, role, total in rows]
 
 
 async def monthly_debt_series(
@@ -102,6 +135,7 @@ async def monthly_debt_series(
     currency: str,
     *,
     months: list[date],
+    target_currency: str | None = None,
 ) -> list[tuple[date, Decimal, Decimal]]:
     """Para cada mes de `months` (primer día de cada uno) devuelve
     `(month, total_payments, interests)`.
@@ -116,8 +150,9 @@ async def monthly_debt_series(
 
     year_expr = func.extract("year", Transaction.occurred_at)
     month_expr = func.extract("month", Transaction.occurred_at)
+    amount = _amount_expr(target_currency)
     interest_amount = case(
-        (Category.role == CategoryRole.DEBT_INTEREST, Transaction.amount),
+        (Category.role == CategoryRole.DEBT_INTEREST, amount),
         else_=Decimal("0"),
     )
 
@@ -125,7 +160,7 @@ async def monthly_debt_series(
         select(
             year_expr.label("y"),
             month_expr.label("m"),
-            func.coalesce(func.sum(Transaction.amount), 0).label("payments"),
+            func.coalesce(func.sum(amount), 0).label("payments"),
             func.coalesce(func.sum(interest_amount), 0).label("interests"),
         )
         .select_from(Transaction)
@@ -133,12 +168,13 @@ async def monthly_debt_series(
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
         .where(Transaction.transfer_pair_id.is_(None))
-        .where(Transaction.currency == currency)
         .where(Category.role.in_(DEBT_ROLES))
         .where(Transaction.occurred_at >= start)
         .where(Transaction.occurred_at <= end)
         .group_by("y", "m")
     )
+    if target_currency is None:
+        query = query.where(Transaction.currency == currency)
     rows = (await db.execute(query)).all()
     by_month: dict[tuple[int, int], tuple[Decimal, Decimal]] = {
         (int(r.y), int(r.m)): (Decimal(r.payments), Decimal(r.interests))

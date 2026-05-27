@@ -375,9 +375,10 @@ export function AccountFormModal({
                     </Text>
                     {debtCategories.length === 0 ? (
                       <Text style={styles.helper}>
-                        No tienes categorías con rol de deuda todavía. Crea
-                        una en Ajustes › Categorías marcando rol
-                        DEBT_PAYMENT o DEBT_INTEREST.
+                        Aún no tienes categorías marcadas como deuda.
+                        Crea una en Ajustes › Categorías y marca el tipo
+                        "Pago de deuda" o "Intereses de deuda" para que
+                        aparezca aquí.
                       </Text>
                     ) : (
                       <>

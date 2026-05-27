@@ -109,6 +109,7 @@ async def _avg_monthly_debt_payment_last_n_months(
     currency: str,
     *,
     months: int = 6,
+    target_currency: str | None = None,
 ) -> Decimal:
     """Media mensual de pagos a deuda en los últimos `months` meses
     cerrados (excluye el mes en curso). Misma ventana que
@@ -129,7 +130,12 @@ async def _avg_monthly_debt_payment_last_n_months(
         tzinfo=UTC,
     )
     totals = await aggregate_debt_payments_by_role(
-        db, user_id, currency, start=start_dt, end=end_dt
+        db,
+        user_id,
+        currency,
+        start=start_dt,
+        end=end_dt,
+        target_currency=target_currency,
     )
     total = totals[CategoryRole.DEBT_PAYMENT] + totals[CategoryRole.DEBT_INTEREST]
     if total <= 0:
@@ -211,38 +217,96 @@ def _build_by_type(
 _MONTHLY_CADENCE_RANGE = range(28, 32)  # 28-31 días
 
 
+async def _convert_at_today(
+    db: AsyncSession,
+    amount: Decimal,
+    *,
+    from_currency: str,
+    target_currency: str,
+) -> Decimal | None:
+    """Convierte `amount` de `from_currency` a `target_currency` con la
+    tasa de hoy. Devuelve `None` cuando no hay tasa disponible — el
+    caller decide si excluir o contar como "no convertible"."""
+    from app.modules.currency.service import convert as currency_convert
+
+    result = await currency_convert(
+        db,
+        amount=amount,
+        from_currency=from_currency,
+        to_currency=target_currency,
+        at_date=_today_utc(),
+    )
+    if result.fallback == "missing":
+        return None
+    return result.amount
+
+
 async def _load_debt_fixed_expenses(
-    db: AsyncSession, user_id: uuid.UUID, currency: str
-) -> list[tuple[FixedExpense, Category]]:
-    """Lista `(fixed_expense, category)` para gastos fijos confirmados,
-    en la moneda de referencia y con cadencia mensual, cuya categoría
-    tiene `role IN (DEBT_PAYMENT, DEBT_INTEREST)`."""
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    currency: str,
+    *,
+    target_currency: str | None = None,
+) -> list[tuple[FixedExpense, Category, Decimal]]:
+    """Lista `(fixed_expense, category, display_amount)` para gastos
+    fijos confirmados cuya categoría tiene rol de deuda.
+
+    Native mode: filtra por `FixedExpense.currency == currency` y
+    `display_amount = fe.amount`.
+
+    Converted mode: trae todos los confirmados con rol de deuda; cada
+    `display_amount` viene convertido a `target_currency` con la tasa
+    de hoy. Gastos en moneda sin tasa quedan excluidos."""
     query = (
         select(FixedExpense, Category)
         .join(Category, Category.id == FixedExpense.category_id)
         .where(FixedExpense.user_id == user_id)
         .where(FixedExpense.status == FixedExpenseStatus.CONFIRMED)
-        .where(FixedExpense.currency == currency)
         .where(Category.role.in_({CategoryRole.DEBT_PAYMENT, CategoryRole.DEBT_INTEREST}))
     )
+    if target_currency is None:
+        query = query.where(FixedExpense.currency == currency)
     rows = (await db.execute(query)).all()
-    return [(fe, cat) for fe, cat in rows]
+
+    result: list[tuple[FixedExpense, Category, Decimal]] = []
+    for fe, cat in rows:
+        if target_currency is None:
+            result.append((fe, cat, fe.amount))
+            continue
+        converted = await _convert_at_today(
+            db,
+            fe.amount,
+            from_currency=fe.currency,
+            target_currency=target_currency,
+        )
+        if converted is None:
+            continue
+        result.append((fe, cat, converted))
+    return result
 
 
 async def _load_non_debt_fixed_expense_monthly_total(
-    db: AsyncSession, user_id: uuid.UUID, currency: str
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    currency: str,
+    *,
+    target_currency: str | None = None,
 ) -> Decimal:
     """Σ cuotas mensuales de gastos fijos NO categorizados como deuda
     (cualquier otra categoría, o sin categoría). Sólo cuenta los
     `confirmed` con cadencia mensual; los semestrales/anuales no
-    contribuyen al "esfuerzo mensual"."""
+    contribuyen al "esfuerzo mensual".
+
+    PHASE-30.6 — Native filtra por moneda; Converted suma todos
+    convertidos a `target_currency` (excluye los sin tasa)."""
     query = (
         select(FixedExpense)
         .outerjoin(Category, Category.id == FixedExpense.category_id)
         .where(FixedExpense.user_id == user_id)
         .where(FixedExpense.status == FixedExpenseStatus.CONFIRMED)
-        .where(FixedExpense.currency == currency)
     )
+    if target_currency is None:
+        query = query.where(FixedExpense.currency == currency)
     items = list((await db.execute(query)).scalars().all())
     debt_query = (
         select(Category.id)
@@ -258,7 +322,18 @@ async def _load_non_debt_fixed_expense_monthly_total(
             continue
         if fe.cadence_days not in _MONTHLY_CADENCE_RANGE:
             continue
-        total += fe.amount
+        if target_currency is None:
+            total += fe.amount
+            continue
+        converted = await _convert_at_today(
+            db,
+            fe.amount,
+            from_currency=fe.currency,
+            target_currency=target_currency,
+        )
+        if converted is None:
+            continue
+        total += converted
     return total.quantize(Decimal("0.01"))
 
 
@@ -268,19 +343,37 @@ async def _load_non_debt_fixed_expense_monthly_total(
 
 
 async def compute_category_summary(
-    db: AsyncSession, user_id: uuid.UUID, range_: DebtTimeRange = "ytd"
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    range_: DebtTimeRange = "ytd",
+    *,
+    target_currency: str | None = None,
 ) -> DebtCategorySummary:
-    """Calcula el snapshot completo de Capa 1 para `range_`."""
+    """Calcula el snapshot completo de Capa 1 para `range_`.
+
+    PHASE-30.6 — Cuando se pasa `target_currency`, todos los importes
+    devueltos se expresan en esa moneda con conversión per-tx vía
+    `converted_amount_expr` (idéntico patrón al dashboard PHASE-8.3).
+    El `reference_currency` de la respuesta se sobreescribe con
+    `target_currency`. Cuando no se pasa, devuelve la moneda nativa
+    del usuario (primera cuenta no archivada por display_order).
+    """
     today = _today_utc()
     range_start, range_end, monthly_buckets = _resolve_range(range_, today)
-    currency = await _resolve_reference_currency(db, user_id)
+    native_currency = await _resolve_reference_currency(db, user_id)
+    effective_currency = (target_currency or native_currency).upper()
 
     start_dt = _month_start_utc(range_start)
     end_dt = _range_end_utc(range_end)
 
     # ── 1. Pagos por role en el rango ────────────────────────────────
     totals = await aggregate_debt_payments_by_role(
-        db, user_id, currency, start=start_dt, end=end_dt
+        db,
+        user_id,
+        native_currency,
+        start=start_dt,
+        end=end_dt,
+        target_currency=target_currency,
     )
     interests_and_fees = totals[CategoryRole.DEBT_INTEREST]
     capital_amortized = totals[CategoryRole.DEBT_PAYMENT]
@@ -288,13 +381,22 @@ async def compute_category_summary(
 
     # ── 2. Composición por tipo ──────────────────────────────────────
     rows = await aggregate_debt_payments_by_category(
-        db, user_id, currency, start=start_dt, end=end_dt
+        db,
+        user_id,
+        native_currency,
+        start=start_dt,
+        end=end_dt,
+        target_currency=target_currency,
     )
     by_type = _build_by_type(rows, total_payments)
 
     # ── 3. Serie mensual ─────────────────────────────────────────────
     series_rows = await monthly_debt_series(
-        db, user_id, currency, months=monthly_buckets
+        db,
+        user_id,
+        native_currency,
+        months=monthly_buckets,
+        target_currency=target_currency,
     )
     monthly_series = [
         MonthlyDebtPoint(
@@ -314,9 +416,11 @@ async def compute_category_summary(
     # diluiríamos pagos reales recientes en huecos sin actividad
     # (usuario que empezó hace 6m con range=12m → ratio aparente la
     # mitad de la real).
-    monthly_income = await monthly_income_avg(db, user_id, currency)
+    monthly_income = await monthly_income_avg(
+        db, user_id, native_currency, target_currency=target_currency
+    )
     avg_monthly_debt_payment = await _avg_monthly_debt_payment_last_n_months(
-        db, user_id, currency, months=6
+        db, user_id, native_currency, months=6, target_currency=target_currency
     )
 
     if monthly_income > 0 and avg_monthly_debt_payment > 0:
@@ -326,7 +430,7 @@ async def compute_category_summary(
     strict_status = classify_effort(strict)
 
     non_debt_fixed = await _load_non_debt_fixed_expense_monthly_total(
-        db, user_id, currency
+        db, user_id, native_currency, target_currency=target_currency
     )
     extended_numerator = avg_monthly_debt_payment + non_debt_fixed
     if monthly_income > 0 and extended_numerator > 0:
@@ -336,21 +440,23 @@ async def compute_category_summary(
     extended_status = classify_effort(extended)
 
     # ── 5. Recurring quotas (cross-link a fixed_expenses) ────────────
-    debt_fixed = await _load_debt_fixed_expenses(db, user_id, currency)
+    debt_fixed = await _load_debt_fixed_expenses(
+        db, user_id, native_currency, target_currency=target_currency
+    )
     recurring_quotas = [
         RecurringQuotaRef(
             fixed_expense_id=fe.id,
             merchant=fe.merchant,
-            amount=fe.amount,
-            currency=fe.currency,
+            amount=display_amount.quantize(Decimal("0.01")),
+            currency=effective_currency if target_currency else fe.currency,
             category_id=cat.id,
             category_name=cat.name,
         )
-        for fe, cat in debt_fixed
+        for fe, cat, display_amount in debt_fixed
     ]
 
     return DebtCategorySummary(
-        reference_currency=currency,
+        reference_currency=effective_currency,
         range=range_,
         range_start=range_start,
         range_end=range_end,

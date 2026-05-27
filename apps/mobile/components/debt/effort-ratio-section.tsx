@@ -143,7 +143,7 @@ function effortTone(status: EffortStatus): { bg: string; fg: string; label: stri
     case 'caution':
       return { bg: colors.warningSoft, fg: colors.warning, label: 'Precaución' };
     case 'stressed':
-      return { bg: colors.dangerSoft, fg: colors.danger, label: 'Sobreendeud.' };
+      return { bg: colors.dangerSoft, fg: colors.danger, label: 'Sobreendeudamiento' };
     default:
       return { bg: colors.surfaceMuted, fg: colors.textMuted, label: 'Sin datos' };
   }
@@ -202,6 +202,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'baseline',
     gap: spacing.sm,
+    flexWrap: 'wrap',
   },
   bigValue: {
     fontSize: fontSize.xxl,

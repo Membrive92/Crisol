@@ -50,16 +50,20 @@ async def _post_tx(
     amount: str,
     occurred_at: str,
     description: str = "",
+    currency: str | None = None,
 ) -> None:
+    payload: dict[str, object] = {
+        "account_id": account_id,
+        "category_id": category_id,
+        "amount": amount,
+        "occurred_at": occurred_at,
+        "description": description,
+    }
+    if currency is not None:
+        payload["currency"] = currency
     r = await client.post(
         "/transactions",
-        json={
-            "account_id": account_id,
-            "category_id": category_id,
-            "amount": amount,
-            "occurred_at": occurred_at,
-            "description": description,
-        },
+        json=payload,
         headers=_auth(token),
     )
     assert r.status_code == 201, r.text
@@ -378,6 +382,138 @@ async def test_classify_effort_bands(client: AsyncClient) -> None:
     assert classify_effort(0.35) == "caution"
     assert classify_effort(0.36) == "stressed"
     assert classify_effort(0.40) == "stressed"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# PHASE-30.6 — Cross-currency (target_currency)
+# ─────────────────────────────────────────────────────────────────────
+
+
+async def _seed_rates(test_engine, rows):  # type: ignore[no-untyped-def]
+    """Helper duplicado de `test_dashboard_cross_currency` para no
+    crear cross-imports entre suites de test."""
+    from datetime import date as _date
+    from decimal import Decimal as _Dec
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.modules.currency import repository as rates_repository
+
+    factory = async_sessionmaker(
+        bind=test_engine, expire_on_commit=False, autoflush=False
+    )
+    async with factory() as db:
+        await rates_repository.upsert_rates(
+            db,
+            [(d, base, quote, _Dec(rate), "test") for d, base, quote, rate in rows],
+        )
+        await db.commit()
+
+
+async def test_summary_target_currency_returns_target_in_reference(
+    client: AsyncClient,
+) -> None:
+    """`?target_currency=USD` → reference_currency en la respuesta = USD."""
+    token = await _register(client, "summary_tc_ref@example.com")
+    r = await client.get(
+        "/debt/category-summary?target_currency=USD", headers=_auth(token)
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["reference_currency"] == "USD"
+
+
+async def test_summary_target_currency_converts_per_tx(
+    client: AsyncClient,
+    test_engine,  # type: ignore[no-untyped-def]
+) -> None:
+    """Sembrado EUR→USD 1.1 + EUR→GBP 0.8 a una fecha conocida. Pago de
+    100 EUR + 50 GBP a esa fecha → con target=USD esperamos
+    `100 * 1.1 + 50 * (1.1 / 0.8) = 110 + 68.75 = 178.75`."""
+    from datetime import UTC, datetime, date as _date
+
+    token = await _register(client, "summary_tc_convert@example.com")
+    eur_cte = await _create_account(
+        client, token, name="EUR", type="bank", currency="EUR",
+        opening_balance="5000",
+    )
+    gbp_cte = await _create_account(
+        client, token, name="GBP", type="bank", currency="GBP",
+        opening_balance="5000",
+    )
+    debt_cat = await _create_category(
+        client, token, "Préstamos e hipotecas", role="DEBT_PAYMENT"
+    )
+
+    seed_day = _date(datetime.now(UTC).year, 3, 15)
+    iso = f"{seed_day.isoformat()}T12:00:00Z"
+    await _seed_rates(
+        test_engine,
+        [
+            (seed_day, "EUR", "USD", "1.1"),
+            (seed_day, "EUR", "GBP", "0.8"),
+        ],
+    )
+
+    await _post_tx(
+        client, token, eur_cte["id"], debt_cat, "100.00", iso, currency="EUR",
+    )
+    await _post_tx(
+        client, token, gbp_cte["id"], debt_cat, "50.00", iso, currency="GBP",
+    )
+
+    r = await client.get(
+        "/debt/category-summary?range=ytd&target_currency=USD",
+        headers=_auth(token),
+    )
+    body = r.json()
+    assert body["reference_currency"] == "USD"
+    # 100 EUR @ 1.1 + 50 GBP @ (1.1/0.8)
+    total = Decimal(body["total_payments"])
+    assert Decimal("178.50") <= total <= Decimal("179.00"), f"got {total}"
+
+
+async def test_summary_native_mode_unchanged(client: AsyncClient) -> None:
+    """Sin `target_currency` la respuesta sigue siendo la moneda nativa
+    (regresión: el campo añadido no debería cambiar el contrato previo)."""
+    token = await _register(client, "summary_native@example.com")
+    cte = await _create_account(
+        client, token, name="EUR", type="bank", currency="EUR",
+        opening_balance="100",
+    )
+    cat = await _create_category(
+        client, token, "Préstamos e hipotecas", role="DEBT_PAYMENT"
+    )
+    year = datetime.now(UTC).year
+    await _post_tx(client, token, cte["id"], cat, "200.00", f"{year}-03-01T12:00:00Z")
+    r = await client.get("/debt/category-summary?range=ytd", headers=_auth(token))
+    body = r.json()
+    assert body["reference_currency"] == "EUR"
+    assert Decimal(body["total_payments"]) == Decimal("200.00")
+
+
+async def test_debt_health_target_currency_converts_balances(
+    client: AsyncClient,
+    test_engine,  # type: ignore[no-untyped-def]
+) -> None:
+    """Una hipoteca EUR de 100k con `target=USD` y tasa EUR→USD=1.1
+    debe reportar `total_liabilities ≈ 110000` y reference_currency=USD."""
+    token = await _register(client, "health_tc_balance@example.com")
+    await _create_account(
+        client, token, name="Hipoteca", type="mortgage", currency="EUR",
+        opening_balance="100000", apr="0.035", term_months=240,
+        start_date="2026-01-01",
+    )
+    from datetime import date as _date
+
+    await _seed_rates(test_engine, [(_date.today(), "EUR", "USD", "1.10")])
+
+    r = await client.get(
+        "/accounts/debt-health?target_currency=USD", headers=_auth(token)
+    )
+    body = r.json()
+    assert body["reference_currency"] == "USD"
+    # 100000 EUR × 1.10 = 110000 USD
+    assert Decimal("109999") <= Decimal(body["total_liabilities"]) <= Decimal("110001")
 
 
 async def test_time_to_payoff_uses_schedule_for_mortgage(

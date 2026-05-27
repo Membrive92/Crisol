@@ -23,6 +23,13 @@ export interface DebtHistoryQuery {
   months_back?: number;
   /** Meses proyectados hacia adelante (0-36, 0 desactiva). Default 12. */
   months_ahead?: number;
+  /** PHASE-30.6 — Convierte saldos y flujo histórico a esta divisa. */
+  target_currency?: string;
+}
+
+export interface DebtHealthQuery {
+  /** PHASE-30.6 — Convierte saldos y KPIs a esta divisa. */
+  target_currency?: string;
 }
 
 export const accountsApi = {
@@ -40,15 +47,24 @@ export const accountsApi = {
     return response.data;
   },
 
-  async debtHealth(): Promise<DebtHealthKpis> {
-    const response = await apiClient.get<DebtHealthKpis>('/accounts/debt-health');
+  async debtHealth(query: DebtHealthQuery = {}): Promise<DebtHealthKpis> {
+    const params: Record<string, string> = {};
+    if (query.target_currency) params['target_currency'] = query.target_currency;
+    const response = await apiClient.get<DebtHealthKpis>(
+      '/accounts/debt-health',
+      { params },
+    );
     return response.data;
   },
 
   async debtHistory(query: DebtHistoryQuery = {}): Promise<DebtHistoryResponse> {
+    const params: Record<string, string | number> = {};
+    if (query.months_back !== undefined) params['months_back'] = query.months_back;
+    if (query.months_ahead !== undefined) params['months_ahead'] = query.months_ahead;
+    if (query.target_currency) params['target_currency'] = query.target_currency;
     const response = await apiClient.get<DebtHistoryResponse>(
       '/accounts/debt-history',
-      { params: query },
+      { params },
     );
     return response.data;
   },

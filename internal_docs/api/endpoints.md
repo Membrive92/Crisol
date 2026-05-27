@@ -366,7 +366,7 @@ Reglas:
 | GET    | `/accounts` | sí | `?include_archived=` | `200 list[Account]` |
 | GET    | `/accounts/{id}` | sí | — | `200 Account` |
 | GET    | `/accounts/balances` | sí | — | `200 AccountBalancesResponse { items, total_assets, total_liabilities, net_worth, mixed_currencies, reference_currency }` (PHASE-21.3) |
-| GET    | `/accounts/debt-health` | sí | — | `200 DebtHealthKpis { total_liabilities, total_assets, net_worth, debt_to_assets_ratio, dti_ratio, dti_status, monthly_debt_payment, monthly_income_avg, interest_paid_ytd, weighted_apr, time_to_payoff_months, reference_currency }` (PHASE-22) |
+| GET    | `/accounts/debt-health` | sí | `?target_currency=` (opc, PHASE-30.6) | `200 DebtHealthKpis { total_liabilities, total_assets, net_worth, debt_to_assets_ratio, dti_ratio, dti_status, monthly_debt_payment, monthly_income_avg, interest_paid_ytd, weighted_apr, time_to_payoff_months, reference_currency }` (PHASE-22) |
 | GET    | `/accounts/{id}/amortization-schedule` | sí | — | `200 AmortizationScheduleResponse { account_id, principal, apr, term_months, start_date, monthly_payment, total_interest, total_paid, rows[] }` (`400` si la cuenta no es loan/mortgage, falta APR/plazo/start_date o `opening_balance <= 0`) (PHASE-22) |
 | POST   | `/accounts` | sí | `{ name, type, currency?, color?, icon?, opening_balance?, opening_balance_date?, apr?, term_months?, start_date?, display_order?, category_id? }` | `201 Account` (`409` si nombre duplicado, `400` si `type` no soportado o `category_id` inválido) |
 | PUT    | `/accounts/{id}` | sí | partial (incluye `apr`, `term_months`, `start_date`) | `200 Account` |
@@ -411,7 +411,7 @@ Reglas:
 
 | Método | Ruta | Auth | Body / Query | Response |
 |--------|------|------|--------------|----------|
-| GET    | `/debt/category-summary` | sí | `?range=ytd|12m|month` (def `ytd`) | `200 DebtCategorySummary { reference_currency, range, range_start, range_end, total_payments, interests_and_fees, capital_amortized, by_type[], monthly_series[], monthly_income_avg, effort_ratio_strict, effort_ratio_strict_status, effort_ratio_extended, effort_ratio_extended_status, recurring_quotas[] }` |
+| GET    | `/debt/category-summary` | sí | `?range=ytd|12m|month` (def `ytd`), `?target_currency=` (opc, PHASE-30.6) | `200 DebtCategorySummary { reference_currency, range, range_start, range_end, total_payments, interests_and_fees, capital_amortized, by_type[], monthly_series[], monthly_income_avg, effort_ratio_strict, effort_ratio_strict_status, effort_ratio_extended, effort_ratio_extended_status, recurring_quotas[] }` |
 
 Reglas:
 - Capa 1 = KPIs derivados del flujo de transacciones con
@@ -431,6 +431,12 @@ Reglas:
 - `recurring_quotas` lista `fixed_expenses` confirmados con
   `category.role` de deuda — la UI los presenta como "Cuotas
   recurrentes detectadas".
+- `target_currency` (PHASE-30.6): cuando se pasa, todos los importes
+  vienen convertidos a esa divisa con la tasa **del día de cada
+  transacción** (`converted_amount_expr`, mismo patrón que dashboard).
+  Para `recurring_quotas` y agregados de gastos fijos, la conversión
+  usa la tasa de hoy. `reference_currency` de la respuesta = target.
+  Txs / gastos en divisas sin tasa quedan excluidos silenciosamente.
 
 ## Transfers (`PHASE-21.3`)
 

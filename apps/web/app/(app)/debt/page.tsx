@@ -9,6 +9,7 @@ import {
   useDebtHealth,
   useDebtHistory,
 } from '@crisol/services';
+import { useCurrencyStore } from '@crisol/store';
 import type { DebtTimeRange } from '@crisol/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
@@ -33,11 +34,27 @@ import { RecurringQuotasList } from '@/components/debt/recurring-quotas-list';
  */
 export default function DebtPage() {
   const [range, setRange] = useState<DebtTimeRange>('ytd');
+  // PHASE-30.6 — el selector global de divisa del header pasa por aquí
+  // como `target_currency` a los tres endpoints de deuda. Sin `convertAll`
+  // (modo legacy del dashboard) volvemos al comportamiento native:
+  // moneda de referencia de la primera cuenta del usuario.
+  const storeCurrency = useCurrencyStore((s) => s.currency);
+  const convertAll = useCurrencyStore((s) => s.convertAll);
+  const targetCurrency = convertAll ? storeCurrency : undefined;
 
-  const summaryQuery = useDebtCategorySummary(range);
-  const healthQuery = useDebtHealth();
+  const summaryQuery = useDebtCategorySummary(
+    range,
+    targetCurrency ? { targetCurrency } : {},
+  );
+  const healthQuery = useDebtHealth(
+    targetCurrency ? { targetCurrency } : {},
+  );
   const balancesQuery = useAccountBalances();
-  const historyQuery = useDebtHistory({ monthsBack: 12, monthsAhead: 12 });
+  const historyQuery = useDebtHistory({
+    monthsBack: 12,
+    monthsAhead: 12,
+    ...(targetCurrency ? { targetCurrency } : {}),
+  });
 
   const liabilities = useMemo(
     () =>

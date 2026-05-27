@@ -9,6 +9,7 @@ import {
   useDebtHealth,
   useDebtHistory,
 } from '@crisol/services';
+import { useCurrencyStore } from '@crisol/store';
 import type { Account, DebtTimeRange } from '@crisol/types';
 import {
   colors,
@@ -41,11 +42,26 @@ export default function DebtScreen() {
   const [layer2Open, setLayer2Open] = useState(false);
   const [payingDebt, setPayingDebt] = useState<Account | null>(null);
 
-  const summaryQuery = useDebtCategorySummary(range);
-  const healthQuery = useDebtHealth();
+  // PHASE-30.6 — el selector global de divisa pasa por aquí como
+  // `target_currency` a los tres endpoints (mismo wiring que web).
+  const storeCurrency = useCurrencyStore((s) => s.currency);
+  const convertAll = useCurrencyStore((s) => s.convertAll);
+  const targetCurrency = convertAll ? storeCurrency : undefined;
+
+  const summaryQuery = useDebtCategorySummary(
+    range,
+    targetCurrency ? { targetCurrency } : {},
+  );
+  const healthQuery = useDebtHealth(
+    targetCurrency ? { targetCurrency } : {},
+  );
   const balancesQuery = useAccountBalances();
   const accountsQuery = useAccounts({ includeArchived: false });
-  const historyQuery = useDebtHistory({ monthsBack: 12, monthsAhead: 12 });
+  const historyQuery = useDebtHistory({
+    monthsBack: 12,
+    monthsAhead: 12,
+    ...(targetCurrency ? { targetCurrency } : {}),
+  });
 
   const summary = summaryQuery.data;
   const health = healthQuery.data;

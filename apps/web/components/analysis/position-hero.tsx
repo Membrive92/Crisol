@@ -44,9 +44,13 @@ import {
  */
 export function PositionHero() {
   const includeDebt = useCurrencyStore((s) => s.includeDebtInNetWorth);
+  // PHASE-30.6 — debt-health respeta el selector de divisa del header.
+  const storeCurrency = useCurrencyStore((s) => s.currency);
+  const convertAll = useCurrencyStore((s) => s.convertAll);
+  const targetCurrency = convertAll ? storeCurrency : undefined;
   const balancesQuery = useAccountBalances();
   const accountsQuery = useAccounts({ includeArchived: true });
-  const debtQuery = useDebtHealth();
+  const debtQuery = useDebtHealth(targetCurrency ? { targetCurrency } : {});
 
   const archivedIds = useMemo(() => {
     const set = new Set<string>();

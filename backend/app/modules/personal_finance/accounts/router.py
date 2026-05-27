@@ -74,12 +74,19 @@ async def balances_endpoint(
 async def debt_health_endpoint(
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
+    target_currency: Annotated[
+        str | None, Query(min_length=3, max_length=3)
+    ] = None,
 ) -> DebtHealthKpis:
     """KPIs de salud financiera (PHASE-22.4): DTI, debt-to-assets,
     intereses YTD, APR medio ponderado, proyección de tiempo hasta
     saldar la deuda al ritmo actual.
+
+    PHASE-30.6 — `?target_currency=` convierte saldos a esa moneda
+    (snapshot today) y aplica per-tx conversion al income e
+    intereses YTD. Saldos sin tasa quedan excluidos del agregado.
     """
-    return await compute_debt_health(db, user.id)
+    return await compute_debt_health(db, user.id, target_currency=target_currency)
 
 
 @router.get("/debt-history", response_model=DebtHistoryResponse)
@@ -88,6 +95,9 @@ async def debt_history_endpoint(
     db: Annotated[AsyncSession, Depends(get_db)],
     months_back: Annotated[int, Query(ge=1, le=36)] = 12,
     months_ahead: Annotated[int, Query(ge=0, le=36)] = 12,
+    target_currency: Annotated[
+        str | None, Query(min_length=3, max_length=3)
+    ] = None,
 ) -> DebtHistoryResponse:
     """Serie temporal de evolución de deuda (PHASE-22.1).
 
@@ -95,9 +105,17 @@ async def debt_history_endpoint(
     (meses cerrados) + `months_ahead` puntos proyectados (a partir
     del mes en curso) usando cuadros de amortización y cuota teórica
     de tarjetas. `months_ahead=0` desactiva la proyección.
+
+    PHASE-30.6 — `?target_currency=` aplica per-tx conversion al
+    histórico (intereses + principal) y convierte cada saldo / cuota
+    proyectada al target con la tasa de hoy.
     """
     return await compute_debt_history(
-        db, user.id, months_back=months_back, months_ahead=months_ahead
+        db,
+        user.id,
+        months_back=months_back,
+        months_ahead=months_ahead,
+        target_currency=target_currency,
     )
 
 

@@ -61,7 +61,14 @@ function formatMonths(months: number | null): string {
  * - Empty state cuando `total_liabilities === 0`.
  */
 export function DebtHealthCard() {
-  const { data, isLoading, isError } = useDebtHealth();
+  // PHASE-30.6 — Mismo wiring que web: el selector de divisa global
+  // se pasa al endpoint cuando `convertAll` está activo.
+  const storeCurrency = useCurrencyStore((s) => s.currency);
+  const convertAll = useCurrencyStore((s) => s.convertAll);
+  const targetCurrency = convertAll ? storeCurrency : undefined;
+  const { data, isLoading, isError } = useDebtHealth(
+    targetCurrency ? { targetCurrency } : {},
+  );
   const includeDebt = useCurrencyStore((s) => s.includeDebtInNetWorth);
 
   if (isLoading) {

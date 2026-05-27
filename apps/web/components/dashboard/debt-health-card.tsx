@@ -57,7 +57,15 @@ function formatMonths(months: number | null): string {
  * se sustituye el grid por un mensaje "Sin deudas registradas".
  */
 export function DebtHealthCard() {
-  const { data, isLoading, isError } = useDebtHealth();
+  // PHASE-30.6 — Respeta el selector de divisa del header como dashboard
+  // y análisis: cuando `convertAll` está activo, pasa la divisa global
+  // al endpoint para obtener saldos / KPIs ya convertidos.
+  const storeCurrency = useCurrencyStore((s) => s.currency);
+  const convertAll = useCurrencyStore((s) => s.convertAll);
+  const targetCurrency = convertAll ? storeCurrency : undefined;
+  const { data, isLoading, isError } = useDebtHealth(
+    targetCurrency ? { targetCurrency } : {},
+  );
   const includeDebt = useCurrencyStore((s) => s.includeDebtInNetWorth);
 
   if (isLoading) {

@@ -22,21 +22,39 @@ export const queryKeys = {
       [...queryKeys.accounts.all, 'list', includeArchived] as const,
     detail: (id: string) => [...queryKeys.accounts.all, 'detail', id] as const,
     balances: () => [...queryKeys.accounts.all, 'balances'] as const,
-    debtHealth: () => [...queryKeys.accounts.all, 'debt-health'] as const,
-    debtHistory: (monthsBack = 12, monthsAhead = 12) =>
+    debtHealth: (targetCurrency?: string) =>
+      [
+        ...queryKeys.accounts.all,
+        'debt-health',
+        targetCurrency ?? 'native',
+      ] as const,
+    debtHistory: (
+      monthsBack = 12,
+      monthsAhead = 12,
+      targetCurrency?: string,
+    ) =>
       [
         ...queryKeys.accounts.all,
         'debt-history',
         monthsBack,
         monthsAhead,
+        targetCurrency ?? 'native',
       ] as const,
     amortization: (id: string) =>
       [...queryKeys.accounts.all, 'amortization', id] as const,
   },
   debt: {
     all: ['debt'] as const,
-    categorySummary: (range: 'ytd' | '12m' | 'month' = 'ytd') =>
-      [...queryKeys.debt.all, 'category-summary', range] as const,
+    categorySummary: (
+      range: 'ytd' | '12m' | 'month' = 'ytd',
+      targetCurrency?: string,
+    ) =>
+      [
+        ...queryKeys.debt.all,
+        'category-summary',
+        range,
+        targetCurrency ?? 'native',
+      ] as const,
   },
   transfers: {
     all: ['transfers'] as const,

@@ -71,25 +71,31 @@ export function useAccountBalances() {
   });
 }
 
-export function useDebtHealth() {
+export function useDebtHealth(options: { targetCurrency?: string } = {}) {
+  const targetCurrency = options.targetCurrency;
   return useQuery<DebtHealthKpis, Error>({
-    queryKey: queryKeys.accounts.debtHealth(),
-    queryFn: () => accountsApi.debtHealth(),
+    queryKey: queryKeys.accounts.debtHealth(targetCurrency),
+    queryFn: () =>
+      accountsApi.debtHealth(
+        targetCurrency ? { target_currency: targetCurrency } : {},
+      ),
     staleTime: 1000 * 60,
   });
 }
 
 export function useDebtHistory(
-  options: { monthsBack?: number; monthsAhead?: number } = {},
+  options: { monthsBack?: number; monthsAhead?: number; targetCurrency?: string } = {},
 ) {
   const monthsBack = options.monthsBack ?? 12;
   const monthsAhead = options.monthsAhead ?? 12;
+  const targetCurrency = options.targetCurrency;
   return useQuery<DebtHistoryResponse, Error>({
-    queryKey: queryKeys.accounts.debtHistory(monthsBack, monthsAhead),
+    queryKey: queryKeys.accounts.debtHistory(monthsBack, monthsAhead, targetCurrency),
     queryFn: () =>
       accountsApi.debtHistory({
         months_back: monthsBack,
         months_ahead: monthsAhead,
+        ...(targetCurrency ? { target_currency: targetCurrency } : {}),
       }),
     staleTime: 1000 * 60,
   });

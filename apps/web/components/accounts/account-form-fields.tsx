@@ -300,8 +300,8 @@ export function AccountFormFields({
             }}
           >
             {debtCategories.length === 0
-              ? 'No tienes categorías con rol de deuda todavía. Crea una en Ajustes › Categorías marcando rol DEBT_PAYMENT o DEBT_INTEREST.'
-              : 'Si las cuotas de este contrato aparecen en tus transacciones bajo una categoría, vincúlala aquí para cruzar Capa 1 (flujo) con Capa 2 (saldo) en el módulo de deuda.'}
+              ? 'Aún no tienes categorías marcadas como deuda. Crea una en Ajustes › Categorías y marca el tipo "Pago de deuda" o "Intereses de deuda" para que aparezca aquí.'
+              : 'Si las cuotas de este contrato aparecen en tus transacciones bajo una categoría, vincúlala aquí para cruzar el flujo (pagos categorizados) con el saldo (contrato) en el módulo de deuda.'}
           </p>
         </div>
       ) : null}
