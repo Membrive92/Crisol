@@ -16,6 +16,7 @@ ADRs (Architecture Decision Records), catálogo de endpoints y schema de BD.
 - [data-model/schema.md](data-model/schema.md) — estado del schema
 - [decisions/](decisions/) — ADRs (decisiones arquitectónicas)
 - [phases/](phases/) — un documento por fase completada
+- [audits/](audits/) — auditorías (seguridad, arquitectura, UX, rendimiento)
 - [ai-context/](ai-context/) — contexto de consulta bajo demanda para IA
   (glosario, ejemplos, evaluaciones de modelos, prompts guardados)
 
@@ -272,6 +273,8 @@ y [`design-explorations/debt-redesign-30/wireframe.md`](design-explorations/debt
 | 30.3 | Web: rediseño `/debt` con Capa 1 hero                        | ✅     | —  |
 | 30.4 | Web: Capa 2 condensada + vinculación contrato-categoría      | ✅     | —  |
 | 30.5 | Mobile parity                                                | ✅     | —  |
+| 30.6 | Selector de divisa del header propagado a los 3 endpoints de deuda | ✅ | — |
+| 30.7 | Selector temporal `month/quarter/year` (alineado con `StitchPeriodToggle`) + donut por tipo de cuenta vinculada | ✅ | — |
 
 ### Fase 31 — Saneamiento de cuentas e integridad de saldos
 
