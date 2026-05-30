@@ -53,12 +53,8 @@ class LiabilityInstallment(Base):
     payment: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     interest: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     principal: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
-    remaining_balance: Mapped[Decimal] = mapped_column(
-        Numeric(14, 2), nullable=False
-    )
-    paid_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    remaining_balance: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     """NULL = pendiente. Timestamp = pagada."""
     paid_transaction_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("transactions.id", ondelete="SET NULL"),

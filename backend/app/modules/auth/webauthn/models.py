@@ -29,9 +29,7 @@ class WebAuthnCredential(Base):
     )
     # `credential_id` es lo que el navegador envía durante autenticación.
     # Único globalmente (es lo que identifica una credencial entre todas).
-    credential_id: Mapped[bytes] = mapped_column(
-        LargeBinary, nullable=False, unique=True
-    )
+    credential_id: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, unique=True)
     public_key: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     sign_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # Transports declarados por el authenticator (usb, nfc, ble, internal,
@@ -42,9 +40,7 @@ class WebAuthnCredential(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
-    last_used_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class WebAuthnChallenge(Base):
@@ -71,9 +67,7 @@ class WebAuthnChallenge(Base):
     # `purpose`: "register" o "authenticate" — defensa en profundidad
     # contra mezclar challenges entre flujos.
     purpose: Mapped[str] = mapped_column(String(20), nullable=False)
-    expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

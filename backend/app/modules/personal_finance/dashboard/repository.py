@@ -105,9 +105,7 @@ def _exclude_transfer_kind(query: Any, *, outer_join: bool) -> Any:
     eso es imposible y basta `is_transfer = false`.
     """
     if outer_join:
-        return query.where(
-            or_(Category.is_transfer.is_(None), Category.is_transfer.is_(False))
-        )
+        return query.where(or_(Category.is_transfer.is_(None), Category.is_transfer.is_(False)))
     return query.where(Category.is_transfer.is_(False))
 
 
@@ -171,12 +169,8 @@ async def get_summary_aggregates(
     en modo legacy es literal `0`.
     """
     amount = _amount_expr(target_currency)
-    income_amount = case(
-        (Category.kind == CategoryKind.INCOME, amount), else_=Decimal("0")
-    )
-    expense_amount = case(
-        (Category.kind == CategoryKind.EXPENSE, amount), else_=Decimal("0")
-    )
+    income_amount = case((Category.kind == CategoryKind.INCOME, amount), else_=Decimal("0"))
+    expense_amount = case((Category.kind == CategoryKind.EXPENSE, amount), else_=Decimal("0"))
 
     if target_currency is not None:
         unconv_subq = (

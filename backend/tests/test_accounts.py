@@ -5,9 +5,7 @@ from __future__ import annotations
 from httpx import AsyncClient
 
 
-async def _setup_user(
-    client: AsyncClient, email: str = "acc@example.com"
-) -> str:
+async def _setup_user(client: AsyncClient, email: str = "acc@example.com") -> str:
     """Registra un usuario y devuelve el access token."""
     r = await client.post(
         "/auth/register",
@@ -318,9 +316,7 @@ async def test_uncategorized_summary_endpoint(client: AsyncClient) -> None:
         )
         assert r.status_code == 201
 
-    summary = await client.get(
-        "/transactions/uncategorized-summary", headers=_auth(token)
-    )
+    summary = await client.get("/transactions/uncategorized-summary", headers=_auth(token))
     assert summary.status_code == 200
     body = summary.json()
     assert body["count"] == 3

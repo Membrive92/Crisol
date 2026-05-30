@@ -7,7 +7,18 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, func
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    func,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -88,17 +99,13 @@ class Account(Base):
     # genera la tabla francesa (cuota constante, intereses decrecientes,
     # principal creciente). Tarjetas no usan estos campos — su saldo es
     # arrastrado sin plan fijo. NULLABLE en todos para no romper assets.
-    apr: Mapped[Decimal | None] = mapped_column(
-        Numeric(6, 4), nullable=True
-    )
+    apr: Mapped[Decimal | None] = mapped_column(Numeric(6, 4), nullable=True)
     """TIN — tipo de interés nominal anual como decimal
     (0.035 = 3.5% TIN). Se usa para calcular cuota e intereses del
     cuadro francés. NULL = sin cuadro. Mantenemos el nombre `apr`
     por compatibilidad con migraciones previas; el label en la UI es
     "TIN"."""
-    tae: Mapped[Decimal | None] = mapped_column(
-        Numeric(6, 4), nullable=True
-    )
+    tae: Mapped[Decimal | None] = mapped_column(Numeric(6, 4), nullable=True)
     """PHASE-24.2 — TAE: tasa anual equivalente (informativa, no
     afecta al cálculo). Obligatoria por regulación bancaria española;
     incluye comisiones + capitalización. NULL = no declarada."""
@@ -106,9 +113,7 @@ class Account(Base):
     """Plazo total en meses. NULL = sin cuadro."""
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     """Fecha de inicio del préstamo. NULL = sin cuadro."""
-    total_to_pay: Mapped[Decimal | None] = mapped_column(
-        Numeric(14, 2), nullable=True
-    )
+    total_to_pay: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     """PHASE-24.3 — total contractualizado por el banco (incluye
     posibles comisiones/cargos no desglosados). Si está, la diferencia
     con `Σ(cuotas) + interest_only_first_payment` aflora como
@@ -142,4 +147,15 @@ class Account(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        # PHASE-30.4 — índice parcial creado en la migración
+        # t7j81l3hg6k4i0; se declara aquí para que `create_all` (tests) y
+        # `alembic check` (parity) coincidan con producción.
+        Index(
+            "ix_accounts_category_id",
+            "category_id",
+            postgresql_where=text("category_id IS NOT NULL"),
+        ),
     )

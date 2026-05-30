@@ -11,7 +11,7 @@ import io
 from typing import Any
 
 import httpx
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from app.core.config import settings
 from app.modules.ai.exceptions import AiTimeoutError, AiUnavailableError
@@ -37,20 +37,20 @@ def _downscale_for_vision(image: bytes) -> bytes:
     """
     try:
         with Image.open(io.BytesIO(image)) as img:
-            img = ImageOps.exif_transpose(img)
-            w, h = img.size
+            oriented = ImageOps.exif_transpose(img) or img
+            w, h = oriented.size
             if max(w, h) <= _MAX_IMAGE_LONG_SIDE:
                 return image
-            img.thumbnail(
+            oriented.thumbnail(
                 (_MAX_IMAGE_LONG_SIDE, _MAX_IMAGE_LONG_SIDE),
                 Image.Resampling.LANCZOS,
             )
-            if img.mode not in {"RGB", "L"}:
-                img = img.convert("RGB")
+            if oriented.mode not in {"RGB", "L"}:
+                oriented = oriented.convert("RGB")
             buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=_JPEG_QUALITY, optimize=True)
+            oriented.save(buf, format="JPEG", quality=_JPEG_QUALITY, optimize=True)
             return buf.getvalue()
-    except (OSError, Image.UnidentifiedImageError):
+    except (OSError, UnidentifiedImageError):
         return image
 
 

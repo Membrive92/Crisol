@@ -54,7 +54,7 @@ class NoTablesInPdfError(ParseError):
     """
 
 
-class SmartParseAmbiguous(ParseError):
+class SmartParseAmbiguousError(ParseError):
     """`parse_pdf_smart` no logró identificar con confianza la tabla
     de transacciones. El caller debe caer al parser legacy con mapping
     manual o al fallback de visión.
@@ -130,9 +130,7 @@ def parse_xlsx(payload: bytes) -> list[dict[str, str]]:
 
     iterator = sheet.iter_rows(values_only=True)
     headers: list[str] = []
-    rows_scanned = 0
-    for raw_row in iterator:
-        rows_scanned += 1
+    for rows_scanned, raw_row in enumerate(iterator, start=1):
         candidate = [_stringify(cell).strip() for cell in raw_row]
         non_empty = sum(1 for cell in candidate if cell)
         if non_empty >= 2:
@@ -195,9 +193,7 @@ def parse_xlsx_smart(payload: bytes) -> list[dict[str, str]]:
 
     iterator = sheet.iter_rows(values_only=True)
     headers: list[str] = []
-    rows_scanned = 0
-    for raw_row in iterator:
-        rows_scanned += 1
+    for rows_scanned, raw_row in enumerate(iterator, start=1):
         candidate = [_stringify(cell).strip() for cell in raw_row]
         non_empty = sum(1 for cell in candidate if cell)
         if non_empty >= 2:
@@ -207,18 +203,15 @@ def parse_xlsx_smart(payload: bytes) -> list[dict[str, str]]:
             break
 
     if not headers:
-        raise SmartParseAmbiguous(
-            "Sin cabecera detectable en las primeras "
-            f"{_XLSX_HEADER_SCAN_LIMIT} filas"
+        raise SmartParseAmbiguousError(
+            "Sin cabecera detectable en las primeras " f"{_XLSX_HEADER_SCAN_LIMIT} filas"
         )
 
     roles = _classify_columns(headers)
     if "amount" not in roles or "occurred_at" not in roles:
         # Sin columnas críticas no podemos seguir — el legacy parser
         # con mapping manual del usuario lo arreglará.
-        raise SmartParseAmbiguous(
-            "No se reconocieron columnas de importe o fecha"
-        )
+        raise SmartParseAmbiguousError("No se reconocieron columnas de importe o fecha")
 
     rows: list[dict[str, str]] = []
     for raw_row in iterator:
@@ -226,7 +219,7 @@ def parse_xlsx_smart(payload: bytes) -> list[dict[str, str]]:
             continue
         cleaned = [_stringify(cell).strip() for cell in raw_row]
 
-        def get(role: str) -> str:
+        def get(role: str, cleaned: list[str] = cleaned) -> str:
             idx = roles.get(role)
             if idx is None or idx >= len(cleaned):
                 return ""
@@ -252,7 +245,7 @@ def parse_xlsx_smart(payload: bytes) -> list[dict[str, str]]:
         )
 
     if not rows:
-        raise SmartParseAmbiguous("Cabecera detectada pero sin filas de datos")
+        raise SmartParseAmbiguousError("Cabecera detectada pero sin filas de datos")
 
     return rows
 
@@ -288,18 +281,14 @@ def parse_pdf(payload: bytes) -> list[dict[str, str]]:
                     tables.append(table)
 
     if not tables:
-        raise NoTablesInPdfError(
-            "No se detectaron tablas en el PDF (¿escaneado?)"
-        )
+        raise NoTablesInPdfError("No se detectaron tablas en el PDF (¿escaneado?)")
 
     first_header_raw = tables[0][0]
     if not first_header_raw:
         raise ParseError("La primera tabla del PDF no tiene cabecera")
 
     header_cleaned = [_pdf_clean(cell) for cell in first_header_raw]
-    headers = [
-        cell or f"col_{idx}" for idx, cell in enumerate(header_cleaned)
-    ]
+    headers = [cell or f"col_{idx}" for idx, cell in enumerate(header_cleaned)]
     if not any(header_cleaned):
         raise ParseError("La cabecera del PDF está vacía")
 
@@ -345,7 +334,9 @@ def parse_file(payload: bytes, filename: str, content_type: str | None) -> list[
     return parse_pdf(payload)
 
 
-def parse_stream(stream: IO[bytes], filename: str, content_type: str | None) -> list[dict[str, str]]:
+def parse_stream(
+    stream: IO[bytes], filename: str, content_type: str | None
+) -> list[dict[str, str]]:
     """Variante para streams ya abiertos (p.ej. `UploadFile`)."""
     return parse_file(stream.read(), filename, content_type)
 
@@ -407,8 +398,18 @@ def _stringify(value: Any) -> str:
 
 # Sinónimos de cada rol de columna (case + acento-insensibles).
 _DATE_HEADER_HINTS = (
-    "fecha", "fec.", "f. operac", "f.operac", "f operac", "f. contab",
-    "f.contab", "f contab", "operación", "operacion", "valor", "date",
+    "fecha",
+    "fec.",
+    "f. operac",
+    "f.operac",
+    "f operac",
+    "f. contab",
+    "f.contab",
+    "f contab",
+    "operación",
+    "operacion",
+    "valor",
+    "date",
 )
 # IMPORTANT: NO incluir "saldo" — los extractos típicos tienen
 # columnas Importe + Saldo y la heurística de "último match" se quedaría
@@ -417,15 +418,31 @@ _DATE_HEADER_HINTS = (
 # "valor" tampoco: confunde con "Fecha valor" en cabeceras de extractos
 # bancarios españoles. Mantenemos sinónimos seguros.
 _AMOUNT_HEADER_HINTS = (
-    "importe", "amount", "monto", "cantidad", "cuantia", "cuantía",
+    "importe",
+    "amount",
+    "monto",
+    "cantidad",
+    "cuantia",
+    "cuantía",
 )
 _CATEGORY_HEADER_HINTS = (
-    "concepto", "categoría", "categoria", "tipo", "movimiento", "operación",
-    "operacion", "category",
+    "concepto",
+    "categoría",
+    "categoria",
+    "tipo",
+    "movimiento",
+    "operación",
+    "operacion",
+    "category",
 )
 _DESCRIPTION_HEADER_HINTS = (
-    "detalle", "descripción", "descripcion", "observaciones", "comercio",
-    "description", "referencia",
+    "detalle",
+    "descripción",
+    "descripcion",
+    "observaciones",
+    "comercio",
+    "description",
+    "referencia",
 )
 
 # Score mínimo para aceptar una tabla como "tabla de transacciones".
@@ -436,8 +453,12 @@ def _norm(value: str) -> str:
     """Normaliza para comparar cabeceras (lowercase + sin acentos + trim)."""
     return (
         value.lower()
-        .replace("á", "a").replace("é", "e").replace("í", "i")
-        .replace("ó", "o").replace("ú", "u").replace("ñ", "n")
+        .replace("á", "a")
+        .replace("é", "e")
+        .replace("í", "i")
+        .replace("ó", "o")
+        .replace("ú", "u")
+        .replace("ñ", "n")
         .strip()
     )
 
@@ -466,14 +487,10 @@ def _classify_columns(headers: list[str]) -> dict[str, int]:
             # gana el último match
             roles["amount"] = idx
             continue
-        if "description" not in roles and _header_matches(
-            header, _DESCRIPTION_HEADER_HINTS
-        ):
+        if "description" not in roles and _header_matches(header, _DESCRIPTION_HEADER_HINTS):
             roles["description"] = idx
             continue
-        if "category_name" not in roles and _header_matches(
-            header, _CATEGORY_HEADER_HINTS
-        ):
+        if "category_name" not in roles and _header_matches(header, _CATEGORY_HEADER_HINTS):
             roles["category_name"] = idx
     return roles
 
@@ -616,19 +633,23 @@ def parse_pdf_smart(payload: bytes) -> list[dict[str, str]]:
                     candidates.append(table)
 
     if not candidates:
-        raise NoTablesInPdfError(
-            "No se detectaron tablas en el PDF (¿escaneado?)"
-        )
+        raise NoTablesInPdfError("No se detectaron tablas en el PDF (¿escaneado?)")
 
     # Agrupar tablas con cabeceras idénticas (continuación entre páginas).
     # Una vez identificada la "mejor" cabecera, todas las tablas posteriores
     # con esa misma cabecera se concatenan.
-    scored = [(score, roles, table) for table in candidates for score, roles in [_score_table(table)]]
+    scored = [
+        (score, roles, table) for table in candidates for score, roles in [_score_table(table)]
+    ]
     scored.sort(key=lambda x: x[0], reverse=True)
 
     best_score, best_roles, best_table = scored[0]
-    if best_score < _SMART_MIN_SCORE or "occurred_at" not in best_roles or "amount" not in best_roles:
-        raise SmartParseAmbiguous(
+    if (
+        best_score < _SMART_MIN_SCORE
+        or "occurred_at" not in best_roles
+        or "amount" not in best_roles
+    ):
+        raise SmartParseAmbiguousError(
             f"Heurística no encontró tabla de transacciones (mejor score={best_score})"
         )
 
@@ -657,7 +678,7 @@ def parse_pdf_smart(payload: bytes) -> list[dict[str, str]]:
             if [_norm(c) for c in cleaned[: len(best_header_norm)]] == best_header_norm:
                 continue
 
-            def get(role: str) -> str:
+            def get(role: str, cleaned: list[str] = cleaned) -> str:
                 idx = best_roles.get(role)
                 if idx is None or idx >= len(cleaned):
                     return ""
@@ -686,8 +707,6 @@ def parse_pdf_smart(payload: bytes) -> list[dict[str, str]]:
             )
 
     if not rows:
-        raise SmartParseAmbiguous(
-            "Tabla de transacciones detectada pero sin filas de datos"
-        )
+        raise SmartParseAmbiguousError("Tabla de transacciones detectada pero sin filas de datos")
 
     return rows

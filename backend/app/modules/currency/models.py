@@ -30,13 +30,9 @@ class ExchangeRate(Base):
     # (JPY ≈ 0,006 EUR/JPY si se invirtiera). El redondeo final a 2
     # decimales lo hace `service.convert` con ROUND_HALF_EVEN.
     rate: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
-    source: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="frankfurter"
-    )
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="frankfurter")
     fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
-    __table_args__ = (
-        Index("ix_exchange_rates_quote_date", "quote", "rate_date"),
-    )
+    __table_args__ = (Index("ix_exchange_rates_quote_date", "quote", "rate_date"),)

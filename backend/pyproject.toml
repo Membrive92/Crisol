@@ -51,7 +51,11 @@ extend-exclude = ["alembic/versions", ".venv"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "TID", "RUF"]
-ignore = ["E501"]
+# E501: line length handled by black (line-length above).
+# RUF001/2/3: "ambiguous unicode" (×, −, …) — false positives in a Spanish
+# codebase that uses real typographic/math symbols in docstrings & comments;
+# ignoring avoids whack-a-mole every time a new "×"/"−" is written in prose.
+ignore = ["E501", "RUF001", "RUF002", "RUF003"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["B011"]

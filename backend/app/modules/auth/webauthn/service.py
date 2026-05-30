@@ -54,18 +54,14 @@ PURPOSE_AUTHENTICATE = "authenticate"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-async def build_registration_options(
-    db: AsyncSession, user: User
-) -> dict[str, Any]:
+async def build_registration_options(db: AsyncSession, user: User) -> dict[str, Any]:
     """Genera las options para `navigator.credentials.create` y persiste el challenge.
 
     Excluye las credenciales ya registradas del usuario para evitar
     re-registros del mismo dispositivo.
     """
     existing = await list_user_credentials(db, user.id)
-    exclude_credentials = [
-        PublicKeyCredentialDescriptor(id=c.credential_id) for c in existing
-    ]
+    exclude_credentials = [PublicKeyCredentialDescriptor(id=c.credential_id) for c in existing]
 
     options = generate_registration_options(
         rp_id=settings.webauthn_rp_id,
@@ -166,9 +162,7 @@ async def build_authentication_options(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No hay passkeys registradas para esta cuenta",
             )
-        allow_credentials = [
-            PublicKeyCredentialDescriptor(id=c.credential_id) for c in credentials
-        ]
+        allow_credentials = [PublicKeyCredentialDescriptor(id=c.credential_id) for c in credentials]
         user_id_for_challenge = user.id
 
     options = generate_authentication_options(
@@ -279,8 +273,7 @@ async def _persist_challenge(
         user_id=user_id,
         challenge=challenge,
         purpose=purpose,
-        expires_at=datetime.now(UTC)
-        + timedelta(seconds=settings.webauthn_challenge_ttl_seconds),
+        expires_at=datetime.now(UTC) + timedelta(seconds=settings.webauthn_challenge_ttl_seconds),
     )
     await create_challenge(db, record)
 

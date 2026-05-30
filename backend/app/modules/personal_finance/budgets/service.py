@@ -70,9 +70,7 @@ async def list_budgets(db: AsyncSession, user_id: uuid.UUID) -> list[Budget]:
     return await list_active_budgets(db, user_id, today=_today_utc())
 
 
-async def get_budget(
-    db: AsyncSession, budget_id: uuid.UUID, user_id: uuid.UUID
-) -> Budget:
+async def get_budget(db: AsyncSession, budget_id: uuid.UUID, user_id: uuid.UUID) -> Budget:
     """Obtiene un presupuesto o 404."""
     budget = await get_budget_by_id(db, budget_id, user_id)
     if budget is None:
@@ -82,9 +80,7 @@ async def get_budget(
     return budget
 
 
-async def create_budget(
-    db: AsyncSession, user_id: uuid.UUID, data: BudgetCreate
-) -> Budget:
+async def create_budget(db: AsyncSession, user_id: uuid.UUID, data: BudgetCreate) -> Budget:
     """Crea un nuevo presupuesto.
 
     Política: un solo presupuesto activo por (user, category) a la
@@ -137,9 +133,7 @@ async def update_budget(
     return budget
 
 
-async def close_budget(
-    db: AsyncSession, budget_id: uuid.UUID, user_id: uuid.UUID
-) -> None:
+async def close_budget(db: AsyncSession, budget_id: uuid.UUID, user_id: uuid.UUID) -> None:
     """Cierra un presupuesto poniendo `effective_to = today`.
 
     Mantiene el row para histórico — DELETE real sería destructivo y
@@ -225,9 +219,7 @@ async def get_alert_for_category(
     return None
 
 
-async def get_budgets_status(
-    db: AsyncSession, user_id: uuid.UUID
-) -> BudgetStatusResponse:
+async def get_budgets_status(db: AsyncSession, user_id: uuid.UUID) -> BudgetStatusResponse:
     """Para cada presupuesto activo, calcula gasto del mes y status.
 
     El "mes" es el calendario UTC actual (1 a último día). Reusa el

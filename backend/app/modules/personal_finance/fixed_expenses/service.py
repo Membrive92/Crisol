@@ -101,8 +101,7 @@ async def pause_fixed_expense(
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
             detail=(
-                "Sólo se puede pausar un gasto fijo confirmado. "
-                f"Estado actual: {item.status}."
+                "Sólo se puede pausar un gasto fijo confirmado. " f"Estado actual: {item.status}."
             ),
         )
     item.status = FixedExpenseStatus.PAUSED
@@ -120,8 +119,7 @@ async def resume_fixed_expense(
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
             detail=(
-                "Sólo se puede reanudar un gasto fijo pausado. "
-                f"Estado actual: {item.status}."
+                "Sólo se puede reanudar un gasto fijo pausado. " f"Estado actual: {item.status}."
             ),
         )
     item.status = FixedExpenseStatus.CONFIRMED
@@ -213,7 +211,7 @@ async def autopost_due_for_user(
 
     created = 0
     advanced = 0
-    MAX_BACKFILL_CYCLES = 12
+    max_backfill_cycles = 12
     for item in items:
         # PHASE-19.1: el autopost necesita una cuenta para imputar la
         # tx. Si el gasto fijo no la tiene asignada, lo saltamos
@@ -222,7 +220,7 @@ async def autopost_due_for_user(
         if item.account_id is None:
             continue
         cycles = 0
-        while item.next_due <= today and cycles < MAX_BACKFILL_CYCLES:
+        while item.next_due <= today and cycles < max_backfill_cycles:
             tx = Transaction(
                 user_id=user_id,
                 account_id=item.account_id,
@@ -249,9 +247,7 @@ async def autopost_due_for_user(
     return AutopostResponse(created=created, advanced=advanced)
 
 
-async def scan_for_user(
-    db: AsyncSession, user_id: uuid.UUID
-) -> ScanResponse:
+async def scan_for_user(db: AsyncSession, user_id: uuid.UUID) -> ScanResponse:
     """Ejecuta el detector y persiste/refresca gastos fijos.
 
     Política:

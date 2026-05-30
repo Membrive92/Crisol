@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 # y fechas en `DD/MM/YY`. En vez de luchar con el prompt, normalizamos en el
 # parser — es determinista y barato.
 
+
 def _coerce_decimal(value: Any) -> Any:
     """Normaliza un decimal en formato europeo (`27,66` → `27.66`).
 

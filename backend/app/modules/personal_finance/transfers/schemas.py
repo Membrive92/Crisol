@@ -173,19 +173,13 @@ class NewLiabilityForDebt(BaseModel):
     currency: str = Field(default="EUR", min_length=3, max_length=3)
     color: str | None = Field(default=None, max_length=7)
     icon: str | None = Field(default=None, max_length=50)
-    apr: Decimal | None = Field(
-        default=None, ge=Decimal("0"), le=Decimal("1"), decimal_places=4
-    )
+    apr: Decimal | None = Field(default=None, ge=Decimal("0"), le=Decimal("1"), decimal_places=4)
     """TIN — usado para el cálculo del cuadro."""
-    tae: Decimal | None = Field(
-        default=None, ge=Decimal("0"), le=Decimal("1"), decimal_places=4
-    )
+    tae: Decimal | None = Field(default=None, ge=Decimal("0"), le=Decimal("1"), decimal_places=4)
     """PHASE-24.2 — TAE (informativa)."""
     term_months: int | None = Field(default=None, ge=1, le=600)
     start_date: date | None = None
-    total_to_pay: Decimal | None = Field(
-        default=None, ge=Decimal("0"), decimal_places=2
-    )
+    total_to_pay: Decimal | None = Field(default=None, ge=Decimal("0"), decimal_places=2)
     """PHASE-24.3 — Total contractualizado (banco)."""
     interest_only_first_payment: Decimal | None = Field(
         default=None, ge=Decimal("0"), decimal_places=2

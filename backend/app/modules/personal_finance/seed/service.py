@@ -102,9 +102,7 @@ async def _upsert_category(
     return cat, True
 
 
-async def seed_recommended(
-    db: AsyncSession, user_id: uuid.UUID
-) -> SeedResult:
+async def seed_recommended(db: AsyncSession, user_id: uuid.UUID) -> SeedResult:
     """Crea categorías y reglas recomendadas. Idempotente.
 
     Si el usuario ya tiene la categoría con ese nombre, se reutiliza.

@@ -5,9 +5,7 @@ from __future__ import annotations
 from httpx import AsyncClient
 
 
-async def _setup_user(
-    client: AsyncClient, email: str = "tx@example.com"
-) -> tuple[str, str, str]:
+async def _setup_user(client: AsyncClient, email: str = "tx@example.com") -> tuple[str, str, str]:
     """Helper: registra, crea categoría y cuenta, devuelve
     (token, category_id, account_id)."""
     r = await client.post(
@@ -247,9 +245,7 @@ async def test_bulk_delete_with_category_filter_only_deletes_matching(
             headers=_auth(token),
         )
 
-    r = await client.delete(
-        f"/transactions?category_id={cat_a}", headers=_auth(token)
-    )
+    r = await client.delete(f"/transactions?category_id={cat_a}", headers=_auth(token))
     assert r.status_code == 200
     assert r.json()["deleted_count"] == 2
 
@@ -401,9 +397,7 @@ async def test_bulk_trash_endpoints_isolate_by_user(client: AsyncClient) -> None
     token_b, cat_b, account_b = await _setup_user(client, "bulktrashB@example.com")
     await _seed_trashed(client, token_b, cat_b, account_b, 2)
 
-    r_restore = await client.post(
-        "/transactions/trash/restore", headers=_auth(token_a)
-    )
+    r_restore = await client.post("/transactions/trash/restore", headers=_auth(token_a))
     r_purge = await client.delete("/transactions/trash", headers=_auth(token_a))
     assert r_restore.json()["restored_count"] == 0
     assert r_purge.json()["purged_count"] == 0

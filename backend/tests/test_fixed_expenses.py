@@ -112,9 +112,7 @@ def test_detect_picks_yearly_cadence() -> None:
 # ---------- API integration ----------
 
 
-async def _setup_user(
-    client: AsyncClient, email: str = "sub@example.com"
-) -> tuple[str, str, str]:
+async def _setup_user(client: AsyncClient, email: str = "sub@example.com") -> tuple[str, str, str]:
     r = await client.post(
         "/auth/register",
         json={"email": email, "password": "SecurePass123", "display_name": "Test"},
@@ -235,9 +233,7 @@ async def test_dismiss_prevents_re_suggestion(client: AsyncClient) -> None:
     r_list = await client.get("/fixed-expenses", headers=_auth(token))
     sid = r_list.json()[0]["id"]
 
-    r_dismiss = await client.post(
-        f"/fixed-expenses/{sid}/dismiss", headers=_auth(token)
-    )
+    r_dismiss = await client.post(f"/fixed-expenses/{sid}/dismiss", headers=_auth(token))
     assert r_dismiss.status_code == 200
     assert r_dismiss.json()["status"] == "dismissed"
 

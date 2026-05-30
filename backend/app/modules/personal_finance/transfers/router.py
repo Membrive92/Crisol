@@ -98,9 +98,7 @@ async def link_endpoint(
     return pair
 
 
-@router.delete(
-    "/{transaction_id}", status_code=204, response_class=Response
-)
+@router.delete("/{transaction_id}", status_code=204, response_class=Response)
 async def unlink_endpoint(
     transaction_id: uuid.UUID,
     user: CurrentUser,
@@ -124,9 +122,7 @@ async def suspects_endpoint(
     return await list_suspects(db, user.id)
 
 
-@router.get(
-    "/misclassified", response_model=list[MisclassifiedTransfer]
-)
+@router.get("/misclassified", response_model=list[MisclassifiedTransfer])
 async def misclassified_endpoint(
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -137,9 +133,7 @@ async def misclassified_endpoint(
     return await list_misclassified(db, user.id)
 
 
-@router.post(
-    "/reclassify-bulk", response_model=ReclassifyBulkResponse
-)
+@router.post("/reclassify-bulk", response_model=ReclassifyBulkResponse)
 async def reclassify_bulk_endpoint(
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -170,16 +164,12 @@ async def mark_endpoint(
     una categoría con `is_transfer=true` (creándola por defecto si
     no existe). La tx sale del cashflow agregado pero su signo sigue
     impactando al saldo de la cuenta."""
-    response = await mark_as_transfer(
-        db, user.id, transaction_id=body.transaction_id
-    )
+    response = await mark_as_transfer(db, user.id, transaction_id=body.transaction_id)
     await db.commit()
     return response
 
 
-@router.post(
-    "/from-source", response_model=TransferPairResponse, status_code=201
-)
+@router.post("/from-source", response_model=TransferPairResponse, status_code=201)
 async def from_source_endpoint(
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],

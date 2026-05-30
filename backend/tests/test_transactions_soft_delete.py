@@ -15,9 +15,7 @@ from __future__ import annotations
 from httpx import AsyncClient
 
 
-async def _setup_user(
-    client: AsyncClient, email: str = "soft@example.com"
-) -> tuple[str, str, str]:
+async def _setup_user(client: AsyncClient, email: str = "soft@example.com") -> tuple[str, str, str]:
     r = await client.post(
         "/auth/register",
         json={"email": email, "password": "SecurePass123", "display_name": "Test"},
@@ -115,16 +113,12 @@ async def test_purge_only_works_on_trashed(client: AsyncClient) -> None:
     tx_id = await _create_tx(client, token, account_id, cat_id=cat_id)
 
     # Activa → purge debe ser 404 (forzar pasar por papelera primero).
-    r_active = await client.delete(
-        f"/transactions/{tx_id}/purge", headers=_auth(token)
-    )
+    r_active = await client.delete(f"/transactions/{tx_id}/purge", headers=_auth(token))
     assert r_active.status_code == 404
 
     # Soft-delete → ahora sí.
     await client.delete(f"/transactions/{tx_id}", headers=_auth(token))
-    r_purge = await client.delete(
-        f"/transactions/{tx_id}/purge", headers=_auth(token)
-    )
+    r_purge = await client.delete(f"/transactions/{tx_id}/purge", headers=_auth(token))
     assert r_purge.status_code == 204
 
     # Ya no existe ni en papelera.
@@ -132,9 +126,7 @@ async def test_purge_only_works_on_trashed(client: AsyncClient) -> None:
     assert r_trash.json()["total"] == 0
 
     # Restore tampoco la encuentra.
-    r_restore = await client.post(
-        f"/transactions/{tx_id}/restore", headers=_auth(token)
-    )
+    r_restore = await client.post(f"/transactions/{tx_id}/restore", headers=_auth(token))
     assert r_restore.status_code == 404
 
 
@@ -151,15 +143,11 @@ async def test_trash_user_isolation(client: AsyncClient) -> None:
     assert r_b_trash.json()["total"] == 0
 
     # B no puede restaurar la tx de A.
-    r_b_restore = await client.post(
-        f"/transactions/{tx_a}/restore", headers=_auth(token_b)
-    )
+    r_b_restore = await client.post(f"/transactions/{tx_a}/restore", headers=_auth(token_b))
     assert r_b_restore.status_code == 404
 
     # B no puede purgar la tx de A.
-    r_b_purge = await client.delete(
-        f"/transactions/{tx_a}/purge", headers=_auth(token_b)
-    )
+    r_b_purge = await client.delete(f"/transactions/{tx_a}/purge", headers=_auth(token_b))
     assert r_b_purge.status_code == 404
 
 
@@ -186,18 +174,14 @@ async def test_dashboard_summary_excludes_trashed(client: AsyncClient) -> None:
     tx_trash = await _create_tx(client, token, account_id, cat_id=cat_id, amount="999.00")
 
     # Antes de borrar: 2 transacciones, 1099 de gasto.
-    r1 = await client.get(
-        "/dashboard/summary", params={"currency": "EUR"}, headers=_auth(token)
-    )
+    r1 = await client.get("/dashboard/summary", params={"currency": "EUR"}, headers=_auth(token))
     assert r1.json()["transaction_count"] == 2
     assert float(r1.json()["expenses"]) == 1099.0
 
     await client.delete(f"/transactions/{tx_trash}", headers=_auth(token))
 
     # Después: la trasheada desaparece del summary.
-    r2 = await client.get(
-        "/dashboard/summary", params={"currency": "EUR"}, headers=_auth(token)
-    )
+    r2 = await client.get("/dashboard/summary", params={"currency": "EUR"}, headers=_auth(token))
     assert r2.json()["transaction_count"] == 1
     assert float(r2.json()["expenses"]) == 100.0
     # Sigue accesible vía papelera para la UI.
@@ -271,6 +255,6 @@ async def test_imports_dedup_ignores_trashed(client: AsyncClient) -> None:
         headers=_auth(token),
     )
     assert r2.status_code == 201, r2.text
-    assert r2.json()["rows_ok"] == 1, (
-        f"Soft-deleted no debería bloquear el dedup de imports — {r2.text}"
-    )
+    assert (
+        r2.json()["rows_ok"] == 1
+    ), f"Soft-deleted no debería bloquear el dedup de imports — {r2.text}"

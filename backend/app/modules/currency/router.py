@@ -35,9 +35,7 @@ def _today_utc() -> date_type:
     return datetime.utcnow().date()
 
 
-async def _maybe_lazy_fetch(
-    db: AsyncSession, *, target_date: date_type, base: str
-) -> None:
+async def _maybe_lazy_fetch(db: AsyncSession, *, target_date: date_type, base: str) -> None:
     """Pide tasas a frankfurter para `target_date` si está dentro del horizonte.
 
     Hook detrás del endpoint `/currency/rates` para que la primera
@@ -91,14 +89,10 @@ async def list_rates(
     """
     target_date = rate_date or _today_utc()
     base_norm = base.upper()
-    rows = await repository.list_rates_for_date(
-        db, rate_date=target_date, base=base_norm
-    )
+    rows = await repository.list_rates_for_date(db, rate_date=target_date, base=base_norm)
     if not rows:
         await _maybe_lazy_fetch(db, target_date=target_date, base=base_norm)
-        rows = await repository.list_rates_for_date(
-            db, rate_date=target_date, base=base_norm
-        )
+        rows = await repository.list_rates_for_date(db, rate_date=target_date, base=base_norm)
     return RatesResponse(
         rate_date=target_date,
         base=base_norm,
@@ -125,9 +119,7 @@ async def convert_amount(
     try:
         amount_decimal = Decimal(amount)
     except InvalidOperation as e:
-        raise HTTPException(
-            status_code=422, detail="amount debe ser un decimal válido"
-        ) from e
+        raise HTTPException(status_code=422, detail="amount debe ser un decimal válido") from e
 
     target_date = at_date or _today_utc()
     # Si la fecha aún no se ha visto, intentar precargarla. Mismo hook

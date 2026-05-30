@@ -116,9 +116,7 @@ async def test_autopost_creates_expected_tx_and_advances_next_due(
     ayer (los cargos seedeados desde el helper dejan next_due en el
     futuro y autopost no dispararía)."""
     token, cat_id, account_id = await _setup_user(client, "ap3@example.com")
-    fid = await _create_confirmed_fixed_expense(
-        client, token, cat_id, account_id, amount="800.00"
-    )
+    fid = await _create_confirmed_fixed_expense(client, token, cat_id, account_id, amount="800.00")
     await client.put(
         f"/fixed-expenses/{fid}",
         json={"auto_post": True},
@@ -129,9 +127,7 @@ async def test_autopost_creates_expected_tx_and_advances_next_due(
     yesterday = today - timedelta(days=1)
     factory = async_sessionmaker(bind=test_engine, expire_on_commit=False)
     async with factory() as db:
-        item = (
-            await db.execute(select(FixedExpense).where(FixedExpense.id == fid))
-        ).scalar_one()
+        item = (await db.execute(select(FixedExpense).where(FixedExpense.id == fid))).scalar_one()
         item.next_due = yesterday
         await db.commit()
 
@@ -144,10 +140,10 @@ async def test_autopost_creates_expected_tx_and_advances_next_due(
 
         # Tx creada con source=expected.
         txs = (
-            await db.execute(
-                select(Transaction).where(Transaction.user_id == item.user_id)
-            )
-        ).scalars().all()
+            (await db.execute(select(Transaction).where(Transaction.user_id == item.user_id)))
+            .scalars()
+            .all()
+        )
         expected_txs = [t for t in txs if t.source.value == "expected"]
         assert len(expected_txs) == 1
         assert str(expected_txs[0].amount) == "800.00"
@@ -176,9 +172,7 @@ async def test_autopost_backfills_multiple_cycles_capped_at_12(
     far_past = today - timedelta(days=30 * 3)  # 3 ciclos atrás
     factory = async_sessionmaker(bind=test_engine, expire_on_commit=False)
     async with factory() as db:
-        item = (
-            await db.execute(select(FixedExpense).where(FixedExpense.id == fid))
-        ).scalar_one()
+        item = (await db.execute(select(FixedExpense).where(FixedExpense.id == fid))).scalar_one()
         item.next_due = far_past
         await db.commit()
 
@@ -195,16 +189,12 @@ async def test_autopost_skips_when_flag_off(client: AsyncClient) -> None:
     haya pasado."""
     token, cat_id, account_id = await _setup_user(client, "ap4@example.com")
     fid = await _create_confirmed_fixed_expense(client, token, cat_id, account_id)
-    item_before = (
-        await client.get(f"/fixed-expenses/{fid}", headers=_auth(token))
-    ).json()
+    item_before = (await client.get(f"/fixed-expenses/{fid}", headers=_auth(token))).json()
 
     r = await client.post("/fixed-expenses/autopost", headers=_auth(token))
     assert r.json()["created"] == 0
 
-    item_after = (
-        await client.get(f"/fixed-expenses/{fid}", headers=_auth(token))
-    ).json()
+    item_after = (await client.get(f"/fixed-expenses/{fid}", headers=_auth(token))).json()
     assert item_after["next_due"] == item_before["next_due"]
 
 

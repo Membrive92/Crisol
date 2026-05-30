@@ -67,9 +67,7 @@ def test_merge_three_way_keeps_longest() -> None:
     """Tres merchants compartiendo prefijo: la llave es la más larga."""
     grouped = {
         ("netflixcom", Decimal("12.99"), "EUR"): [_occ(date(2026, 1, 15))],
-        ("netflixsuscripcionplus", Decimal("12.99"), "EUR"): [
-            _occ(date(2026, 2, 15))
-        ],
+        ("netflixsuscripcionplus", Decimal("12.99"), "EUR"): [_occ(date(2026, 2, 15))],
         ("netflixpremium", Decimal("12.99"), "EUR"): [_occ(date(2026, 3, 15))],
     }
     out = _merge_by_common_prefix(grouped)

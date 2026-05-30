@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+from decimal import Decimal
 
 import pytest
 from openpyxl import Workbook
@@ -13,7 +14,8 @@ from reportlab.platypus import PageBreak, SimpleDocTemplate, Table, TableStyle
 
 from app.modules.personal_finance.imports.parser import (
     ParseError,
-    SmartParseAmbiguous,
+    SmartParseAmbiguousError,
+    _normalize_date,
     detect_format,
     parse_csv,
     parse_pdf,
@@ -201,8 +203,20 @@ def _bank_statement_pdf() -> bytes:
             ],
             [
                 ["F. Operac.", "F. Contab.", "Concepto", "Detalle", "Importe (EUR)"],
-                ["25/02", "02/03", "PAGO TARJETA - RESTAURANTES", "PAYPAL *PAGO 3 PLAZOS", "-29,66"],
-                ["28/02", "02/03", "PAGO CON TARJETA EN GASOLINERAS", "E.S. LA HITA TORRE PACHECO", "-40,00"],
+                [
+                    "25/02",
+                    "02/03",
+                    "PAGO TARJETA - RESTAURANTES",
+                    "PAYPAL *PAGO 3 PLAZOS",
+                    "-29,66",
+                ],
+                [
+                    "28/02",
+                    "02/03",
+                    "PAGO CON TARJETA EN GASOLINERAS",
+                    "E.S. LA HITA TORRE PACHECO",
+                    "-40,00",
+                ],
                 ["13/03", "13/03", "ABONO DE NOMINA", "DNV GREENPOWERMONITOR", "2.491,65"],
                 ["13/03", "13/03", "TRANSFERENCIAS", "JOSE A MEMBRIVE", "-900,00"],
                 ["01/04", "02/04", "BIZUM RECIBIDO", "cena", "15,50"],
@@ -237,6 +251,7 @@ def test_parse_pdf_smart_infers_year_for_ddmm_dates() -> None:
     explícito en el PDF (cubierto por el fixture)."""
     rows = parse_pdf_smart(_bank_statement_pdf())
     from datetime import date
+
     expected_year = str(date.today().year)
     for r in rows:
         assert r["occurred_at"].endswith(f"/{expected_year}"), r["occurred_at"]
@@ -274,7 +289,7 @@ def test_parse_pdf_smart_picks_importe_over_saldo() -> None:
 
 def test_parse_pdf_smart_ambiguous_when_no_transactions_table() -> None:
     """PDF con solo tablas de resumen (sin cabeceras tipo fecha+importe
-    suficientes) → SmartParseAmbiguous, el caller cae al parser legacy."""
+    suficientes) → SmartParseAmbiguousError, el caller cae al parser legacy."""
     payload = _build_pdf(
         [
             [
@@ -284,16 +299,13 @@ def test_parse_pdf_smart_ambiguous_when_no_transactions_table() -> None:
             ],
         ]
     )
-    with pytest.raises(SmartParseAmbiguous):
+    with pytest.raises(SmartParseAmbiguousError):
         parse_pdf_smart(payload)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # _parse_amount: importe con formatos europeos, símbolos de moneda, signos
 # ─────────────────────────────────────────────────────────────────────────────
-
-
-from decimal import Decimal
 
 
 @pytest.mark.parametrize(
@@ -317,9 +329,7 @@ from decimal import Decimal
         (" 100,00 ", Decimal("100.00")),
     ],
 )
-def test_parse_amount_accepts_currency_symbols_and_signs(
-    raw: str, expected: Decimal
-) -> None:
+def test_parse_amount_accepts_currency_symbols_and_signs(raw: str, expected: Decimal) -> None:
     assert _parse_amount(raw) == expected
 
 
@@ -341,8 +351,6 @@ def test_parse_amount_rejects_empty_or_zero(raw: str) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 # _normalize_date: celdas con doble fecha y formatos varios
 # ─────────────────────────────────────────────────────────────────────────────
-
-from app.modules.personal_finance.imports.parser import _normalize_date
 
 
 @pytest.mark.parametrize(

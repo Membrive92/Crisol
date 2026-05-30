@@ -18,9 +18,7 @@ def normalize_concept(value: str) -> str:
     return (value or "").strip().casefold()
 
 
-async def list_mappings(
-    db: AsyncSession, user_id: uuid.UUID
-) -> list[BankCategoryMapping]:
+async def list_mappings(db: AsyncSession, user_id: uuid.UUID) -> list[BankCategoryMapping]:
     """Lista las equivalencias del usuario, ordenadas por concepto."""
     result = await db.execute(
         select(BankCategoryMapping)

@@ -171,9 +171,7 @@ async def preview_import_endpoint(
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     file: Annotated[UploadFile, File(...)],
-    column_mappings: Annotated[
-        str, Form(..., description="JSON con el mapping de columnas")
-    ],
+    column_mappings: Annotated[str, Form(..., description="JSON con el mapping de columnas")],
     account_id: Annotated[str, Form(..., description="UUID de la cuenta destino")],
     currency: Annotated[str, Form(min_length=3, max_length=3)] = "EUR",
     default_category_id: Annotated[str | None, Form()] = None,
@@ -372,9 +370,7 @@ async def commit_import_endpoint(
     futuras importaciones. Si `body` es `None` no se aplican overrides.
     """
     overrides = body.category_overrides if body is not None else {}
-    job = await run_commit(
-        db, user.id, job_id=job_id, category_overrides=overrides
-    )
+    job = await run_commit(db, user.id, job_id=job_id, category_overrides=overrides)
     await db.commit()
     return ImportJobResponse.model_validate(job)
 
@@ -412,29 +408,23 @@ async def ai_suggest_endpoint(
     usuario confirme o corrija; al hacer commit se guardan las
     aceptadas como `bank_category_mappings`.
     """
-    from app.modules.personal_finance.imports.repository import get_job_by_id as _get_job
     from app.modules.personal_finance.imports.models import ImportJobStatus
+    from app.modules.personal_finance.imports.repository import get_job_by_id as _get_job
 
     job = await _get_job(db, job_id, user.id)
     if job is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Job no encontrado"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job no encontrado")
     if job.status != ImportJobStatus.PREVIEW:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Job en estado {job.status.value}, no se puede sugerir",
         )
     if not job.preview_payload:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Job sin filas"
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Job sin filas")
 
     payload_data = job.preview_payload
     rows_raw = payload_data.get("rows") or []
-    effective_mappings = ImportColumnMappings.model_validate(
-        payload_data["effective_mappings"]
-    )
+    effective_mappings = ImportColumnMappings.model_validate(payload_data["effective_mappings"])
     if not effective_mappings.category_name:
         return AiSuggestionResponse(suggestions={})
 
@@ -443,10 +433,7 @@ async def ai_suggest_endpoint(
     saved_mappings = await get_mappings_for_concepts(
         db,
         user.id,
-        [
-            str(r.get(effective_mappings.category_name) or "")
-            for r in rows_raw
-        ],
+        [str(r.get(effective_mappings.category_name) or "") for r in rows_raw],
     )
     rules = await list_rules_for_user(db, user.id, enabled_only=True)
 
@@ -473,9 +460,7 @@ async def ai_suggest_endpoint(
             continue
         if rules:
             resolved = {
-                find_first_matching_rule(
-                    rules, concept=concept, description=description
-                )
+                find_first_matching_rule(rules, concept=concept, description=description)
                 for concept, description in rows_in_group
             }
             cat_ids = {r.category_id for r in resolved if r is not None}
@@ -484,9 +469,7 @@ async def ai_suggest_endpoint(
                 continue
         # Sin sugerencia previa: candidato para IA. Mando concepto + la
         # primera description del grupo como ejemplo.
-        first_desc = next(
-            (d for _, d in rows_in_group if d), ""
-        )
+        first_desc = next((d for _, d in rows_in_group if d), "")
         pending.append(
             {
                 "id": norm,
@@ -515,13 +498,9 @@ async def ai_suggest_endpoint(
     ]
 
     try:
-        ai_result = await ai_service.suggest_categories_for_concepts(
-            pending, cat_payload
-        )
+        ai_result = await ai_service.suggest_categories_for_concepts(pending, cat_payload)
     except AiError as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"IA: {e}"
-        ) from e
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"IA: {e}") from e
 
     # Mapeamos `id` (norm concept) → category_id (str). El frontend
     # espera el concepto en formato display, pero el normalizado es

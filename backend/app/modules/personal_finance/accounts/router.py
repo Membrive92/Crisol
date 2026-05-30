@@ -74,9 +74,7 @@ async def balances_endpoint(
 async def debt_health_endpoint(
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
-    target_currency: Annotated[
-        str | None, Query(min_length=3, max_length=3)
-    ] = None,
+    target_currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
 ) -> DebtHealthKpis:
     """KPIs de salud financiera (PHASE-22.4): DTI, debt-to-assets,
     intereses YTD, APR medio ponderado, proyección de tiempo hasta
@@ -95,9 +93,7 @@ async def debt_history_endpoint(
     db: Annotated[AsyncSession, Depends(get_db)],
     months_back: Annotated[int, Query(ge=1, le=36)] = 12,
     months_ahead: Annotated[int, Query(ge=0, le=36)] = 12,
-    target_currency: Annotated[
-        str | None, Query(min_length=3, max_length=3)
-    ] = None,
+    target_currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
 ) -> DebtHistoryResponse:
     """Serie temporal de evolución de deuda (PHASE-22.1).
 
@@ -156,9 +152,7 @@ async def regenerate_amortization_endpoint(
     return schedule
 
 
-@router.patch(
-    "/installments/{installment_id}", response_model=AmortizationRowResponse
-)
+@router.patch("/installments/{installment_id}", response_model=AmortizationRowResponse)
 async def update_installment_endpoint(
     installment_id: uuid.UUID,
     body: InstallmentUpdateRequest,

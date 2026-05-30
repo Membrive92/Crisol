@@ -31,9 +31,7 @@ def _auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-async def _create_pending_sub(
-    client: AsyncClient, token: str, cat_id: str, account_id: str
-) -> str:
+async def _create_pending_sub(client: AsyncClient, token: str, cat_id: str, account_id: str) -> str:
     """Helper: crea 4 cargos mensuales y dispara scan → devuelve id
     de la pending creada."""
     today = date.today()
@@ -61,9 +59,7 @@ async def test_pause_only_from_confirmed(client: AsyncClient) -> None:
     sid = await _create_pending_sub(client, token, cat_id, account_id)
 
     # Pending → 409.
-    r_pending = await client.post(
-        f"/fixed-expenses/{sid}/pause", headers=_auth(token)
-    )
+    r_pending = await client.post(f"/fixed-expenses/{sid}/pause", headers=_auth(token))
     assert r_pending.status_code == 409
 
     # Confirmar primero.
@@ -81,9 +77,7 @@ async def test_resume_only_from_paused(client: AsyncClient) -> None:
     await client.post(f"/fixed-expenses/{sid}/confirm", headers=_auth(token))
 
     # Confirmed → resume → 409 (no está paused).
-    r_conf = await client.post(
-        f"/fixed-expenses/{sid}/resume", headers=_auth(token)
-    )
+    r_conf = await client.post(f"/fixed-expenses/{sid}/resume", headers=_auth(token))
     assert r_conf.status_code == 409
 
     # Pause + resume.

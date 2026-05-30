@@ -19,14 +19,13 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
+from fastapi import HTTPException, status
 from sqlalchemy import Date as SQLDate
 from sqlalchemy import cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.currency import service as currency_service
 from app.modules.personal_finance.categories.models import CategoryKind
-from fastapi import HTTPException, status
-
 from app.modules.personal_finance.categories.repository import get_category_by_id
 from app.modules.personal_finance.dashboard import repository
 from app.modules.personal_finance.dashboard.schemas import (
@@ -419,10 +418,7 @@ async def get_category_detail(
         total=total,
         count=count,
         average_amount=average.quantize(Decimal("0.01")),
-        by_month=[
-            CategoryMonthlyBucket(month=month, total=total_m)
-            for month, total_m in monthly
-        ],
+        by_month=[CategoryMonthlyBucket(month=month, total=total_m) for month, total_m in monthly],
         top_transactions=[
             TopExpenseItem(
                 transaction_id=tx.id,

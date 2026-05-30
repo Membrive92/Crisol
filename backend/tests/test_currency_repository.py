@@ -23,18 +23,14 @@ async def test_get_rate_exact(test_engine) -> None:  # type: ignore[no-untyped-d
         )
         await db.commit()
 
-        rate = await repository.get_rate(
-            db, rate_date=date(2026, 4, 1), base="EUR", quote="USD"
-        )
+        rate = await repository.get_rate(db, rate_date=date(2026, 4, 1), base="EUR", quote="USD")
         assert rate is not None
         assert rate.rate == Decimal("1.10")
 
 
 async def test_get_rate_returns_none_for_missing(test_engine) -> None:  # type: ignore[no-untyped-def]
     async with await _session(test_engine) as db:
-        rate = await repository.get_rate(
-            db, rate_date=date(2026, 4, 1), base="EUR", quote="USD"
-        )
+        rate = await repository.get_rate(db, rate_date=date(2026, 4, 1), base="EUR", quote="USD")
         assert rate is None
 
 
@@ -83,9 +79,7 @@ async def test_upsert_replaces_existing_rate(test_engine) -> None:  # type: igno
         )
         await db.commit()
 
-        rate = await repository.get_rate(
-            db, rate_date=date(2026, 4, 1), base="EUR", quote="USD"
-        )
+        rate = await repository.get_rate(db, rate_date=date(2026, 4, 1), base="EUR", quote="USD")
         assert rate is not None
         assert rate.rate == Decimal("1.15")
         assert rate.source == "frankfurter"
@@ -105,10 +99,6 @@ async def test_list_rates_for_date(test_engine) -> None:  # type: ignore[no-unty
         )
         await db.commit()
 
-        rows = await repository.list_rates_for_date(
-            db, rate_date=date(2026, 4, 1), base="EUR"
-        )
+        rows = await repository.list_rates_for_date(db, rate_date=date(2026, 4, 1), base="EUR")
         quotes = {r.quote for r in rows}
         assert quotes == {"USD", "GBP", "JPY"}
-
-

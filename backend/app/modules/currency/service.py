@@ -70,9 +70,7 @@ async def _resolve_eur_rate(
     if quote == CANONICAL_BASE:
         return Decimal("1"), at_date, "exact"
 
-    exact = await repository.get_rate(
-        db, rate_date=at_date, base=CANONICAL_BASE, quote=quote
-    )
+    exact = await repository.get_rate(db, rate_date=at_date, base=CANONICAL_BASE, quote=quote)
     if exact is not None:
         return exact.rate, exact.rate_date, "exact"
 
@@ -141,9 +139,7 @@ async def convert(
 
     # Si alguna pierna usó fallback, el resultado completo es
     # "previous" — el peor caso domina.
-    fallback: RateFallback = (
-        "previous" if "previous" in (src_fallback, dst_fallback) else "exact"
-    )
+    fallback: RateFallback = "previous" if "previous" in (src_fallback, dst_fallback) else "exact"
     # Reportamos la fecha más antigua de las dos: la pierna más
     # rancia es la que limita la frescura del resultado. El caso EUR
     # self-shortcut tiene `rate_date == at_date` sintético (no es una
@@ -190,10 +186,7 @@ async def refresh_rates(
     if not fetched:
         return 0
 
-    rows = [
-        (target_date, base_norm, quote, rate, "frankfurter")
-        for quote, rate in fetched.items()
-    ]
+    rows = [(target_date, base_norm, quote, rate, "frankfurter") for quote, rate in fetched.items()]
     return await repository.upsert_rates(db, rows)
 
 
@@ -232,9 +225,7 @@ async def ensure_rates_for_dates(
         if existing is not None:
             continue
         try:
-            await refresh_rates(
-                db, target_date=target, quotes=quote_list, base=base_norm
-            )
+            await refresh_rates(db, target_date=target, quotes=quote_list, base=base_norm)
             await db.commit()
             fetched += 1
         except (FrankfurterUnavailableError, FrankfurterInvalidResponseError):
@@ -259,20 +250,14 @@ async def ensure_rate(
     if quote_norm == base_norm:
         return True
 
-    existing = await repository.get_rate(
-        db, rate_date=at_date, base=base_norm, quote=quote_norm
-    )
+    existing = await repository.get_rate(db, rate_date=at_date, base=base_norm, quote=quote_norm)
     if existing is not None:
         return True
 
     try:
-        await refresh_rates(
-            db, target_date=at_date, quotes=[quote_norm], base=base_norm
-        )
+        await refresh_rates(db, target_date=at_date, quotes=[quote_norm], base=base_norm)
     except (FrankfurterUnavailableError, FrankfurterInvalidResponseError):
         return False
 
-    refreshed = await repository.get_rate(
-        db, rate_date=at_date, base=base_norm, quote=quote_norm
-    )
+    refreshed = await repository.get_rate(db, rate_date=at_date, base=base_norm, quote=quote_norm)
     return refreshed is not None

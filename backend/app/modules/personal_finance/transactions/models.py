@@ -84,9 +84,7 @@ class Transaction(Base):
     # Las queries del módulo y del dashboard filtran por defecto
     # `deleted_at IS NULL`; los endpoints `/trash`/restore/purge son los
     # únicos que ven o tocan filas con valor.
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         # Partial unique para dedup de imports — incluye `AND deleted_at

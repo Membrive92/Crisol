@@ -20,7 +20,7 @@ import calendar
 import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,7 +52,9 @@ def _amount_expr(target_currency: str | None) -> ColumnElement[Any]:
     `target_currency`, cruda si no."""
     if target_currency is not None:
         return converted_amount_expr(target_currency)
-    return Transaction.amount
+    # InstrumentedAttribute[Decimal] is a column expr at runtime; the
+    # SQLAlchemy stubs don't expose it as ColumnElement, so cast.
+    return cast("ColumnElement[Any]", Transaction.amount)
 
 
 async def aggregate_debt_payments_by_role(

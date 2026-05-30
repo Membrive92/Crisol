@@ -100,6 +100,7 @@ async def test_login_remember_me_extends_cookie_max_age(client: AsyncClient) -> 
     # 30 días en segundos = 2_592_000. Aceptamos cualquier valor ≥ 8 días
     # para que falle si volvemos al default de 7.
     import re
+
     match = re.search(r"Max-Age=(\d+)", set_cookie)
     assert match is not None
     max_age = int(match.group(1))

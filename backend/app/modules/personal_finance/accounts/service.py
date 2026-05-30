@@ -3,11 +3,34 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC
 from decimal import Decimal
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.personal_finance.accounts.amortization import build_schedule
+from app.modules.personal_finance.accounts.installments_model import (
+    LiabilityInstallment,
+)
+from app.modules.personal_finance.accounts.installments_repository import (
+    generate_installments_for_account,
+)
+from app.modules.personal_finance.accounts.installments_repository import (
+    get_installment as repo_get_installment,
+)
+from app.modules.personal_finance.accounts.installments_repository import (
+    list_installments as repo_list_installments,
+)
+from app.modules.personal_finance.accounts.installments_repository import (
+    mark_installment_paid as repo_mark_paid,
+)
+from app.modules.personal_finance.accounts.installments_repository import (
+    unmark_installment_paid as repo_unmark_paid,
+)
+from app.modules.personal_finance.accounts.installments_repository import (
+    update_installment_amount_and_date as repo_update_installment,
+)
 from app.modules.personal_finance.accounts.models import (
     Account,
     AccountNature,
@@ -15,24 +38,18 @@ from app.modules.personal_finance.accounts.models import (
 )
 from app.modules.personal_finance.accounts.repository import (
     count_transactions_for_account,
-    create_account as persist_account,
-    delete_account as remove_account,
     get_account_by_id,
     get_account_by_name,
     get_balances_for_user,
+)
+from app.modules.personal_finance.accounts.repository import (
+    create_account as persist_account,
+)
+from app.modules.personal_finance.accounts.repository import (
+    delete_account as remove_account,
+)
+from app.modules.personal_finance.accounts.repository import (
     list_accounts as list_all,
-)
-from app.modules.personal_finance.accounts.amortization import build_schedule
-from app.modules.personal_finance.accounts.installments_model import (
-    LiabilityInstallment,
-)
-from app.modules.personal_finance.accounts.installments_repository import (
-    generate_installments_for_account,
-    get_installment as repo_get_installment,
-    list_installments as repo_list_installments,
-    mark_installment_paid as repo_mark_paid,
-    unmark_installment_paid as repo_unmark_paid,
-    update_installment_amount_and_date as repo_update_installment,
 )
 from app.modules.personal_finance.accounts.schemas import (
     ASSET_ACCOUNT_TYPES,
@@ -77,10 +94,7 @@ async def _validate_debt_category_link(
     if account_type not in LIABILITY_ACCOUNT_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "Sólo las cuentas de deuda pueden vincularse a una "
-                "categoría de pagos."
-            ),
+            detail=("Sólo las cuentas de deuda pueden vincularse a una " "categoría de pagos."),
         )
     from sqlalchemy import select
 
@@ -90,9 +104,7 @@ async def _validate_debt_category_link(
     )
 
     result = await db.execute(
-        select(Category)
-        .where(Category.id == category_id)
-        .where(Category.user_id == user_id)
+        select(Category).where(Category.id == category_id).where(Category.user_id == user_id)
     )
     category = result.scalar_one_or_none()
     if category is None:
@@ -104,10 +116,10 @@ async def _validate_debt_category_link(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                "La categoría vinculada debe tener rol de deuda "
-                "(DEBT_PAYMENT o DEBT_INTEREST)."
+                "La categoría vinculada debe tener rol de deuda " "(DEBT_PAYMENT o DEBT_INTEREST)."
             ),
         )
+
 
 DEFAULT_REFERENCE_CURRENCY = "EUR"
 
@@ -130,15 +142,11 @@ async def list_accounts(
     return await list_all(db, user_id, include_archived=include_archived)
 
 
-async def get_account(
-    db: AsyncSession, account_id: uuid.UUID, user_id: uuid.UUID
-) -> Account:
+async def get_account(db: AsyncSession, account_id: uuid.UUID, user_id: uuid.UUID) -> Account:
     """Obtiene una cuenta o lanza 404."""
     account = await get_account_by_id(db, account_id, user_id)
     if account is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Cuenta no encontrada"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cuenta no encontrada")
     return account
 
 
@@ -151,9 +159,7 @@ async def ensure_account_exists(
     return await get_account(db, account_id, user_id)
 
 
-async def create_account(
-    db: AsyncSession, user_id: uuid.UUID, data: AccountCreate
-) -> Account:
+async def create_account(db: AsyncSession, user_id: uuid.UUID, data: AccountCreate) -> Account:
     """Crea una nueva cuenta para el usuario.
 
     Validaciones:
@@ -182,15 +188,13 @@ async def create_account(
     # a debt-health). Rechazamos en el endpoint antes de persistir.
     # credit_card se permite con opening_balance=0 porque la deuda
     # puede modelarse vía la tx contraparte (flujo convert-to-debt).
-    if data.type in {AccountType.LOAN, AccountType.MORTGAGE}:
-        if data.opening_balance is None or data.opening_balance <= 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "El capital del préstamo o hipoteca es obligatorio "
-                    "y debe ser mayor que 0."
-                ),
-            )
+    if data.type in {AccountType.LOAN, AccountType.MORTGAGE} and (
+        data.opening_balance is None or data.opening_balance <= 0
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=("El capital del préstamo o hipoteca es obligatorio " "y debe ser mayor que 0."),
+        )
     accepts_amortization = data.type in {
         AccountType.LOAN,
         AccountType.MORTGAGE,
@@ -274,9 +278,7 @@ async def update_account(
     return account
 
 
-async def delete_account(
-    db: AsyncSession, account_id: uuid.UUID, user_id: uuid.UUID
-) -> None:
+async def delete_account(db: AsyncSession, account_id: uuid.UUID, user_id: uuid.UUID) -> None:
     """Borra una cuenta sin transacciones; si tiene, fuerza al caller
     a archivarla en su lugar.
 
@@ -298,9 +300,7 @@ async def delete_account(
     await remove_account(db, account)
 
 
-async def get_balances(
-    db: AsyncSession, user_id: uuid.UUID
-) -> AccountBalancesResponse:
+async def get_balances(db: AsyncSession, user_id: uuid.UUID) -> AccountBalancesResponse:
     """Saldo por cuenta + agregados de patrimonio (PHASE-19.4).
 
     Sólo cuentas no archivadas entran en los totales agregados, pero
@@ -395,7 +395,6 @@ def _compute_extra_charges(
         return None
     base = installments_total + (interest_only or Decimal("0"))
     return total_to_pay - base
-
 
 
 async def get_amortization_schedule(
@@ -531,9 +530,7 @@ async def _get_installment_or_404(
 ) -> LiabilityInstallment:
     inst = await repo_get_installment(db, installment_id, user_id)
     if inst is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Cuota no encontrada"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cuota no encontrada")
     return inst
 
 
@@ -560,14 +557,14 @@ async def regenerate_amortization_schedule(
     Requiere `accepts_amortization` y los tres campos del cuadro
     informados.
     """
-    from decimal import Decimal as _Decimal  # noqa: PLC0415
+    from decimal import Decimal as _Decimal
 
-    from sqlalchemy import select  # noqa: PLC0415
+    from sqlalchemy import select
 
-    from app.modules.personal_finance.accounts.installments_repository import (  # noqa: PLC0415
+    from app.modules.personal_finance.accounts.installments_repository import (
         delete_installments_for_account,
     )
-    from app.modules.personal_finance.transactions.models import (  # noqa: PLC0415
+    from app.modules.personal_finance.transactions.models import (
         Transaction,
     )
 
@@ -615,9 +612,7 @@ async def regenerate_amortization_schedule(
         )
 
     await delete_installments_for_account(db, account_id)
-    await generate_installments_for_account(
-        db, account, principal_override=principal_override
-    )
+    await generate_installments_for_account(db, account, principal_override=principal_override)
     await db.flush()
     return await get_amortization_schedule(db, account_id, user_id)
 
@@ -637,9 +632,7 @@ async def update_installment(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="El importe de la cuota no puede ser negativo.",
         )
-    return await repo_update_installment(
-        db, inst, payment=payment, due_date=due_date
-    )
+    return await repo_update_installment(db, inst, payment=payment, due_date=due_date)
 
 
 async def mark_installment_paid(
@@ -651,10 +644,10 @@ async def mark_installment_paid(
     paid_transaction_id: uuid.UUID | None,
 ) -> LiabilityInstallment:
     """Marca como pagada — `paid_at=None` → now()."""
-    from datetime import datetime, timezone  # noqa: PLC0415
+    from datetime import datetime
 
     inst = await _get_installment_or_404(db, installment_id, user_id)
-    when = paid_at if paid_at is not None else datetime.now(timezone.utc)
+    when = paid_at if paid_at is not None else datetime.now(UTC)
     return await repo_mark_paid(
         db,
         inst,

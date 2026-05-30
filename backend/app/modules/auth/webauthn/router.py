@@ -42,9 +42,7 @@ def _set_refresh_cookie(response: Response, refresh_token: str, ttl_days: int) -
     """Setea la cookie httpOnly. Replica la del router auth principal — la
     duplicamos aquí para no crear una dependencia entre módulos hermanos.
     Si crece más, mover a `core/cookies.py`."""
-    samesite = cast(
-        Literal["lax", "strict", "none"], settings.auth_cookie_samesite.lower()
-    )
+    samesite = cast(Literal["lax", "strict", "none"], settings.auth_cookie_samesite.lower())
     response.set_cookie(
         key=settings.auth_cookie_name,
         value=refresh_token,
@@ -118,9 +116,7 @@ async def authenticate_verify_endpoint(
     body: PasskeyAuthenticationVerifyRequest,
     response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _refresh_cookie: Annotated[
-        str | None, Cookie(alias=settings.auth_cookie_name)
-    ] = None,
+    _refresh_cookie: Annotated[str | None, Cookie(alias=settings.auth_cookie_name)] = None,
 ) -> TokenResponse:
     """Verifica la assertion y emite los tokens normales (access + refresh).
 
@@ -134,9 +130,7 @@ async def authenticate_verify_endpoint(
     )
     session = await _issue_tokens(db, user)
     await db.commit()
-    _set_refresh_cookie(
-        response, session.tokens.refresh_token, session.refresh_ttl_days
-    )
+    _set_refresh_cookie(response, session.tokens.refresh_token, session.refresh_ttl_days)
     return session.tokens
 
 

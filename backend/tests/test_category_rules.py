@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import json
-import uuid
 
 from httpx import AsyncClient
 from openpyxl import Workbook
@@ -15,9 +14,9 @@ async def _wipe_seeded(client: AsyncClient, token: str) -> None:
     registrarse. Estos tests asumen entorno limpio para verificar el
     comportamiento aislado del rules engine sin que el seed interfiera.
     """
-    rules = (await client.get("/category-rules", headers={"Authorization": f"Bearer {token}"})).json()[
-        "items"
-    ]
+    rules = (
+        await client.get("/category-rules", headers={"Authorization": f"Bearer {token}"})
+    ).json()["items"]
     for r in rules:
         await client.delete(
             f"/category-rules/{r['id']}",
@@ -168,9 +167,7 @@ async def test_delete_rule(client: AsyncClient) -> None:
             headers=_auth(token),
         )
     ).json()["id"]
-    r = await client.delete(
-        f"/category-rules/{rule_id}", headers=_auth(token)
-    )
+    r = await client.delete(f"/category-rules/{rule_id}", headers=_auth(token))
     assert r.status_code == 204
     list_r = await client.get("/category-rules", headers=_auth(token))
     assert list_r.json()["items"] == []
@@ -199,12 +196,8 @@ async def test_user_isolation(client: AsyncClient) -> None:
         },
         headers=_auth(token_b),
     )
-    items_a = (await client.get("/category-rules", headers=_auth(token_a))).json()[
-        "items"
-    ]
-    items_b = (await client.get("/category-rules", headers=_auth(token_b))).json()[
-        "items"
-    ]
+    items_a = (await client.get("/category-rules", headers=_auth(token_a))).json()["items"]
+    items_b = (await client.get("/category-rules", headers=_auth(token_b))).json()["items"]
     assert {i["pattern"] for i in items_a} == {"AAA"}
     assert {i["pattern"] for i in items_b} == {"BBB"}
 
@@ -222,9 +215,7 @@ async def test_delete_category_cascades_rule(client: AsyncClient) -> None:
         headers=_auth(token),
     )
     await client.delete(f"/categories/{food_id}", headers=_auth(token))
-    items = (await client.get("/category-rules", headers=_auth(token))).json()[
-        "items"
-    ]
+    items = (await client.get("/category-rules", headers=_auth(token))).json()["items"]
     assert items == []
 
 
@@ -256,9 +247,7 @@ _DEFAULT_MAPPING = json.dumps(
 )
 
 
-async def _import_xlsx(
-    client: AsyncClient, token: str, account_id: str, payload: bytes
-) -> dict:
+async def _import_xlsx(client: AsyncClient, token: str, account_id: str, payload: bytes) -> dict:
     files = {
         "file": (
             "import.xlsx",
@@ -267,9 +256,7 @@ async def _import_xlsx(
         )
     }
     data = {"account_id": account_id, "column_mappings": _DEFAULT_MAPPING}
-    pr = await client.post(
-        "/imports/preview", files=files, data=data, headers=_auth(token)
-    )
+    pr = await client.post("/imports/preview", files=files, data=data, headers=_auth(token))
     job_id = pr.json()["job_id"]
     cr = await client.post(f"/imports/{job_id}/commit", headers=_auth(token))
     return cr.json()
@@ -316,9 +303,7 @@ async def test_rule_contains_matches_description(client: AsyncClient) -> None:
         },
         headers=_auth(token),
     )
-    payload = _xlsx(
-        [("2026-04-15", "PAGO TARJETA", "10.00", "Mercadona Torre Pacheco")]
-    )
+    payload = _xlsx([("2026-04-15", "PAGO TARJETA", "10.00", "Mercadona Torre Pacheco")])
     await _import_xlsx(client, token, account_id, payload)
     txs = (await client.get("/transactions", headers=_auth(token))).json()["items"]
     assert txs[0]["category_id"] == food_id
@@ -326,9 +311,7 @@ async def test_rule_contains_matches_description(client: AsyncClient) -> None:
 
 async def test_rule_priority_first_match_wins(client: AsyncClient) -> None:
     """Si dos reglas matchean, gana la de menor priority."""
-    token, food_id, subs_id, account_id = await _setup_user(
-        client, "rule-priority@example.com"
-    )
+    token, food_id, subs_id, account_id = await _setup_user(client, "rule-priority@example.com")
     # Priority 10 → Suscripciones (más específica).
     await client.post(
         "/category-rules",
@@ -353,9 +336,7 @@ async def test_rule_priority_first_match_wins(client: AsyncClient) -> None:
         },
         headers=_auth(token),
     )
-    payload = _xlsx(
-        [("2026-04-15", "PAGO TARJETA", "9.99", "Amazon Prime Video")]
-    )
+    payload = _xlsx([("2026-04-15", "PAGO TARJETA", "9.99", "Amazon Prime Video")])
     await _import_xlsx(client, token, account_id, payload)
     txs = (await client.get("/transactions", headers=_auth(token))).json()["items"]
     assert txs[0]["category_id"] == subs_id  # ganó la prioritaria
@@ -380,9 +361,7 @@ async def test_rule_disabled_does_not_match(client: AsyncClient) -> None:
         json={"enabled": False},
         headers=_auth(token),
     )
-    payload = _xlsx(
-        [("2026-04-15", "PAGO TARJETA - RESTAURANTES", "10.00", "Mercadona")]
-    )
+    payload = _xlsx([("2026-04-15", "PAGO TARJETA - RESTAURANTES", "10.00", "Mercadona")])
     await _import_xlsx(client, token, account_id, payload)
     txs = (await client.get("/transactions", headers=_auth(token))).json()["items"]
     assert txs[0]["category_id"] is None
@@ -402,9 +381,7 @@ async def test_rule_matching_is_accent_insensitive(client: AsyncClient) -> None:
         },
         headers=_auth(token),
     )
-    payload = _xlsx(
-        [("2026-04-15", "TARJETA RESTAURACIÓN", "10.00", "Mercadona")]
-    )
+    payload = _xlsx([("2026-04-15", "TARJETA RESTAURACIÓN", "10.00", "Mercadona")])
     await _import_xlsx(client, token, account_id, payload)
     txs = (await client.get("/transactions", headers=_auth(token))).json()["items"]
     assert txs[0]["category_id"] == food_id
@@ -481,9 +458,7 @@ async def test_preview_marks_mixed_rule_matches(client: AsyncClient) -> None:
     """Si el mismo concepto matchea reglas distintas según la
     description, marca `has_mixed_rule_matches=True` y deja la
     sugerencia en null."""
-    token, food_id, subs_id, account_id = await _setup_user(
-        client, "rule-pre-mix@example.com"
-    )
+    token, food_id, subs_id, account_id = await _setup_user(client, "rule-pre-mix@example.com")
     # Regla por description "MERCADONA" → Comida.
     await client.post(
         "/category-rules",
@@ -538,9 +513,7 @@ async def test_preview_saved_mapping_beats_rule_in_suggestion(
     client: AsyncClient,
 ) -> None:
     """Equivalencia exacta gana sobre regla incluso en preview."""
-    token, food_id, subs_id, account_id = await _setup_user(
-        client, "rule-pre-bm@example.com"
-    )
+    token, food_id, subs_id, account_id = await _setup_user(client, "rule-pre-bm@example.com")
     # Regla → Comida.
     await client.post(
         "/category-rules",
@@ -561,9 +534,7 @@ async def test_preview_saved_mapping_beats_rule_in_suggestion(
         },
         headers=_auth(token),
     )
-    payload = _xlsx(
-        [("2026-04-15", "PAGO TARJETA - RESTAURANTES", "10.00", "X")]
-    )
+    payload = _xlsx([("2026-04-15", "PAGO TARJETA - RESTAURANTES", "10.00", "X")])
     files = {
         "file": (
             "import.xlsx",
@@ -606,9 +577,7 @@ async def test_bank_mapping_beats_rule(client: AsyncClient) -> None:
         },
         headers=_auth(token),
     )
-    payload = _xlsx(
-        [("2026-04-15", "PAGO TARJETA - RESTAURANTES", "10.00", "X")]
-    )
+    payload = _xlsx([("2026-04-15", "PAGO TARJETA - RESTAURANTES", "10.00", "X")])
     await _import_xlsx(client, token, account_id, payload)
     txs = (await client.get("/transactions", headers=_auth(token))).json()["items"]
     # Mapping exacto gana sobre la regla.

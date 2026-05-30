@@ -17,13 +17,33 @@ from alembic import context
 
 from app.core.config import settings
 from app.core.database import Base
+
+# Importar TODOS los modelos para que `Base.metadata` esté completo:
+# `alembic check` (parity modelo↔migración en CI) sólo es fiable si el
+# metadata objetivo incluye cada tabla del dominio.
 from app.modules.auth.models import RefreshToken  # noqa: F401
 from app.modules.auth.webauthn.models import (  # noqa: F401
     WebAuthnChallenge,
     WebAuthnCredential,
 )
+from app.modules.currency.models import ExchangeRate  # noqa: F401
+from app.modules.personal_finance.accounts.installments_model import (  # noqa: F401
+    LiabilityInstallment,
+)
+from app.modules.personal_finance.accounts.models import Account  # noqa: F401
+from app.modules.personal_finance.bank_mappings.models import (  # noqa: F401
+    BankCategoryMapping,
+)
+from app.modules.personal_finance.budgets.models import Budget  # noqa: F401
 from app.modules.personal_finance.categories.models import Category  # noqa: F401
+from app.modules.personal_finance.category_rules.models import (  # noqa: F401
+    CategoryRule,
+)
+from app.modules.personal_finance.fixed_expenses.models import (  # noqa: F401
+    FixedExpense,
+)
 from app.modules.personal_finance.imports.models import ImportJob  # noqa: F401
+from app.modules.personal_finance.receipts.models import Receipt  # noqa: F401
 from app.modules.personal_finance.transactions.models import Transaction  # noqa: F401
 from app.modules.users.models import User  # noqa: F401
 

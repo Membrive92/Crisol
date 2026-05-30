@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Literal
 
-from sqlalchemy import Select, Update, func, null, select, update
+from sqlalchemy import Delete, Select, Update, func, null, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.personal_finance.dashboard.conversion import converted_amount_expr
@@ -20,7 +20,7 @@ from app.modules.personal_finance.transactions.models import Transaction
 DeletedScope = Literal["active", "trashed", "any"]
 
 
-def _scope[Q: Select[Any] | Update](
+def _scope[Q: Select[Any] | Update | Delete](
     query: Q,
     user_id: uuid.UUID,
     *,
@@ -36,22 +36,24 @@ def _scope[Q: Select[Any] | Update](
     Aplicable tanto a SELECT como a UPDATE (bulk soft-delete) — el
     `where()` chaining funciona idéntico en ambos.
     """
-    query = query.where(Transaction.user_id == user_id)
+    conditions: list[Any] = [Transaction.user_id == user_id]
     if deleted == "active":
-        query = query.where(Transaction.deleted_at.is_(None))
+        conditions.append(Transaction.deleted_at.is_(None))
     elif deleted == "trashed":
-        query = query.where(Transaction.deleted_at.is_not(None))
+        conditions.append(Transaction.deleted_at.is_not(None))
     if account_id is not None:
-        query = query.where(Transaction.account_id == account_id)
+        conditions.append(Transaction.account_id == account_id)
     if category_id is not None:
-        query = query.where(Transaction.category_id == category_id)
+        conditions.append(Transaction.category_id == category_id)
     if date_from is not None:
-        query = query.where(Transaction.occurred_at >= date_from)
+        conditions.append(Transaction.occurred_at >= date_from)
     if date_to is not None:
-        query = query.where(Transaction.occurred_at <= date_to)
+        conditions.append(Transaction.occurred_at <= date_to)
     if search:
-        query = query.where(Transaction.description.ilike(f"%{search}%"))
-    return query
+        conditions.append(Transaction.description.ilike(f"%{search}%"))
+    # SQLAlchemy's .where() doesn't preserve the Q TypeVar (it returns the
+    # union of the bound); the runtime type matches the input statement.
+    return query.where(*conditions)  # type: ignore[return-value]
 
 
 async def list_transactions(
@@ -104,9 +106,7 @@ async def list_transactions(
         date_to=date_to,
         search=search,
     )
-    items_query = (
-        items_query.order_by(Transaction.occurred_at.desc()).limit(limit).offset(offset)
-    )
+    items_query = items_query.order_by(Transaction.occurred_at.desc()).limit(limit).offset(offset)
 
     result = await db.execute(items_query)
     items: list[tuple[Transaction, Decimal | None]] = []
@@ -176,9 +176,7 @@ async def create_transaction(db: AsyncSession, transaction: Transaction) -> Tran
     return transaction
 
 
-async def soft_delete_transaction(
-    db: AsyncSession, transaction: Transaction
-) -> Transaction:
+async def soft_delete_transaction(db: AsyncSession, transaction: Transaction) -> Transaction:
     """Marca la transacción como borrada (mueve a papelera).
 
     Usa `datetime.now(UTC)` (Python-side) en lugar de `func.now()` por
@@ -263,9 +261,7 @@ async def bulk_purge_trashed(db: AsyncSession, user_id: uuid.UUID) -> int:
     return int(count)
 
 
-async def restore_transaction(
-    db: AsyncSession, transaction: Transaction
-) -> Transaction:
+async def restore_transaction(db: AsyncSession, transaction: Transaction) -> Transaction:
     """Quita la marca de borrado (saca de papelera)."""
     transaction.deleted_at = None
     await db.flush()

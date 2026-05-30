@@ -88,9 +88,7 @@ async def _create_expected_tx(
 
     factory = async_sessionmaker(bind=test_engine, expire_on_commit=False)
     async with factory() as db:
-        fx = (
-            await db.execute(select(FixedExpense).where(FixedExpense.id == fid))
-        ).scalar_one()
+        fx = (await db.execute(select(FixedExpense).where(FixedExpense.id == fid))).scalar_one()
         fx.next_due = occurred_at
         await db.commit()
         result = await autopost_due_for_user(db, fx.user_id, today=today)
@@ -99,12 +97,16 @@ async def _create_expected_tx(
 
         # ID de la tx expected creada por autopost.
         tx = (
-            await db.execute(
-                select(Transaction)
-                .where(Transaction.user_id == fx.user_id)
-                .where(Transaction.source == TransactionSource.EXPECTED)
+            (
+                await db.execute(
+                    select(Transaction)
+                    .where(Transaction.user_id == fx.user_id)
+                    .where(Transaction.source == TransactionSource.EXPECTED)
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         assert tx is not None
         return fid, str(tx.id)
 
@@ -135,16 +137,14 @@ def _import_payload(cat_id: str, account_id: str) -> dict:
     }
 
 
-async def test_reconcile_returns_existing_when_match(
-    client: AsyncClient, test_engine
-) -> None:
+async def test_reconcile_returns_existing_when_match(client: AsyncClient, test_engine) -> None:
     """Tx expected creada por autopost → import con merchant + amount +
     fecha próximos → devuelve la expected existente con import_hash y
     description actualizada. NO crea fila nueva."""
     token, cat_id, account_id = await _setup_user(client, "rec1@example.com")
     today = date.today()
     yesterday = today - timedelta(days=1)
-    fid, expected_tx_id = await _create_expected_tx(
+    _fid, expected_tx_id = await _create_expected_tx(
         client, token, cat_id, account_id, test_engine, occurred_at=yesterday
     )
 
@@ -153,9 +153,7 @@ async def test_reconcile_returns_existing_when_match(
         # Token user_id
         from app.modules.users.models import User
 
-        user = (
-            await db.execute(select(User).where(User.email == "rec1@example.com"))
-        ).scalar_one()
+        user = (await db.execute(select(User).where(User.email == "rec1@example.com"))).scalar_one()
 
         match = await reconcile_with_expected(
             db,
@@ -175,9 +173,7 @@ async def test_reconcile_returns_existing_when_match(
         await db.commit()
 
 
-async def test_reconcile_no_match_when_amount_differs(
-    client: AsyncClient, test_engine
-) -> None:
+async def test_reconcile_no_match_when_amount_differs(client: AsyncClient, test_engine) -> None:
     """Mismo merchant + fecha pero amount distinto → no match."""
     token, cat_id, account_id = await _setup_user(client, "rec2@example.com")
     today = date.today()
@@ -190,9 +186,7 @@ async def test_reconcile_no_match_when_amount_differs(
     async with factory() as db:
         from app.modules.users.models import User
 
-        user = (
-            await db.execute(select(User).where(User.email == "rec2@example.com"))
-        ).scalar_one()
+        user = (await db.execute(select(User).where(User.email == "rec2@example.com"))).scalar_one()
 
         match = await reconcile_with_expected(
             db,
@@ -214,17 +208,13 @@ async def test_reconcile_no_match_when_outside_date_window(
     token, cat_id, account_id = await _setup_user(client, "rec3@example.com")
     today = date.today()
     long_ago = today - timedelta(days=10)
-    await _create_expected_tx(
-        client, token, cat_id, account_id, test_engine, occurred_at=long_ago
-    )
+    await _create_expected_tx(client, token, cat_id, account_id, test_engine, occurred_at=long_ago)
 
     factory = async_sessionmaker(bind=test_engine, expire_on_commit=False)
     async with factory() as db:
         from app.modules.users.models import User
 
-        user = (
-            await db.execute(select(User).where(User.email == "rec3@example.com"))
-        ).scalar_one()
+        user = (await db.execute(select(User).where(User.email == "rec3@example.com"))).scalar_one()
 
         match = await reconcile_with_expected(
             db,
@@ -239,24 +229,18 @@ async def test_reconcile_no_match_when_outside_date_window(
         assert match is None
 
 
-async def test_reconcile_no_match_when_merchant_different(
-    client: AsyncClient, test_engine
-) -> None:
+async def test_reconcile_no_match_when_merchant_different(client: AsyncClient, test_engine) -> None:
     """Mismo amount + fecha pero merchant sin prefijo común → no match."""
     token, cat_id, account_id = await _setup_user(client, "rec4@example.com")
     today = date.today()
     yesterday = today - timedelta(days=1)
-    await _create_expected_tx(
-        client, token, cat_id, account_id, test_engine, occurred_at=yesterday
-    )
+    await _create_expected_tx(client, token, cat_id, account_id, test_engine, occurred_at=yesterday)
 
     factory = async_sessionmaker(bind=test_engine, expire_on_commit=False)
     async with factory() as db:
         from app.modules.users.models import User
 
-        user = (
-            await db.execute(select(User).where(User.email == "rec4@example.com"))
-        ).scalar_one()
+        user = (await db.execute(select(User).where(User.email == "rec4@example.com"))).scalar_one()
 
         match = await reconcile_with_expected(
             db,
@@ -271,15 +255,13 @@ async def test_reconcile_no_match_when_merchant_different(
         assert match is None
 
 
-async def test_reconcile_skips_already_reconciled(
-    client: AsyncClient, test_engine
-) -> None:
+async def test_reconcile_skips_already_reconciled(client: AsyncClient, test_engine) -> None:
     """Una expected con import_hash ya asignado no se vuelve a
     reconciliar (no debería matchear dos imports al mismo evento)."""
     token, cat_id, account_id = await _setup_user(client, "rec5@example.com")
     today = date.today()
     yesterday = today - timedelta(days=1)
-    fid, expected_tx_id = await _create_expected_tx(
+    _fid, expected_tx_id = await _create_expected_tx(
         client, token, cat_id, account_id, test_engine, occurred_at=yesterday
     )
 
@@ -288,16 +270,12 @@ async def test_reconcile_skips_already_reconciled(
         from app.modules.users.models import User
 
         tx = (
-            await db.execute(
-                select(Transaction).where(Transaction.id == expected_tx_id)
-            )
+            await db.execute(select(Transaction).where(Transaction.id == expected_tx_id))
         ).scalar_one()
         tx.import_hash = "first_import"
         await db.commit()
 
-        user = (
-            await db.execute(select(User).where(User.email == "rec5@example.com"))
-        ).scalar_one()
+        user = (await db.execute(select(User).where(User.email == "rec5@example.com"))).scalar_one()
 
         match = await reconcile_with_expected(
             db,
@@ -320,13 +298,11 @@ async def test_imports_pipeline_reconciles_expected_via_csv(
     token, cat_id, account_id = await _setup_user(client, "rec_pipe@example.com")
     today = date.today()
     yesterday = today - timedelta(days=1)
-    fid, expected_tx_id = await _create_expected_tx(
+    _fid, expected_tx_id = await _create_expected_tx(
         client, token, cat_id, account_id, test_engine, occurred_at=yesterday
     )
 
-    csv = _make_csv(
-        [(today.isoformat(), "800.00", "HIPOTECA SANTANDER OFICINA 1234")]
-    )
+    csv = _make_csv([(today.isoformat(), "800.00", "HIPOTECA SANTANDER OFICINA 1234")])
     files = {"file": ("hipoteca.csv", io.BytesIO(csv), "text/csv")}
     r = await client.post(
         "/imports",
@@ -344,13 +320,17 @@ async def test_imports_pipeline_reconciles_expected_via_csv(
     factory = async_sessionmaker(bind=test_engine, expire_on_commit=False)
     async with factory() as db:
         rows = (
-            await db.execute(
-                select(Transaction).where(
-                    Transaction.amount == Decimal("800.00"),
-                    Transaction.deleted_at.is_(None),
+            (
+                await db.execute(
+                    select(Transaction).where(
+                        Transaction.amount == Decimal("800.00"),
+                        Transaction.deleted_at.is_(None),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         # Sólo la expected reconciliada (los 4 cargos seedeados son
         # parte del histórico que el detector usó, pero no son de
         # 800.00 si tienen fecha distinta — sí tienen). Así que sólo
@@ -358,8 +338,7 @@ async def test_imports_pipeline_reconciles_expected_via_csv(
         # La expected ahora tiene import_hash; las otras 4 son tx
         # manuales source=manual.
         reconciled = [
-            t for t in rows
-            if t.source == TransactionSource.EXPECTED and t.import_hash is not None
+            t for t in rows if t.source == TransactionSource.EXPECTED and t.import_hash is not None
         ]
         assert len(reconciled) == 1
         assert str(reconciled[0].id) == expected_tx_id

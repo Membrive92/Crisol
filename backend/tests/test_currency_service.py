@@ -20,9 +20,7 @@ async def _session(test_engine):  # type: ignore[no-untyped-def]
 
 
 async def _seed_eur_to_usd(db, rate_date: date, rate: str) -> None:  # type: ignore[no-untyped-def]
-    await repository.upsert_rates(
-        db, [(rate_date, "EUR", "USD", Decimal(rate), "test")]
-    )
+    await repository.upsert_rates(db, [(rate_date, "EUR", "USD", Decimal(rate), "test")])
 
 
 async def test_convert_same_currency_returns_amount_unchanged(test_engine) -> None:  # type: ignore[no-untyped-def]
@@ -170,9 +168,7 @@ async def test_refresh_rates_persists_fetched(test_engine) -> None:  # type: ign
         await db.commit()
 
         assert inserted == 2
-        rate = await repository.get_rate(
-            db, rate_date=date(2026, 4, 1), base="EUR", quote="USD"
-        )
+        rate = await repository.get_rate(db, rate_date=date(2026, 4, 1), base="EUR", quote="USD")
         assert rate is not None
         assert rate.rate == Decimal("1.10")
         assert rate.source == "frankfurter"
@@ -181,14 +177,15 @@ async def test_refresh_rates_persists_fetched(test_engine) -> None:  # type: ign
 async def test_refresh_rates_propagates_unavailable(test_engine) -> None:  # type: ignore[no-untyped-def]
     """Si frankfurter falla, refresh_rates propaga la excepción."""
     async with await _session(test_engine) as db:
-        with patch(
-            "app.modules.currency.client.fetch_rates",
-            new_callable=AsyncMock,
-            side_effect=FrankfurterUnavailableError("offline"),
-        ), pytest.raises(FrankfurterUnavailableError):
-            await service.refresh_rates(
-                db, target_date=date(2026, 4, 1), quotes=["USD"]
-            )
+        with (
+            patch(
+                "app.modules.currency.client.fetch_rates",
+                new_callable=AsyncMock,
+                side_effect=FrankfurterUnavailableError("offline"),
+            ),
+            pytest.raises(FrankfurterUnavailableError),
+        ):
+            await service.refresh_rates(db, target_date=date(2026, 4, 1), quotes=["USD"])
 
 
 async def test_ensure_rate_short_circuits_when_existing(test_engine) -> None:  # type: ignore[no-untyped-def]
@@ -201,9 +198,7 @@ async def test_ensure_rate_short_circuits_when_existing(test_engine) -> None:  #
             "app.modules.currency.client.fetch_rates",
             new_callable=AsyncMock,
         ) as mock:
-            ok = await service.ensure_rate(
-                db, quote="USD", at_date=date(2026, 4, 1)
-            )
+            ok = await service.ensure_rate(db, quote="USD", at_date=date(2026, 4, 1))
         assert ok is True
         mock.assert_not_called()
 
@@ -215,7 +210,5 @@ async def test_ensure_rate_returns_false_on_network_error(test_engine) -> None: 
             new_callable=AsyncMock,
             side_effect=FrankfurterUnavailableError("offline"),
         ):
-            ok = await service.ensure_rate(
-                db, quote="USD", at_date=date(2026, 4, 1)
-            )
+            ok = await service.ensure_rate(db, quote="USD", at_date=date(2026, 4, 1))
         assert ok is False

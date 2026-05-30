@@ -41,9 +41,7 @@ async def generate_installments_for_account(
         return []
 
     existing = await db.execute(
-        select(LiabilityInstallment).where(
-            LiabilityInstallment.account_id == account.id
-        )
+        select(LiabilityInstallment).where(LiabilityInstallment.account_id == account.id)
     )
     if existing.first() is not None:
         return []
@@ -145,13 +143,9 @@ async def unmark_installment_paid(
     return inst
 
 
-async def delete_installments_for_account(
-    db: AsyncSession, account_id: uuid.UUID
-) -> None:
+async def delete_installments_for_account(db: AsyncSession, account_id: uuid.UUID) -> None:
     """Borra todas las cuotas de una cuenta (al regenerar el cuadro)."""
     await db.execute(
-        delete(LiabilityInstallment).where(
-            LiabilityInstallment.account_id == account_id
-        )
+        delete(LiabilityInstallment).where(LiabilityInstallment.account_id == account_id)
     )
     await db.flush()

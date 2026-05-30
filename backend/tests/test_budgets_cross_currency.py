@@ -11,9 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.modules.currency.models import ExchangeRate
 
 
-async def _setup_user(
-    client: AsyncClient, email: str
-) -> tuple[str, str, str]:
+async def _setup_user(client: AsyncClient, email: str) -> tuple[str, str, str]:
     r = await client.post(
         "/auth/register",
         json={"email": email, "password": "SecurePass123", "display_name": "Test"},
@@ -112,9 +110,7 @@ async def test_status_without_flag_ignores_other_currencies(
         headers=_auth(token),
     )
 
-    r = await client.get(
-        "/budgets/status", params={"currency": "EUR"}, headers=_auth(token)
-    )
+    r = await client.get("/budgets/status", params={"currency": "EUR"}, headers=_auth(token))
     item = r.json()["items"][0]
     assert float(item["spent_this_month"]) == 0.0
     assert item["unconvertible_count"] == 0  # legacy mode no cuenta
@@ -153,9 +149,7 @@ async def test_status_with_flag_sums_converted(client: AsyncClient, test_engine)
         headers=_auth(token),
     )
 
-    r = await client.get(
-        "/budgets/status", params={"currency": "EUR"}, headers=_auth(token)
-    )
+    r = await client.get("/budgets/status", params={"currency": "EUR"}, headers=_auth(token))
     item = r.json()["items"][0]
     spent = float(item["spent_this_month"])
     # 50 / 1.10 = 45.4545... — toleramos algo de precisión decimal.
@@ -207,9 +201,7 @@ async def test_status_with_flag_reports_unconvertible(
         headers=_auth(token),
     )
 
-    r = await client.get(
-        "/budgets/status", params={"currency": "EUR"}, headers=_auth(token)
-    )
+    r = await client.get("/budgets/status", params={"currency": "EUR"}, headers=_auth(token))
     item = r.json()["items"][0]
     assert float(item["spent_this_month"]) == 30.0  # solo la EUR
     assert item["unconvertible_count"] == 1

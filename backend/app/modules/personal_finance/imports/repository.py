@@ -47,9 +47,7 @@ async def list_jobs(
     return list(result.scalars().all()), total
 
 
-async def find_existing_hashes(
-    db: AsyncSession, user_id: uuid.UUID, hashes: list[str]
-) -> set[str]:
+async def find_existing_hashes(db: AsyncSession, user_id: uuid.UUID, hashes: list[str]) -> set[str]:
     """Devuelve los hashes que YA existen en transactions activas del usuario.
 
     Filtra soft-deleted (PHASE-10.1) para coherencia con el partial

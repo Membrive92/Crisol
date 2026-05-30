@@ -8,20 +8,22 @@ from datetime import date
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.personal_finance.accounts.installments_repository import (
+    generate_installments_for_account,
+)
 from app.modules.personal_finance.accounts.models import (
     Account,
     AccountNature,
     AccountType,
 )
-from app.modules.personal_finance.accounts.installments_repository import (
-    generate_installments_for_account,
-)
 from app.modules.personal_finance.accounts.repository import (
     create_account as repo_create_account,
+)
+from app.modules.personal_finance.accounts.repository import (
     get_account_by_id,
     get_account_by_name,
 )
-from app.modules.personal_finance.categories.models import Category, CategoryKind
+from app.modules.personal_finance.categories.models import CategoryKind
 from app.modules.personal_finance.categories.repository import (
     get_category_by_id,
 )
@@ -31,16 +33,28 @@ from app.modules.personal_finance.transactions.models import (
 )
 from app.modules.personal_finance.transfers.repository import (
     assign_category as repo_assign_category,
+)
+from app.modules.personal_finance.transfers.repository import (
     filter_unambiguous,
     find_candidate_pairs,
     get_or_create_default_transfer_category,
-    get_pair as repo_get_pair,
-    get_transaction as repo_get_tx,
-    link_pair as repo_link_pair,
     list_misclassified_transfers,
-    list_pairs as repo_list_pairs,
     list_suspect_transactions,
     list_unmatched_active_transactions,
+)
+from app.modules.personal_finance.transfers.repository import (
+    get_pair as repo_get_pair,
+)
+from app.modules.personal_finance.transfers.repository import (
+    get_transaction as repo_get_tx,
+)
+from app.modules.personal_finance.transfers.repository import (
+    link_pair as repo_link_pair,
+)
+from app.modules.personal_finance.transfers.repository import (
+    list_pairs as repo_list_pairs,
+)
+from app.modules.personal_finance.transfers.repository import (
     unlink_pair as repo_unlink_pair,
 )
 from app.modules.personal_finance.transfers.schemas import (
@@ -73,9 +87,7 @@ def _delta_days(tx_a: Transaction, tx_b: Transaction) -> int:
     return abs((tx_a.occurred_at - tx_b.occurred_at).days)
 
 
-def _candidate_to_schema(
-    out_tx: Transaction, in_tx: Transaction, delta: int
-) -> TransferCandidate:
+def _candidate_to_schema(out_tx: Transaction, in_tx: Transaction, delta: int) -> TransferCandidate:
     return TransferCandidate(
         out_transaction_id=out_tx.id,
         in_transaction_id=in_tx.id,
@@ -89,9 +101,7 @@ def _candidate_to_schema(
     )
 
 
-def _pair_to_schema(
-    out_tx: Transaction, in_tx: Transaction
-) -> TransferPairResponse:
+def _pair_to_schema(out_tx: Transaction, in_tx: Transaction) -> TransferPairResponse:
     return TransferPairResponse(
         out_transaction_id=out_tx.id,
         in_transaction_id=in_tx.id,
@@ -105,9 +115,7 @@ def _pair_to_schema(
     )
 
 
-async def list_pairs(
-    db: AsyncSession, user_id: uuid.UUID
-) -> list[TransferPairResponse]:
+async def list_pairs(db: AsyncSession, user_id: uuid.UUID) -> list[TransferPairResponse]:
     """Pares emparejados activos del usuario, en orden cronológico."""
     pairs = await repo_list_pairs(db, user_id)
     return [_pair_to_schema(out_tx, in_tx) for out_tx, in_tx in pairs]
@@ -147,8 +155,7 @@ async def auto_match(
     return TransferMatchResponse(
         linked_count=len(unambiguous),
         pending_candidates=[
-            _candidate_to_schema(out_tx, in_tx, d)
-            for out_tx, in_tx, d in ambiguous
+            _candidate_to_schema(out_tx, in_tx, d) for out_tx, in_tx, d in ambiguous
         ],
     )
 
@@ -198,8 +205,7 @@ async def link_manually(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                "El importe y la moneda deben coincidir entre las dos "
-                "transacciones del par."
+                "El importe y la moneda deben coincidir entre las dos " "transacciones del par."
             ),
         )
     await repo_link_pair(db, out_tx, in_tx)
@@ -223,9 +229,7 @@ async def unlink(
     await repo_unlink_pair(db, tx_a, tx_b)
 
 
-async def list_suspects(
-    db: AsyncSession, user_id: uuid.UUID
-) -> list[TransferSuspect]:
+async def list_suspects(db: AsyncSession, user_id: uuid.UUID) -> list[TransferSuspect]:
     """PHASE-23: txs candidatas a transferencia interna sin pareja
     (descripción contiene "transfer"). El usuario revisa y marca las
     que correspondan via /transfers/mark.
@@ -246,9 +250,7 @@ async def list_suspects(
     ]
 
 
-async def list_misclassified(
-    db: AsyncSession, user_id: uuid.UUID
-) -> list[MisclassifiedTransfer]:
+async def list_misclassified(db: AsyncSession, user_id: uuid.UUID) -> list[MisclassifiedTransfer]:
     """PHASE-31.2 — tx con categoría is_transfer cuyo kind no encaja con
     la dirección de su descripción. La UI las muestra agrupadas para
     recategorizar en bloque."""
@@ -303,10 +305,7 @@ async def reclassify_bulk(
         if not target_cat.is_transfer:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "La categoría destino debe ser una transferencia "
-                    "(is_transfer=true)."
-                ),
+                detail=("La categoría destino debe ser una transferencia " "(is_transfer=true)."),
             )
 
     reclassified = 0
@@ -324,9 +323,7 @@ async def reclassify_bulk(
             chosen_cat_id = target_category_id
         else:
             current_cat = (
-                await get_category_by_id(db, tx.category_id, user_id)
-                if tx.category_id
-                else None
+                await get_category_by_id(db, tx.category_id, user_id) if tx.category_id else None
             )
             if current_cat is None or not current_cat.is_transfer:
                 errors.append(
@@ -339,9 +336,7 @@ async def reclassify_bulk(
                 if current_cat.kind == CategoryKind.EXPENSE
                 else CategoryKind.EXPENSE
             )
-            opposite_cat = await get_or_create_default_transfer_category(
-                db, user_id, kind=opposite
-            )
+            opposite_cat = await get_or_create_default_transfer_category(db, user_id, kind=opposite)
             chosen_cat_id = opposite_cat.id
         await repo_assign_category(db, tx, chosen_cat_id)
         reclassified += 1
@@ -452,9 +447,7 @@ async def mark_as_transfer(
         existing_cat = await get_category_by_id(db, tx.category_id, user_id)
         if existing_cat is not None:
             existing_kind = existing_cat.kind
-    target_kind = _infer_transfer_kind(
-        tx.description, existing_category_kind=existing_kind
-    )
+    target_kind = _infer_transfer_kind(tx.description, existing_category_kind=existing_kind)
     if target_kind is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -465,9 +458,7 @@ async def mark_as_transfer(
                 "especificando las dos cuentas."
             ),
         )
-    category = await get_or_create_default_transfer_category(
-        db, user_id, kind=target_kind
-    )
+    category = await get_or_create_default_transfer_category(db, user_id, kind=target_kind)
     await repo_assign_category(db, tx, category.id)
     return TransferMarkResponse(
         transaction_id=tx.id,
@@ -513,8 +504,7 @@ async def convert_to_internal_transfer(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                "La transacción ya forma parte de un par. Deshaz el "
-                "enlace antes de convertirla."
+                "La transacción ya forma parte de un par. Deshaz el " "enlace antes de convertirla."
             ),
         )
 
@@ -550,10 +540,7 @@ async def convert_to_internal_transfer(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Una de las cuentas indicadas no existe o no es tuya.",
         )
-    if (
-        originating.currency != source.currency
-        or beneficiary.currency != source.currency
-    ):
+    if originating.currency != source.currency or beneficiary.currency != source.currency:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
@@ -565,9 +552,7 @@ async def convert_to_internal_transfer(
     # Kind canónico según el rol del origen:
     #   - ordenante: el dinero SALE → EXPENSE en su cuenta.
     #   - beneficiaria: el dinero ENTRA → INCOME en su cuenta.
-    source_kind = (
-        CategoryKind.EXPENSE if source_role == "originating" else CategoryKind.INCOME
-    )
+    source_kind = CategoryKind.EXPENSE if source_role == "originating" else CategoryKind.INCOME
     counterpart_kind = (
         CategoryKind.INCOME if source_kind == CategoryKind.EXPENSE else CategoryKind.EXPENSE
     )
@@ -589,9 +574,7 @@ async def convert_to_internal_transfer(
     # Descripción humana en la contraparte: "Transferencia desde X" si
     # la contraparte recibe el dinero, "hacia X" si lo manda.
     other_account = beneficiary if source_role == "originating" else originating
-    source_account_name = (
-        originating.name if source_role == "originating" else beneficiary.name
-    )
+    source_account_name = originating.name if source_role == "originating" else beneficiary.name
     label = "desde" if counterpart_kind == CategoryKind.INCOME else "hacia"
     counterpart = Transaction(
         user_id=user_id,
@@ -663,8 +646,7 @@ async def convert_to_debt_operation(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                "La transacción ya forma parte de un par. Deshaz el "
-                "enlace antes de convertirla."
+                "La transacción ya forma parte de un par. Deshaz el " "enlace antes de convertirla."
             ),
         )
     if (destination_account_id is None) == (new_liability is None):
@@ -688,23 +670,21 @@ async def convert_to_debt_operation(
         # PHASE-24.1: generar cuotas con principal = importe financiado
         # (la liability tiene opening_balance=0 porque la deuda se
         # representa vía la tx contraparte que se crea más abajo).
-        await generate_installments_for_account(
-            db, liability, principal_override=source.amount
-        )
+        await generate_installments_for_account(db, liability, principal_override=source.amount)
     else:
         assert destination_account_id is not None  # narrow for mypy
-        liability = await get_account_by_id(db, destination_account_id, user_id)
-        if liability is None:
+        found = await get_account_by_id(db, destination_account_id, user_id)
+        if found is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="La cuenta destino no existe o no es tuya.",
             )
+        liability = found
         if liability.nature != AccountNature.LIABILITY:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
-                    "La cuenta destino debe ser de tipo deuda "
-                    "(tarjeta, préstamo o hipoteca)."
+                    "La cuenta destino debe ser de tipo deuda " "(tarjeta, préstamo o hipoteca)."
                 ),
             )
 
@@ -801,9 +781,7 @@ async def _create_liability_for_debt(
         apr=spec.apr if accepts_amortization else None,
         tae=spec.tae if accepts_amortization else None,
         term_months=spec.term_months if accepts_amortization else None,
-        start_date=(
-            (spec.start_date or default_start) if accepts_amortization else None
-        ),
+        start_date=((spec.start_date or default_start) if accepts_amortization else None),
         total_to_pay=spec.total_to_pay if accepts_amortization else None,
         interest_only_first_payment=(
             spec.interest_only_first_payment if accepts_amortization else None

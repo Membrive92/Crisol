@@ -106,9 +106,7 @@ class ImportPreviewResponse(BaseModel):
     source: ImportSource
     total_rows: int
     rows: list[ImportPreviewRow]
-    bank_concept_groups: list[ImportPreviewBankConceptGroup] = Field(
-        default_factory=list
-    )
+    bank_concept_groups: list[ImportPreviewBankConceptGroup] = Field(default_factory=list)
     error_sample: list[str] = Field(default_factory=list)
 
 

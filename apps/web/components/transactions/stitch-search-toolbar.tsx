@@ -46,7 +46,6 @@ export function StitchSearchToolbar({
     // Reconstruimos `value` omitiendo `date_from`/`date_to` para
     // respetar `exactOptionalPropertyTypes` (no podemos asignar
     // `undefined` explícito a un campo opcional).
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { date_from: _df, date_to: _dt, ...rest } = value;
     onChange({
       ...rest,

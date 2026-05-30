@@ -17,9 +17,7 @@ from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Table, T
 from app.modules.ai.schemas import BankStatementRow
 
 
-async def _setup_user(
-    client: AsyncClient, email: str = "imp@example.com"
-) -> tuple[str, str]:
+async def _setup_user(client: AsyncClient, email: str = "imp@example.com") -> tuple[str, str]:
     """Registra un usuario y crea una cuenta, devuelve (token, account_id)."""
     r = await client.post(
         "/auth/register",
@@ -68,16 +66,18 @@ async def _post_csv(
 
 async def test_import_csv_creates_transactions(client: AsyncClient) -> None:
     token, account_id = await _setup_user(client)
-    csv_text = (
-        "Fecha,Importe,Concepto\n"
-        "2026-04-15,25.50,Cafe\n"
-        "2026-04-16,10.00,Almuerzo\n"
+    csv_text = "Fecha,Importe,Concepto\n" "2026-04-15,25.50,Cafe\n" "2026-04-16,10.00,Almuerzo\n"
+    job = await _post_csv(
+        client,
+        token,
+        account_id,
+        csv_text,
+        mapping={
+            "amount": "Importe",
+            "occurred_at": "Fecha",
+            "description": "Concepto",
+        },
     )
-    job = await _post_csv(client, token, account_id, csv_text, mapping={
-        "amount": "Importe",
-        "occurred_at": "Fecha",
-        "description": "Concepto",
-    })
     assert job["status"] == "completed"
     assert job["rows_total"] == 2
     assert job["rows_ok"] == 2
@@ -92,16 +92,18 @@ async def test_import_csv_creates_transactions(client: AsyncClient) -> None:
 
 async def test_import_dedupes_within_batch(client: AsyncClient) -> None:
     token, account_id = await _setup_user(client, "dedup@example.com")
-    csv_text = (
-        "Fecha,Importe,Concepto\n"
-        "2026-04-15,10.00,Cafe\n"
-        "2026-04-15,10.00,Cafe\n"
+    csv_text = "Fecha,Importe,Concepto\n" "2026-04-15,10.00,Cafe\n" "2026-04-15,10.00,Cafe\n"
+    job = await _post_csv(
+        client,
+        token,
+        account_id,
+        csv_text,
+        mapping={
+            "amount": "Importe",
+            "occurred_at": "Fecha",
+            "description": "Concepto",
+        },
     )
-    job = await _post_csv(client, token, account_id, csv_text, mapping={
-        "amount": "Importe",
-        "occurred_at": "Fecha",
-        "description": "Concepto",
-    })
     assert job["rows_ok"] == 1
     assert job["rows_skipped"] == 1
 
@@ -109,18 +111,30 @@ async def test_import_dedupes_within_batch(client: AsyncClient) -> None:
 async def test_import_dedupes_against_existing(client: AsyncClient) -> None:
     token, account_id = await _setup_user(client, "dedup2@example.com")
     csv_text = "Fecha,Importe,Concepto\n2026-04-15,10.00,Cafe\n"
-    job1 = await _post_csv(client, token, account_id, csv_text, mapping={
-        "amount": "Importe",
-        "occurred_at": "Fecha",
-        "description": "Concepto",
-    })
+    job1 = await _post_csv(
+        client,
+        token,
+        account_id,
+        csv_text,
+        mapping={
+            "amount": "Importe",
+            "occurred_at": "Fecha",
+            "description": "Concepto",
+        },
+    )
     assert job1["rows_ok"] == 1
 
-    job2 = await _post_csv(client, token, account_id, csv_text, mapping={
-        "amount": "Importe",
-        "occurred_at": "Fecha",
-        "description": "Concepto",
-    })
+    job2 = await _post_csv(
+        client,
+        token,
+        account_id,
+        csv_text,
+        mapping={
+            "amount": "Importe",
+            "occurred_at": "Fecha",
+            "description": "Concepto",
+        },
+    )
     assert job2["rows_ok"] == 0
     assert job2["rows_skipped"] == 1
 
@@ -133,11 +147,17 @@ async def test_import_records_invalid_rows(client: AsyncClient) -> None:
         "not-a-date,10.00,Cafe2\n"
         "2026-04-15,10.00,Cafe3\n"
     )
-    job = await _post_csv(client, token, account_id, csv_text, mapping={
-        "amount": "Importe",
-        "occurred_at": "Fecha",
-        "description": "Concepto",
-    })
+    job = await _post_csv(
+        client,
+        token,
+        account_id,
+        csv_text,
+        mapping={
+            "amount": "Importe",
+            "occurred_at": "Fecha",
+            "description": "Concepto",
+        },
+    )
     assert job["rows_total"] == 3
     assert job["rows_ok"] == 1
     assert job["rows_failed"] == 2
@@ -154,9 +174,7 @@ async def test_import_assigns_category_by_name(client: AsyncClient) -> None:
     )
     cat_id = cat.json()["id"]
 
-    csv_text = (
-        "Fecha,Importe,Concepto,Categoria\n2026-04-15,10.00,Cafe,COMIDA\n"
-    )
+    csv_text = "Fecha,Importe,Concepto,Categoria\n2026-04-15,10.00,Cafe,COMIDA\n"
     job = await _post_csv(client, token, account_id, csv_text)
     assert job["rows_ok"] == 1
 
@@ -258,11 +276,13 @@ async def test_import_xlsx(client: AsyncClient) -> None:
     }
     data = {
         "account_id": account_id,
-        "column_mappings": json.dumps({
-            "amount": "Importe",
-            "occurred_at": "Fecha",
-            "description": "Concepto",
-        }),
+        "column_mappings": json.dumps(
+            {
+                "amount": "Importe",
+                "occurred_at": "Fecha",
+                "description": "Concepto",
+            }
+        ),
     }
     r = await client.post("/imports", files=files, data=data, headers=_auth(token))
     assert r.status_code == 201, r.text
@@ -273,11 +293,17 @@ async def test_import_xlsx(client: AsyncClient) -> None:
 async def test_import_list_and_get(client: AsyncClient) -> None:
     token, account_id = await _setup_user(client, "list@example.com")
     csv_text = "Fecha,Importe,Concepto\n2026-04-15,10.00,Cafe\n"
-    job = await _post_csv(client, token, account_id, csv_text, mapping={
-        "amount": "Importe",
-        "occurred_at": "Fecha",
-        "description": "Concepto",
-    })
+    job = await _post_csv(
+        client,
+        token,
+        account_id,
+        csv_text,
+        mapping={
+            "amount": "Importe",
+            "occurred_at": "Fecha",
+            "description": "Concepto",
+        },
+    )
 
     r_list = await client.get("/imports", headers=_auth(token))
     assert r_list.status_code == 200
@@ -293,11 +319,17 @@ async def test_import_user_isolation(client: AsyncClient) -> None:
     token_b, _account_b = await _setup_user(client, "ib@example.com")
 
     csv_text = "Fecha,Importe,Concepto\n2026-04-15,10.00,Cafe\n"
-    job_a = await _post_csv(client, token_a, account_a, csv_text, mapping={
-        "amount": "Importe",
-        "occurred_at": "Fecha",
-        "description": "Concepto",
-    })
+    job_a = await _post_csv(
+        client,
+        token_a,
+        account_a,
+        csv_text,
+        mapping={
+            "amount": "Importe",
+            "occurred_at": "Fecha",
+            "description": "Concepto",
+        },
+    )
 
     r_b_list = await client.get("/imports", headers=_auth(token_b))
     assert r_b_list.json()["total"] == 0
@@ -310,14 +342,20 @@ async def test_import_european_amount_formats(client: AsyncClient) -> None:
     token, account_id = await _setup_user(client, "fmt@example.com")
     csv_text = (
         "Fecha,Importe,Concepto\n"
-        "2026-04-15,\"1.234,56\",Compra europea\n"
-        "2026-04-16,\"1,234.56\",Compra USA\n"
+        '2026-04-15,"1.234,56",Compra europea\n'
+        '2026-04-16,"1,234.56",Compra USA\n'
     )
-    job = await _post_csv(client, token, account_id, csv_text, mapping={
-        "amount": "Importe",
-        "occurred_at": "Fecha",
-        "description": "Concepto",
-    })
+    job = await _post_csv(
+        client,
+        token,
+        account_id,
+        csv_text,
+        mapping={
+            "amount": "Importe",
+            "occurred_at": "Fecha",
+            "description": "Concepto",
+        },
+    )
     assert job["rows_ok"] == 2
 
     r = await client.get("/transactions", headers=_auth(token))
@@ -447,11 +485,7 @@ async def test_preview_csv_returns_rows_and_does_not_persist(
     client: AsyncClient,
 ) -> None:
     token, account_id = await _setup_user(client, "preview@example.com")
-    csv_text = (
-        "Fecha,Importe,Concepto\n"
-        "2026-04-15,25.50,Cafe\n"
-        "2026-04-16,10.00,Almuerzo\n"
-    )
+    csv_text = "Fecha,Importe,Concepto\n" "2026-04-15,25.50,Cafe\n" "2026-04-16,10.00,Almuerzo\n"
     files = {"file": ("import.csv", csv_text.encode("utf-8"), "text/csv")}
     data = {
         "account_id": account_id,
@@ -475,11 +509,7 @@ async def test_preview_csv_returns_rows_and_does_not_persist(
 
 async def test_preview_then_commit_persists_transactions(client: AsyncClient) -> None:
     token, account_id = await _setup_user(client, "commit@example.com")
-    csv_text = (
-        "Fecha,Importe,Concepto\n"
-        "2026-04-15,25.50,Cafe\n"
-        "2026-04-16,10.00,Almuerzo\n"
-    )
+    csv_text = "Fecha,Importe,Concepto\n" "2026-04-15,25.50,Cafe\n" "2026-04-16,10.00,Almuerzo\n"
     files = {"file": ("import.csv", csv_text.encode("utf-8"), "text/csv")}
     data = {
         "account_id": account_id,
@@ -487,9 +517,7 @@ async def test_preview_then_commit_persists_transactions(client: AsyncClient) ->
             {"amount": "Importe", "occurred_at": "Fecha", "description": "Concepto"}
         ),
     }
-    pr = await client.post(
-        "/imports/preview", files=files, data=data, headers=_auth(token)
-    )
+    pr = await client.post("/imports/preview", files=files, data=data, headers=_auth(token))
     assert pr.status_code == 200
     job_id = pr.json()["job_id"]
 
@@ -513,9 +541,7 @@ async def test_commit_rejects_already_completed_job(client: AsyncClient) -> None
             {"amount": "Importe", "occurred_at": "Fecha", "description": "Concepto"}
         ),
     }
-    pr = await client.post(
-        "/imports/preview", files=files, data=data, headers=_auth(token)
-    )
+    pr = await client.post("/imports/preview", files=files, data=data, headers=_auth(token))
     job_id = pr.json()["job_id"]
     first = await client.post(f"/imports/{job_id}/commit", headers=_auth(token))
     assert first.status_code == 200
@@ -554,9 +580,7 @@ async def test_preview_pdf_smart_returns_fixed_keys(client: AsyncClient) -> None
     )
     files = {"file": ("statement.pdf", pdf, "application/pdf")}
     data = {"account_id": account_id, "column_mappings": json.dumps(_DEFAULT_MAPPING)}
-    r = await client.post(
-        "/imports/preview", files=files, data=data, headers=_auth(token)
-    )
+    r = await client.post("/imports/preview", files=files, data=data, headers=_auth(token))
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["source"] == "pdfplumber_smart"

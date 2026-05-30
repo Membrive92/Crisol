@@ -19,12 +19,12 @@ from app.modules.personal_finance.bank_mappings.router import router as bank_map
 from app.modules.personal_finance.budgets.router import router as budgets_router
 from app.modules.personal_finance.categories.router import router as categories_router
 from app.modules.personal_finance.category_rules.router import router as category_rules_router
-from app.modules.personal_finance.seed.router import router as seed_router
 from app.modules.personal_finance.dashboard.router import router as dashboard_router
 from app.modules.personal_finance.debt.router import router as debt_router
+from app.modules.personal_finance.fixed_expenses.router import router as fixed_expenses_router
 from app.modules.personal_finance.imports.router import router as imports_router
 from app.modules.personal_finance.receipts.router import router as receipts_router
-from app.modules.personal_finance.fixed_expenses.router import router as fixed_expenses_router
+from app.modules.personal_finance.seed.router import router as seed_router
 from app.modules.personal_finance.transactions.router import router as transactions_router
 from app.modules.personal_finance.transfers.router import router as transfers_router
 

@@ -45,18 +45,14 @@ async def list_unmatched_active_transactions(
             Transaction.deleted_at.is_(None),
             Transaction.transfer_pair_id.is_(None),
         )
-        .where(
-            (Category.is_transfer.is_(None)) | (Category.is_transfer.is_(False))
-        )
+        .where((Category.is_transfer.is_(None)) | (Category.is_transfer.is_(False)))
         .order_by(Transaction.occurred_at.asc())
     )
     rows = await db.execute(query)
     return [(tx, kind) for tx, kind in rows.all()]
 
 
-async def list_pairs(
-    db: AsyncSession, user_id: uuid.UUID
-) -> list[tuple[Transaction, Transaction]]:
+async def list_pairs(db: AsyncSession, user_id: uuid.UUID) -> list[tuple[Transaction, Transaction]]:
     """Lista pares emparejados del usuario, devolviendo (out, in).
 
     Usa `Transaction.amount` (el out se identifica por categoría
@@ -121,9 +117,7 @@ async def get_pair(
     return tx, partner
 
 
-async def link_pair(
-    db: AsyncSession, tx_a: Transaction, tx_b: Transaction
-) -> None:
+async def link_pair(db: AsyncSession, tx_a: Transaction, tx_b: Transaction) -> None:
     """Marca las dos txs como pareja (bidireccional). NO valida nada;
     el caller debe haber comprobado pertenencia + criterio."""
     tx_a.transfer_pair_id = tx_b.id
@@ -131,9 +125,7 @@ async def link_pair(
     await db.flush()
 
 
-async def unlink_pair(
-    db: AsyncSession, tx_a: Transaction, tx_b: Transaction
-) -> None:
+async def unlink_pair(db: AsyncSession, tx_a: Transaction, tx_b: Transaction) -> None:
     """Deshace la pareja, dejando ambas txs como movimientos normales."""
     tx_a.transfer_pair_id = None
     tx_b.transfer_pair_id = None
@@ -204,9 +196,7 @@ def find_candidate_pairs(
                 continue
             # Mejor candidato: menor delta; en empate, id menor para
             # determinismo (evita flapping entre runs).
-            if best is None or delta < best[1] or (
-                delta == best[1] and in_tx.id < best[0].id
-            ):
+            if best is None or delta < best[1] or (delta == best[1] and in_tx.id < best[0].id):
                 best = (in_tx, delta)
         if best is not None:
             in_tx, delta = best
@@ -233,9 +223,7 @@ async def list_suspect_transactions(
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
         .where(Transaction.transfer_pair_id.is_(None))
-        .where(
-            (Category.is_transfer.is_(None)) | (Category.is_transfer.is_(False))
-        )
+        .where((Category.is_transfer.is_(None)) | (Category.is_transfer.is_(False)))
         .where(Transaction.description.ilike("%transfer%"))
         .order_by(Transaction.occurred_at.desc())
     )
@@ -323,9 +311,7 @@ async def list_misclassified_transfers(
     out: list[tuple[Transaction, Category, CategoryKind]] = []
     for tx, cat in rows.all():
         suggested = (
-            CategoryKind.INCOME
-            if cat.kind == CategoryKind.EXPENSE
-            else CategoryKind.EXPENSE
+            CategoryKind.INCOME if cat.kind == CategoryKind.EXPENSE else CategoryKind.EXPENSE
         )
         out.append((tx, cat, suggested))
     return out
@@ -375,9 +361,7 @@ async def get_or_create_default_transfer_category(
     return cat
 
 
-async def assign_category(
-    db: AsyncSession, tx: Transaction, category_id: uuid.UUID
-) -> None:
+async def assign_category(db: AsyncSession, tx: Transaction, category_id: uuid.UUID) -> None:
     """Asigna `category_id` a la tx y persiste el cambio."""
     tx.category_id = category_id
     await db.flush()

@@ -49,9 +49,7 @@ async def test_fetch_rates_parses_decimal() -> None:
         "app.modules.currency.client.httpx.AsyncClient",
         return_value=_build_mock_client(body=body),
     ):
-        result = await client.fetch_rates(
-            target_date=date(2026, 4, 1), quotes=["USD", "GBP"]
-        )
+        result = await client.fetch_rates(target_date=date(2026, 4, 1), quotes=["USD", "GBP"])
 
     assert result == {"USD": Decimal("1.0987654"), "GBP": Decimal("0.8519")}
 
@@ -61,34 +59,41 @@ async def test_fetch_rates_skips_base_in_quotes() -> None:
     with patch(
         "app.modules.currency.client.httpx.AsyncClient",
     ) as mock_class:
-        result = await client.fetch_rates(
-            target_date=date(2026, 4, 1), quotes=["EUR"]
-        )
+        result = await client.fetch_rates(target_date=date(2026, 4, 1), quotes=["EUR"])
     assert result == {}
     mock_class.assert_not_called()
 
 
 async def test_fetch_rates_raises_on_http_error() -> None:
-    with patch(
-        "app.modules.currency.client.httpx.AsyncClient",
-        return_value=_build_mock_client(status=502, body={}),
-    ), pytest.raises(FrankfurterUnavailableError):
+    with (
+        patch(
+            "app.modules.currency.client.httpx.AsyncClient",
+            return_value=_build_mock_client(status=502, body={}),
+        ),
+        pytest.raises(FrankfurterUnavailableError),
+    ):
         await client.fetch_rates(target_date=date(2026, 4, 1), quotes=["USD"])
 
 
 async def test_fetch_rates_raises_on_missing_rates_field() -> None:
     body = {"amount": 1.0, "base": "EUR", "date": "2026-04-01"}
-    with patch(
-        "app.modules.currency.client.httpx.AsyncClient",
-        return_value=_build_mock_client(body=body),
-    ), pytest.raises(FrankfurterInvalidResponseError):
+    with (
+        patch(
+            "app.modules.currency.client.httpx.AsyncClient",
+            return_value=_build_mock_client(body=body),
+        ),
+        pytest.raises(FrankfurterInvalidResponseError),
+    ):
         await client.fetch_rates(target_date=date(2026, 4, 1), quotes=["USD"])
 
 
 async def test_fetch_rates_raises_on_invalid_rate_value() -> None:
     body = {"rates": {"USD": "not-a-number"}}
-    with patch(
-        "app.modules.currency.client.httpx.AsyncClient",
-        return_value=_build_mock_client(body=body),
-    ), pytest.raises(FrankfurterInvalidResponseError):
+    with (
+        patch(
+            "app.modules.currency.client.httpx.AsyncClient",
+            return_value=_build_mock_client(body=body),
+        ),
+        pytest.raises(FrankfurterInvalidResponseError),
+    ):
         await client.fetch_rates(target_date=date(2026, 4, 1), quotes=["USD"])

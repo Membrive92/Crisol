@@ -152,9 +152,7 @@ async def list_trash_endpoint(
     "borrada hace X días". Sin filtros adicionales — la papelera es
     una vista plana de "qué he borrado recientemente".
     """
-    items, total = await list_trashed_transactions(
-        db, user.id, limit=limit, offset=offset
-    )
+    items, total = await list_trashed_transactions(db, user.id, limit=limit, offset=offset)
     return TransactionListResponse(
         items=[TransactionResponse.model_validate(tx) for tx in items],
         total=total,
@@ -208,10 +206,7 @@ async def available_periods_endpoint(
     """
     periods = await list_available_periods(db, user.id)
     return AvailablePeriodsResponse(
-        periods=[
-            AvailablePeriodItem(year=year, months=months)
-            for year, months in periods
-        ]
+        periods=[AvailablePeriodItem(year=year, months=months) for year, months in periods]
     )
 
 
@@ -252,13 +247,11 @@ async def uncategorized_summary_endpoint(
     # razonable para el banner — un caso bordes que no debería pasar
     # con un usuario disciplinado.
     if not rows:
-        return UncategorizedSummaryResponse(
-            count=0, total_amount=Decimal("0"), currency="EUR"
-        )
+        return UncategorizedSummaryResponse(count=0, total_amount=Decimal("0"), currency="EUR")
     rows_sorted = sorted(rows, key=lambda r: r[0], reverse=True)
     count, amount, currency = rows_sorted[0]
     total_count = sum(int(r[0]) for r in rows)
-    _ = count  # noqa: F841 — kept for clarity above; total_count wins
+    _ = count
     return UncategorizedSummaryResponse(
         count=total_count,
         total_amount=Decimal(amount or 0),
@@ -293,9 +286,7 @@ async def create_endpoint(
     """
     transaction = await create_transaction(db, user.id, body)
     await db.flush()
-    alert = await get_alert_for_category(
-        db, user.id, category_id=transaction.category_id
-    )
+    alert = await get_alert_for_category(db, user.id, category_id=transaction.category_id)
     await db.commit()
 
     payload = TransactionResponse.model_validate(transaction)
@@ -304,13 +295,9 @@ async def create_endpoint(
         if alert.budget.category_id is None:
             cat_label = "Presupuesto global"
         else:
-            cat = await get_category_by_id(
-                db, alert.budget.category_id, user.id
-            )
+            cat = await get_category_by_id(db, alert.budget.category_id, user.id)
             cat_label = cat.name if cat is not None else "Categoría"
-        message = (
-            f"{cat_label} está al {alert.percent_used:.0f}% del presupuesto."
-        )
+        message = f"{cat_label} está al {alert.percent_used:.0f}% del presupuesto."
         payload = payload.model_copy(
             update={
                 "budget_alert": BudgetAlertSchema(
@@ -404,9 +391,7 @@ async def restore_endpoint(
     return TransactionResponse.model_validate(transaction)
 
 
-@router.delete(
-    "/{transaction_id}/purge", status_code=204, response_class=Response
-)
+@router.delete("/{transaction_id}/purge", status_code=204, response_class=Response)
 async def purge_endpoint(
     transaction_id: uuid.UUID,
     user: CurrentUser,

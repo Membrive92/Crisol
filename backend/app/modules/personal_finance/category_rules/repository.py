@@ -50,9 +50,7 @@ async def get_rule_by_id(
     db: AsyncSession, rule_id: uuid.UUID, user_id: uuid.UUID
 ) -> CategoryRule | None:
     result = await db.execute(
-        select(CategoryRule).where(
-            CategoryRule.id == rule_id, CategoryRule.user_id == user_id
-        )
+        select(CategoryRule).where(CategoryRule.id == rule_id, CategoryRule.user_id == user_id)
     )
     return result.scalar_one_or_none()
 

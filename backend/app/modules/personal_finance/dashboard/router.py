@@ -121,9 +121,7 @@ async def by_month_endpoint(
 ) -> list[MonthlyBucket]:
     """12 buckets mensuales para el año."""
     cur, target = _resolve_currency_params(currency, target_currency)
-    return await get_monthly_breakdown(
-        db, user.id, year=year, currency=cur, target_currency=target
-    )
+    return await get_monthly_breakdown(db, user.id, year=year, currency=cur, target_currency=target)
 
 
 @router.get(
@@ -145,9 +143,7 @@ async def category_available_periods_endpoint(
     return await get_category_available_periods(db, user.id, category_id)
 
 
-@router.get(
-    "/category/{category_id}", response_model=CategoryDetailResponse
-)
+@router.get("/category/{category_id}", response_model=CategoryDetailResponse)
 async def category_detail_endpoint(
     category_id: uuid.UUID,
     user: CurrentUser,

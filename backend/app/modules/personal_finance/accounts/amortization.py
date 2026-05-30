@@ -71,7 +71,7 @@ def compute_monthly_payment(principal: Decimal, apr: Decimal, term_months: int) 
         return _round_cents(principal / Decimal(term_months))
     i = apr / Decimal(12)
     one_plus_i = Decimal(1) + i
-    factor = one_plus_i ** term_months
+    factor = one_plus_i**term_months
     payment = principal * (i * factor) / (factor - Decimal(1))
     return _round_cents(payment)
 

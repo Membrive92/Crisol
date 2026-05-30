@@ -117,9 +117,7 @@ async def upsert_rates(
     return len(payload)
 
 
-async def list_distinct_quotes(
-    db: AsyncSession, *, since: date | None = None
-) -> list[str]:
+async def list_distinct_quotes(db: AsyncSession, *, since: date | None = None) -> list[str]:
     """Devuelve todos los `quote` distintos almacenados.
 
     Útil para construir la lista de monedas que el cliente HTTP debe

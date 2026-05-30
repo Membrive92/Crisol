@@ -113,7 +113,7 @@ async def test_upsert_replaces_category_for_same_concept(
 async def test_create_rejects_category_from_other_user(client: AsyncClient) -> None:
     """Si el `category_id` no pertenece al usuario, 400."""
     token_a, _, _, _ = await _setup_user(client, "bm-A@example.com")
-    token_b, food_b, _, _ = await _setup_user(client, "bm-B@example.com")
+    _token_b, food_b, _, _ = await _setup_user(client, "bm-B@example.com")
     # A intenta usar la categoría de B.
     r = await client.post(
         "/bank-mappings",
@@ -132,9 +132,7 @@ async def test_delete_mapping(client: AsyncClient) -> None:
             headers=_auth(token),
         )
     ).json()
-    r = await client.delete(
-        f"/bank-mappings/{created['id']}", headers=_auth(token)
-    )
+    r = await client.delete(f"/bank-mappings/{created['id']}", headers=_auth(token))
     assert r.status_code == 204
     list_r = await client.get("/bank-mappings", headers=_auth(token))
     assert list_r.json()["items"] == []
@@ -155,12 +153,8 @@ async def test_user_isolation(client: AsyncClient) -> None:
         headers=_auth(token_b),
     )
 
-    items_a = (await client.get("/bank-mappings", headers=_auth(token_a))).json()[
-        "items"
-    ]
-    items_b = (await client.get("/bank-mappings", headers=_auth(token_b))).json()[
-        "items"
-    ]
+    items_a = (await client.get("/bank-mappings", headers=_auth(token_a))).json()["items"]
+    items_b = (await client.get("/bank-mappings", headers=_auth(token_b))).json()["items"]
     assert [i["bank_concept"] for i in items_a] == ["aaa"]
     assert [i["bank_concept"] for i in items_b] == ["bbb"]
 
@@ -225,9 +219,7 @@ async def test_preview_groups_rows_by_bank_concept(client: AsyncClient) -> None:
             }
         ),
     }
-    r = await client.post(
-        "/imports/preview", files=files, data=data, headers=_auth(token)
-    )
+    r = await client.post("/imports/preview", files=files, data=data, headers=_auth(token))
     assert r.status_code == 200, r.text
     groups = r.json()["bank_concept_groups"]
     assert len(groups) == 2
@@ -248,9 +240,7 @@ async def test_preview_returns_existing_mapping_as_suggestion(
         json={"bank_concept": "PAGO TARJETA", "category_id": food_id},
         headers=_auth(token),
     )
-    payload = _xlsx_with_concepts(
-        [("2026-04-15", "PAGO TARJETA", "10.00", "Amazon")]
-    )
+    payload = _xlsx_with_concepts([("2026-04-15", "PAGO TARJETA", "10.00", "Amazon")])
     files = {
         "file": (
             "import.xlsx",
@@ -269,9 +259,7 @@ async def test_preview_returns_existing_mapping_as_suggestion(
             }
         ),
     }
-    r = await client.post(
-        "/imports/preview", files=files, data=data, headers=_auth(token)
-    )
+    r = await client.post("/imports/preview", files=files, data=data, headers=_auth(token))
     groups = r.json()["bank_concept_groups"]
     assert len(groups) == 1
     assert groups[0]["suggested_category_id"] == food_id
@@ -309,9 +297,7 @@ async def test_commit_with_overrides_assigns_categories_and_persists_mapping(
             }
         ),
     }
-    pr = await client.post(
-        "/imports/preview", files=files, data=data, headers=_auth(token)
-    )
+    pr = await client.post("/imports/preview", files=files, data=data, headers=_auth(token))
     job_id = pr.json()["job_id"]
 
     cr = await client.post(
@@ -336,9 +322,7 @@ async def test_commit_with_overrides_assigns_categories_and_persists_mapping(
 
     # Y las equivalencias se han guardado: el siguiente preview las
     # sugiere automáticamente.
-    next_pr = await client.post(
-        "/imports/preview", files=files, data=data, headers=_auth(token)
-    )
+    next_pr = await client.post("/imports/preview", files=files, data=data, headers=_auth(token))
     groups = next_pr.json()["bank_concept_groups"]
     by_concept = {g["concept"]: g for g in groups}
     assert by_concept["PAGO TARJETA"]["suggested_category_id"] == food_id
@@ -357,9 +341,7 @@ async def test_commit_uses_saved_mapping_without_explicit_override(
         headers=_auth(token),
     )
 
-    payload = _xlsx_with_concepts(
-        [("2026-04-15", "PAGO TARJETA", "10.00", "Mercadona")]
-    )
+    payload = _xlsx_with_concepts([("2026-04-15", "PAGO TARJETA", "10.00", "Mercadona")])
     files = {
         "file": (
             "import.xlsx",
@@ -378,9 +360,7 @@ async def test_commit_uses_saved_mapping_without_explicit_override(
             }
         ),
     }
-    pr = await client.post(
-        "/imports/preview", files=files, data=data, headers=_auth(token)
-    )
+    pr = await client.post("/imports/preview", files=files, data=data, headers=_auth(token))
     job_id = pr.json()["job_id"]
     # Commit SIN body — debería aplicar la equivalencia guardada.
     cr = await client.post(f"/imports/{job_id}/commit", headers=_auth(token))
@@ -399,9 +379,7 @@ async def test_commit_ignores_overrides_with_foreign_category(
     token_a, _food_a, _, account_a = await _setup_user(client, "bm-foreignA@example.com")
     _token_b, food_b, _, _ = await _setup_user(client, "bm-foreignB@example.com")
 
-    payload = _xlsx_with_concepts(
-        [("2026-04-15", "PAGO TARJETA", "10.00", "Mercadona")]
-    )
+    payload = _xlsx_with_concepts([("2026-04-15", "PAGO TARJETA", "10.00", "Mercadona")])
     files = {
         "file": (
             "import.xlsx",
@@ -420,9 +398,7 @@ async def test_commit_ignores_overrides_with_foreign_category(
             }
         ),
     }
-    pr = await client.post(
-        "/imports/preview", files=files, data=data, headers=_auth(token_a)
-    )
+    pr = await client.post("/imports/preview", files=files, data=data, headers=_auth(token_a))
     job_id = pr.json()["job_id"]
 
     cr = await client.post(
@@ -432,7 +408,5 @@ async def test_commit_ignores_overrides_with_foreign_category(
     )
     assert cr.status_code == 200
     # Se importó pero sin categoría (override ignorado, sin fallback).
-    txs = (await client.get("/transactions", headers=_auth(token_a))).json()[
-        "items"
-    ]
+    txs = (await client.get("/transactions", headers=_auth(token_a))).json()["items"]
     assert txs[0]["category_id"] is None

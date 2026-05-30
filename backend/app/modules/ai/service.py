@@ -14,7 +14,6 @@ from pydantic import ValidationError
 from app.modules.ai import client
 from app.modules.ai.exceptions import AiInvalidOutputError
 from app.modules.ai.schemas import (
-    BankStatementPage,
     BankStatementRow,
     ReceiptExtraction,
 )
@@ -209,12 +208,9 @@ async def suggest_categories_for_concepts(
         return {}
 
     valid_category_ids = {c["id"] for c in categories}
-    categories_block = "\n".join(
-        f"{c['id']} — {c['name']} — {c['kind']}" for c in categories
-    )
+    categories_block = "\n".join(f"{c['id']} — {c['name']} — {c['kind']}" for c in categories)
     concepts_block = "\n".join(
-        f"{it['id']}|{it['concept']}|{it.get('description') or ''}"
-        for it in items
+        f"{it['id']}|{it['concept']}|{it.get('description') or ''}" for it in items
     )
     prompt = CATEGORY_SUGGEST_PROMPT_TEMPLATE.format(
         categories_block=categories_block,

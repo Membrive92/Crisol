@@ -30,9 +30,7 @@ class Settings(BaseSettings):
     # BD aislada para tests. Se crea automáticamente desde conftest si no
     # existe. Nunca debe coincidir con `database_url` — los tests truncan
     # tablas tras cada test y haría desaparecer datos de desarrollo.
-    test_database_url: str = (
-        "postgresql+asyncpg://crisol:crisol@localhost:5432/crisol_test"
-    )
+    test_database_url: str = "postgresql+asyncpg://crisol:crisol@localhost:5432/crisol_test"
 
     # ---------- Auth ----------
     # Default cumple los 32 bytes mínimos para silenciar la advertencia de

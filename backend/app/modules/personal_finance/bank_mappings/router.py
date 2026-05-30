@@ -52,9 +52,7 @@ async def upsert_endpoint(
     return BankCategoryMappingResponse.model_validate(mapping)
 
 
-@router.delete(
-    "/{mapping_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response
-)
+@router.delete("/{mapping_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def delete_endpoint(
     mapping_id: uuid.UUID,
     user: CurrentUser,

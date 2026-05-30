@@ -6,7 +6,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -72,9 +72,7 @@ class Category(Base):
     # internas y quedan fuera de cashflow (dashboard, presupuestos), pero
     # SIGUEN contribuyendo al saldo de la cuenta con el signo dictado
     # por `kind`. Sustituye al difunto `CategoryKind.TRANSFER`.
-    is_transfer: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default="false"
-    )
+    is_transfer: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     role: Mapped[CategoryRole] = mapped_column(
         Enum(CategoryRole, name="categoryrole", native_enum=True),
         nullable=False,
@@ -88,4 +86,16 @@ class Category(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        # PHASE-30.1 — índice parcial creado en la migración
+        # s6i70k2gf5j3h9; se declara aquí para que `create_all` (tests) y
+        # `alembic check` (parity) coincidan con producción.
+        Index(
+            "ix_categories_role_debt",
+            "user_id",
+            "role",
+            postgresql_where=text("role IN ('DEBT_PAYMENT', 'DEBT_INTEREST')"),
+        ),
     )

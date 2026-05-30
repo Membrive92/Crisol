@@ -30,9 +30,7 @@ async def _ensure_category_owned(
     db: AsyncSession, user_id: uuid.UUID, category_id: uuid.UUID
 ) -> None:
     result = await db.execute(
-        select(Category.id).where(
-            Category.id == category_id, Category.user_id == user_id
-        )
+        select(Category.id).where(Category.id == category_id, Category.user_id == user_id)
     )
     if result.scalar_one_or_none() is None:
         raise HTTPException(
@@ -65,9 +63,7 @@ async def update_rule(
 ) -> CategoryRule:
     rule = await get_rule_by_id(db, rule_id, user_id)
     if rule is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Regla no encontrada"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Regla no encontrada")
 
     payload = data.model_dump(exclude_unset=True)
     if "category_id" in payload and payload["category_id"] is not None:
@@ -81,12 +77,8 @@ async def update_rule(
     return rule
 
 
-async def delete_rule(
-    db: AsyncSession, user_id: uuid.UUID, rule_id: uuid.UUID
-) -> None:
+async def delete_rule(db: AsyncSession, user_id: uuid.UUID, rule_id: uuid.UUID) -> None:
     rule = await get_rule_by_id(db, rule_id, user_id)
     if rule is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Regla no encontrada"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Regla no encontrada")
     await remove_rule(db, rule)

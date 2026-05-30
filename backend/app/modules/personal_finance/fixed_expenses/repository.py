@@ -71,9 +71,7 @@ async def find_by_fingerprint(
     return (await db.execute(query)).scalar_one_or_none()
 
 
-async def create_fixed_expense(
-    db: AsyncSession, fixed_expense: FixedExpense
-) -> FixedExpense:
+async def create_fixed_expense(db: AsyncSession, fixed_expense: FixedExpense) -> FixedExpense:
     """Persiste un gasto fijo nuevo."""
     db.add(fixed_expense)
     await db.flush()

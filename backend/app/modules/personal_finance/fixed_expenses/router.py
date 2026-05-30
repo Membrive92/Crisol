@@ -113,9 +113,7 @@ async def update_endpoint(
     return FixedExpenseResponse.model_validate(item)
 
 
-@router.post(
-    "/{fixed_expense_id}/confirm", response_model=FixedExpenseResponse
-)
+@router.post("/{fixed_expense_id}/confirm", response_model=FixedExpenseResponse)
 async def confirm_endpoint(
     fixed_expense_id: uuid.UUID,
     user: CurrentUser,
@@ -127,9 +125,7 @@ async def confirm_endpoint(
     return FixedExpenseResponse.model_validate(item)
 
 
-@router.post(
-    "/{fixed_expense_id}/dismiss", response_model=FixedExpenseResponse
-)
+@router.post("/{fixed_expense_id}/dismiss", response_model=FixedExpenseResponse)
 async def dismiss_endpoint(
     fixed_expense_id: uuid.UUID,
     user: CurrentUser,
@@ -141,9 +137,7 @@ async def dismiss_endpoint(
     return FixedExpenseResponse.model_validate(item)
 
 
-@router.post(
-    "/{fixed_expense_id}/pause", response_model=FixedExpenseResponse
-)
+@router.post("/{fixed_expense_id}/pause", response_model=FixedExpenseResponse)
 async def pause_endpoint(
     fixed_expense_id: uuid.UUID,
     user: CurrentUser,
@@ -156,9 +150,7 @@ async def pause_endpoint(
     return FixedExpenseResponse.model_validate(item)
 
 
-@router.post(
-    "/{fixed_expense_id}/resume", response_model=FixedExpenseResponse
-)
+@router.post("/{fixed_expense_id}/resume", response_model=FixedExpenseResponse)
 async def resume_endpoint(
     fixed_expense_id: uuid.UUID,
     user: CurrentUser,
@@ -171,9 +163,7 @@ async def resume_endpoint(
     return FixedExpenseResponse.model_validate(item)
 
 
-@router.post(
-    "/{fixed_expense_id}/cancel", response_model=FixedExpenseResponse
-)
+@router.post("/{fixed_expense_id}/cancel", response_model=FixedExpenseResponse)
 async def cancel_endpoint(
     fixed_expense_id: uuid.UUID,
     user: CurrentUser,
@@ -186,9 +176,7 @@ async def cancel_endpoint(
     return FixedExpenseResponse.model_validate(item)
 
 
-@router.delete(
-    "/{fixed_expense_id}", status_code=204, response_class=Response
-)
+@router.delete("/{fixed_expense_id}", status_code=204, response_class=Response)
 async def delete_endpoint(
     fixed_expense_id: uuid.UUID,
     user: CurrentUser,

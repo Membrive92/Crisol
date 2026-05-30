@@ -32,9 +32,7 @@ async def list_endpoint(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CategoryRuleListResponse:
     items = await list_rules(db, user.id)
-    return CategoryRuleListResponse(
-        items=[CategoryRuleResponse.model_validate(r) for r in items]
-    )
+    return CategoryRuleListResponse(items=[CategoryRuleResponse.model_validate(r) for r in items])
 
 
 @router.post(
@@ -64,9 +62,7 @@ async def update_endpoint(
     return CategoryRuleResponse.model_validate(rule)
 
 
-@router.delete(
-    "/{rule_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response
-)
+@router.delete("/{rule_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def delete_endpoint(
     rule_id: uuid.UUID,
     user: CurrentUser,

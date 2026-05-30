@@ -34,9 +34,7 @@ async def test_register_seeds_categories_and_rules(client: AsyncClient) -> None:
     assert "Supermercado" in names
     assert "Nómina" in names
 
-    rules = (await client.get("/category-rules", headers=_auth(token))).json()[
-        "items"
-    ]
+    rules = (await client.get("/category-rules", headers=_auth(token))).json()["items"]
     assert len(rules) >= 50  # esperamos muchísimas reglas
 
 
@@ -52,12 +50,10 @@ async def test_seed_recommended_endpoint_is_idempotent(client: AsyncClient) -> N
     )
     token = r.json()["access_token"]
 
-    cats_after_register = (
-        await client.get("/categories", headers=_auth(token))
-    ).json()
-    rules_after_register = (
-        await client.get("/category-rules", headers=_auth(token))
-    ).json()["items"]
+    cats_after_register = (await client.get("/categories", headers=_auth(token))).json()
+    rules_after_register = (await client.get("/category-rules", headers=_auth(token))).json()[
+        "items"
+    ]
 
     # Llamamos al endpoint manualmente (segunda vez ya).
     seed_r = await client.post("/seed/recommended", headers=_auth(token))
@@ -69,9 +65,7 @@ async def test_seed_recommended_endpoint_is_idempotent(client: AsyncClient) -> N
     assert body["rules_existed"] >= 50
 
     cats_after = (await client.get("/categories", headers=_auth(token))).json()
-    rules_after = (
-        await client.get("/category-rules", headers=_auth(token))
-    ).json()["items"]
+    rules_after = (await client.get("/category-rules", headers=_auth(token))).json()["items"]
     assert len(cats_after) == len(cats_after_register)
     assert len(rules_after) == len(rules_after_register)
 
@@ -129,9 +123,7 @@ async def test_seed_after_register_actually_categorizes_imports(
             }
         ),
     }
-    pr = await client.post(
-        "/imports/preview", files=files, data=data, headers=_auth(token)
-    )
+    pr = await client.post("/imports/preview", files=files, data=data, headers=_auth(token))
     job_id = pr.json()["job_id"]
     cr = await client.post(f"/imports/{job_id}/commit", headers=_auth(token))
     assert cr.status_code == 200

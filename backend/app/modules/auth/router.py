@@ -31,9 +31,7 @@ def _set_refresh_cookie(
     "Recordarme". Si no se pasa, se usa el default de settings.
     `httponly=True` la oculta de JS (XSS no puede leerla).
     """
-    samesite = cast(
-        Literal["lax", "strict", "none"], settings.auth_cookie_samesite.lower()
-    )
+    samesite = cast(Literal["lax", "strict", "none"], settings.auth_cookie_samesite.lower())
     days = ttl_days if ttl_days is not None else settings.jwt_refresh_token_expire_days
     # Path="/" para que la cookie viaje también cuando el frontend usa el
     # rewrite `/api/auth/...` de Next.js: la cookie la setea el browser con
@@ -95,9 +93,7 @@ async def register_endpoint(
     if user is not None:
         await seed_recommended(db, user.id)
     await db.commit()
-    _set_refresh_cookie(
-        response, session.tokens.refresh_token, ttl_days=session.refresh_ttl_days
-    )
+    _set_refresh_cookie(response, session.tokens.refresh_token, ttl_days=session.refresh_ttl_days)
     return session.tokens
 
 
@@ -112,13 +108,9 @@ async def login_endpoint(
     Si `body.remember_me` es true, la cookie y el refresh usan el TTL
     extendido de settings.
     """
-    session = await login(
-        db, body.email, body.password, remember_me=body.remember_me
-    )
+    session = await login(db, body.email, body.password, remember_me=body.remember_me)
     await db.commit()
-    _set_refresh_cookie(
-        response, session.tokens.refresh_token, ttl_days=session.refresh_ttl_days
-    )
+    _set_refresh_cookie(response, session.tokens.refresh_token, ttl_days=session.refresh_ttl_days)
     return session.tokens
 
 
@@ -138,9 +130,7 @@ async def refresh_endpoint(
     token = _resolve_refresh_token(body.refresh_token, refresh_cookie)
     session = await refresh(db, token)
     await db.commit()
-    _set_refresh_cookie(
-        response, session.tokens.refresh_token, ttl_days=session.refresh_ttl_days
-    )
+    _set_refresh_cookie(response, session.tokens.refresh_token, ttl_days=session.refresh_ttl_days)
     return session.tokens
 
 

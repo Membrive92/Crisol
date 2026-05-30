@@ -78,19 +78,13 @@ async def fetch_rates(
     except httpx.ReadTimeout as e:
         raise FrankfurterUnavailableError("Timeout leyendo frankfurter") from e
     except httpx.HTTPStatusError as e:
-        raise FrankfurterUnavailableError(
-            f"frankfurter error {e.response.status_code}"
-        ) from e
+        raise FrankfurterUnavailableError(f"frankfurter error {e.response.status_code}") from e
 
     if not isinstance(data, dict):
-        raise FrankfurterInvalidResponseError(
-            f"Payload no es un objeto JSON: {data!r:.100}"
-        )
+        raise FrankfurterInvalidResponseError(f"Payload no es un objeto JSON: {data!r:.100}")
     raw_rates = data.get("rates")
     if not isinstance(raw_rates, dict) or not raw_rates:
-        raise FrankfurterInvalidResponseError(
-            f"Payload sin tasas válidas: {data!r}"
-        )
+        raise FrankfurterInvalidResponseError(f"Payload sin tasas válidas: {data!r}")
 
     out: dict[str, Decimal] = {}
     for quote, value in raw_rates.items():
@@ -98,9 +92,7 @@ async def fetch_rates(
             # Convertimos vía str para evitar el ruido binario de float.
             out[quote.upper()] = Decimal(str(value))
         except (ArithmeticError, TypeError, ValueError) as e:
-            raise FrankfurterInvalidResponseError(
-                f"Tasa inválida para {quote}: {value!r}"
-            ) from e
+            raise FrankfurterInvalidResponseError(f"Tasa inválida para {quote}: {value!r}") from e
     return out
 
 

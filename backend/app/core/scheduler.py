@@ -59,9 +59,7 @@ async def refresh_currency_rates_job() -> None:
     yesterday = today - timedelta(days=1)
     try:
         async with session_factory() as db:
-            fetched = await currency_service.ensure_rates_for_dates(
-                db, [yesterday, today]
-            )
+            fetched = await currency_service.ensure_rates_for_dates(db, [yesterday, today])
         logger.info(
             "currency cron: %s fechas refrescadas (yesterday=%s, today=%s)",
             fetched,
@@ -86,8 +84,8 @@ async def autopost_fixed_expenses_job() -> None:
     try:
         async with session_factory() as db:
             user_ids = (
-                await db.execute(select(User.id).where(User.is_active.is_(True)))
-            ).scalars().all()
+                (await db.execute(select(User.id).where(User.is_active.is_(True)))).scalars().all()
+            )
             total_created = 0
             for uid in user_ids:
                 try:
@@ -98,16 +96,12 @@ async def autopost_fixed_expenses_job() -> None:
                         service as fixed_expenses_service,
                     )
 
-                    result = await fixed_expenses_service.autopost_due_for_user(
-                        db, uid
-                    )
+                    result = await fixed_expenses_service.autopost_due_for_user(db, uid)
                     await db.commit()
                     total_created += result.created
                 except Exception:
                     await db.rollback()
-                    logger.exception(
-                        "fixed_expenses autopost failed for user_id=%s", uid
-                    )
+                    logger.exception("fixed_expenses autopost failed for user_id=%s", uid)
         logger.info(
             "fixed_expenses autopost cron: %s users, %s txs created",
             len(user_ids),
@@ -131,8 +125,8 @@ async def scan_fixed_expenses_job() -> None:
     try:
         async with session_factory() as db:
             user_ids = (
-                await db.execute(select(User.id).where(User.is_active.is_(True)))
-            ).scalars().all()
+                (await db.execute(select(User.id).where(User.is_active.is_(True)))).scalars().all()
+            )
             total_created = 0
             total_updated = 0
             for uid in user_ids:
@@ -143,9 +137,7 @@ async def scan_fixed_expenses_job() -> None:
                     total_updated += result.updated
                 except Exception:
                     await db.rollback()
-                    logger.exception(
-                        "fixed_expenses scan failed for user_id=%s", uid
-                    )
+                    logger.exception("fixed_expenses scan failed for user_id=%s", uid)
         logger.info(
             "fixed_expenses cron: %s users scanned, %s created, %s updated",
             len(user_ids),

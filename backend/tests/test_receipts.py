@@ -48,7 +48,10 @@ def _mock_storage_and_ai(
         extract_kwargs["return_value"] = extraction or _sample_extraction()
 
     with (
-        patch("app.modules.personal_finance.receipts.service.storage.put_receipt", return_value="fakekey/img.jpg"),
+        patch(
+            "app.modules.personal_finance.receipts.service.storage.put_receipt",
+            return_value="fakekey/img.jpg",
+        ),
         patch("app.modules.personal_finance.receipts.service.storage.delete_receipt", delete_mock),
         patch(
             "app.modules.personal_finance.receipts.service.ai_service.extract_receipt",
@@ -59,9 +62,7 @@ def _mock_storage_and_ai(
         yield delete_mock
 
 
-async def _setup_user(
-    client: AsyncClient, email: str = "rcpt@example.com"
-) -> tuple[str, str]:
+async def _setup_user(client: AsyncClient, email: str = "rcpt@example.com") -> tuple[str, str]:
     """Registra un usuario y crea una cuenta, devuelve (token, account_id)."""
     r = await client.post(
         "/auth/register",
@@ -112,9 +113,7 @@ async def test_extract_empty_payload_rejected(client: AsyncClient) -> None:
 async def test_extract_ai_unavailable_cleans_blob(client: AsyncClient) -> None:
     token, _account_id = await _setup_user(client, "aidown@example.com")
     files = {"file": ("ticket.jpg", b"fake", "image/jpeg")}
-    with _mock_storage_and_ai(
-        extract_side_effect=AiUnavailableError("Ollama down")
-    ) as delete_mock:
+    with _mock_storage_and_ai(extract_side_effect=AiUnavailableError("Ollama down")) as delete_mock:
         r = await client.post("/receipts/extract", files=files, headers=_auth(token))
     assert r.status_code == 502
     delete_mock.assert_called_once_with("fakekey/img.jpg")
@@ -164,13 +163,9 @@ async def test_confirm_twice_returns_409(client: AsyncClient) -> None:
         "occurred_at": "2026-04-15T00:00:00Z",
         "currency": "EUR",
     }
-    r1 = await client.post(
-        f"/receipts/{receipt_id}/confirm", json=payload, headers=_auth(token)
-    )
+    r1 = await client.post(f"/receipts/{receipt_id}/confirm", json=payload, headers=_auth(token))
     assert r1.status_code == 200
-    r2 = await client.post(
-        f"/receipts/{receipt_id}/confirm", json=payload, headers=_auth(token)
-    )
+    r2 = await client.post(f"/receipts/{receipt_id}/confirm", json=payload, headers=_auth(token))
     assert r2.status_code == 409
 
 
@@ -244,9 +239,7 @@ async def test_get_blob_isolated_per_user(client: AsyncClient) -> None:
     token_b, _account_b = await _setup_user(client, "bblob@example.com")
     files = {"file": ("ticket.jpg", b"fake", "image/jpeg")}
     with _mock_storage_and_ai():
-        a_extract = await client.post(
-            "/receipts/extract", files=files, headers=_auth(token_a)
-        )
+        a_extract = await client.post("/receipts/extract", files=files, headers=_auth(token_a))
     rid = a_extract.json()["receipt"]["id"]
 
     with patch(

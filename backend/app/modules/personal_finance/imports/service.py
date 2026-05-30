@@ -28,6 +28,8 @@ from app.modules.personal_finance.accounts.service import ensure_account_exists
 from app.modules.personal_finance.bank_mappings.repository import (
     get_mappings_for_concepts,
     normalize_concept,
+)
+from app.modules.personal_finance.bank_mappings.repository import (
     upsert_mapping as upsert_bank_mapping,
 )
 from app.modules.personal_finance.categories.models import Category
@@ -43,7 +45,7 @@ from app.modules.personal_finance.imports.models import ImportJob, ImportJobStat
 from app.modules.personal_finance.imports.parser import (
     NoTablesInPdfError,
     ParseError,
-    SmartParseAmbiguous,
+    SmartParseAmbiguousError,
     detect_format,
     parse_file,
     parse_pdf_smart,
@@ -226,9 +228,7 @@ async def run_preview(
         "rows": rows,
         "effective_mappings": effective_mappings.model_dump(),
         "currency": currency.upper(),
-        "default_category_id": (
-            str(default_category_id) if default_category_id else None
-        ),
+        "default_category_id": (str(default_category_id) if default_category_id else None),
         "source": source.value,
         "account_id": str(account_id),
     }
@@ -261,9 +261,7 @@ async def run_commit(
     """
     job = await get_job_by_id(db, job_id, user_id)
     if job is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Job no encontrado"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job no encontrado")
     if job.status != ImportJobStatus.PREVIEW:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -277,14 +275,10 @@ async def run_commit(
 
     payload_data = job.preview_payload
     rows_raw = payload_data.get("rows") or []
-    effective_mappings = ImportColumnMappings.model_validate(
-        payload_data["effective_mappings"]
-    )
+    effective_mappings = ImportColumnMappings.model_validate(payload_data["effective_mappings"])
     currency = payload_data.get("currency") or DEFAULT_CURRENCY
     default_category_id_raw = payload_data.get("default_category_id")
-    default_category_id = (
-        uuid.UUID(default_category_id_raw) if default_category_id_raw else None
-    )
+    default_category_id = uuid.UUID(default_category_id_raw) if default_category_id_raw else None
     account_id_raw = payload_data.get("account_id") or (
         str(job.account_id) if job.account_id else None
     )
@@ -300,9 +294,7 @@ async def run_commit(
     # las filas, para que el lookup encuentre las categorías correctas.
     valid_overrides: dict[str, uuid.UUID] = {}
     if category_overrides:
-        valid_overrides = await _persist_user_category_overrides(
-            db, user_id, category_overrides
-        )
+        valid_overrides = await _persist_user_category_overrides(db, user_id, category_overrides)
 
     job.status = ImportJobStatus.PROCESSING
     job.error_log = []
@@ -343,9 +335,7 @@ async def _persist_user_category_overrides(
     user_cat_ids = {
         cat_id
         for (cat_id,) in (
-            await db.execute(
-                select(Category.id).where(Category.user_id == user_id)
-            )
+            await db.execute(select(Category.id).where(Category.user_id == user_id))
         ).all()
     }
 
@@ -356,9 +346,7 @@ async def _persist_user_category_overrides(
         normalized = normalize_concept(raw_concept)
         if not normalized:
             continue
-        await upsert_bank_mapping(
-            db, user_id, bank_concept=normalized, category_id=cat_id
-        )
+        await upsert_bank_mapping(db, user_id, bank_concept=normalized, category_id=cat_id)
         valid[normalized] = cat_id
     return valid
 
@@ -494,9 +482,7 @@ async def _process_and_persist(
     await db.refresh(job)
 
 
-async def _mark_job_failed(
-    db: AsyncSession, job: ImportJob, error: str
-) -> ImportJob:
+async def _mark_job_failed(db: AsyncSession, job: ImportJob, error: str) -> ImportJob:
     job.status = ImportJobStatus.FAILED
     job.error_log = [{"row": 0, "error": error}]
     await db.flush()
@@ -545,7 +531,7 @@ async def _parse_with_fallbacks(
         try:
             rows = parse_xlsx_smart(payload)
             return rows, SMART_FORCED_MAPPING, ImportSource.XLSX_SMART
-        except SmartParseAmbiguous:
+        except SmartParseAmbiguousError:
             rows = parse_file(payload, filename, content_type)
             return rows, mappings, ImportSource.XLSX
 
@@ -560,7 +546,7 @@ async def _parse_with_fallbacks(
     except NoTablesInPdfError:
         rows = await _parse_pdf_with_vision(payload)
         return rows, VISION_FORCED_MAPPING, ImportSource.VISION
-    except SmartParseAmbiguous:
+    except SmartParseAmbiguousError:
         # Heurística no encontró una tabla clara: caemos al legacy
         # parser que concatena todas las tablas y deja al usuario
         # mapear las columnas a mano (comportamiento histórico).
@@ -625,9 +611,7 @@ def _parse_row(
     """
     amount_raw = raw.get(mappings.amount, "").strip()
     occurred_raw = raw.get(mappings.occurred_at, "").strip()
-    description_raw = (
-        raw.get(mappings.description, "").strip() if mappings.description else ""
-    )
+    description_raw = raw.get(mappings.description, "").strip() if mappings.description else ""
     category_name_raw = (
         raw.get(mappings.category_name, "").strip() if mappings.category_name else ""
     )
@@ -752,19 +736,13 @@ def _compute_hash(
     return hashlib.sha256(raw).hexdigest()
 
 
-async def _build_category_lookup(
-    db: AsyncSession, user_id: uuid.UUID
-) -> dict[str, uuid.UUID]:
+async def _build_category_lookup(db: AsyncSession, user_id: uuid.UUID) -> dict[str, uuid.UUID]:
     """Mapa case-insensitive `name → id` de las categorías del usuario."""
-    result = await db.execute(
-        select(Category.id, Category.name).where(Category.user_id == user_id)
-    )
+    result = await db.execute(select(Category.id, Category.name).where(Category.user_id == user_id))
     return {name.casefold(): cat_id for cat_id, name in result.all()}
 
 
-async def _user_owns_category(
-    db: AsyncSession, user_id: uuid.UUID, category_id: uuid.UUID
-) -> bool:
+async def _user_owns_category(db: AsyncSession, user_id: uuid.UUID, category_id: uuid.UUID) -> bool:
     result = await db.execute(
         select(Category.id).where(Category.id == category_id, Category.user_id == user_id)
     )

@@ -50,12 +50,12 @@ CADENCE_VARIANCE_MAX = 0.30
 
 # Ventanas de cadencia conocidas (mín, max días).
 CADENCE_WINDOWS: list[tuple[int, int, int]] = [
-    (6, 8, 7),       # semanal
-    (13, 16, 14),    # quincenal
-    (26, 35, 30),    # mensual
-    (85, 95, 90),    # trimestral
-    (175, 190, 180), # semestral
-    (355, 375, 365), # anual
+    (6, 8, 7),  # semanal
+    (13, 16, 14),  # quincenal
+    (26, 35, 30),  # mensual
+    (85, 95, 90),  # trimestral
+    (175, 190, 180),  # semestral
+    (355, 375, 365),  # anual
 ]
 
 # Ventana de inspección por defecto: 6 meses hacia atrás.
@@ -135,9 +135,7 @@ def _detect_in_group(
     # Ordenar por fecha ascendente.
     sorted_occ = sorted(occurrences, key=lambda x: x[0])
     dates = [d for d, _, _ in sorted_occ]
-    gaps = [
-        (dates[i] - dates[i - 1]).days for i in range(1, len(dates))
-    ]
+    gaps = [(dates[i] - dates[i - 1]).days for i in range(1, len(dates))]
     if not gaps or any(g <= 0 for g in gaps):
         return None
 
@@ -216,17 +214,15 @@ async def detect_for_user(
     )
     rows = (await db.execute(query)).all()
 
-    grouped: dict[tuple[str, Decimal, str], list[tuple[date, str, uuid.UUID | None]]] = (
-        defaultdict(list)
+    grouped: dict[tuple[str, Decimal, str], list[tuple[date, str, uuid.UUID | None]]] = defaultdict(
+        list
     )
     for occurred_at, description, amount, currency, category_id in rows:
         merchant = normalize_merchant(description)
         if not merchant:
             continue
         key = (merchant, Decimal(amount), currency)
-        grouped[key].append(
-            (occurred_at.date(), description or "", category_id)
-        )
+        grouped[key].append((occurred_at.date(), description or "", category_id))
 
     # PHASE-14.7: fusionar grupos con prefijo común grande +
     # mismo amount + mismo currency. Captura "NETFLIX.COM" /
@@ -276,9 +272,7 @@ def _merge_by_common_prefix(
     for (merchant, amount, currency), occurrences in grouped.items():
         by_amount[(amount, currency)].append((merchant, occurrences))
 
-    merged: dict[
-        tuple[str, Decimal, str], list[tuple[date, str, uuid.UUID | None]]
-    ] = {}
+    merged: dict[tuple[str, Decimal, str], list[tuple[date, str, uuid.UUID | None]]] = {}
     for (amount, currency), entries in by_amount.items():
         # Sort por len(merchant) desc — el más largo se queda como llave.
         entries.sort(key=lambda e: -len(e[0]))

@@ -98,8 +98,10 @@ jobs:
       - name: Mypy (typecheck)
         run: mypy app
 
-      - name: Alembic upgrade (smoke test migrations)
-        run: alembic upgrade head
+      - name: Alembic upgrade + parity check (migrations <-> models)
+        run: |
+          alembic upgrade head
+          alembic check
 
       - name: Pytest
         run: pytest -v --tb=short

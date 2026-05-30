@@ -66,9 +66,7 @@ async def _create_tx(
 
 
 async def test_link_two_transactions_as_transfer(client: AsyncClient) -> None:
-    token, _cat, acc_a, acc_b = await _setup_user_with_two_accounts(
-        client, "link@example.com"
-    )
+    token, _cat, acc_a, acc_b = await _setup_user_with_two_accounts(client, "link@example.com")
     out_id = await _create_tx(
         client,
         token,
@@ -102,9 +100,7 @@ async def test_link_two_transactions_as_transfer(client: AsyncClient) -> None:
     assert pairs[0]["amount"] == "500.00"
 
     # Las dos txs reflejan transfer_pair_id
-    out_tx = (
-        await client.get(f"/transactions/{out_id}", headers=_auth(token))
-    ).json()
+    out_tx = (await client.get(f"/transactions/{out_id}", headers=_auth(token))).json()
     assert out_tx["transfer_pair_id"] == in_id
 
 
@@ -145,9 +141,7 @@ async def test_link_rejects_different_amounts(client: AsyncClient) -> None:
 
 
 async def test_link_rejects_already_paired(client: AsyncClient) -> None:
-    token, _cat, acc_a, acc_b = await _setup_user_with_two_accounts(
-        client, "already@example.com"
-    )
+    token, _cat, acc_a, acc_b = await _setup_user_with_two_accounts(client, "already@example.com")
     out_id = await _create_tx(
         client, token, account_id=acc_a, amount="50", occurred_at="2026-04-15T12:00:00Z"
     )
@@ -174,9 +168,7 @@ async def test_link_rejects_already_paired(client: AsyncClient) -> None:
 
 
 async def test_unlink_breaks_pair(client: AsyncClient) -> None:
-    token, _cat, acc_a, acc_b = await _setup_user_with_two_accounts(
-        client, "unlink@example.com"
-    )
+    token, _cat, acc_a, acc_b = await _setup_user_with_two_accounts(client, "unlink@example.com")
     out_id = await _create_tx(
         client, token, account_id=acc_a, amount="80", occurred_at="2026-04-15T12:00:00Z"
     )
@@ -192,22 +184,16 @@ async def test_unlink_breaks_pair(client: AsyncClient) -> None:
     r = await client.delete(f"/transfers/{out_id}", headers=_auth(token))
     assert r.status_code == 204
 
-    out_tx = (
-        await client.get(f"/transactions/{out_id}", headers=_auth(token))
-    ).json()
+    out_tx = (await client.get(f"/transactions/{out_id}", headers=_auth(token))).json()
     assert out_tx["transfer_pair_id"] is None
-    in_tx = (
-        await client.get(f"/transactions/{in_id}", headers=_auth(token))
-    ).json()
+    in_tx = (await client.get(f"/transactions/{in_id}", headers=_auth(token))).json()
     assert in_tx["transfer_pair_id"] is None
 
 
 async def test_match_links_unambiguous_pair(client: AsyncClient) -> None:
     """Una salida en A + una entrada en B con mismo importe y fecha
     cercana se enlazan automáticamente."""
-    token, _cat, acc_a, acc_b = await _setup_user_with_two_accounts(
-        client, "match1@example.com"
-    )
+    token, _cat, acc_a, acc_b = await _setup_user_with_two_accounts(client, "match1@example.com")
     # Para que el matcher pueda distinguir kind=expense vs income,
     # creamos una categoría income separada.
     income_cat = await client.post(
@@ -248,9 +234,7 @@ async def test_match_links_unambiguous_pair(client: AsyncClient) -> None:
 async def test_match_keeps_ambiguous_for_user(client: AsyncClient) -> None:
     """Si hay dos salidas y dos entradas idénticas, el matcher NO
     enlaza nada y deja los candidatos para revisión manual."""
-    token, _cat, acc_a, acc_b = await _setup_user_with_two_accounts(
-        client, "match2@example.com"
-    )
+    token, _cat, acc_a, acc_b = await _setup_user_with_two_accounts(client, "match2@example.com")
     # Sin categoría — caen en "unknown" y el matcher las cruza por
     # fecha + importe + cuentas.
     await _create_tx(
@@ -278,9 +262,7 @@ async def test_paired_tx_excluded_from_dashboard_summary(
 ) -> None:
     """Una transferencia interna no infla `expenses` ni `income` del
     summary del dashboard una vez emparejada."""
-    token, _cat, acc_a, acc_b = await _setup_user_with_two_accounts(
-        client, "exclsum@example.com"
-    )
+    token, _cat, acc_a, acc_b = await _setup_user_with_two_accounts(client, "exclsum@example.com")
     expense_cat = await client.post(
         "/categories",
         json={"name": "Salida interna", "kind": "expense"},
@@ -310,9 +292,7 @@ async def test_paired_tx_excluded_from_dashboard_summary(
 
     # Antes de emparejar, ambas entran en el cómputo.
     summary_before = (
-        await client.get(
-            "/dashboard/summary?currency=EUR", headers=_auth(token)
-        )
+        await client.get("/dashboard/summary?currency=EUR", headers=_auth(token))
     ).json()
     assert Decimal(summary_before["income"]) == Decimal("300.00")
     assert Decimal(summary_before["expenses"]) == Decimal("300.00")
@@ -324,9 +304,7 @@ async def test_paired_tx_excluded_from_dashboard_summary(
         headers=_auth(token),
     )
     summary_after = (
-        await client.get(
-            "/dashboard/summary?currency=EUR", headers=_auth(token)
-        )
+        await client.get("/dashboard/summary?currency=EUR", headers=_auth(token))
     ).json()
     assert Decimal(summary_after["income"]) == Decimal("0")
     assert Decimal(summary_after["expenses"]) == Decimal("0")
@@ -335,9 +313,7 @@ async def test_paired_tx_excluded_from_dashboard_summary(
 
 async def test_user_isolation_in_transfers(client: AsyncClient) -> None:
     """Usuario B no puede enlazar txs de A ni ver sus pares."""
-    token_a, _, acc_a1, acc_a2 = await _setup_user_with_two_accounts(
-        client, "isoTrA@example.com"
-    )
+    token_a, _, acc_a1, acc_a2 = await _setup_user_with_two_accounts(client, "isoTrA@example.com")
     token_b = (
         await client.post(
             "/auth/register",
@@ -372,9 +348,7 @@ async def test_user_isolation_in_transfers(client: AsyncClient) -> None:
 async def test_account_balances_endpoint(client: AsyncClient) -> None:
     """`/accounts/balances` devuelve saldo por cuenta + agregados de
     patrimonio. Income suma, expense resta. Opening balance se incluye."""
-    token, _cat, _acc_a, _acc_b = await _setup_user_with_two_accounts(
-        client, "bal@example.com"
-    )
+    token, _cat, _acc_a, _acc_b = await _setup_user_with_two_accounts(client, "bal@example.com")
     # Crea una tercera cuenta con opening_balance distinto de 0.
     acc_c = await client.post(
         "/accounts",
@@ -415,9 +389,7 @@ async def test_account_balances_endpoint(client: AsyncClient) -> None:
         occurred_at="2026-04-16T12:00:00Z",
     )
 
-    balances = (
-        await client.get("/accounts/balances", headers=_auth(token))
-    ).json()
+    balances = (await client.get("/accounts/balances", headers=_auth(token))).json()
 
     by_id = {b["account_id"]: b for b in balances["items"]}
     bal_a = by_id[_acc_a]
@@ -439,9 +411,7 @@ async def test_account_balances_endpoint(client: AsyncClient) -> None:
 
 async def test_list_transactions_filters_by_account(client: AsyncClient) -> None:
     """`GET /transactions?account_id=X` devuelve sólo las de esa cuenta."""
-    token, _cat, acc_a, acc_b = await _setup_user_with_two_accounts(
-        client, "filter@example.com"
-    )
+    token, _cat, acc_a, acc_b = await _setup_user_with_two_accounts(client, "filter@example.com")
     await _create_tx(
         client, token, account_id=acc_a, amount="10", occurred_at="2026-04-15T12:00:00Z"
     )
@@ -470,9 +440,7 @@ async def test_suspects_only_returns_unmatched_with_transfer_in_description(
     """`GET /transfers/suspects` devuelve SÓLO txs activas, sin pareja,
     no categorizadas con is_transfer=true, cuya descripción contiene
     "transfer" (case insensitive)."""
-    token, cat, acc_a, _acc_b = await _setup_user_with_two_accounts(
-        client, "suspects@example.com"
-    )
+    token, cat, acc_a, _acc_b = await _setup_user_with_two_accounts(client, "suspects@example.com")
     yes_id = await _create_tx(
         client,
         token,
@@ -577,9 +545,7 @@ async def test_mark_infers_income_kind_from_recibida_description(
     assert target_cat["is_transfer"] is True
 
     cats = await client.get("/categories", headers=_auth(token))
-    income_transfer = [
-        c for c in cats.json() if c["is_transfer"] and c["kind"] == "income"
-    ]
+    income_transfer = [c for c in cats.json() if c["is_transfer"] and c["kind"] == "income"]
     assert len(income_transfer) == 1
 
 
@@ -589,12 +555,20 @@ async def test_mark_409_when_tx_already_paired(client: AsyncClient) -> None:
         client, "mark-paired@example.com"
     )
     out_id = await _create_tx(
-        client, token, account_id=acc_a, amount="400.00",
-        occurred_at="2026-04-15T12:00:00Z", description="transfer out",
+        client,
+        token,
+        account_id=acc_a,
+        amount="400.00",
+        occurred_at="2026-04-15T12:00:00Z",
+        description="transfer out",
     )
     in_id = await _create_tx(
-        client, token, account_id=acc_b, amount="400.00",
-        occurred_at="2026-04-15T12:00:00Z", description="transfer in",
+        client,
+        token,
+        account_id=acc_b,
+        amount="400.00",
+        occurred_at="2026-04-15T12:00:00Z",
+        description="transfer in",
     )
     link = await client.post(
         "/transfers/link",
@@ -622,19 +596,19 @@ async def test_mark_excludes_tx_from_dashboard_cashflow_preserves_balance(
         client, "mark-balance@example.com"
     )
     await _create_tx(
-        client, token, account_id=acc_a, amount="500.00",
-        occurred_at="2026-04-15T12:00:00Z", category_id=expense_cat,
+        client,
+        token,
+        account_id=acc_a,
+        amount="500.00",
+        occurred_at="2026-04-15T12:00:00Z",
+        category_id=expense_cat,
         description="TRANSFER realizada",
     )
-    r1 = await client.get(
-        "/dashboard/summary?currency=EUR", headers=_auth(token)
-    )
+    r1 = await client.get("/dashboard/summary?currency=EUR", headers=_auth(token))
     assert Decimal(r1.json()["expenses"]) == Decimal("500.00")
 
     # Get the actual tx_id from the list
-    tx_list = await client.get(
-        f"/transactions?account_id={acc_a}", headers=_auth(token)
-    )
+    tx_list = await client.get(f"/transactions?account_id={acc_a}", headers=_auth(token))
     tx_id = tx_list.json()["items"][0]["id"]
 
     await client.post(
@@ -643,16 +617,12 @@ async def test_mark_excludes_tx_from_dashboard_cashflow_preserves_balance(
         headers=_auth(token),
     )
     # Cashflow ya no la cuenta
-    r2 = await client.get(
-        "/dashboard/summary?currency=EUR", headers=_auth(token)
-    )
+    r2 = await client.get("/dashboard/summary?currency=EUR", headers=_auth(token))
     assert Decimal(r2.json()["expenses"]) == Decimal("0.00")
 
     # Saldo SÍ refleja el movimiento: -500 (asset + expense kind)
     balances = await client.get("/accounts/balances", headers=_auth(token))
-    acc_a_balance = next(
-        b for b in balances.json()["items"] if b["account_id"] == acc_a
-    )
+    acc_a_balance = next(b for b in balances.json()["items"] if b["account_id"] == acc_a)
     assert Decimal(acc_a_balance["movements_balance"]) == Decimal("-500.00")
 
 
@@ -675,12 +645,20 @@ async def test_matcher_skips_is_transfer_categorized_txs(
         headers=_auth(token),
     )
     await _create_tx(
-        client, token, account_id=acc_a, amount="600.00",
-        occurred_at="2026-04-15T12:00:00Z", category_id=out_cat.json()["id"],
+        client,
+        token,
+        account_id=acc_a,
+        amount="600.00",
+        occurred_at="2026-04-15T12:00:00Z",
+        category_id=out_cat.json()["id"],
     )
     await _create_tx(
-        client, token, account_id=acc_b, amount="600.00",
-        occurred_at="2026-04-15T12:00:00Z", category_id=in_cat.json()["id"],
+        client,
+        token,
+        account_id=acc_b,
+        amount="600.00",
+        occurred_at="2026-04-15T12:00:00Z",
+        category_id=in_cat.json()["id"],
     )
 
     r = await client.post("/transfers/match", headers=_auth(token))
@@ -704,8 +682,12 @@ async def test_from_source_creates_counterpart_and_pairs(
         client, "fromsource@example.com"
     )
     source_id = await _create_tx(
-        client, token, account_id=acc_a, amount="1000.00",
-        occurred_at="2026-04-15T12:00:00Z", category_id=expense_cat,
+        client,
+        token,
+        account_id=acc_a,
+        amount="1000.00",
+        occurred_at="2026-04-15T12:00:00Z",
+        category_id=expense_cat,
         description="Traspaso a broker",
     )
 
@@ -732,9 +714,7 @@ async def test_from_source_creates_counterpart_and_pairs(
     assert Decimal(by_id[acc_b]["movements_balance"]) == Decimal("1000.00")
 
     # Cashflow: cero (par emparejado excluido)
-    summary = await client.get(
-        "/dashboard/summary?currency=EUR", headers=_auth(token)
-    )
+    summary = await client.get("/dashboard/summary?currency=EUR", headers=_auth(token))
     assert Decimal(summary.json()["expenses"]) == Decimal("0.00")
     assert Decimal(summary.json()["income"]) == Decimal("0.00")
 
@@ -745,7 +725,10 @@ async def test_from_source_400_same_account(client: AsyncClient) -> None:
         client, "fromsource-same@example.com"
     )
     source_id = await _create_tx(
-        client, token, account_id=acc_a, amount="50.00",
+        client,
+        token,
+        account_id=acc_a,
+        amount="50.00",
         occurred_at="2026-04-15T12:00:00Z",
     )
     r = await client.post(
@@ -773,7 +756,10 @@ async def test_from_source_400_different_currency(client: AsyncClient) -> None:
         headers=headers,
     )
     source_id = await _create_tx(
-        client, token, account_id=acc_a, amount="100.00",
+        client,
+        token,
+        account_id=acc_a,
+        amount="100.00",
         occurred_at="2026-04-15T12:00:00Z",
     )
     r = await client.post(
@@ -806,7 +792,10 @@ async def test_from_source_400_when_source_not_in_pair(client: AsyncClient) -> N
     )
     third_id = third_acc.json()["id"]
     source_id = await _create_tx(
-        client, token, account_id=acc_a, amount="50.00",
+        client,
+        token,
+        account_id=acc_a,
+        amount="50.00",
         occurred_at="2026-04-15T12:00:00Z",
     )
     r = await client.post(
@@ -834,8 +823,12 @@ async def test_from_source_incoming_overrides_wrong_category(
     )
     # Tx en BBVA con categoría EXPENSE mal asignada (caso post-import).
     source_id = await _create_tx(
-        client, token, account_id=acc_a, amount="1000.00",
-        occurred_at="2026-02-02T12:00:00Z", category_id=expense_cat,
+        client,
+        token,
+        account_id=acc_a,
+        amount="1000.00",
+        occurred_at="2026-02-02T12:00:00Z",
+        category_id=expense_cat,
         description="TRANSFERENCIA RECIBIDA Ws",
     )
 
@@ -914,12 +907,8 @@ async def test_from_source_debt_creates_new_liability_and_pairs(
     assert pair["currency"] == "EUR"
 
     # La nueva cuenta liability existe con nature=liability
-    accs = await client.get(
-        "/accounts?include_archived=false", headers=_auth(token)
-    )
-    new_acc = next(
-        a for a in accs.json() if a["name"] == "Tarjeta financiada BBVA"
-    )
+    accs = await client.get("/accounts?include_archived=false", headers=_auth(token))
+    new_acc = next(a for a in accs.json() if a["name"] == "Tarjeta financiada BBVA")
     assert new_acc["nature"] == "liability"
     assert new_acc["type"] == "credit_card"
 
@@ -930,9 +919,7 @@ async def test_from_source_debt_creates_new_liability_and_pairs(
     assert Decimal(by_id[new_acc["id"]]["movements_balance"]) == Decimal("824.77")
 
     # Cashflow agregado: cero (par emparejado excluido)
-    summary = await client.get(
-        "/dashboard/summary?currency=EUR", headers=_auth(token)
-    )
+    summary = await client.get("/dashboard/summary?currency=EUR", headers=_auth(token))
     assert Decimal(summary.json()["expenses"]) == Decimal("0.00")
     assert Decimal(summary.json()["income"]) == Decimal("0.00")
 
@@ -989,7 +976,10 @@ async def test_from_source_debt_400_when_destination_is_asset(
         client, "debt-asset-dest@example.com"
     )
     source_id = await _create_tx(
-        client, token, account_id=acc_a, amount="100.00",
+        client,
+        token,
+        account_id=acc_a,
+        amount="100.00",
         occurred_at="2026-04-15T12:00:00Z",
     )
     r = await client.post(
@@ -1008,11 +998,12 @@ async def test_from_source_debt_400_when_both_or_neither_provided(
 ) -> None:
     """Exactamente uno entre `destination_account_id` y `new_liability`
     debe venir."""
-    token, _cat, acc_a, _acc_b = await _setup_user_with_two_accounts(
-        client, "debt-xor@example.com"
-    )
+    token, _cat, acc_a, _acc_b = await _setup_user_with_two_accounts(client, "debt-xor@example.com")
     source_id = await _create_tx(
-        client, token, account_id=acc_a, amount="100.00",
+        client,
+        token,
+        account_id=acc_a,
+        amount="100.00",
         occurred_at="2026-04-15T12:00:00Z",
     )
     headers = _auth(token)
@@ -1034,7 +1025,10 @@ async def test_from_source_debt_400_when_new_liability_type_is_asset(
         client, "debt-bad-type@example.com"
     )
     source_id = await _create_tx(
-        client, token, account_id=acc_a, amount="100.00",
+        client,
+        token,
+        account_id=acc_a,
+        amount="100.00",
         occurred_at="2026-04-15T12:00:00Z",
     )
     r = await client.post(
@@ -1061,7 +1055,10 @@ async def test_from_source_debt_persists_amortization_fields_for_loan(
         client, "debt-loan@example.com"
     )
     source_id = await _create_tx(
-        client, token, account_id=acc_a, amount="10000.00",
+        client,
+        token,
+        account_id=acc_a,
+        amount="10000.00",
         occurred_at="2026-04-15T12:00:00Z",
     )
     r = await client.post(
@@ -1099,9 +1096,7 @@ async def _seed_user_with_two_transfer_cats(
     """Helper: registra un usuario con seed (que ya trae las dos
     categorías is_transfer tras PHASE-31.1) y crea dos cuentas bank
     EUR. Devuelve (token, expense_cat, income_cat, acc_a, acc_b)."""
-    token, _expense_cat, acc_a, acc_b = await _setup_user_with_two_accounts(
-        client, email
-    )
+    token, _expense_cat, acc_a, acc_b = await _setup_user_with_two_accounts(client, email)
     cats = (await client.get("/categories", headers=_auth(token))).json()
     transfer_cats = [c for c in cats if c["is_transfer"]]
     expense_cat = next(c for c in transfer_cats if c["kind"] == "expense")
@@ -1114,10 +1109,8 @@ async def test_misclassified_detects_recibida_in_expense_category(
 ) -> None:
     """Tx "RECIBIDA" asignada a categoría EXPENSE 'Transferencias'
     aparece en /transfers/misclassified con suggested_kind=income."""
-    token, expense_cat, _income_cat, acc_a, _acc_b = (
-        await _seed_user_with_two_transfer_cats(
-            client, "misclassified-recibida@example.com"
-        )
+    token, expense_cat, _income_cat, acc_a, _acc_b = await _seed_user_with_two_transfer_cats(
+        client, "misclassified-recibida@example.com"
     )
     src_id = await _create_tx(
         client,
@@ -1141,10 +1134,8 @@ async def test_misclassified_excludes_ambiguous_descriptions(
     client: AsyncClient,
 ) -> None:
     """Texto que matchea ambos lados o ninguno NO aparece."""
-    token, expense_cat, _income_cat, acc_a, _acc_b = (
-        await _seed_user_with_two_transfer_cats(
-            client, "misclassified-ambiguous@example.com"
-        )
+    token, expense_cat, _income_cat, acc_a, _acc_b = await _seed_user_with_two_transfer_cats(
+        client, "misclassified-ambiguous@example.com"
     )
     await _create_tx(
         client,
@@ -1173,10 +1164,8 @@ async def test_reclassify_bulk_moves_to_opposite_kind(
 ) -> None:
     """Sin target_category_id, las tx flipean al kind opuesto
     (EXPENSE → INCOME) usando las categorías is_transfer existentes."""
-    token, expense_cat, income_cat, acc_a, _acc_b = (
-        await _seed_user_with_two_transfer_cats(
-            client, "reclassify-bulk-flip@example.com"
-        )
+    token, expense_cat, income_cat, acc_a, _acc_b = await _seed_user_with_two_transfer_cats(
+        client, "reclassify-bulk-flip@example.com"
     )
     ids = []
     for i in range(3):

@@ -32,15 +32,11 @@ async def get_account_by_id(
     db: AsyncSession, account_id: uuid.UUID, user_id: uuid.UUID
 ) -> Account | None:
     """Obtiene una cuenta por ID, filtrando por user_id."""
-    query = select(Account).where(
-        Account.user_id == user_id, Account.id == account_id
-    )
+    query = select(Account).where(Account.user_id == user_id, Account.id == account_id)
     return (await db.execute(query)).scalar_one_or_none()
 
 
-async def get_account_by_name(
-    db: AsyncSession, user_id: uuid.UUID, *, name: str
-) -> Account | None:
+async def get_account_by_name(db: AsyncSession, user_id: uuid.UUID, *, name: str) -> Account | None:
     """Match case-insensitive por nombre — usado para validar duplicados."""
     target = name.casefold()
     query = select(Account).where(Account.user_id == user_id)
@@ -82,9 +78,7 @@ async def delete_account(db: AsyncSession, account: Account) -> None:
     await db.flush()
 
 
-async def get_balances_for_user(
-    db: AsyncSession, user_id: uuid.UUID
-) -> dict[uuid.UUID, Decimal]:
+async def get_balances_for_user(db: AsyncSession, user_id: uuid.UUID) -> dict[uuid.UUID, Decimal]:
     """Suma neta de cada cuenta del usuario en la moneda nativa de la
     cuenta (sin conversión cross-currency).
 
@@ -111,13 +105,11 @@ async def get_balances_for_user(
     signed_amount = case(
         # Liability: signos invertidos respecto a asset.
         (
-            (Account.nature == AccountNature.LIABILITY)
-            & (Category.kind == CategoryKind.EXPENSE),
+            (Account.nature == AccountNature.LIABILITY) & (Category.kind == CategoryKind.EXPENSE),
             Transaction.amount,
         ),
         (
-            (Account.nature == AccountNature.LIABILITY)
-            & (Category.kind == CategoryKind.INCOME),
+            (Account.nature == AccountNature.LIABILITY) & (Category.kind == CategoryKind.INCOME),
             -Transaction.amount,
         ),
         # Asset (default).

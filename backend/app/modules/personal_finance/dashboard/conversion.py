@@ -42,9 +42,10 @@ CANONICAL_BASE = "EUR"
 _FALLBACK_WINDOW_DAYS = 14
 
 
-def _latest_rate_subquery(
-    quote: ColumnElement[Any] | str, occurred_at: ColumnElement[Any]
-) -> ColumnElement[Any]:
+def _latest_rate_subquery(quote: Any, occurred_at: Any) -> ColumnElement[Any]:
+    # `quote`/`occurred_at` are SQL column expressions or literals
+    # (InstrumentedAttribute / str). Typed as Any because the SQLAlchemy
+    # stubs don't treat InstrumentedAttribute[T] as ColumnElement[Any].
     """Subquery escalar correlacionada: última tasa EUR→`quote` ≤ `occurred_at`.
 
     Acepta `quote` como columna SQL o literal Python. La ventana de

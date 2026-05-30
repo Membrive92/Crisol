@@ -7,9 +7,7 @@ from datetime import date
 from httpx import AsyncClient
 
 
-async def _setup_user(
-    client: AsyncClient, email: str = "bg@example.com"
-) -> tuple[str, str, str]:
+async def _setup_user(client: AsyncClient, email: str = "bg@example.com") -> tuple[str, str, str]:
     """Helper: registra, crea categoría de gasto y cuenta, devuelve
     (token, category_id, account_id)."""
     r = await client.post(

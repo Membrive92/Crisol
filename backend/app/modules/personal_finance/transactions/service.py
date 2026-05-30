@@ -14,6 +14,15 @@ from app.modules.personal_finance.accounts.service import ensure_account_exists
 from app.modules.personal_finance.dashboard.service import ensure_rates_for_user_scope
 from app.modules.personal_finance.transactions.models import Transaction
 from app.modules.personal_finance.transactions.repository import (
+    bulk_purge_trashed as bulk_purge_trashed_in_db,
+)
+from app.modules.personal_finance.transactions.repository import (
+    bulk_restore_trashed as bulk_restore_trashed_in_db,
+)
+from app.modules.personal_finance.transactions.repository import (
+    bulk_soft_delete_transactions as bulk_soft_delete_in_db,
+)
+from app.modules.personal_finance.transactions.repository import (
     create_transaction as persist_transaction,
 )
 from app.modules.personal_finance.transactions.repository import (
@@ -30,15 +39,6 @@ from app.modules.personal_finance.transactions.repository import (
 )
 from app.modules.personal_finance.transactions.repository import (
     restore_transaction as restore_in_db,
-)
-from app.modules.personal_finance.transactions.repository import (
-    bulk_purge_trashed as bulk_purge_trashed_in_db,
-)
-from app.modules.personal_finance.transactions.repository import (
-    bulk_restore_trashed as bulk_restore_trashed_in_db,
-)
-from app.modules.personal_finance.transactions.repository import (
-    bulk_soft_delete_transactions as bulk_soft_delete_in_db,
 )
 from app.modules.personal_finance.transactions.repository import (
     soft_delete_transaction as soft_delete_in_db,
@@ -124,10 +124,7 @@ async def list_available_periods(
         if year is None or month is None:
             continue
         months_by_year.setdefault(int(year), set()).add(int(month))
-    return [
-        (year, sorted(months_by_year[year]))
-        for year in sorted(months_by_year, reverse=True)
-    ]
+    return [(year, sorted(months_by_year[year])) for year in sorted(months_by_year, reverse=True)]
 
 
 async def get_transaction(
@@ -150,9 +147,7 @@ async def get_trashed_transaction(
     Usado por restore/purge — si el caller pide restaurar una tx que ya
     está activa (o no existe), 404 en lugar de no-op silencioso.
     """
-    transaction = await get_transaction_by_id(
-        db, transaction_id, user_id, deleted="trashed"
-    )
+    transaction = await get_transaction_by_id(db, transaction_id, user_id, deleted="trashed")
     if transaction is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -261,9 +256,7 @@ async def purge_transaction(
     await purge_in_db(db, transaction)
 
 
-async def bulk_restore_trashed_transactions(
-    db: AsyncSession, user_id: uuid.UUID
-) -> int:
+async def bulk_restore_trashed_transactions(db: AsyncSession, user_id: uuid.UUID) -> int:
     """Restaura TODAS las transacciones que el usuario tiene en papelera.
 
     Devuelve cuántas se restauraron (0 si la papelera está vacía).
@@ -271,9 +264,7 @@ async def bulk_restore_trashed_transactions(
     return await bulk_restore_trashed_in_db(db, user_id)
 
 
-async def bulk_purge_trashed_transactions(
-    db: AsyncSession, user_id: uuid.UUID
-) -> int:
+async def bulk_purge_trashed_transactions(db: AsyncSession, user_id: uuid.UUID) -> int:
     """Elimina permanente TODAS las transacciones que el usuario tiene
     en papelera. Operación IRREVERSIBLE.
 

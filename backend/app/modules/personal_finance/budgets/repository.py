@@ -18,9 +18,7 @@ from app.modules.personal_finance.dashboard.conversion import (
 from app.modules.personal_finance.transactions.models import Transaction
 
 
-async def list_active_budgets(
-    db: AsyncSession, user_id: uuid.UUID, *, today: date
-) -> list[Budget]:
+async def list_active_budgets(db: AsyncSession, user_id: uuid.UUID, *, today: date) -> list[Budget]:
     """Lista presupuestos activos: `effective_to IS NULL` o `>= today`."""
     query = (
         select(Budget)
@@ -36,9 +34,7 @@ async def get_budget_by_id(
     db: AsyncSession, budget_id: uuid.UUID, user_id: uuid.UUID
 ) -> Budget | None:
     """Obtiene un presupuesto por ID, filtrando por user_id."""
-    query = select(Budget).where(
-        Budget.user_id == user_id, Budget.id == budget_id
-    )
+    query = select(Budget).where(Budget.user_id == user_id, Budget.id == budget_id)
     return (await db.execute(query)).scalar_one_or_none()
 
 

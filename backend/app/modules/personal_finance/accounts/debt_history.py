@@ -36,6 +36,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.personal_finance.accounts.amortization import (
+    AmortizationRow,
     build_schedule,
     compute_monthly_payment,
 )
@@ -237,16 +238,20 @@ async def _project_points(
 
     # Schedules pre-calculados para loans/mortgages (siempre en divisa
     # nativa de la liability).
-    schedules: dict[uuid.UUID, list] = {}
+    schedules: dict[uuid.UUID, list[AmortizationRow]] = {}
     for liab in liabilities:
-        if liab.type in {AccountType.LOAN, AccountType.MORTGAGE}:
-            if liab.apr is not None and liab.term_months is not None and liab.start_date is not None and liab.opening_balance > 0:
-                schedules[liab.id] = build_schedule(
-                    principal=liab.opening_balance,
-                    apr=liab.apr,
-                    term_months=liab.term_months,
-                    start_date=liab.start_date,
-                )
+        if liab.type in {AccountType.LOAN, AccountType.MORTGAGE} and (
+            liab.apr is not None
+            and liab.term_months is not None
+            and liab.start_date is not None
+            and liab.opening_balance > 0
+        ):
+            schedules[liab.id] = build_schedule(
+                principal=liab.opening_balance,
+                apr=liab.apr,
+                term_months=liab.term_months,
+                start_date=liab.start_date,
+            )
 
     # FX rates cacheadas por liability (un único factor por cuenta,
     # con la tasa de hoy). Si una cuenta no tiene tasa o ya está en
@@ -270,16 +275,13 @@ async def _project_points(
     # Estado mutable: saldo proyectado por cuenta (ya en effective_currency
     # cuando target está activo, gracias a `current_balances` preconvertido).
     balances: dict[uuid.UUID, Decimal] = {
-        liab.id: current_balances.get(liab.id, Decimal("0"))
-        for liab in liabilities
+        liab.id: current_balances.get(liab.id, Decimal("0")) for liab in liabilities
     }
 
     def _convert_native_to_eff(account_id: uuid.UUID, native: Decimal) -> Decimal:
         if target_currency is None:
             return native
-        return (native * fx_factor.get(account_id, Decimal("0"))).quantize(
-            Decimal("0.01")
-        )
+        return (native * fx_factor.get(account_id, Decimal("0"))).quantize(Decimal("0.01"))
 
     points: list[DebtHistoryPoint] = []
     for offset in range(1, months_ahead + 1):
@@ -307,40 +309,30 @@ async def _project_points(
                     None,
                 )
                 if schedule_row is not None:
-                    pay_principal_eff = _convert_native_to_eff(
-                        liab.id, schedule_row.principal
-                    )
+                    pay_principal_eff = _convert_native_to_eff(liab.id, schedule_row.principal)
                     pay_principal_eff = min(pay_principal_eff, balance)
                     month_principal += pay_principal_eff
-                    month_interest += _convert_native_to_eff(
-                        liab.id, schedule_row.interest
-                    )
+                    month_interest += _convert_native_to_eff(liab.id, schedule_row.interest)
                     balances[liab.id] = balance - pay_principal_eff
             elif liab.type == AccountType.CREDIT_CARD:
                 if liab.apr is not None:
                     # Operamos sobre el saldo nativo equivalente para
                     # respetar el APR (porcentaje, independiente de divisa).
-                    factor = fx_factor.get(liab.id, Decimal("1")) if target_currency else Decimal("1")
-                    native_equiv = (
-                        balance / factor if factor > 0 else Decimal("0")
+                    factor = (
+                        fx_factor.get(liab.id, Decimal("1")) if target_currency else Decimal("1")
                     )
-                    cuota_native = compute_monthly_payment(
-                        native_equiv, liab.apr, 12
+                    native_equiv = balance / factor if factor > 0 else Decimal("0")
+                    cuota_native = compute_monthly_payment(native_equiv, liab.apr, 12)
+                    interest_native = (native_equiv * liab.apr / Decimal(12)).quantize(
+                        Decimal("0.01")
                     )
-                    interest_native = (
-                        native_equiv * liab.apr / Decimal(12)
-                    ).quantize(Decimal("0.01"))
                     pay_principal_native = cuota_native - interest_native
                     if pay_principal_native < 0:
                         pay_principal_native = Decimal("0")
-                    pay_principal_eff = _convert_native_to_eff(
-                        liab.id, pay_principal_native
-                    )
+                    pay_principal_eff = _convert_native_to_eff(liab.id, pay_principal_native)
                     pay_principal_eff = min(pay_principal_eff, balance)
                     month_principal += pay_principal_eff
-                    month_interest += _convert_native_to_eff(
-                        liab.id, interest_native
-                    )
+                    month_interest += _convert_native_to_eff(liab.id, interest_native)
                     balances[liab.id] = balance - pay_principal_eff
                 else:
                     pay_principal_eff = min(
@@ -407,11 +399,7 @@ async def compute_debt_history(
     """
     # 1. Listar cuentas activas → determinar reference_currency + filtrar
     #    liabilities relevantes.
-    query = (
-        select(Account)
-        .where(Account.user_id == user_id)
-        .where(Account.is_archived.is_(False))
-    )
+    query = select(Account).where(Account.user_id == user_id).where(Account.is_archived.is_(False))
     accounts = list((await db.execute(query)).scalars().all())
     if not accounts:
         return DebtHistoryResponse(
@@ -451,9 +439,7 @@ async def compute_debt_history(
     current_balances: dict[uuid.UUID, Decimal] = {}
     sum_opening_target = Decimal("0") if target_currency else None
     for liab in liabilities:
-        native_balance = liab.opening_balance + movements.get(
-            liab.id, Decimal("0")
-        )
+        native_balance = liab.opening_balance + movements.get(liab.id, Decimal("0"))
         if target_currency is None or liab.currency.upper() == effective_currency:
             current_balances[liab.id] = native_balance
             if sum_opening_target is not None:

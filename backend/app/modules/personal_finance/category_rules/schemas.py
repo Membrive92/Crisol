@@ -26,7 +26,7 @@ class CategoryRuleCreate(BaseModel):
     enabled: bool = True
 
     @model_validator(mode="after")
-    def _validate_regex_compiles(self) -> "CategoryRuleCreate":
+    def _validate_regex_compiles(self) -> CategoryRuleCreate:
         """Si `match_type=regex`, asegurar que el pattern compila."""
         if self.match_type == RuleMatchType.REGEX:
             try:
@@ -47,7 +47,7 @@ class CategoryRuleUpdate(BaseModel):
     enabled: bool | None = None
 
     @model_validator(mode="after")
-    def _validate_regex_compiles(self) -> "CategoryRuleUpdate":
+    def _validate_regex_compiles(self) -> CategoryRuleUpdate:
         if self.match_type == RuleMatchType.REGEX and self.pattern is not None:
             try:
                 re.compile(self.pattern)

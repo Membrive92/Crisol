@@ -15,12 +15,6 @@ from decimal import Decimal
 import pytest
 from httpx import AsyncClient
 
-from app.modules.personal_finance.imports.service import (
-    _parse_row as parse_row,
-)
-from app.modules.personal_finance.imports.schemas import ImportColumnMappings
-
-
 pytestmark = pytest.mark.asyncio
 
 
@@ -65,9 +59,7 @@ async def test_seed_rules_route_incoming_to_income_category(
     aplicada vía el rules engine durante el parsing de filas."""
     token = await _register(client, "seed-transfers-incoming@example.com")
     cats = (await client.get("/categories", headers=_auth(token))).json()
-    income_cat = next(
-        c for c in cats if c["name"] == "Transferencia a favor"
-    )
+    income_cat = next(c for c in cats if c["name"] == "Transferencia a favor")
 
     # Crear cuenta para que la tx tenga destino válido.
     acc = await client.post(
@@ -118,19 +110,11 @@ async def test_ambiguous_transferencia_does_not_get_arbitrary_kind(
     # Pero con un hint claro sí decide.
     from app.modules.personal_finance.categories.models import CategoryKind
 
-    assert (
-        _infer_transfer_kind("TRANSFERENCIA RECIBIDA DE X")
-        == CategoryKind.INCOME
-    )
-    assert (
-        _infer_transfer_kind("TRANSFERENCIA REALIZADA A Y")
-        == CategoryKind.EXPENSE
-    )
+    assert _infer_transfer_kind("TRANSFERENCIA RECIBIDA DE X") == CategoryKind.INCOME
+    assert _infer_transfer_kind("TRANSFERENCIA REALIZADA A Y") == CategoryKind.EXPENSE
     # Y respeta categoría preexistente sobre la descripción.
     assert (
-        _infer_transfer_kind(
-            "TRANSFERENCIA", existing_category_kind=CategoryKind.INCOME
-        )
+        _infer_transfer_kind("TRANSFERENCIA", existing_category_kind=CategoryKind.INCOME)
         == CategoryKind.INCOME
     )
     assert (

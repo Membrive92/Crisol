@@ -531,8 +531,8 @@ async def compute_category_summary(
         monthly_income_avg=monthly_income,
         monthly_debt_payment_avg=avg_monthly_debt_payment,
         effort_ratio_strict=strict,
-        effort_ratio_strict_status=strict_status,  # type: ignore[arg-type]
+        effort_ratio_strict_status=strict_status,
         effort_ratio_extended=extended,
-        effort_ratio_extended_status=extended_status,  # type: ignore[arg-type]
+        effort_ratio_extended_status=extended_status,
         recurring_quotas=recurring_quotas,
     )

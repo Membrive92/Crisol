@@ -55,7 +55,5 @@ class BankCategoryMapping(Base):
     __table_args__ = (
         # Un usuario solo puede tener una equivalencia por concepto.
         # Si re-mapea, hacemos UPSERT (cambia category_id).
-        UniqueConstraint(
-            "user_id", "bank_concept", name="uq_bank_mappings_user_concept"
-        ),
+        UniqueConstraint("user_id", "bank_concept", name="uq_bank_mappings_user_concept"),
     )

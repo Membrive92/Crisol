@@ -36,9 +36,9 @@ from app.modules.personal_finance.bank_mappings.models import BankCategoryMappin
 from app.modules.personal_finance.budgets.models import Budget  # noqa: F401
 from app.modules.personal_finance.categories.models import Category  # noqa: F401
 from app.modules.personal_finance.category_rules.models import CategoryRule  # noqa: F401
+from app.modules.personal_finance.fixed_expenses.models import FixedExpense  # noqa: F401
 from app.modules.personal_finance.imports.models import ImportJob  # noqa: F401
 from app.modules.personal_finance.receipts.models import Receipt  # noqa: F401
-from app.modules.personal_finance.fixed_expenses.models import FixedExpense  # noqa: F401
 from app.modules.personal_finance.transactions.models import Transaction  # noqa: F401
 from app.modules.users.models import User  # noqa: F401
 
@@ -72,9 +72,7 @@ async def _ensure_test_database_exists() -> None:
         database="postgres",
     )
     try:
-        exists = await conn.fetchval(
-            "SELECT 1 FROM pg_database WHERE datname = $1", target_db
-        )
+        exists = await conn.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", target_db)
         if not exists:
             # Identificador, no parámetro — escapamos comillas para evitar
             # inyección si el nombre llegase configurado raro.
@@ -93,9 +91,7 @@ async def test_engine() -> AsyncIterator[None]:
     _assert_isolated()
     await _ensure_test_database_exists()
 
-    engine = create_async_engine(
-        settings.test_database_url, future=True, poolclass=NullPool
-    )
+    engine = create_async_engine(settings.test_database_url, future=True, poolclass=NullPool)
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

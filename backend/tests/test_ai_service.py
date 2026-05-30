@@ -48,21 +48,27 @@ async def test_extract_receipt_returns_typed_extraction() -> None:
 
 
 async def test_extract_receipt_invalid_json_raises() -> None:
-    with patch(
-        "app.modules.ai.client.generate_with_image",
-        new_callable=AsyncMock,
-        return_value="not json {",
-    ), pytest.raises(AiInvalidOutputError):
+    with (
+        patch(
+            "app.modules.ai.client.generate_with_image",
+            new_callable=AsyncMock,
+            return_value="not json {",
+        ),
+        pytest.raises(AiInvalidOutputError),
+    ):
         await ai_service.extract_receipt(b"fake")
 
 
 async def test_extract_receipt_invalid_schema_raises() -> None:
     """`currency` con menos de 3 letras incumple el schema."""
-    with patch(
-        "app.modules.ai.client.generate_with_image",
-        new_callable=AsyncMock,
-        return_value=json.dumps({"currency": "X"}),
-    ), pytest.raises(AiInvalidOutputError):
+    with (
+        patch(
+            "app.modules.ai.client.generate_with_image",
+            new_callable=AsyncMock,
+            return_value=json.dumps({"currency": "X"}),
+        ),
+        pytest.raises(AiInvalidOutputError),
+    ):
         await ai_service.extract_receipt(b"fake")
 
 
@@ -189,11 +195,14 @@ async def test_extract_bank_statement_page_empty_rows_ok() -> None:
 
 
 async def test_extract_bank_statement_page_invalid_json_raises() -> None:
-    with patch(
-        "app.modules.ai.client.generate_with_image",
-        new_callable=AsyncMock,
-        return_value="not json",
-    ), pytest.raises(AiInvalidOutputError):
+    with (
+        patch(
+            "app.modules.ai.client.generate_with_image",
+            new_callable=AsyncMock,
+            return_value="not json",
+        ),
+        pytest.raises(AiInvalidOutputError),
+    ):
         await ai_service.extract_bank_statement_page(b"fake")
 
 
@@ -232,9 +241,12 @@ async def test_extract_bank_statement_page_filters_invalid_rows() -> None:
 async def test_extract_bank_statement_page_top_level_invalid_raises() -> None:
     """Si el JSON top-level no es un objeto con `rows`, sigue siendo error."""
     response = json.dumps([1, 2, 3])  # lista en lugar de objeto
-    with patch(
-        "app.modules.ai.client.generate_with_image",
-        new_callable=AsyncMock,
-        return_value=response,
-    ), pytest.raises(AiInvalidOutputError):
+    with (
+        patch(
+            "app.modules.ai.client.generate_with_image",
+            new_callable=AsyncMock,
+            return_value=response,
+        ),
+        pytest.raises(AiInvalidOutputError),
+    ):
         await ai_service.extract_bank_statement_page(b"fake")

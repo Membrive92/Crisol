@@ -4,6 +4,7 @@ del saldo, cuadro de amortización y salud financiera.
 
 from __future__ import annotations
 
+import itertools
 from decimal import Decimal
 
 from httpx import AsyncClient
@@ -21,9 +22,7 @@ def _auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-async def _create_account(
-    client: AsyncClient, token: str, **fields: object
-) -> dict[str, object]:
+async def _create_account(client: AsyncClient, token: str, **fields: object) -> dict[str, object]:
     """Crea una cuenta. Acepta cualquier campo del schema."""
     r = await client.post("/accounts", json=fields, headers=_auth(token))
     assert r.status_code == 201, r.text
@@ -38,9 +37,7 @@ async def _create_account(
 async def test_create_credit_card_account(client: AsyncClient) -> None:
     """Tipos `liability` ya son creables; nature se asigna a 'liability'."""
     token = await _register(client, "cc@example.com")
-    acc = await _create_account(
-        client, token, name="Visa", type="credit_card", currency="EUR"
-    )
+    acc = await _create_account(client, token, name="Visa", type="credit_card", currency="EUR")
     assert acc["type"] == "credit_card"
     assert acc["nature"] == "liability"
 
@@ -86,8 +83,14 @@ async def test_amortization_fields_accepted_for_credit_card(
     assert card["start_date"] == "2026-01-01"
     # Cuenta asset (bank) sigue descartando los campos del cuadro.
     bank = await _create_account(
-        client, token, name="Cte", type="bank", currency="EUR",
-        apr="0.10", term_months=6, start_date="2026-01-01",
+        client,
+        token,
+        name="Cte",
+        type="bank",
+        currency="EUR",
+        apr="0.10",
+        term_months=6,
+        start_date="2026-01-01",
     )
     assert bank["apr"] is None
     assert bank["term_months"] is None
@@ -112,12 +115,20 @@ async def test_balance_inverted_for_liability(client: AsyncClient) -> None:
     )
     income_cat_id = income_cat.json()["id"]
 
-    cte = await _create_account(
-        client, token, name="Cte", type="bank", currency="EUR",
+    await _create_account(
+        client,
+        token,
+        name="Cte",
+        type="bank",
+        currency="EUR",
         opening_balance="1000",
     )
     visa = await _create_account(
-        client, token, name="Visa", type="credit_card", currency="EUR",
+        client,
+        token,
+        name="Visa",
+        type="credit_card",
+        currency="EUR",
     )
 
     # Compra de 30€ con la tarjeta → expense en Visa.
@@ -145,9 +156,7 @@ async def test_balance_inverted_for_liability(client: AsyncClient) -> None:
         headers=_auth(token),
     )
 
-    balances = (
-        await client.get("/accounts/balances", headers=_auth(token))
-    ).json()
+    balances = (await client.get("/accounts/balances", headers=_auth(token))).json()
     by_id = {b["account_id"]: b for b in balances["items"]}
 
     # Visa: 0 (opening) + 30 (compra suma deuda) − 20 (pago resta deuda) = 10
@@ -178,9 +187,7 @@ async def test_amortization_schedule_basic(client: AsyncClient) -> None:
         term_months=120,
         start_date="2026-01-01",
     )
-    r = await client.get(
-        f"/accounts/{acc['id']}/amortization-schedule", headers=_auth(token)
-    )
+    r = await client.get(f"/accounts/{acc['id']}/amortization-schedule", headers=_auth(token))
     assert r.status_code == 200
     body = r.json()
     # Cuota francesa para 100k al 5% en 10 años ≈ 1060.66 €/mes.
@@ -195,11 +202,13 @@ async def test_amortization_schedule_rejects_credit_card(client: AsyncClient) ->
     """Tarjetas no usan cuadro fijo; 400."""
     token = await _register(client, "amort_cc@example.com")
     acc = await _create_account(
-        client, token, name="Visa", type="credit_card", currency="EUR",
+        client,
+        token,
+        name="Visa",
+        type="credit_card",
+        currency="EUR",
     )
-    r = await client.get(
-        f"/accounts/{acc['id']}/amortization-schedule", headers=_auth(token)
-    )
+    r = await client.get(f"/accounts/{acc['id']}/amortization-schedule", headers=_auth(token))
     assert r.status_code == 400
 
 
@@ -207,12 +216,14 @@ async def test_amortization_schedule_rejects_without_fields(client: AsyncClient)
     """Mortgage sin apr/term/start_date → 400."""
     token = await _register(client, "amort_missing@example.com")
     acc = await _create_account(
-        client, token, name="Hipoteca", type="mortgage", currency="EUR",
+        client,
+        token,
+        name="Hipoteca",
+        type="mortgage",
+        currency="EUR",
         opening_balance="180000",
     )
-    r = await client.get(
-        f"/accounts/{acc['id']}/amortization-schedule", headers=_auth(token)
-    )
+    r = await client.get(f"/accounts/{acc['id']}/amortization-schedule", headers=_auth(token))
     assert r.status_code == 400
 
 
@@ -244,7 +255,11 @@ async def test_interest_paid_ytd_uses_role_not_category_name(
     """
     token = await _register(client, "interest_role@example.com")
     cte = await _create_account(
-        client, token, name="Cte", type="bank", currency="EUR",
+        client,
+        token,
+        name="Cte",
+        type="bank",
+        currency="EUR",
         opening_balance="5000",
     )
 
@@ -277,6 +292,7 @@ async def test_interest_paid_ytd_uses_role_not_category_name(
     # 50€ en la custom DEBT_INTEREST + 999€ en la GENERIC con nombre
     # "Intereses". Solo la primera debe sumar al KPI.
     from datetime import UTC, datetime
+
     year_now = datetime.now(UTC).year
     await client.post(
         "/transactions",
@@ -310,7 +326,11 @@ async def test_debt_health_basic_kpis(client: AsyncClient) -> None:
     """Patrimonio + cuota + APR medio se computan correctamente."""
     token = await _register(client, "dh_basic@example.com")
     await _create_account(
-        client, token, name="Cte", type="bank", currency="EUR",
+        client,
+        token,
+        name="Cte",
+        type="bank",
+        currency="EUR",
         opening_balance="20000",
     )
     await _create_account(
@@ -359,7 +379,11 @@ async def test_debt_history_no_liabilities_only_assets(
     """Sólo activos = items vacío, pero reference_currency es la primera."""
     token = await _register(client, "dhist_assets@example.com")
     await _create_account(
-        client, token, name="Cte", type="bank", currency="EUR",
+        client,
+        token,
+        name="Cte",
+        type="bank",
+        currency="EUR",
         opening_balance="5000",
     )
     r = await client.get("/accounts/debt-history", headers=_auth(token))
@@ -400,7 +424,7 @@ async def test_debt_history_returns_historical_and_projected_points(
     # La proyección reduce la deuda total mes a mes (cuota francesa
     # siempre amortiza algo de principal).
     projected_debts = [Decimal(it["total_debt"]) for it in body["items"][6:]]
-    for prev, curr in zip(projected_debts, projected_debts[1:]):
+    for prev, curr in itertools.pairwise(projected_debts):
         assert curr <= prev
 
 
@@ -410,7 +434,11 @@ async def test_debt_history_months_ahead_zero_disables_projection(
     """`months_ahead=0` → sólo histórico."""
     token = await _register(client, "dhist_no_proj@example.com")
     await _create_account(
-        client, token, name="Visa", type="credit_card", currency="EUR",
+        client,
+        token,
+        name="Visa",
+        type="credit_card",
+        currency="EUR",
     )
     r = await client.get(
         "/accounts/debt-history?months_back=3&months_ahead=0",
@@ -442,9 +470,7 @@ async def test_create_loan_persists_installments(client: AsyncClient) -> None:
         term_months=12,
         start_date="2026-01-01",
     )
-    r = await client.get(
-        f"/accounts/{loan['id']}/amortization-schedule", headers=_auth(token)
-    )
+    r = await client.get(f"/accounts/{loan['id']}/amortization-schedule", headers=_auth(token))
     assert r.status_code == 200
     body = r.json()
     assert len(body["rows"]) == 12
@@ -463,8 +489,14 @@ async def test_patch_installment_overrides_amount_and_date(
     siguientes."""
     token = await _register(client, "phase241-patch@example.com")
     loan = await _create_account(
-        client, token, name="L", type="loan", currency="EUR",
-        opening_balance="1200.00", apr="0.0500", term_months=6,
+        client,
+        token,
+        name="L",
+        type="loan",
+        currency="EUR",
+        opening_balance="1200.00",
+        apr="0.0500",
+        term_months=6,
         start_date="2026-01-01",
     )
     sched = await client.get(
@@ -502,8 +534,14 @@ async def test_pay_and_unpay_installment(client: AsyncClient) -> None:
     opcional con una tx."""
     token = await _register(client, "phase241-pay@example.com")
     loan = await _create_account(
-        client, token, name="L", type="loan", currency="EUR",
-        opening_balance="600.00", apr="0.0", term_months=3,
+        client,
+        token,
+        name="L",
+        type="loan",
+        currency="EUR",
+        opening_balance="600.00",
+        apr="0.0",
+        term_months=3,
         start_date="2026-01-01",
     )
     sched = await client.get(
@@ -549,9 +587,7 @@ async def test_create_credit_card_with_amortization_persists_installments(
         start_date="2026-01-07",
     )
     assert card["tae"] == "0.0824"
-    r = await client.get(
-        f"/accounts/{card['id']}/amortization-schedule", headers=_auth(token)
-    )
+    r = await client.get(f"/accounts/{card['id']}/amortization-schedule", headers=_auth(token))
     assert r.status_code == 200
     body = r.json()
     assert len(body["rows"]) == 12
@@ -564,9 +600,16 @@ async def test_account_tae_is_persisted_and_returned(
     """TAE es informativa pero debe persistirse y devolverse intacta."""
     token = await _register(client, "phase242-tae@example.com")
     loan = await _create_account(
-        client, token, name="L", type="loan", currency="EUR",
-        opening_balance="1000.00", apr="0.0500", tae="0.0512",
-        term_months=12, start_date="2026-01-01",
+        client,
+        token,
+        name="L",
+        type="loan",
+        currency="EUR",
+        opening_balance="1000.00",
+        apr="0.0500",
+        tae="0.0512",
+        term_months=12,
+        start_date="2026-01-01",
     )
     assert loan["apr"] == "0.0500"
     assert loan["tae"] == "0.0512"
@@ -626,8 +669,14 @@ async def test_extra_charges_null_when_total_to_pay_not_set(
     cargos."""
     token = await _register(client, "phase243-no-total@example.com")
     loan = await _create_account(
-        client, token, name="L", type="loan", currency="EUR",
-        opening_balance="1000.00", apr="0.0500", term_months=12,
+        client,
+        token,
+        name="L",
+        type="loan",
+        currency="EUR",
+        opening_balance="1000.00",
+        apr="0.0500",
+        term_months=12,
         start_date="2026-01-01",
     )
     r = await client.get(
@@ -662,9 +711,7 @@ async def test_create_liability_with_debt_category_link(
     """PHASE-30.4 — Una liability acepta `category_id` apuntando a una
     categoría con role DEBT_PAYMENT y la devuelve en la respuesta."""
     token = await _register(client, "link_ok@example.com")
-    cat_id = await _create_category(
-        client, token, "Hipoteca BBVA", role="DEBT_PAYMENT"
-    )
+    cat_id = await _create_category(client, token, "Hipoteca BBVA", role="DEBT_PAYMENT")
     body = await _create_account(
         client,
         token,
@@ -709,9 +756,7 @@ async def test_create_asset_with_category_id_rejected(
 ) -> None:
     """Una cuenta asset no puede vincularse a una categoría — 400."""
     token = await _register(client, "link_asset@example.com")
-    cat_id = await _create_category(
-        client, token, "Hipoteca", role="DEBT_PAYMENT"
-    )
+    cat_id = await _create_category(client, token, "Hipoteca", role="DEBT_PAYMENT")
     r = await client.post(
         "/accounts",
         json={
@@ -733,9 +778,7 @@ async def test_create_liability_with_other_user_category_rejected(
     filtrar existencia)."""
     token_a = await _register(client, "link_a@example.com")
     token_b = await _register(client, "link_b@example.com")
-    cat_b = await _create_category(
-        client, token_b, "Hipoteca B", role="DEBT_PAYMENT"
-    )
+    cat_b = await _create_category(client, token_b, "Hipoteca B", role="DEBT_PAYMENT")
     r = await client.post(
         "/accounts",
         json={
@@ -756,9 +799,7 @@ async def test_create_liability_with_other_user_category_rejected(
 async def test_update_account_can_unlink_category(client: AsyncClient) -> None:
     """PUT con `category_id: null` desvincula la categoría."""
     token = await _register(client, "unlink@example.com")
-    cat_id = await _create_category(
-        client, token, "Tarjeta", role="DEBT_PAYMENT"
-    )
+    cat_id = await _create_category(client, token, "Tarjeta", role="DEBT_PAYMENT")
     acc = await _create_account(
         client,
         token,
@@ -782,8 +823,14 @@ async def test_installment_isolation_between_users(client: AsyncClient) -> None:
     token_a = await _register(client, "phase241-iso-a@example.com")
     token_b = await _register(client, "phase241-iso-b@example.com")
     loan_a = await _create_account(
-        client, token_a, name="L", type="loan", currency="EUR",
-        opening_balance="600.00", apr="0.0", term_months=3,
+        client,
+        token_a,
+        name="L",
+        type="loan",
+        currency="EUR",
+        opening_balance="600.00",
+        apr="0.0",
+        term_months=3,
         start_date="2026-01-01",
     )
     sched = await client.get(

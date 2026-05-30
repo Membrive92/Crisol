@@ -184,9 +184,7 @@ async def _issue_tokens(
     db: AsyncSession, user: User, *, ttl_days: int | None = None
 ) -> IssuedSession:
     """Emite un par access + refresh token para el usuario."""
-    effective_ttl = (
-        ttl_days if ttl_days is not None else settings.jwt_refresh_token_expire_days
-    )
+    effective_ttl = ttl_days if ttl_days is not None else settings.jwt_refresh_token_expire_days
     access = create_access_token(user.id)
     plain, expires_at = create_refresh_token(user.id, ttl_days=effective_ttl)
     record = RefreshToken(
