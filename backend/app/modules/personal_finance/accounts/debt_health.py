@@ -163,6 +163,48 @@ async def monthly_income_avg(
     return (total / Decimal(months)).quantize(Decimal("0.01"))
 
 
+async def windowed_income_total(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    currency: str,
+    *,
+    start: date,
+    end: date,
+    target_currency: str | None = None,
+) -> Decimal:
+    """Σ ingresos (categoría INCOME, sin papelera, sin transferencias
+    internas) en la ventana `[start, end]` inclusive (PHASE-30.8).
+
+    A diferencia de `monthly_income_avg` (ventana fija de 6 meses
+    cerrados, anclada en hoy), aquí la ventana la fija el caller —la
+    usa la tasa de esfuerzo *period-scoped* de Capa 1, que luego divide
+    por el nº de meses del período. Mismo modo dual de moneda que
+    `monthly_income_avg`. Devuelve `Decimal('0')` si no hay ingresos.
+    """
+    window_start = datetime(start.year, start.month, start.day, 0, 0, 0, tzinfo=UTC)
+    window_end = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=UTC)
+    amount_expr = (
+        converted_amount_expr(target_currency)
+        if target_currency is not None
+        else Transaction.amount
+    )
+    query = (
+        select(func.coalesce(func.sum(amount_expr), 0))
+        .select_from(Transaction)
+        .join(Category, Category.id == Transaction.category_id)
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.deleted_at.is_(None))
+        .where(Transaction.transfer_pair_id.is_(None))
+        .where(Category.kind == CategoryKind.INCOME)
+        .where(Transaction.occurred_at >= window_start)
+        .where(Transaction.occurred_at <= window_end)
+    )
+    if target_currency is None:
+        query = query.where(Transaction.currency == currency)
+    total = Decimal((await db.execute(query)).scalar_one())
+    return total if total > 0 else Decimal("0")
+
+
 async def _interest_paid_ytd(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -195,9 +237,7 @@ async def _interest_paid_ytd(
     return Decimal((await db.execute(query)).scalar_one())
 
 
-def _months_remaining_from_schedule(
-    liab: Account, balance: Decimal, today: date
-) -> int | None:
+def _months_remaining_from_schedule(liab: Account, balance: Decimal, today: date) -> int | None:
     """Cuenta cuántas filas del cuadro francés quedan por pagar
     para una liability concreta (PHASE-30.2).
 
@@ -279,9 +319,7 @@ async def _time_to_payoff_months(
         )
         if principal_3m > 0:
             monthly_principal = principal_3m / Decimal(3)
-            linear_estimate = int(
-                (no_schedule_balance / monthly_principal).to_integral_value()
-            )
+            linear_estimate = int((no_schedule_balance / monthly_principal).to_integral_value())
 
     candidates: list[int] = list(schedule_estimates)
     if linear_estimate is not None:
@@ -404,11 +442,7 @@ async def compute_debt_health(
     en `/balances`).
     """
     # 1. Cuentas activas y agregados de saldo.
-    query = (
-        select(Account)
-        .where(Account.user_id == user_id)
-        .where(Account.is_archived.is_(False))
-    )
+    query = select(Account).where(Account.user_id == user_id).where(Account.is_archived.is_(False))
     accounts = list((await db.execute(query)).scalars().all())
 
     if not accounts:
@@ -444,9 +478,7 @@ async def compute_debt_health(
     for account in accounts:
         # Saldo nativo de la cuenta (siempre en su propia divisa, igual
         # que en /balances).
-        native_balance = account.opening_balance + movements.get(
-            account.id, Decimal("0")
-        )
+        native_balance = account.opening_balance + movements.get(account.id, Decimal("0"))
 
         # Decidir el balance "agregable" según el modo:
         # - Sin target: como antes, sólo cuentas en reference_currency.
@@ -479,9 +511,7 @@ async def compute_debt_health(
             total_assets += aggregable_balance
 
     net_worth = total_assets - total_liabilities
-    debt_to_assets = (
-        float(total_liabilities / total_assets) if total_assets > 0 else None
-    )
+    debt_to_assets = float(total_liabilities / total_assets) if total_assets > 0 else None
 
     # 3. Cuota mensual estimada — suma cuotas francesas de loans/mortgages
     #    + estimación de tarjetas.
@@ -516,19 +546,11 @@ async def compute_debt_health(
                 # Cuota teórica de 12 meses con apr — sobre el saldo
                 # nativo, no el convertido, para que sea fiel a la
                 # liability real.
-                native_card_balance = liab.opening_balance + movements.get(
-                    liab.id, Decimal("0")
-                )
-                native_cuota = compute_monthly_payment(
-                    native_card_balance, liab.apr, 12
-                )
+                native_card_balance = liab.opening_balance + movements.get(liab.id, Decimal("0"))
+                native_cuota = compute_monthly_payment(native_card_balance, liab.apr, 12)
             else:
-                native_card_balance = liab.opening_balance + movements.get(
-                    liab.id, Decimal("0")
-                )
-                native_cuota = (native_card_balance * Decimal("0.03")).quantize(
-                    Decimal("0.01")
-                )
+                native_card_balance = liab.opening_balance + movements.get(liab.id, Decimal("0"))
+                native_cuota = (native_card_balance * Decimal("0.03")).quantize(Decimal("0.01"))
 
         if native_cuota <= 0:
             continue
@@ -544,11 +566,7 @@ async def compute_debt_health(
             if converted_cuota is not None:
                 monthly_payment_total += converted_cuota
 
-    weighted_apr = (
-        float(weighted_apr_num / weighted_apr_den)
-        if weighted_apr_den > 0
-        else None
-    )
+    weighted_apr = float(weighted_apr_num / weighted_apr_den) if weighted_apr_den > 0 else None
 
     # 4. Income medio + DTI.
     monthly_income = await monthly_income_avg(
@@ -595,5 +613,3 @@ async def compute_debt_health(
         time_to_payoff_months=time_to_payoff,
         reference_currency=effective_currency,
     )
-
-

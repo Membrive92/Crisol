@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import calendar
 import uuid
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -12,16 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.personal_finance.accounts.debt_health import (
     DEFAULT_REFERENCE_CURRENCY,
-    EFFORT_BAND_CAUTION,
-    EFFORT_BAND_HEALTHY,
-    monthly_income_avg,
     classify_effort,
+    windowed_income_total,
 )
 from app.modules.personal_finance.accounts.models import Account
 from app.modules.personal_finance.categories.models import Category, CategoryRole
 from app.modules.personal_finance.debt.repository import (
     aggregate_debt_payments_by_category,
     aggregate_debt_payments_by_role,
+    debt_movement_bounds,
     monthly_debt_series,
 )
 from app.modules.personal_finance.debt.schemas import (
@@ -36,7 +35,6 @@ from app.modules.personal_finance.fixed_expenses.models import (
     FixedExpense,
     FixedExpenseStatus,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────
 # Helpers de rango temporal
@@ -58,32 +56,82 @@ def _add_month(d: date, months: int) -> date:
     return date(new_year, new_month, 1)
 
 
+def _period_bounds(range_: DebtTimeRange, anchor: date) -> tuple[date, date]:
+    """`[start, period_end]` natural del período que CONTIENE `anchor`,
+    sin recortar a hoy.
+
+    - `month`   → 1º…último día del mes de `anchor`.
+    - `quarter` → trimestre natural (Q1=Ene-Mar … Q4=Oct-Dic).
+    - `year`    → 1-ene…31-dic del año de `anchor`.
+    """
+    if range_ == "month":
+        start = date(anchor.year, anchor.month, 1)
+        last_day = calendar.monthrange(anchor.year, anchor.month)[1]
+        return start, date(anchor.year, anchor.month, last_day)
+    if range_ == "quarter":
+        q_index = (anchor.month - 1) // 3
+        first_month = q_index * 3 + 1
+        last_month = first_month + 2
+        start = date(anchor.year, first_month, 1)
+        last_day = calendar.monthrange(anchor.year, last_month)[1]
+        return start, date(anchor.year, last_month, last_day)
+    # year
+    return date(anchor.year, 1, 1), date(anchor.year, 12, 31)
+
+
+def resolve_period_end(
+    range_: DebtTimeRange,
+    anchor: date | None = None,
+    today: date | None = None,
+) -> date:
+    """Fecha de corte ("as-of") del período: fin natural del período,
+    salvo el período en curso que se recorta a hoy.
+
+    PHASE-30.8 — Fuente ÚNICA de verdad del as-of, compartida entre
+    Capa 1 (`compute_category_summary`) y Capa 2 (`compute_debt_health`
+    / `compute_debt_history`) para que los tres endpoints coincidan en
+    la fecha de corte de un mismo período.
+    """
+    today = today or _today_utc()
+    anchor = anchor or today
+    _, period_end = _period_bounds(range_, anchor)
+    return min(period_end, today)
+
+
 def _resolve_range(
-    range_: DebtTimeRange, today: date | None = None
+    range_: DebtTimeRange,
+    anchor: date | None = None,
+    today: date | None = None,
 ) -> tuple[date, date, list[date]]:
     """Devuelve `(range_start, range_end, monthly_buckets)`.
 
-    `monthly_buckets` es la lista del primer día de cada mes del rango,
-    incluyendo huecos sin actividad — necesaria para producir series
-    de longitud determinista (ej. 12 puntos para `12m`).
+    PHASE-30.8 — El período lo determina `anchor` (cualquier día dentro
+    del período objetivo); ausente → hoy → período en curso. `range_end`
+    se recorta a hoy (`min(period_end, today)`): los períodos pasados
+    salen completos, el actual parcial.
+
+    `monthly_buckets` (meses sin actividad incluidos, longitud
+    determinista):
+    - `month`/`quarter` → siempre los meses naturales **completos** del
+      período (1 y 3) → eje estable al navegar entre períodos del mismo
+      tipo; los meses futuros del trimestre en curso salen a 0.
+    - `year` → YTD para el año en curso (no pintamos meses futuros, que
+      serían barras vacías) y los 12 meses para años pasados.
+
+    Con `anchor=None` esto es idéntico al comportamiento previo a
+    PHASE-30.8.
     """
     today = today or _today_utc()
-    if range_ == "month":
-        start = _start_of_month(today)
-        end = today
-        return start, end, [start]
-    if range_ == "ytd":
-        start = date(today.year, 1, 1)
-        end = today
-        buckets = [
-            _add_month(start, m) for m in range(today.month)
-        ]
-        return start, end, buckets
-    # 12m: últimos 12 meses incluyendo el actual.
-    start_month = _add_month(_start_of_month(today), -11)
-    buckets = [_add_month(start_month, m) for m in range(12)]
-    end = today
-    return start_month, end, buckets
+    anchor = anchor or today
+    start, period_end = _period_bounds(range_, anchor)
+    range_end = min(period_end, today)
+    last_bucket = _start_of_month(range_end) if range_ == "year" else _start_of_month(period_end)
+    buckets: list[date] = []
+    month = start
+    while month <= last_bucket:
+        buckets.append(month)
+        month = _add_month(month, 1)
+    return start, range_end, buckets
 
 
 def _month_start_utc(d: date) -> datetime:
@@ -103,56 +151,10 @@ def _format_month(d: date) -> str:
 # ─────────────────────────────────────────────────────────────────────
 
 
-async def _avg_monthly_debt_payment_last_n_months(
-    db: AsyncSession,
-    user_id: uuid.UUID,
-    currency: str,
-    *,
-    months: int = 6,
-    target_currency: str | None = None,
-) -> Decimal:
-    """Media mensual de pagos a deuda en los últimos `months` meses
-    cerrados (excluye el mes en curso). Misma ventana que
-    `monthly_income_avg` — esencial para que el cociente del effort
-    ratio compare valores comparables.
-    """
-    today = _today_utc()
-    last_full_end = _start_of_month(today) - timedelta(days=1)
-    window_start = _add_month(_start_of_month(last_full_end), -(months - 1))
-    start_dt = datetime(window_start.year, window_start.month, 1, tzinfo=UTC)
-    end_dt = datetime(
-        last_full_end.year,
-        last_full_end.month,
-        last_full_end.day,
-        23,
-        59,
-        59,
-        tzinfo=UTC,
-    )
-    totals = await aggregate_debt_payments_by_role(
-        db,
-        user_id,
-        currency,
-        start=start_dt,
-        end=end_dt,
-        target_currency=target_currency,
-    )
-    total = totals[CategoryRole.DEBT_PAYMENT] + totals[CategoryRole.DEBT_INTEREST]
-    if total <= 0:
-        return Decimal("0")
-    return (total / Decimal(months)).quantize(Decimal("0.01"))
-
-
-async def _resolve_reference_currency(
-    db: AsyncSession, user_id: uuid.UUID
-) -> str:
+async def _resolve_reference_currency(db: AsyncSession, user_id: uuid.UUID) -> str:
     """Misma estrategia que `accounts.debt_health` — primera cuenta
     activa por display_order. Si no hay cuentas, EUR (default global)."""
-    query = (
-        select(Account)
-        .where(Account.user_id == user_id)
-        .where(Account.is_archived.is_(False))
-    )
+    query = select(Account).where(Account.user_id == user_id).where(Account.is_archived.is_(False))
     accounts = list((await db.execute(query)).scalars().all())
     if not accounts:
         return DEFAULT_REFERENCE_CURRENCY
@@ -170,19 +172,51 @@ _NAME_HINTS_CARD = ("tarjeta",)
 _NAME_HINTS_LOAN = ("préstamo", "prestamo", "crédito personal", "credito personal")
 
 
+# Mapa account.type → bucket del donut. Sólo nos interesan tipos
+# liability; assets nunca aparecen vinculados a categorías de deuda.
+_ACCOUNT_TYPE_BUCKET: dict[str, DebtTypeBucket] = {
+    "mortgage": "mortgage",
+    "loan": "loan",
+    "credit_card": "credit_card",
+}
+
+
 def _classify_by_name(name: str) -> DebtTypeBucket:
+    """Fallback de clasificación cuando la categoría no está vinculada
+    a una cuenta (PHASE-30.4) — heurística sobre el nombre.
+
+    PHASE-30.7 — `loan` se chequea ANTES que `mortgage` porque la
+    categoría seed "Préstamos e hipotecas" contiene ambos substrings
+    y la convención del producto es interpretarla como préstamo
+    genérico (la mayoría de usuarios sin hipoteca usan esta categoría
+    para sus préstamos). Quien tenga una hipoteca real puede o bien
+    crear una categoría "Hipoteca Banco X" (no contiene "préstamo" →
+    cae en mortgage) o vincular la liability a una categoría
+    explícita para que la clasificación sea por `account.type`.
+    """
     lower = name.lower()
+    if any(h in lower for h in _NAME_HINTS_LOAN):
+        return "loan"
     if any(h in lower for h in _NAME_HINTS_MORTGAGE):
         return "mortgage"
     if any(h in lower for h in _NAME_HINTS_CARD):
         return "credit_card"
-    if any(h in lower for h in _NAME_HINTS_LOAN):
-        return "loan"
     return "other"
 
 
+def _classify_row(name: str, linked_account_type: str | None) -> DebtTypeBucket:
+    """Señal primaria: tipo de la cuenta vinculada a la categoría
+    (PHASE-30.4). Fallback: matching por nombre."""
+    if linked_account_type is not None:
+        bucket = _ACCOUNT_TYPE_BUCKET.get(linked_account_type)
+        if bucket is not None:
+            return bucket
+    return _classify_by_name(name)
+
+
 def _build_by_type(
-    rows: list[tuple[str, CategoryRole, Decimal]], total: Decimal
+    rows: list[tuple[str, CategoryRole, Decimal, str | None]],
+    total: Decimal,
 ) -> list[DebtTypeBreakdown]:
     aggregates: dict[DebtTypeBucket, Decimal] = {
         "mortgage": Decimal("0"),
@@ -190,8 +224,8 @@ def _build_by_type(
         "loan": Decimal("0"),
         "other": Decimal("0"),
     }
-    for name, _role, amount in rows:
-        aggregates[_classify_by_name(name)] += amount
+    for name, _role, amount, linked_type in rows:
+        aggregates[_classify_row(name, linked_type)] += amount
     result: list[DebtTypeBreakdown] = []
     for bucket, amount in aggregates.items():
         if amount == 0:
@@ -313,9 +347,7 @@ async def _load_non_debt_fixed_expense_monthly_total(
         .where(Category.user_id == user_id)
         .where(Category.role.in_({CategoryRole.DEBT_PAYMENT, CategoryRole.DEBT_INTEREST}))
     )
-    debt_category_ids = {
-        row[0] for row in (await db.execute(debt_query)).all()
-    }
+    debt_category_ids = {row[0] for row in (await db.execute(debt_query)).all()}
     total = Decimal("0")
     for fe in items:
         if fe.category_id in debt_category_ids:
@@ -345,8 +377,9 @@ async def _load_non_debt_fixed_expense_monthly_total(
 async def compute_category_summary(
     db: AsyncSession,
     user_id: uuid.UUID,
-    range_: DebtTimeRange = "ytd",
+    range_: DebtTimeRange = "year",
     *,
+    anchor: date | None = None,
     target_currency: str | None = None,
 ) -> DebtCategorySummary:
     """Calcula el snapshot completo de Capa 1 para `range_`.
@@ -359,7 +392,7 @@ async def compute_category_summary(
     del usuario (primera cuenta no archivada por display_order).
     """
     today = _today_utc()
-    range_start, range_end, monthly_buckets = _resolve_range(range_, today)
+    range_start, range_end, monthly_buckets = _resolve_range(range_, anchor, today)
     native_currency = await _resolve_reference_currency(db, user_id)
     effective_currency = (target_currency or native_currency).upper()
 
@@ -408,20 +441,41 @@ async def compute_category_summary(
         for month_start, payments, interests in series_rows
     ]
 
-    # ── 4. Tasa de esfuerzo ──────────────────────────────────────────
+    # ── 4. Tasa de esfuerzo (period-scoped, PHASE-30.8) ──────────────
     #
-    # Income y pagos se promedian sobre la MISMA ventana (últimos 6
-    # meses cerrados). Si calculásemos pagos sobre el rango visualizado
-    # (12m / ytd / month), los ratios se descompensarían porque
-    # diluiríamos pagos reales recientes en huecos sin actividad
-    # (usuario que empezó hace 6m con range=12m → ratio aparente la
-    # mitad de la real).
-    monthly_income = await monthly_income_avg(
-        db, user_id, native_currency, target_currency=target_currency
-    )
-    avg_monthly_debt_payment = await _avg_monthly_debt_payment_last_n_months(
-        db, user_id, native_currency, months=6, target_currency=target_currency
-    )
+    # Se promedia sobre los meses CERRADOS del período —se excluye el
+    # mes en curso, aún incompleto, igual que hacía la ventana fija
+    # anterior—: así numerador y denominador son medias mensuales reales
+    # y no quedan diluidas por un mes a medias (la distorsión de dividir
+    # ingreso parcial por meses completos rompería la coherencia con el
+    # término de gastos fijos del ratio ampliado). Numerador = Σ pagos
+    # de esos meses (reutiliza la serie ya calculada); denominador =
+    # ingreso de la misma ventana. Sin meses cerrados (p. ej. `month`
+    # del mes en curso) → ratio `None`: a mitad de mes no se puede saber.
+    current_month_start = _start_of_month(today)
+    closed_idx = [i for i, b in enumerate(monthly_buckets) if b < current_month_start]
+    if closed_idx:
+        n_closed = len(closed_idx)
+        debt_closed = sum((monthly_series[i].payments for i in closed_idx), Decimal("0"))
+        avg_monthly_debt_payment = (debt_closed / Decimal(n_closed)).quantize(Decimal("0.01"))
+        last_closed = monthly_buckets[closed_idx[-1]]
+        income_end = date(
+            last_closed.year,
+            last_closed.month,
+            calendar.monthrange(last_closed.year, last_closed.month)[1],
+        )
+        income_total = await windowed_income_total(
+            db,
+            user_id,
+            native_currency,
+            start=range_start,
+            end=income_end,
+            target_currency=target_currency,
+        )
+        monthly_income = (income_total / Decimal(n_closed)).quantize(Decimal("0.01"))
+    else:
+        avg_monthly_debt_payment = Decimal("0")
+        monthly_income = Decimal("0")
 
     if monthly_income > 0 and avg_monthly_debt_payment > 0:
         strict = float(avg_monthly_debt_payment / monthly_income)
@@ -455,17 +509,27 @@ async def compute_category_summary(
         for fe, cat, display_amount in debt_fixed
     ]
 
+    # ── 6. Límites de períodos con datos (navegador de período) ──────
+    # Mismos predicados que los agregados → las flechas nunca caen en
+    # un período con KPIs todos a cero.
+    bound_from, bound_to = await debt_movement_bounds(
+        db, user_id, native_currency, target_currency=target_currency
+    )
+
     return DebtCategorySummary(
         reference_currency=effective_currency,
         range=range_,
         range_start=range_start,
         range_end=range_end,
+        available_from=_format_month(bound_from) if bound_from else None,
+        available_to=_format_month(bound_to) if bound_to else None,
         total_payments=total_payments.quantize(Decimal("0.01")),
         interests_and_fees=interests_and_fees.quantize(Decimal("0.01")),
         capital_amortized=capital_amortized.quantize(Decimal("0.01")),
         by_type=by_type,
         monthly_series=monthly_series,
         monthly_income_avg=monthly_income,
+        monthly_debt_payment_avg=avg_monthly_debt_payment,
         effort_ratio_strict=strict,
         effort_ratio_strict_status=strict_status,  # type: ignore[arg-type]
         effort_ratio_extended=extended,

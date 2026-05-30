@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -22,7 +23,17 @@ router = APIRouter(prefix="/debt", tags=["debt"])
 async def category_summary_endpoint(
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
-    range: Annotated[DebtTimeRange, Query()] = "ytd",
+    range: Annotated[DebtTimeRange, Query()] = "year",
+    anchor: Annotated[
+        date | None,
+        Query(
+            description=(
+                "Cualquier día (YYYY-MM-DD) dentro del período a mostrar. "
+                "La granularidad la fija `range`; `anchor` decide CUÁL "
+                "mes/trimestre/año. Si se omite, el período en curso."
+            ),
+        ),
+    ] = None,
     target_currency: Annotated[
         str | None,
         Query(
@@ -50,5 +61,5 @@ async def category_summary_endpoint(
     silenciosamente.
     """
     return await compute_category_summary(
-        db, user.id, range_=range, target_currency=target_currency
+        db, user.id, range_=range, anchor=anchor, target_currency=target_currency
     )

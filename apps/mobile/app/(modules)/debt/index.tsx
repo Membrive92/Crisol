@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 
 import {
+  periodLabel,
   useAccountBalances,
   useAccounts,
   useDebtCategorySummary,
@@ -26,6 +27,7 @@ import { DebtMonthlyEvolution } from '../../../components/debt/debt-monthly-evol
 import { DebtTrendChart } from '../../../components/debt/debt-trend-chart';
 import { EffortRatioSection } from '../../../components/debt/effort-ratio-section';
 import { PaymentsSummaryCard } from '../../../components/debt/payments-summary-card';
+import { PeriodNavigator } from '../../../components/debt/period-navigator';
 import { RecurringQuotasList } from '../../../components/debt/recurring-quotas-list';
 
 /**
@@ -38,7 +40,14 @@ import { RecurringQuotasList } from '../../../components/debt/recurring-quotas-l
  */
 export default function DebtScreen() {
   const router = useRouter();
-  const [range, setRange] = useState<DebtTimeRange>('ytd');
+  const [range, setRange] = useState<DebtTimeRange>('year');
+  // PHASE-30.8 — Mes ancla `YYYY-MM`; por defecto el mes en curso →
+  // período actual (comportamiento previo). El `PeriodNavigator` lo
+  // mueve, limitado a los meses con datos.
+  const [anchorMonth, setAnchorMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
   const [layer2Open, setLayer2Open] = useState(false);
   const [payingDebt, setPayingDebt] = useState<Account | null>(null);
 
@@ -48,10 +57,10 @@ export default function DebtScreen() {
   const convertAll = useCurrencyStore((s) => s.convertAll);
   const targetCurrency = convertAll ? storeCurrency : undefined;
 
-  const summaryQuery = useDebtCategorySummary(
-    range,
-    targetCurrency ? { targetCurrency } : {},
-  );
+  const summaryQuery = useDebtCategorySummary(range, {
+    anchor: `${anchorMonth}-01`,
+    ...(targetCurrency ? { targetCurrency } : {}),
+  });
   const healthQuery = useDebtHealth(
     targetCurrency ? { targetCurrency } : {},
   );
@@ -76,8 +85,10 @@ export default function DebtScreen() {
     balancesQuery.data?.reference_currency ??
     'EUR';
 
+  // PHASE-30.8 — numerador (pagos) y denominador (ingreso) del período,
+  // ambos del category-summary, coherentes con el período elegido.
   const monthlyIncome = summary?.monthly_income_avg ?? '0';
-  const monthlyDebtPayment = health?.monthly_debt_payment ?? '0';
+  const monthlyDebtPayment = summary?.monthly_debt_payment_avg ?? '0';
   const monthlyDebtPaymentExtended =
     summary && summary.effort_ratio_extended !== null
       ? (summary.effort_ratio_extended * Number(monthlyIncome)).toFixed(2)
@@ -109,6 +120,15 @@ export default function DebtScreen() {
           </Pressable>
         </View>
 
+        <PeriodNavigator
+          range={range}
+          onRangeChange={setRange}
+          anchor={anchorMonth}
+          onAnchorChange={setAnchorMonth}
+          availableFrom={summary?.available_from ?? null}
+          availableTo={summary?.available_to ?? null}
+        />
+
         <EffortRatioSection
           strictRatio={summary?.effort_ratio_strict ?? null}
           strictStatus={summary?.effort_ratio_strict_status ?? 'unknown'}
@@ -122,8 +142,7 @@ export default function DebtScreen() {
         />
 
         <PaymentsSummaryCard
-          range={range}
-          onRangeChange={setRange}
+          title={`Pagos a deuda — ${periodLabel(range, anchorMonth)}`}
           totalPayments={summary?.total_payments ?? '0'}
           interestsAndFees={summary?.interests_and_fees ?? '0'}
           capitalAmortized={summary?.capital_amortized ?? '0'}

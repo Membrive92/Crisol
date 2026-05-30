@@ -9,7 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-DebtTimeRange = Literal["ytd", "12m", "month"]
+DebtTimeRange = Literal["month", "quarter", "year"]
 EffortStatus = Literal["healthy", "caution", "stressed", "unknown"]
 DebtTypeBucket = Literal["mortgage", "loan", "credit_card", "other"]
 
@@ -17,10 +17,14 @@ DebtTypeBucket = Literal["mortgage", "loan", "credit_card", "other"]
 class DebtTypeBreakdown(BaseModel):
     """Pagos a deuda agregados por tipo aproximado (PHASE-30.2).
 
-    El "tipo" se infiere del role + nombre de la categoría: las
-    categorías DEBT_PAYMENT que contienen "hipoteca" caen en
-    `mortgage`, "tarjeta" → `credit_card`, "préstamo" → `loan`, el
-    resto → `other`. No es 100% perfecto pero refleja la composición
+    El "tipo" se infiere primero por la cuenta vinculada a la
+    categoría (PHASE-30.4): si la categoría apunta a una liability
+    con `type='mortgage'`, su bucket es `mortgage`; si apunta a
+    `loan`, `loan`; etc. Cuando no hay cuenta vinculada, se cae a
+    matching por nombre (con `loan` chequeado antes que `mortgage`
+    para que la categoría seed "Préstamos e hipotecas" no se
+    interprete como hipoteca solo por contener el substring). No es
+    100% perfecto pero refleja la composición
     semántica que el usuario reconoce en el donut.
     """
 
@@ -69,28 +73,41 @@ class DebtCategorySummary(BaseModel):
     range_start: date
     range_end: date
 
+    available_from: str | None = None
+    """`YYYY-MM` del primer mes con movimientos de deuda (o `null`).
+    Límite inferior para el navegador de período (PHASE-30.8)."""
+    available_to: str | None = None
+    """`YYYY-MM` del último mes con movimientos de deuda (o `null`).
+    Límite superior para el navegador de período (PHASE-30.8)."""
+
     total_payments: Decimal
     """Σ flujo de categorías con `role IN (DEBT_PAYMENT, DEBT_INTEREST)`
     durante el rango."""
     interests_and_fees: Decimal
     """Σ flujo de DEBT_INTEREST sólo."""
     capital_amortized: Decimal
-    """`total_payments − interests_and_fees`."""
+    """`total_payments - interests_and_fees`."""
 
     by_type: list[DebtTypeBreakdown]
     """Composición agregada por tipo aproximado para el donut."""
 
     monthly_series: list[MonthlyDebtPoint]
-    """12 puntos cuando range=12m; meses sin actividad en 0. Para `ytd`
-    es desde enero al mes actual; para `month` el único punto del mes
-    en curso (longitud 1)."""
+    """Un punto por mes del período (meses sin actividad en 0): 1 para
+    `month`, hasta 3 para `quarter`, hasta 12 para `year`. El período
+    en curso sólo incluye los meses transcurridos."""
 
     monthly_income_avg: Decimal
-    """Igual que en `/accounts/debt-health` — promedio últimos 6 meses
-    cerrados de la categoría INCOME, excluyendo transferencias internas."""
+    """Ingreso medio mensual de la categoría INCOME (sin transferencias
+    internas) DURANTE el período seleccionado (PHASE-30.8): Σ ingresos
+    del período ÷ nº de meses. Denominador de la tasa de esfuerzo."""
+    monthly_debt_payment_avg: Decimal
+    """Pago a deuda medio mensual del período (PHASE-30.8): Σ pagos de
+    los meses cerrados ÷ nº de meses. Numerador de la tasa de esfuerzo
+    estricta — expuesto para que la card muestre cifras coherentes con
+    el gauge sin derivarlas del ratio."""
     effort_ratio_strict: float | None
-    """`monthly_debt_payment / monthly_income_avg`. Sólo pagos de deuda
-    en el numerador. `null` cuando no hay ingresos."""
+    """Pagos a deuda del período/mes ÷ ingreso medio del período/mes
+    (PHASE-30.8, ambos sobre la misma ventana). `null` sin ingresos."""
     effort_ratio_strict_status: EffortStatus
     effort_ratio_extended: float | None
     """Como `strict` pero sumando las cuotas de `fixed_expenses` con

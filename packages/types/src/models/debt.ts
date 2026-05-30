@@ -90,7 +90,12 @@ export interface DebtHistoryResponse {
 /* PHASE-30.2 — Capa 1 del módulo deuda: KPIs derivados del flujo de
  * categorías marcadas como deuda. Cubre /debt/category-summary. */
 
-export type DebtTimeRange = 'ytd' | '12m' | 'month';
+/**
+ * PHASE-30.7 — Alineado con `PeriodKey` de `StitchPeriodToggle`
+ * (dashboard + análisis) para que el selector de período sea
+ * coherente en todo el producto.
+ */
+export type DebtTimeRange = 'month' | 'quarter' | 'year';
 
 export type EffortStatus = 'healthy' | 'caution' | 'stressed' | 'unknown';
 
@@ -125,12 +130,22 @@ export interface DebtCategorySummary {
   range: DebtTimeRange;
   range_start: string;
   range_end: string;
+  /**
+   * PHASE-30.8 — `YYYY-MM` del primer/último mes con movimientos de
+   * deuda (o `null`). Límites del navegador de período: las flechas se
+   * detienen en estos extremos.
+   */
+  available_from: string | null;
+  available_to: string | null;
   total_payments: string;
   interests_and_fees: string;
   capital_amortized: string;
   by_type: DebtTypeBreakdown[];
   monthly_series: MonthlyDebtPoint[];
   monthly_income_avg: string;
+  /** PHASE-30.8 — Pago a deuda medio mensual del período (numerador
+   * de la tasa de esfuerzo estricta). */
+  monthly_debt_payment_avg: string;
   effort_ratio_strict: number | null;
   effort_ratio_strict_status: EffortStatus;
   effort_ratio_extended: number | null;

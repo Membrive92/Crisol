@@ -46,14 +46,19 @@ export const queryKeys = {
   debt: {
     all: ['debt'] as const,
     categorySummary: (
-      range: 'ytd' | '12m' | 'month' = 'ytd',
+      range: 'month' | 'quarter' | 'year' = 'year',
       targetCurrency?: string,
+      // PHASE-30.8 — `anchor` (YYYY-MM-DD) del período; `'current'`
+      // como sentinel cuando se omite, para no invalidar las keys
+      // existentes que no navegan en el tiempo.
+      anchor?: string,
     ) =>
       [
         ...queryKeys.debt.all,
         'category-summary',
         range,
         targetCurrency ?? 'native',
+        anchor ?? 'current',
       ] as const,
   },
   transfers: {

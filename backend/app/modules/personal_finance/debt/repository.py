@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import calendar
 import uuid
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -26,6 +26,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.modules.personal_finance.accounts.models import Account
 from app.modules.personal_finance.categories.models import Category, CategoryRole
 from app.modules.personal_finance.dashboard.conversion import (
     converted_amount_expr,
@@ -102,16 +103,38 @@ async def aggregate_debt_payments_by_category(
     start: datetime,
     end: datetime,
     target_currency: str | None = None,
-) -> list[tuple[str, CategoryRole, Decimal]]:
-    """Devuelve `(category_name, role, total)` para construir el donut
-    de composición por tipo. El service mapea name → bucket
-    (mortgage/loan/credit_card/other)."""
+) -> list[tuple[str, CategoryRole, Decimal, str | None]]:
+    """Devuelve `(category_name, role, total, linked_account_type)`
+    para construir el donut de composición por tipo.
+
+    PHASE-30.7 — `linked_account_type` proviene de
+    `accounts.category_id` (PHASE-30.4): cuando un usuario vincula una
+    liability a una categoría de pagos, sabemos con certeza si esos
+    pagos van a una hipoteca / préstamo / tarjeta. El service usa
+    esa info como señal primaria, con fallback al matching por nombre.
+    Si hay varias cuentas vinculadas a la misma categoría, devolvemos
+    la primera (por display_order) — el caso real es 1-a-1.
+    """
     amount = _amount_expr(target_currency)
+    # Subquery escalar: type de la PRIMERA liability vinculada a la
+    # categoría (orden por display_order, name). NULL si no hay
+    # ninguna cuenta vinculada.
+    linked_type_subq = (
+        select(Account.type)
+        .where(Account.user_id == user_id)
+        .where(Account.category_id == Category.id)
+        .where(Account.is_archived.is_(False))
+        .order_by(Account.display_order, Account.name)
+        .limit(1)
+        .correlate(Category)
+        .scalar_subquery()
+    )
     query = (
         select(
             Category.name,
             Category.role,
             func.coalesce(func.sum(amount), 0),
+            linked_type_subq.label("linked_type"),
         )
         .select_from(Transaction)
         .join(Category, Category.id == Transaction.category_id)
@@ -121,12 +144,12 @@ async def aggregate_debt_payments_by_category(
         .where(Category.role.in_(DEBT_ROLES))
         .where(Transaction.occurred_at >= start)
         .where(Transaction.occurred_at <= end)
-        .group_by(Category.name, Category.role)
+        .group_by(Category.name, Category.role, Category.id)
     )
     if target_currency is None:
         query = query.where(Transaction.currency == currency)
     rows = (await db.execute(query)).all()
-    return [(name, role, Decimal(total)) for name, role, total in rows]
+    return [(name, role, Decimal(total), linked_type) for name, role, total, linked_type in rows]
 
 
 async def monthly_debt_series(
@@ -177,8 +200,7 @@ async def monthly_debt_series(
         query = query.where(Transaction.currency == currency)
     rows = (await db.execute(query)).all()
     by_month: dict[tuple[int, int], tuple[Decimal, Decimal]] = {
-        (int(r.y), int(r.m)): (Decimal(r.payments), Decimal(r.interests))
-        for r in rows
+        (int(r.y), int(r.m)): (Decimal(r.payments), Decimal(r.interests)) for r in rows
     }
 
     series: list[tuple[date, Decimal, Decimal]] = []
@@ -189,3 +211,39 @@ async def monthly_debt_series(
         )
         series.append((month_start, payments, interests))
     return series
+
+
+async def debt_movement_bounds(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    currency: str,
+    *,
+    target_currency: str | None = None,
+) -> tuple[date | None, date | None]:
+    """Primer y último `occurred_at` (como fecha) con movimientos de
+    deuda (PHASE-30.8).
+
+    Usa el **mismo set de predicados** que los agregados (papelera,
+    transferencias internas, roles de deuda y, en modo nativo, moneda)
+    para que el navegador de período nunca aterrice en un período cuyos
+    KPIs de Capa 1 sean todos cero. `(None, None)` si no hay datos.
+    """
+    query = (
+        select(
+            func.min(Transaction.occurred_at),
+            func.max(Transaction.occurred_at),
+        )
+        .select_from(Transaction)
+        .join(Category, Category.id == Transaction.category_id)
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.deleted_at.is_(None))
+        .where(Transaction.transfer_pair_id.is_(None))
+        .where(Category.role.in_(DEBT_ROLES))
+    )
+    if target_currency is None:
+        query = query.where(Transaction.currency == currency)
+    min_dt, max_dt = (await db.execute(query)).one()
+    return (
+        min_dt.date() if min_dt is not None else None,
+        max_dt.date() if max_dt is not None else None,
+    )

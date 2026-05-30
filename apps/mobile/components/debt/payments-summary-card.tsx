@@ -1,6 +1,5 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
-import type { DebtTimeRange } from '@crisol/types';
 import {
   colors,
   fontSize,
@@ -11,8 +10,8 @@ import {
 } from '@crisol/ui';
 
 export interface PaymentsSummaryCardProps {
-  range: DebtTimeRange;
-  onRangeChange: (range: DebtTimeRange) => void;
+  /** Título con el período, p. ej. "Pagos a deuda — Abril 2025". */
+  title: string;
   totalPayments: string;
   interestsAndFees: string;
   capitalAmortized: string;
@@ -20,28 +19,14 @@ export interface PaymentsSummaryCardProps {
   isLoading: boolean;
 }
 
-const RANGE_LABEL: Record<DebtTimeRange, string> = {
-  ytd: 'YTD',
-  '12m': '12 m',
-  month: 'Mes',
-};
-
-const RANGE_TITLE: Record<DebtTimeRange, string> = {
-  ytd: 'Pagos a deuda — año en curso',
-  '12m': 'Pagos a deuda — últimos 12 meses',
-  month: 'Pagos a deuda — este mes',
-};
-
-const RANGES: DebtTimeRange[] = ['ytd', '12m', 'month'];
-
 /**
  * PHASE-30.5 — Mobile parity de `payments-summary-card.tsx` (web).
- * Selector compacto YTD/12m/Mes, KPI grande, barra apilada y
- * desglose Capital vs Intereses.
+ * KPI grande, barra apilada y desglose Capital vs Intereses. El selector
+ * de período vive fuera (PHASE-30.8, `PeriodNavigator`); la card recibe
+ * el período ya resuelto como `title`.
  */
 export function PaymentsSummaryCard({
-  range,
-  onRangeChange,
+  title,
   totalPayments,
   interestsAndFees,
   capitalAmortized,
@@ -58,25 +43,10 @@ export function PaymentsSummaryCard({
     <View style={styles.card}>
       <View style={styles.headerRow}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.title}>{RANGE_TITLE[range]}</Text>
+          <Text style={styles.title}>{title}</Text>
           <Text style={styles.subtitle}>
             Todo lo destinado a categorías marcadas como deuda en este periodo.
           </Text>
-        </View>
-        <View style={styles.toggleRow}>
-          {RANGES.map((opt) => (
-            <Pressable
-              key={opt}
-              onPress={() => onRangeChange(opt)}
-              style={[styles.toggleBtn, opt === range && styles.toggleBtnActive]}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: opt === range }}
-            >
-              <Text style={[styles.toggleText, opt === range && styles.toggleTextActive]}>
-                {RANGE_LABEL[opt]}
-              </Text>
-            </Pressable>
-          ))}
         </View>
       </View>
 
@@ -175,30 +145,6 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xs,
     color: colors.textMuted,
     lineHeight: 18,
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    padding: 2,
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  toggleBtn: {
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: radius.sm,
-  },
-  toggleBtnActive: {
-    backgroundColor: colors.surface,
-  },
-  toggleText: {
-    fontSize: 11,
-    fontWeight: fontWeight.semibold,
-    color: colors.textMuted,
-  },
-  toggleTextActive: {
-    color: colors.text,
   },
   emptyBox: {
     backgroundColor: colors.surfaceMuted,

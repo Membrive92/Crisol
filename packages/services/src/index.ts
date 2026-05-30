@@ -77,6 +77,13 @@ export {
 } from './query/hooks/useCategories';
 export { useDebtCategorySummary } from './query/hooks/useDebt';
 export {
+  periodLabel,
+  stepAnchor,
+  clampAnchor,
+  canStepPrev,
+  canStepNext,
+} from './period/debt-period';
+export {
   useTransactions,
   useTransaction,
   useTransactionAvailablePeriods,

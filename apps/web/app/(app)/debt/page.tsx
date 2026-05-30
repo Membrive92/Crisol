@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useMemo, useState } from 'react';
 
 import {
+  periodLabel,
   useAccountBalances,
   useDebtCategorySummary,
   useDebtHealth,
@@ -19,6 +20,7 @@ import { DebtMonthlyEvolution } from '@/components/debt/debt-monthly-evolution';
 import { DebtTrendChart } from '@/components/debt/debt-trend-chart';
 import { EffortRatioSection } from '@/components/debt/effort-ratio-section';
 import { PaymentsSummaryCard } from '@/components/debt/payments-summary-card';
+import { PeriodNavigator } from '@/components/debt/period-navigator';
 import { RecurringQuotasList } from '@/components/debt/recurring-quotas-list';
 
 /**
@@ -33,7 +35,14 @@ import { RecurringQuotasList } from '@/components/debt/recurring-quotas-list';
  * cuando hay cuotas recurrentes pero ningún liability declarado.
  */
 export default function DebtPage() {
-  const [range, setRange] = useState<DebtTimeRange>('ytd');
+  const [range, setRange] = useState<DebtTimeRange>('year');
+  // PHASE-30.8 — Mes ancla `YYYY-MM` del período mostrado. Por defecto
+  // el mes en curso → período actual (comportamiento previo). El
+  // `PeriodNavigator` lo mueve (limitado a los meses con datos).
+  const [anchorMonth, setAnchorMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
   // PHASE-30.6 — el selector global de divisa del header pasa por aquí
   // como `target_currency` a los tres endpoints de deuda. Sin `convertAll`
   // (modo legacy del dashboard) volvemos al comportamiento native:
@@ -42,10 +51,10 @@ export default function DebtPage() {
   const convertAll = useCurrencyStore((s) => s.convertAll);
   const targetCurrency = convertAll ? storeCurrency : undefined;
 
-  const summaryQuery = useDebtCategorySummary(
-    range,
-    targetCurrency ? { targetCurrency } : {},
-  );
+  const summaryQuery = useDebtCategorySummary(range, {
+    anchor: `${anchorMonth}-01`,
+    ...(targetCurrency ? { targetCurrency } : {}),
+  });
   const healthQuery = useDebtHealth(
     targetCurrency ? { targetCurrency } : {},
   );
@@ -74,13 +83,12 @@ export default function DebtPage() {
     balancesQuery.data?.reference_currency ??
     'EUR';
 
-  // El numerador estricto es la cuota mensual estimada (lo que el
-  // backend devuelve en debt-health). Si no está cargado todavía,
-  // mostramos guion. El numerador ampliado lo derivamos del ratio
-  // ampliado y el income — backend ya hizo el cálculo correcto pero
-  // no expone el numerador absoluto.
+  // PHASE-30.8 — Numerador (pagos a deuda) y denominador (ingreso) del
+  // período, ambos del category-summary, para que el gauge y las cifras
+  // sean coherentes con el período elegido. El numerador ampliado se
+  // deriva del ratio ampliado (el backend no expone su absoluto).
   const monthlyIncome = summary?.monthly_income_avg ?? '0';
-  const monthlyDebtPayment = health?.monthly_debt_payment ?? '0';
+  const monthlyDebtPayment = summary?.monthly_debt_payment_avg ?? '0';
   const monthlyDebtPaymentExtended =
     summary && summary.effort_ratio_extended !== null
       ? (
@@ -93,6 +101,14 @@ export default function DebtPage() {
       <PageHeader />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
+        <PeriodNavigator
+          range={range}
+          onRangeChange={setRange}
+          anchor={anchorMonth}
+          onAnchorChange={setAnchorMonth}
+          availableFrom={summary?.available_from ?? null}
+          availableTo={summary?.available_to ?? null}
+        />
         <EffortRatioSection
           strictRatio={summary?.effort_ratio_strict ?? null}
           strictStatus={summary?.effort_ratio_strict_status ?? 'unknown'}
@@ -106,8 +122,7 @@ export default function DebtPage() {
         />
 
         <PaymentsSummaryCard
-          range={range}
-          onRangeChange={setRange}
+          title={`Pagos a deuda — ${periodLabel(range, anchorMonth)}`}
           totalPayments={summary?.total_payments ?? '0'}
           interestsAndFees={summary?.interests_and_fees ?? '0'}
           capitalAmortized={summary?.capital_amortized ?? '0'}

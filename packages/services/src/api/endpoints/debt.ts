@@ -4,6 +4,12 @@ import { apiClient } from '../client';
 
 export interface CategorySummaryQuery {
   range?: DebtTimeRange;
+  /**
+   * PHASE-30.8 — Cualquier día (`YYYY-MM-DD`) dentro del período a
+   * mostrar. `range` fija el tipo (mes/trimestre/año); `anchor` decide
+   * cuál. Si se omite, el período en curso.
+   */
+  anchor?: string;
   /** PHASE-30.6 — Convierte todos los importes a esta divisa (per-tx). */
   target_currency?: string;
 }
@@ -18,8 +24,11 @@ export const debtApi = {
     query: CategorySummaryQuery = {},
   ): Promise<DebtCategorySummary> {
     const params: Record<string, string> = {
-      range: query.range ?? 'ytd',
+      range: query.range ?? 'year',
     };
+    if (query.anchor) {
+      params['anchor'] = query.anchor;
+    }
     if (query.target_currency) {
       params['target_currency'] = query.target_currency;
     }

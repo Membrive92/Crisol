@@ -1,6 +1,5 @@
 'use client';
 
-import type { DebtTimeRange } from '@crisol/types';
 import {
   colors,
   fontSize,
@@ -13,8 +12,8 @@ import {
 import { Card } from '@/components/ui/card';
 
 export interface PaymentsSummaryCardProps {
-  range: DebtTimeRange;
-  onRangeChange: (range: DebtTimeRange) => void;
+  /** Título con el período, p. ej. "Pagos a deuda — Abril 2025". */
+  title: string;
   totalPayments: string;
   interestsAndFees: string;
   capitalAmortized: string;
@@ -22,29 +21,17 @@ export interface PaymentsSummaryCardProps {
   isLoading: boolean;
 }
 
-const RANGE_LABEL: Record<DebtTimeRange, string> = {
-  ytd: 'YTD',
-  '12m': '12 meses',
-  month: 'Este mes',
-};
-
-const RANGE_TITLE: Record<DebtTimeRange, string> = {
-  ytd: 'Pagos a deuda — año en curso',
-  '12m': 'Pagos a deuda — últimos 12 meses',
-  month: 'Pagos a deuda — este mes',
-};
-
 /**
  * PHASE-30.3 — Card de "Pagos a deuda" de Capa 1.
  *
- * Selector de rango (YTD / 12M / Mes), KPI grande con el total
- * y desglose intereses vs capital con una barra horizontal apilada
- * + tooltips educativos. Para usuarios sin datos en el rango,
- * pinta un mensaje "Sin pagos registrados".
+ * KPI grande con el total y desglose intereses vs capital en una barra
+ * horizontal apilada + tooltips educativos. Para usuarios sin datos en
+ * el período, pinta un mensaje "Sin pagos registrados". El selector de
+ * período vive ahora fuera (PHASE-30.8, `PeriodNavigator`): la card
+ * recibe el período ya resuelto como `title`.
  */
 export function PaymentsSummaryCard({
-  range,
-  onRangeChange,
+  title,
   totalPayments,
   interestsAndFees,
   capitalAmortized,
@@ -85,7 +72,7 @@ export function PaymentsSummaryCard({
               letterSpacing: '-0.01em',
             }}
           >
-            {RANGE_TITLE[range]}
+            {title}
           </h2>
           <p
             style={{
@@ -100,7 +87,6 @@ export function PaymentsSummaryCard({
             (capital + intereses) en este periodo.
           </p>
         </div>
-        <RangeSelector range={range} onChange={onRangeChange} />
       </header>
 
       {empty ? (
@@ -187,54 +173,6 @@ export function PaymentsSummaryCard({
   );
 }
 
-function RangeSelector({
-  range,
-  onChange,
-}: {
-  range: DebtTimeRange;
-  onChange: (range: DebtTimeRange) => void;
-}) {
-  const options: DebtTimeRange[] = ['ytd', '12m', 'month'];
-  return (
-    <div
-      role="tablist"
-      aria-label="Rango temporal"
-      style={{
-        display: 'inline-flex',
-        padding: 2,
-        backgroundColor: colors.surfaceMuted,
-        border: `1px solid ${colors.border}`,
-        borderRadius: radius.sm,
-        fontSize: fontSize.xs,
-        fontWeight: fontWeight.semibold,
-      }}
-    >
-      {options.map((opt) => {
-        const active = opt === range;
-        return (
-          <button
-            type="button"
-            key={opt}
-            role="tab"
-            aria-selected={active}
-            onClick={() => onChange(opt)}
-            style={{
-              padding: `${spacing.xs}px ${spacing.sm}px`,
-              backgroundColor: active ? colors.surface : 'transparent',
-              color: active ? colors.text : colors.textMuted,
-              border: 'none',
-              borderRadius: radius.sm,
-              cursor: 'pointer',
-              boxShadow: active ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
-            }}
-          >
-            {RANGE_LABEL[opt]}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 function Breakdown({
   swatch,
