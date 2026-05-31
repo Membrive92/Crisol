@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from decimal import Decimal
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from httpx import AsyncClient
 
@@ -39,7 +39,7 @@ def _mock_storage_and_ai(
     extract_side_effect: Exception | None = None,
 ) -> Any:
     """Mockea `storage.put_receipt`, `storage.delete_receipt` y la extracción."""
-    delete_mock = MagicMock(return_value=None)
+    delete_mock = AsyncMock(return_value=None)
 
     extract_kwargs: dict[str, Any] = {}
     if extract_side_effect is not None:
@@ -50,6 +50,7 @@ def _mock_storage_and_ai(
     with (
         patch(
             "app.modules.personal_finance.receipts.service.storage.put_receipt",
+            new_callable=AsyncMock,
             return_value="fakekey/img.jpg",
         ),
         patch("app.modules.personal_finance.receipts.service.storage.delete_receipt", delete_mock),
@@ -226,6 +227,7 @@ async def test_get_blob_returns_image_bytes(client: AsyncClient) -> None:
     fake_bytes = b"\xff\xd8\xff\xe0image-bytes"
     with patch(
         "app.modules.personal_finance.receipts.router.storage.get_receipt",
+        new_callable=AsyncMock,
         return_value=fake_bytes,
     ):
         r = await client.get(f"/receipts/{rid}/blob", headers=_auth(token))
@@ -244,6 +246,7 @@ async def test_get_blob_isolated_per_user(client: AsyncClient) -> None:
 
     with patch(
         "app.modules.personal_finance.receipts.router.storage.get_receipt",
+        new_callable=AsyncMock,
         return_value=b"x",
     ) as get_mock:
         r = await client.get(f"/receipts/{rid}/blob", headers=_auth(token_b))
@@ -263,6 +266,7 @@ async def test_get_blob_storage_failure_returns_404(client: AsyncClient) -> None
 
     with patch(
         "app.modules.personal_finance.receipts.router.storage.get_receipt",
+        new_callable=AsyncMock,
         side_effect=StorageError("blob no existe"),
     ):
         r = await client.get(f"/receipts/{rid}/blob", headers=_auth(token))

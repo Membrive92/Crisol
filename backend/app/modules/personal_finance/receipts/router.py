@@ -146,7 +146,7 @@ async def get_receipt_blob_endpoint(
     if receipt is None:
         raise HTTPException(status_code=404, detail="Recibo no encontrado")
     try:
-        payload = storage.get_receipt(receipt.blob_key)
+        payload = await storage.get_receipt(receipt.blob_key)
     except storage.StorageError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -155,7 +155,7 @@ async def get_receipt_blob_endpoint(
     return Response(
         content=payload,
         media_type=receipt.content_type or "application/octet-stream",
-        headers={"Cache-Control": "private, max-age=300"},
+        headers={"Cache-Control": "private, max-age=300", "X-Content-Type-Options": "nosniff"},
     )
 
 

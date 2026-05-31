@@ -6,15 +6,22 @@ con su API HTTP. Ningún otro módulo importa httpx para hablar con Ollama.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 from typing import Any
 
 import httpx
 from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL.Image import DecompressionBombError
 
 from app.core.config import settings
-from app.modules.ai.exceptions import AiTimeoutError, AiUnavailableError
+from app.modules.ai.exceptions import AiError, AiTimeoutError, AiUnavailableError
+
+# Cota anti decompression-bomb: Pillow lanza DecompressionBombError al abrir
+# imágenes que declaran más píxeles que esto (un recibo real cabe de sobra en
+# 50 MP). Evita el agotamiento de memoria al redimensionar (AUDIT-2026-05).
+Image.MAX_IMAGE_PIXELS = 50_000_000
 
 # Tamaño máximo del lado largo al pasar imágenes al modelo de visión. Las
 # fotos de móvil llegan a 4032 px y producen miles de tokens de visión que
@@ -50,6 +57,10 @@ def _downscale_for_vision(image: bytes) -> bytes:
             buf = io.BytesIO()
             oriented.save(buf, format="JPEG", quality=_JPEG_QUALITY, optimize=True)
             return buf.getvalue()
+    except DecompressionBombError as e:
+        # Imagen-bomba (dimensiones declaradas enormes) — rechazo limpio en
+        # vez de agotar memoria o pasarla a Ollama (AUDIT-2026-05).
+        raise AiError("Imagen rechazada: dimensiones excesivas.") from e
     except (OSError, UnidentifiedImageError):
         return image
 
@@ -122,7 +133,9 @@ async def generate_with_image(
         AiTimeout: la inferencia excede el timeout configurado.
     """
     target = model or settings.ollama_vision_model
-    encoded = base64.b64encode(_downscale_for_vision(image)).decode("ascii")
+    # El resize Pillow es CPU-bound y bloqueante → threadpool (AUDIT-2026-05).
+    downscaled = await asyncio.to_thread(_downscale_for_vision, image)
+    encoded = base64.b64encode(downscaled).decode("ascii")
     payload: dict[str, Any] = {
         "model": target,
         "prompt": prompt,

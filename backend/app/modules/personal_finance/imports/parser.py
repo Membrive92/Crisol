@@ -159,6 +159,9 @@ def parse_xlsx(payload: bytes) -> list[dict[str, str]]:
 
 
 _XLSX_HEADER_SCAN_LIMIT = 30
+# Cota anti decompression-bomb: un extracto bancario real rara vez supera unas
+# decenas de páginas; > 50 lo tratamos como abusivo (AUDIT-2026-05).
+_MAX_PDF_PAGES = 50
 
 
 def parse_xlsx_smart(payload: bytes) -> list[dict[str, str]]:
@@ -275,6 +278,8 @@ def parse_pdf(payload: bytes) -> list[dict[str, str]]:
 
     tables: list[list[list[str | None]]] = []
     with pdf:
+        if len(pdf.pages) > _MAX_PDF_PAGES:
+            raise ParseError(f"PDF demasiado largo (> {_MAX_PDF_PAGES} páginas).")
         for page in pdf.pages:
             for table in page.extract_tables():
                 if table:
@@ -621,6 +626,8 @@ def parse_pdf_smart(payload: bytes) -> list[dict[str, str]]:
     candidates: list[list[list[str | None]]] = []
     full_text_parts: list[str] = []
     with pdf:
+        if len(pdf.pages) > _MAX_PDF_PAGES:
+            raise ParseError(f"PDF demasiado largo (> {_MAX_PDF_PAGES} páginas).")
         for page in pdf.pages:
             try:
                 text = page.extract_text() or ""

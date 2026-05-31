@@ -11,6 +11,7 @@ Pipeline síncrono:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
 import uuid
@@ -518,7 +519,7 @@ async def _parse_with_fallbacks(
     """
     fmt = detect_format(filename, content_type)
     if fmt == "csv":
-        rows = parse_file(payload, filename, content_type)
+        rows = await asyncio.to_thread(parse_file, payload, filename, content_type)
         return rows, mappings, ImportSource.CSV
     if fmt == "xlsx":
         # Intentamos primero el smart parser (mismo enfoque que PDF):
@@ -529,10 +530,10 @@ async def _parse_with_fallbacks(
         # ausentes), caemos al `parse_xlsx` legacy con el mapping del
         # usuario — comportamiento histórico.
         try:
-            rows = parse_xlsx_smart(payload)
+            rows = await asyncio.to_thread(parse_xlsx_smart, payload)
             return rows, SMART_FORCED_MAPPING, ImportSource.XLSX_SMART
         except SmartParseAmbiguousError:
-            rows = parse_file(payload, filename, content_type)
+            rows = await asyncio.to_thread(parse_file, payload, filename, content_type)
             return rows, mappings, ImportSource.XLSX
 
     # PDF
@@ -541,7 +542,7 @@ async def _parse_with_fallbacks(
         return rows, VISION_FORCED_MAPPING, ImportSource.VISION
 
     try:
-        rows = parse_pdf_smart(payload)
+        rows = await asyncio.to_thread(parse_pdf_smart, payload)
         return rows, SMART_FORCED_MAPPING, ImportSource.PDFPLUMBER_SMART
     except NoTablesInPdfError:
         rows = await _parse_pdf_with_vision(payload)
@@ -550,7 +551,7 @@ async def _parse_with_fallbacks(
         # Heurística no encontró una tabla clara: caemos al legacy
         # parser que concatena todas las tablas y deja al usuario
         # mapear las columnas a mano (comportamiento histórico).
-        rows = parse_file(payload, filename, content_type)
+        rows = await asyncio.to_thread(parse_file, payload, filename, content_type)
         return rows, mappings, ImportSource.PDFPLUMBER_LEGACY
 
 

@@ -7,6 +7,7 @@ o entregan bytes.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import uuid
 from datetime import UTC, datetime
@@ -51,7 +52,16 @@ def _ensure_bucket(bucket: str) -> None:
     _buckets_ensured.add(bucket)
 
 
-def put_receipt(user_id: uuid.UUID, payload: bytes, content_type: str) -> str:
+async def put_receipt(user_id: uuid.UUID, payload: bytes, content_type: str) -> str:
+    """Sube los bytes de un recibo y devuelve la `object_key`.
+
+    El I/O de MinIO es bloqueante → se ejecuta en un threadpool para no
+    congelar el event loop (AUDIT-2026-05).
+    """
+    return await asyncio.to_thread(_put_receipt_sync, user_id, payload, content_type)
+
+
+def _put_receipt_sync(user_id: uuid.UUID, payload: bytes, content_type: str) -> str:
     """Sube los bytes de un recibo y devuelve la `object_key`.
 
     El path es `<user_id>/<YYYYMMDD>/<uuid>.<ext>` para facilitar
@@ -79,7 +89,12 @@ def put_receipt(user_id: uuid.UUID, payload: bytes, content_type: str) -> str:
     return key
 
 
-def get_receipt(object_key: str) -> bytes:
+async def get_receipt(object_key: str) -> bytes:
+    """Descarga el blob como bytes (I/O MinIO en threadpool — AUDIT-2026-05)."""
+    return await asyncio.to_thread(_get_receipt_sync, object_key)
+
+
+def _get_receipt_sync(object_key: str) -> bytes:
     """Descarga el blob como bytes."""
     bucket = settings.minio_bucket_receipts
     _ensure_bucket(bucket)
@@ -95,7 +110,12 @@ def get_receipt(object_key: str) -> bytes:
         raise StorageError(f"Descarga fallida ({object_key}): {e}") from e
 
 
-def delete_receipt(object_key: str) -> None:
+async def delete_receipt(object_key: str) -> None:
+    """Elimina el blob (best-effort; I/O MinIO en threadpool — AUDIT-2026-05)."""
+    await asyncio.to_thread(_delete_receipt_sync, object_key)
+
+
+def _delete_receipt_sync(object_key: str) -> None:
     """Elimina el blob (best-effort: ignora si no existe)."""
     bucket = settings.minio_bucket_receipts
     client = get_client()

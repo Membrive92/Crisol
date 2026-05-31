@@ -52,26 +52,30 @@ async def extract_and_persist(
             detail=f"Tipo de imagen no soportado: {content_type}",
         )
 
-    blob_key = storage.put_receipt(user_id, payload, content_type)
+    blob_key = await storage.put_receipt(user_id, payload, content_type)
 
+    # AUDIT-2026-05: limpiar el blob ante CUALQUIER fallo posterior (IA,
+    # imagen-bomba, error de BD), no sólo AiError — así no quedan objetos
+    # MinIO huérfanos sin fila en BD.
     try:
         extraction = await ai_service.extract_receipt(payload)
+        receipt = Receipt(
+            user_id=user_id,
+            status=ReceiptStatus.PENDING,
+            blob_key=blob_key,
+            content_type=content_type,
+            extraction=_serialize_extraction(extraction),
+        )
+        receipt = await create_receipt(db, receipt)
     except AiError as e:
-        # Limpiamos el blob si la IA falla — no queremos huérfanos.
-        storage.delete_receipt(blob_key)
+        await storage.delete_receipt(blob_key)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Extracción fallida: {e}",
+            detail="La extracción de tickets no está disponible ahora mismo.",
         ) from e
-
-    receipt = Receipt(
-        user_id=user_id,
-        status=ReceiptStatus.PENDING,
-        blob_key=blob_key,
-        content_type=content_type,
-        extraction=_serialize_extraction(extraction),
-    )
-    receipt = await create_receipt(db, receipt)
+    except Exception:
+        await storage.delete_receipt(blob_key)
+        raise
     return receipt, extraction
 
 
