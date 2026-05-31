@@ -46,8 +46,6 @@ export {
   useAccounts,
   useAmortizationSchedule,
   useCreateAccount,
-  useDebtHealth,
-  useDebtHistory,
   useDeleteAccount,
   usePayInstallment,
   useRegenerateAmortization,
@@ -75,7 +73,11 @@ export {
   useUpdateCategory,
   useDeleteCategory,
 } from './query/hooks/useCategories';
-export { useDebtCategorySummary } from './query/hooks/useDebt';
+export {
+  useDebtCategorySummary,
+  useDebtHealth,
+  useDebtHistory,
+} from './query/hooks/useDebt';
 export {
   periodLabel,
   stepAnchor,

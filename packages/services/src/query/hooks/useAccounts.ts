@@ -7,8 +7,6 @@ import type {
   AccountUpdateRequest,
   AmortizationRow,
   AmortizationSchedule,
-  DebtHealthKpis,
-  DebtHistoryResponse,
   InstallmentPayRequest,
   InstallmentUpdateRequest,
 } from '@crisol/types';
@@ -71,36 +69,6 @@ export function useAccountBalances() {
   });
 }
 
-export function useDebtHealth(options: { targetCurrency?: string } = {}) {
-  const targetCurrency = options.targetCurrency;
-  return useQuery<DebtHealthKpis, Error>({
-    queryKey: queryKeys.accounts.debtHealth(targetCurrency),
-    queryFn: () =>
-      accountsApi.debtHealth(
-        targetCurrency ? { target_currency: targetCurrency } : {},
-      ),
-    staleTime: 1000 * 60,
-  });
-}
-
-export function useDebtHistory(
-  options: { monthsBack?: number; monthsAhead?: number; targetCurrency?: string } = {},
-) {
-  const monthsBack = options.monthsBack ?? 12;
-  const monthsAhead = options.monthsAhead ?? 12;
-  const targetCurrency = options.targetCurrency;
-  return useQuery<DebtHistoryResponse, Error>({
-    queryKey: queryKeys.accounts.debtHistory(monthsBack, monthsAhead, targetCurrency),
-    queryFn: () =>
-      accountsApi.debtHistory({
-        months_back: monthsBack,
-        months_ahead: monthsAhead,
-        ...(targetCurrency ? { target_currency: targetCurrency } : {}),
-      }),
-    staleTime: 1000 * 60,
-  });
-}
-
 export function useAmortizationSchedule(id: string | undefined) {
   return useQuery<AmortizationSchedule, Error>({
     queryKey: id
@@ -114,12 +82,17 @@ export function useAmortizationSchedule(id: string | undefined) {
 
 /**
  * PHASE-24.1: helper común que invalida el cuadro de amortización
- * (accounts.amortization), balances y debt-health tras tocar una cuota.
+ * (accounts.amortization) + balances tras tocar una cuota.
+ *
+ * AUDIT-2026-05: además invalida `debt.all` — pagar/editar una cuota
+ * cambia los KPIs de deuda (debt-health, debt-history, category-summary)
+ * y antes quedaban stale hasta el `staleTime` de 60s.
  */
 function invalidateAmortization(
   queryClient: ReturnType<typeof useQueryClient>,
 ) {
   void queryClient.invalidateQueries({ queryKey: queryKeys.accounts.all });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
 }
 
 /**

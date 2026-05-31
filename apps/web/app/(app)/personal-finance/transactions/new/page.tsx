@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 
 import { useCreateTransaction } from '@crisol/services';
+import { toast } from '@crisol/store';
 import type { TransactionCreateRequest } from '@crisol/types';
 import { colors, fontSize, spacing } from '@crisol/ui';
 
@@ -15,7 +16,20 @@ export default function NewTransactionPage() {
 
   function handleSubmit(payload: TransactionCreateRequest) {
     mutation.mutate(payload, {
-      onSuccess: () => router.push('/personal-finance/transactions'),
+      onSuccess: (created) => {
+        // AUDIT-2026-05: el toast de budget vive ahora en la app (antes
+        // en el hook). dedupKey por budget evita spam al crear varias
+        // txs seguidas en la misma categoría (PHASE-15.1).
+        const alert = created.budget_alert;
+        if (alert) {
+          toast.show({
+            kind: alert.status === 'over' ? 'error' : 'warning',
+            message: alert.next_due_label,
+            dedupKey: `budget:${alert.budget_id}`,
+          });
+        }
+        router.push('/personal-finance/transactions');
+      },
     });
   }
 

@@ -6,10 +6,6 @@ import type {
   TransactionListQuery,
   TransactionUpdateRequest,
 } from '@crisol/types';
-// PHASE-14.5: el hook dispara un toast cuando la respuesta del POST
-// trae `budget_alert`. La store de toasts es cross-platform y
-// `toast.warning` / `toast.error` ya tienen palette por kind.
-import { toast } from '@crisol/store';
 
 import { transactionsApi } from '../../api/endpoints/transactions';
 import { queryKeys } from '../keys';
@@ -59,29 +55,24 @@ export function useTransactionAvailablePeriods() {
   });
 }
 
+/**
+ * Crea una transacción. `created.budget_alert` puede venir poblado
+ * (PHASE-14.5) — AUDIT-2026-05: el toast lo dispara la app en su propio
+ * `onSuccess` (cada plataforma decide cómo notificar) en vez de aquí;
+ * `@crisol/services` ya no importa `@crisol/store`.
+ */
 export function useCreateTransaction() {
   const queryClient = useQueryClient();
   return useMutation<Transaction, Error, TransactionCreateRequest>({
     mutationFn: (data) => transactionsApi.create(data),
-    onSuccess: (created) => {
+    onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
       // Crear afecta budgets — invalidamos el grupo entero para que
       // los status cards refresquen sin esperar al staleTime.
       void queryClient.invalidateQueries({ queryKey: queryKeys.budgets.all });
-      // PHASE-14.5: notificación proactiva si la nueva tx empuja a
-      // warning/over. El backend prepara `next_due_label` listo
-      // para el toast.
-      const alert = created.budget_alert;
-      if (alert) {
-        // PHASE-15.1: dedupKey por budget evita spam si el usuario
-        // crea varias txs seguidas en la misma categoría — el toast
-        // se reemplaza en su sitio en lugar de apilarse.
-        toast.show({
-          kind: alert.status === 'over' ? 'error' : 'warning',
-          message: alert.next_due_label,
-          dedupKey: `budget:${alert.budget_id}`,
-        });
-      }
+      // AUDIT-2026-05: una tx categorizada como pago/interés de deuda
+      // mueve los KPIs de deuda (Capa 1 + Capa 2).
+      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
     },
   });
 }
@@ -92,6 +83,8 @@ export function useUpdateTransaction(id: string) {
     mutationFn: (data) => transactionsApi.update(id, data),
     onSuccess: (updated) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.budgets.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
       queryClient.setQueryData(queryKeys.transactions.detail(updated.id), updated);
     },
   });
@@ -108,6 +101,7 @@ export function useDeleteTransaction() {
       // se actualicen sin esperar a staleTime.
       void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
       void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
     },
   });
 }
@@ -125,6 +119,7 @@ export function useBulkDeleteTransactions() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
       void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
       void queryClient.invalidateQueries({ queryKey: queryKeys.budgets.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
     },
   });
 }
@@ -146,6 +141,7 @@ export function useRestoreTransaction() {
       // que delete pero al revés.
       void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
       void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
     },
   });
 }
@@ -175,6 +171,7 @@ export function useBulkRestoreTrash() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
       void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
       void queryClient.invalidateQueries({ queryKey: queryKeys.budgets.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
     },
   });
 }

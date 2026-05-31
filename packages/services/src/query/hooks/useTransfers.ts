@@ -49,6 +49,9 @@ function invalidateAll(queryClient: ReturnType<typeof useQueryClient>) {
   void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
   void queryClient.invalidateQueries({ queryKey: queryKeys.budgets.all });
   void queryClient.invalidateQueries({ queryKey: queryKeys.accounts.balances() });
+  // AUDIT-2026-05: un pago a deuda (income transfer a una liability) o
+  // un convert-to-debt mueven los KPIs de deuda — refrescarlos también.
+  void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
 }
 
 /**

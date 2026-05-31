@@ -22,27 +22,13 @@ export const queryKeys = {
       [...queryKeys.accounts.all, 'list', includeArchived] as const,
     detail: (id: string) => [...queryKeys.accounts.all, 'detail', id] as const,
     balances: () => [...queryKeys.accounts.all, 'balances'] as const,
-    debtHealth: (targetCurrency?: string) =>
-      [
-        ...queryKeys.accounts.all,
-        'debt-health',
-        targetCurrency ?? 'native',
-      ] as const,
-    debtHistory: (
-      monthsBack = 12,
-      monthsAhead = 12,
-      targetCurrency?: string,
-    ) =>
-      [
-        ...queryKeys.accounts.all,
-        'debt-history',
-        monthsBack,
-        monthsAhead,
-        targetCurrency ?? 'native',
-      ] as const,
     amortization: (id: string) =>
       [...queryKeys.accounts.all, 'amortization', id] as const,
   },
+  // AUDIT-2026-05: debt-health/debt-history viven bajo `debt.*` (antes
+  // bajo `accounts.*`). Así `debt.all` es el único objetivo de
+  // invalidación de todo lo de deuda (Capa 1 + Capa 2), y las
+  // mutaciones que mueven deuda invalidan un solo namespace.
   debt: {
     all: ['debt'] as const,
     categorySummary: (
@@ -59,6 +45,16 @@ export const queryKeys = {
         range,
         targetCurrency ?? 'native',
         anchor ?? 'current',
+      ] as const,
+    health: (targetCurrency?: string) =>
+      [...queryKeys.debt.all, 'health', targetCurrency ?? 'native'] as const,
+    history: (monthsBack = 12, monthsAhead = 12, targetCurrency?: string) =>
+      [
+        ...queryKeys.debt.all,
+        'history',
+        monthsBack,
+        monthsAhead,
+        targetCurrency ?? 'native',
       ] as const,
   },
   transfers: {

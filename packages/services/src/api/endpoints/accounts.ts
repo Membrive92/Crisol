@@ -5,8 +5,6 @@ import type {
   AccountUpdateRequest,
   AmortizationRow,
   AmortizationSchedule,
-  DebtHealthKpis,
-  DebtHistoryResponse,
   InstallmentPayRequest,
   InstallmentUpdateRequest,
 } from '@crisol/types';
@@ -18,19 +16,8 @@ export interface AccountListQuery {
   include_archived?: boolean;
 }
 
-export interface DebtHistoryQuery {
-  /** Meses cerrados hacia atrás (1-36). Default 12. */
-  months_back?: number;
-  /** Meses proyectados hacia adelante (0-36, 0 desactiva). Default 12. */
-  months_ahead?: number;
-  /** PHASE-30.6 — Convierte saldos y flujo histórico a esta divisa. */
-  target_currency?: string;
-}
-
-export interface DebtHealthQuery {
-  /** PHASE-30.6 — Convierte saldos y KPIs a esta divisa. */
-  target_currency?: string;
-}
+// AUDIT-2026-05: `debtHealth`/`debtHistory` (+ sus query types) se
+// movieron a `debtApi` para consolidar el módulo deuda.
 
 export const accountsApi = {
   async list(query: AccountListQuery = {}): Promise<Account[]> {
@@ -43,28 +30,6 @@ export const accountsApi = {
   async balances(): Promise<AccountBalancesResponse> {
     const response = await apiClient.get<AccountBalancesResponse>(
       '/accounts/balances',
-    );
-    return response.data;
-  },
-
-  async debtHealth(query: DebtHealthQuery = {}): Promise<DebtHealthKpis> {
-    const params: Record<string, string> = {};
-    if (query.target_currency) params['target_currency'] = query.target_currency;
-    const response = await apiClient.get<DebtHealthKpis>(
-      '/accounts/debt-health',
-      { params },
-    );
-    return response.data;
-  },
-
-  async debtHistory(query: DebtHistoryQuery = {}): Promise<DebtHistoryResponse> {
-    const params: Record<string, string | number> = {};
-    if (query.months_back !== undefined) params['months_back'] = query.months_back;
-    if (query.months_ahead !== undefined) params['months_ahead'] = query.months_ahead;
-    if (query.target_currency) params['target_currency'] = query.target_currency;
-    const response = await apiClient.get<DebtHistoryResponse>(
-      '/accounts/debt-history',
-      { params },
     );
     return response.data;
   },
