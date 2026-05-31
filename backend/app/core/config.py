@@ -6,7 +6,14 @@ Ningún otro archivo debe leer `os.environ` directamente.
 
 from __future__ import annotations
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Valor placeholder del secreto JWT — público (está en el repo). Si llega a
+# un entorno no-dev sin sobreescribir, cualquiera podría forjar tokens.
+_DEFAULT_JWT_SECRET = "DEV-ONLY-CHANGE-ME-IN-DOT-ENV-PLEASE-32B"
+# Entornos donde NO se exige config endurecida (dev local + CI).
+_NON_PROD_ENVS = frozenset({"development", "test"})
 
 
 class Settings(BaseSettings):
@@ -36,7 +43,7 @@ class Settings(BaseSettings):
     # Default cumple los 32 bytes mínimos para silenciar la advertencia de
     # `PyJWT`, pero NO es seguro: cada despliegue debe sobreescribirlo en `.env`
     # con algo generado por `openssl rand -hex 32` o `secrets.token_hex(32)`.
-    jwt_secret_key: str = "DEV-ONLY-CHANGE-ME-IN-DOT-ENV-PLEASE-32B"
+    jwt_secret_key: str = _DEFAULT_JWT_SECRET
     jwt_access_token_expire_minutes: int = 15
     jwt_refresh_token_expire_days: int = 7
     # TTL extendido cuando el cliente pide "Recordarme" en el login.
@@ -113,6 +120,37 @@ class Settings(BaseSettings):
     def cors_origins_list(self) -> list[str]:
         """Devuelve los orígenes CORS como lista."""
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @model_validator(mode="after")
+    def _enforce_prod_hardening(self) -> Settings:
+        """Falla AL ARRANCAR si la config es insegura fuera de dev/test.
+
+        AUDIT-2026-05 (weak-default-jwt-secret): la app NO debe arrancar
+        con el secreto JWT por defecto / corto, credenciales MinIO por
+        defecto, `app_debug` o CORS wildcard en un entorno productivo. En
+        `development`/`test` se omiten estas comprobaciones.
+        """
+        if self.app_env in _NON_PROD_ENVS:
+            return self
+        problems: list[str] = []
+        if self.jwt_secret_key == _DEFAULT_JWT_SECRET or len(self.jwt_secret_key) < 32:
+            problems.append(
+                "JWT_SECRET_KEY debe sobreescribirse con >= 32 bytes "
+                "(p.ej. `secrets.token_hex(32)`)"
+            )
+        if self.minio_access_key == "minioadmin" or self.minio_secret_key == "minioadmin":
+            problems.append("MINIO_ACCESS_KEY / MINIO_SECRET_KEY no pueden ser 'minioadmin'")
+        if self.app_debug:
+            problems.append("APP_DEBUG debe ser false fuera de desarrollo")
+        if "*" in self.cors_origins:
+            problems.append("CORS_ORIGINS no puede ser un wildcard")
+        if problems:
+            raise ValueError(
+                f"Configuración insegura para app_env={self.app_env!r}: "
+                + "; ".join(problems)
+                + ". Define estas variables en el entorno antes de arrancar."
+            )
+        return self
 
 
 settings = Settings()

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import logging
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.scheduler import create_scheduler
@@ -64,6 +66,39 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+logger = logging.getLogger("crisol")
+
+
+@app.middleware("http")
+async def _security_headers(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    """AUDIT-2026-05 — cabeceras de seguridad en toda respuesta."""
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault(
+        "Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'"
+    )
+    if settings.auth_cookie_secure:
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=63072000; includeSubDomains"
+        )
+    return response
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """AUDIT-2026-05 — nunca devolver tracebacks al cliente; loguear server-side.
+
+    Sólo intercepta errores NO controlados (500). `HTTPException` y los
+    errores de validación de FastAPI siguen su propio handler con su
+    `detail` específico.
+    """
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "Error interno del servidor."})
 
 
 app.include_router(ai_router)
