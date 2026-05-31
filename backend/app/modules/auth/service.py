@@ -210,6 +210,14 @@ async def logout(db: AsyncSession, refresh_token_plain: str) -> None:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Refresh token inválido",
         )
+    # AUDIT-2026-05: verifica el SECRETO, no sólo el `token_id` (que es
+    # público/indexado). Sin esto, conocer el token_id bastaría para
+    # revocar la sesión de cualquiera (mismo verify que hace `refresh`).
+    if not verify_refresh_token(refresh_token_plain, token_record.token_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token inválido",
+        )
     await revoke_token(db, token_record.id)
 
 

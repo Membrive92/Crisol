@@ -215,6 +215,33 @@ async def test_logout_ok(client: AsyncClient) -> None:
     assert response2.status_code == 401
 
 
+async def test_logout_rejects_forged_secret(client: AsyncClient) -> None:
+    """AUDIT-2026-05 — conocer el `token_id` (público/indexado) no basta
+    para revocar la sesión: logout exige el secreto correcto, igual que
+    refresh. Un token forjado con token_id válido + secreto basura → 401
+    y NO revoca el token legítimo."""
+    _, body = await _register(client, email="logout_forged@example.com")
+    access = body["access_token"]
+    refresh_token = body["refresh_token"]
+    token_id = refresh_token.split(".")[0]
+    forged = f"{token_id}.zzz-this-is-not-the-secret"
+
+    # La cookie tiene prioridad sobre el body — la limpiamos para que el
+    # endpoint use el token forjado del body.
+    client.cookies.clear()
+    forged_resp = await client.post(
+        "/auth/logout",
+        json={"refresh_token": forged},
+        headers={"Authorization": f"Bearer {access}"},
+    )
+    assert forged_resp.status_code == 401
+
+    # El token legítimo NO fue revocado: el refresh sigue funcionando.
+    client.cookies.clear()
+    ok_resp = await client.post("/auth/refresh", json={"refresh_token": refresh_token})
+    assert ok_resp.status_code == 200
+
+
 # ─────────────────────────────────────
 # Me
 # ─────────────────────────────────────

@@ -439,6 +439,15 @@ async def _process_and_persist(
     # AUDIT-2026-05: comprueba UNA vez si la cuenta tiene `expected`
     # pendientes. El caso común (ninguna) se saltaba con N queries
     # vacías — una por fila. Con esto sólo reconciliamos si hace falta.
+    #
+    # Trade-off consciente (P2): si un proceso concurrente (cron de
+    # autopost) inserta un `expected` DESPUÉS de este check pero antes de
+    # terminar el import, esa fila no se reconcilia en este lote y puede
+    # crear un duplicado. El peor caso es un duplicado que el usuario
+    # reconcilia a mano — no hay pérdida de datos ni cálculo erróneo — y
+    # la ventana es de microsegundos. El código previo (reconcile por
+    # fila) tenía la misma carrera a grano más fino. Aceptable para un
+    # host único de dev; revisitar si se pasa a multi-worker.
     try_reconcile = await has_pending_expected(db, user_id, account_id)
 
     inserted = 0

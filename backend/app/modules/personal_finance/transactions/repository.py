@@ -250,6 +250,22 @@ async def bulk_soft_delete_transactions(
     lo que veo en pantalla con este filtro" sea exacto. Si no se pasa
     ningún filtro, mueve todas las transacciones activas del usuario.
     """
+    # AUDIT-2026-05: capturamos los ids que ESTE bulk va a trashear ANTES
+    # de hacerlo, para desvincular sólo las parejas de las filas que
+    # acabamos de mover a la papelera. (Una versión anterior usaba
+    # "todas las trasheadas del usuario", lo que desvinculaba parejas
+    # huérfanas preexistentes aunque no matchearan el filtro del bulk.)
+    select_ids = _scope(
+        select(Transaction.id),
+        user_id,
+        category_id=category_id,
+        date_from=date_from,
+        date_to=date_to,
+        search=search,
+        deleted="active",
+    )
+    to_delete_ids = list((await db.execute(select_ids)).scalars().all())
+
     stmt = update(Transaction).values(deleted_at=datetime.now(UTC))
     stmt = _scope(
         stmt,
@@ -261,22 +277,18 @@ async def bulk_soft_delete_transactions(
         deleted="active",
     )
     result = await db.execute(stmt)
-    # AUDIT-2026-05: tras el bulk soft-delete, desvincula cualquier pata
-    # activa que quedara apuntando a una pareja recién trasheada (mismo
-    # motivo que en `soft_delete_transaction`). Set-based + idempotente.
-    trashed_ids = (
-        select(Transaction.id)
-        .where(Transaction.user_id == user_id)
-        .where(Transaction.deleted_at.is_not(None))
-    )
-    orphan_unlink = (
-        update(Transaction)
-        .where(Transaction.user_id == user_id)
-        .where(Transaction.deleted_at.is_(None))
-        .where(Transaction.transfer_pair_id.in_(trashed_ids))
-        .values(transfer_pair_id=None)
-    )
-    await db.execute(orphan_unlink)
+
+    # Desvincula sólo las patas activas cuya pareja se acaba de trashear
+    # en este bulk (mismo motivo que en `soft_delete_transaction`).
+    if to_delete_ids:
+        orphan_unlink = (
+            update(Transaction)
+            .where(Transaction.user_id == user_id)
+            .where(Transaction.deleted_at.is_(None))
+            .where(Transaction.transfer_pair_id.in_(to_delete_ids))
+            .values(transfer_pair_id=None)
+        )
+        await db.execute(orphan_unlink)
     await db.flush()
     return result.rowcount or 0
 

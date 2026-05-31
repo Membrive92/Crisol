@@ -29,6 +29,32 @@
 | ⚪ Info               | 5  |
 | **Total (deduplicado)** | **~56** + 11 puntos ciegos a verificar |
 
+---
+
+## Remediación — AUDIT-2026-05 (estado)
+
+Remediación ejecutada en 8 olas, **una rama `main` verde por ola** (autorización
+explícita del usuario para commitear por ola).
+
+| Ola | Foco | Commit(s) |
+|-----|------|-----------|
+| 1 | CI verde + quality gates (ruff/black/mypy/`alembic check` — cazó drift real de índices) | `52aa065` |
+| 2 | Auth/HTTP hardening: refresh self-identifying + reuse-detection, rate-limit, fail-closed config, security headers, 500 opaco, email-normalize, `/ai/health` con auth | `78c58bb`, `7d2551b` |
+| 3 | Disponibilidad: I/O a threadpool, caps anti-bomba (Pillow/PDF/XLSX), cleanup de blob en fallo | `07c97d9` |
+| 4 | Errores frontend + a11y: `ErrorState`/`Skeleton` + retry, boundaries de ruta + `ErrorBoundary` RN, focus-trap, skip-link, contraste AA, validación por campo | `3db5da5` |
+| 5 | Rendimiento: índice parcial `(user_id, occurred_at)`, debt-history N+1→3 queries agrupadas, `get_account_by_name` en SQL, reconcile guard, charts `next/dynamic`, memo de la tabla | `9a2fc8b` |
+| 6a | Corrección backend: cross-rate same-date, orphan-unlink de pares al soft-delete, borrado de `_source_kind` muerto + inversión de dependencias (`auth→seed` hook) + lógica fuera de routers | `02c7fb7` |
+| 6b | Consolidación módulo deuda (API/hooks/keys bajo `debt`) + fix `debt.all` nunca invalidado + `services` deja de importar `store` | `53ad311` |
+| 7 | Tests del contrato de consolidación + seam i18n (`pluralize`) | `3c432a9` |
+| 8 | **Revisión adversarial del diff completo** (workflow: 6 revisores por área + verificación adversarial por hallazgo) → 4 defectos confirmados, todos corregidos: logout sin verificar el secreto (P1), bulk-orphan-unlink fuera de scope (P1), cross-rate fallback engañoso (P1, fix defensivo), race del reconcile-guard (P2, trade-off documentado) | (esta ola) |
+
+**Diferido conscientemente** (recipes en [`backlog.md`](../backlog.md), sección
+AUDIT-2026-05): relocalización física del módulo deuda backend +
+`core/dates`/`_shared` (cosmético, sin cambio de comportamiento), endpoint
+agregado `GET /debt/overview` (perf aditiva), dedup cosmético del navegador de
+período + filtro de liabilities, y cache de tasas FX en debt-health (bajo
+beneficio / riesgo de cuantización).
+
 **Salud general:** la base es **sólida** — modularidad vertical respetada en su
 mayoría, `Decimal` para dinero en todo el dominio, **aislamiento multi-tenant
 correcto** (los auditores verificaron 6+ repositorios y NO encontraron IDOR de

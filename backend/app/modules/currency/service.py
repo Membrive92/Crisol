@@ -147,6 +147,15 @@ async def convert(
             dst_rate, dst_date, _ = dst_common
             reanchored = True
 
+    # AUDIT-2026-05: si tras intentar re-anclar las dos patas siguen en
+    # fechas distintas (datos con huecos: una divisa sin tasa en la fecha
+    # común), la composición es necesariamente de fechas mezcladas →
+    # marca "previous" explícitamente en vez de arriesgar un "exact"
+    # engañoso. En la práctica una fecha distinta ya implica una pata
+    # "previous", pero lo hacemos explícito por si cambia `_resolve`.
+    if src != CANONICAL_BASE and dst != CANONICAL_BASE and src_date != dst_date:
+        reanchored = True
+
     # rate(FROM→TO) = rate(EUR→TO) / rate(EUR→FROM)
     # Operamos a precisión completa de Decimal y redondeamos al final.
     composed_rate = dst_rate / src_rate
