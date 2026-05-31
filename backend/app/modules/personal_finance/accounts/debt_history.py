@@ -131,78 +131,127 @@ async def _compute_historical_points(
         else Transaction.amount
     )
 
-    # Inversión de signo en SQL idéntica a get_balances_for_user, pero
-    # acumulada hasta `month_end`. Para llamadas múltiples, una sola
-    # query agrupada por cierre de mes sería más eficiente; el patrón
-    # mensual de iteración es lo bastante barato para 12-24 meses.
+    # Inversión de signo en SQL idéntica a get_balances_for_user.
     signed_amount = case(
         (Category.kind == CategoryKind.EXPENSE, amount_expr),
         (Category.kind == CategoryKind.INCOME, -amount_expr),
         else_=amount_expr,
     )
 
-    points: list[DebtHistoryPoint] = []
+    # Lista de meses de la ventana (cronológica).
+    window_months: list[date] = []
     cursor = first_month
     while cursor <= last_closed:
-        month_end = _end_of_month(cursor)
-        month_start = datetime(cursor.year, cursor.month, 1, tzinfo=UTC)
+        window_months.append(cursor)
+        cursor = _add_month(cursor, 1)
 
-        # Saldo acumulado de liabilities al cierre del mes.
-        cumulative_q = (
-            select(func.coalesce(func.sum(signed_amount), 0))
-            .select_from(Transaction)
-            .outerjoin(Category, Category.id == Transaction.category_id)
-            .where(Transaction.user_id == user_id)
-            .where(Transaction.account_id.in_(liability_ids))
-            .where(Transaction.deleted_at.is_(None))
-            .where(Transaction.occurred_at <= month_end)
-        )
-        if target_currency is None:
-            cumulative_q = cumulative_q.where(Transaction.currency == reference_currency)
-        cumulative = Decimal((await db.execute(cumulative_q)).scalar_one())
+    last_month_end = _end_of_month(last_closed)
+    first_month_start = datetime(first_month.year, first_month.month, 1, tzinfo=UTC)
+
+    # AUDIT-2026-05: en vez de 3 queries por mes (3×N round-trips),
+    # agrupamos por mes en SQL y hacemos el prefix-sum en Python (3
+    # queries totales). El bucket se trunca en UTC para que la
+    # pertenencia al mes coincida con las fronteras `_end_of_month`
+    # (instantes UTC) usadas antes, sea cual sea la TZ de la sesión.
+    month_bucket = func.date_trunc("month", func.timezone("UTC", Transaction.occurred_at))
+
+    def _format_bucket(value: object) -> str:
+        # `date_trunc` devuelve un timestamp naive a inicio de mes UTC.
+        assert isinstance(value, datetime)
+        return f"{value.year:04d}-{value.month:02d}"
+
+    # Query A — saldo firmado por mes sobre TODO el histórico ≤ último
+    # mes cerrado. El prefix-sum incluye el carry de meses previos a la
+    # ventana, replicando el `occurred_at <= month_end` acumulado.
+    cumulative_q = (
+        select(month_bucket.label("bucket"), func.coalesce(func.sum(signed_amount), 0))
+        .select_from(Transaction)
+        .outerjoin(Category, Category.id == Transaction.category_id)
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.account_id.in_(liability_ids))
+        .where(Transaction.deleted_at.is_(None))
+        .where(Transaction.occurred_at <= last_month_end)
+        .group_by(month_bucket)
+    )
+    if target_currency is None:
+        cumulative_q = cumulative_q.where(Transaction.currency == reference_currency)
+    signed_by_month: dict[str, Decimal] = {
+        _format_bucket(bucket): Decimal(total)
+        for bucket, total in (await db.execute(cumulative_q)).all()
+    }
+
+    # Query B — principal amortizado por mes (income transfer pair a
+    # liabilities), dentro de la ventana.
+    principal_q = (
+        select(month_bucket.label("bucket"), func.coalesce(func.sum(amount_expr), 0))
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.account_id.in_(liability_ids))
+        .where(Transaction.deleted_at.is_(None))
+        .where(Transaction.transfer_pair_id.is_not(None))
+        .where(Transaction.occurred_at >= first_month_start)
+        .where(Transaction.occurred_at <= last_month_end)
+        .group_by(month_bucket)
+    )
+    if target_currency is None:
+        principal_q = principal_q.where(Transaction.currency == reference_currency)
+    principal_by_month: dict[str, Decimal] = {
+        _format_bucket(bucket): Decimal(total)
+        for bucket, total in (await db.execute(principal_q)).all()
+    }
+
+    # Query C — intereses pagados por mes, dentro de la ventana.
+    interest_q = (
+        select(month_bucket.label("bucket"), func.coalesce(func.sum(amount_expr), 0))
+        .select_from(Transaction)
+        .join(Category, Category.id == Transaction.category_id)
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.deleted_at.is_(None))
+        .where(Category.kind == CategoryKind.EXPENSE)
+        .where(Category.role == CategoryRole.DEBT_INTEREST)
+        .where(Transaction.occurred_at >= first_month_start)
+        .where(Transaction.occurred_at <= last_month_end)
+        .group_by(month_bucket)
+    )
+    if target_currency is None:
+        interest_q = interest_q.where(Transaction.currency == reference_currency)
+    interest_by_month: dict[str, Decimal] = {
+        _format_bucket(bucket): Decimal(total)
+        for bucket, total in (await db.execute(interest_q)).all()
+    }
+
+    # Prefix-sum: saldo acumulado al cierre de cada mes con actividad
+    # (las claves 'YYYY-MM' ordenan cronológicamente).
+    running = Decimal("0")
+    cumulative_at: dict[str, Decimal] = {}
+    for month_key in sorted(signed_by_month):
+        running += signed_by_month[month_key]
+        cumulative_at[month_key] = running
+    sorted_keys = sorted(cumulative_at)
+
+    points: list[DebtHistoryPoint] = []
+    for month in window_months:
+        month_key = _format_month(month)
+        # Acumulado ≤ month = prefix del último mes con actividad ≤ month.
+        cumulative = Decimal("0")
+        for key in sorted_keys:
+            if key <= month_key:
+                cumulative = cumulative_at[key]
+            else:
+                break
         total_debt = sum_opening + cumulative
-
-        # Principal amortizado durante el mes (ingresos transferencia
-        # llegando a liabilities).
-        principal_q = (
-            select(func.coalesce(func.sum(amount_expr), 0))
-            .where(Transaction.user_id == user_id)
-            .where(Transaction.account_id.in_(liability_ids))
-            .where(Transaction.deleted_at.is_(None))
-            .where(Transaction.transfer_pair_id.is_not(None))
-            .where(Transaction.occurred_at >= month_start)
-            .where(Transaction.occurred_at <= month_end)
-        )
-        if target_currency is None:
-            principal_q = principal_q.where(Transaction.currency == reference_currency)
-        principal_paid = Decimal((await db.execute(principal_q)).scalar_one())
-
-        # Intereses pagados durante el mes.
-        interest_q = (
-            select(func.coalesce(func.sum(amount_expr), 0))
-            .select_from(Transaction)
-            .join(Category, Category.id == Transaction.category_id)
-            .where(Transaction.user_id == user_id)
-            .where(Transaction.deleted_at.is_(None))
-            .where(Category.kind == CategoryKind.EXPENSE)
-            .where(Category.role == CategoryRole.DEBT_INTEREST)
-            .where(Transaction.occurred_at >= month_start)
-            .where(Transaction.occurred_at <= month_end)
-        )
-        if target_currency is None:
-            interest_q = interest_q.where(Transaction.currency == reference_currency)
-        interest_paid = Decimal((await db.execute(interest_q)).scalar_one())
-
         points.append(
             DebtHistoryPoint(
-                month=_format_month(cursor),
+                month=month_key,
                 total_debt=max(total_debt, Decimal("0")).quantize(Decimal("0.01")),
-                principal_paid=principal_paid.quantize(Decimal("0.01")),
-                interest_paid=interest_paid.quantize(Decimal("0.01")),
+                principal_paid=principal_by_month.get(month_key, Decimal("0")).quantize(
+                    Decimal("0.01")
+                ),
+                interest_paid=interest_by_month.get(month_key, Decimal("0")).quantize(
+                    Decimal("0.01")
+                ),
                 kind="historical",
             )
         )
-        cursor = _add_month(cursor, 1)
 
     return points
 

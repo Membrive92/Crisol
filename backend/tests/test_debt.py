@@ -449,6 +449,125 @@ async def test_debt_history_months_ahead_zero_disables_projection(
     assert all(it["kind"] == "historical" for it in body["items"])
 
 
+async def test_debt_history_historical_values_multi_month(
+    client: AsyncClient,
+    test_engine,  # type: ignore[no-untyped-def]
+) -> None:
+    """AUDIT-2026-05 — blinda el histórico agrupado: cumulative
+    prefix-sum + principal (transfer pair) + interés per-mes con datos
+    en dos meses cerrados.
+
+    Escenario (tarjeta EUR, opening 1000):
+    - Mes B (penúltimo cerrado): compra +500 → saldo cierre B = 1500.
+    - Mes A (último cerrado): pago 300 (income transfer pair) → saldo
+      cierre A = 1200; interés 50 en una cuenta bank (no toca el saldo
+      de la tarjeta, sólo `interest_paid`).
+    """
+    import uuid as _uuid
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select as _sel
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.modules.personal_finance.transactions.models import (
+        Transaction,
+        TransactionSource,
+    )
+    from app.modules.users.models import User
+
+    email = "dhist_values@example.com"
+    token = await _register(client, email)
+    card = await _create_account(
+        client, token, name="Visa", type="credit_card", currency="EUR", opening_balance="1000"
+    )
+    bank = await _create_account(
+        client, token, name="Cte", type="bank", currency="EUR", opening_balance="0"
+    )
+
+    async def _new_cat(name: str, kind: str, role: str = "GENERIC") -> str:
+        r = await client.post(
+            "/categories",
+            json={"name": name, "kind": kind, "role": role},
+            headers=_auth(token),
+        )
+        return str(r.json()["id"])
+
+    purchase_cat = await _new_cat("Compra tarjeta", "expense")
+    income_cat = await _new_cat("Pago tarjeta", "income")
+    interest_cat = await _new_cat("Intereses tarjeta", "expense", "DEBT_INTEREST")
+
+    today = datetime.now(UTC).date()
+    month_a = (today.replace(day=1) - timedelta(days=1)).replace(day=1)  # último cerrado
+    month_b = (month_a - timedelta(days=1)).replace(day=1)  # el anterior
+
+    async def _post(account_id: str, category_id: str, amount: str, when) -> str:  # type: ignore[no-untyped-def]
+        r = await client.post(
+            "/transactions",
+            json={
+                "account_id": account_id,
+                "category_id": category_id,
+                "amount": amount,
+                "occurred_at": f"{when.year:04d}-{when.month:02d}-15T12:00:00Z",
+            },
+            headers=_auth(token),
+        )
+        assert r.status_code == 201, r.text
+        return str(r.json()["id"])
+
+    # Mes B: compra +500 en la tarjeta.
+    await _post(card["id"], purchase_cat, "500.00", month_b)
+    # Mes A: interés 50 en la cuenta bank (sólo interest_paid).
+    await _post(bank["id"], interest_cat, "50.00", month_a)
+
+    # Mes A: pago 300 (income con transfer_pair) en la tarjeta. Lo
+    # insertamos directo para fijar `transfer_pair_id` (auto-referencia).
+    factory = async_sessionmaker(bind=test_engine, expire_on_commit=False, autoflush=False)
+    async with factory() as session:
+        user = (await session.execute(_sel(User).where(User.email == email))).scalar_one()
+        pay_id = _uuid.uuid4()
+        session.add(
+            Transaction(
+                id=pay_id,
+                user_id=user.id,
+                account_id=_uuid.UUID(str(card["id"])),
+                category_id=_uuid.UUID(income_cat),
+                amount=Decimal("300.00"),
+                currency="EUR",
+                occurred_at=datetime(month_a.year, month_a.month, 15, 12, tzinfo=UTC),
+                transfer_pair_id=pay_id,
+                source=TransactionSource.MANUAL,
+            )
+        )
+        await session.commit()
+
+    r = await client.get(
+        "/accounts/debt-history?months_back=3&months_ahead=0",
+        headers=_auth(token),
+    )
+    body = r.json()
+    items = body["items"]
+    assert len(items) == 3  # B-1, B, A
+    by_month = {it["month"]: it for it in items}
+    b_minus_1 = f"{month_b.year:04d}-{month_b.month:02d}"
+    # Recalcular B-1 explícitamente.
+    bm1 = (month_b - timedelta(days=1)).replace(day=1)
+    pt_bm1 = by_month[f"{bm1.year:04d}-{bm1.month:02d}"]
+    pt_b = by_month[b_minus_1]
+    pt_a = by_month[f"{month_a.year:04d}-{month_a.month:02d}"]
+
+    # B-1: sin movimientos → saldo = opening 1000.
+    assert Decimal(pt_bm1["total_debt"]) == Decimal("1000.00")
+    assert Decimal(pt_bm1["principal_paid"]) == Decimal("0")
+    assert Decimal(pt_bm1["interest_paid"]) == Decimal("0")
+    # B: compra +500 → 1500.
+    assert Decimal(pt_b["total_debt"]) == Decimal("1500.00")
+    assert Decimal(pt_b["principal_paid"]) == Decimal("0")
+    # A: pago -300 → 1200; principal 300; interés 50.
+    assert Decimal(pt_a["total_debt"]) == Decimal("1200.00")
+    assert Decimal(pt_a["principal_paid"]) == Decimal("300.00")
+    assert Decimal(pt_a["interest_paid"]) == Decimal("50.00")
+
+
 # ─────────────────────────────────────────────────────────────────────
 # PHASE-24.1: cuotas persistidas editables + estado de pago
 # ─────────────────────────────────────────────────────────────────────

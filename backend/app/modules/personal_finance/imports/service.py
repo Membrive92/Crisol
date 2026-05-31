@@ -40,6 +40,7 @@ from app.modules.personal_finance.category_rules.repository import (
     list_rules_for_user,
 )
 from app.modules.personal_finance.fixed_expenses.reconciliation import (
+    has_pending_expected,
     reconcile_with_expected,
 )
 from app.modules.personal_finance.imports.models import ImportJob, ImportJobStatus
@@ -435,6 +436,11 @@ async def _process_and_persist(
     existing = await find_existing_hashes(db, user_id, [p.import_hash for p in deduped])
     skipped_in_batch = len(parsed) - len(deduped)
 
+    # AUDIT-2026-05: comprueba UNA vez si la cuenta tiene `expected`
+    # pendientes. El caso común (ninguna) se saltaba con N queries
+    # vacías — una por fila. Con esto sólo reconciliamos si hace falta.
+    try_reconcile = await has_pending_expected(db, user_id, account_id)
+
     inserted = 0
     reconciled = 0
     for p in deduped:
@@ -444,15 +450,19 @@ async def _process_and_persist(
         # lugar de crear duplicada le asignamos el `import_hash` y
         # actualizamos su descripción. Cuenta como reconciliación,
         # no como inserción.
-        match = await reconcile_with_expected(
-            db,
-            user_id,
-            account_id=account_id,
-            occurred_at=p.occurred_at,
-            amount=p.amount,
-            currency=currency.upper(),
-            description=p.description,
-            import_hash=p.import_hash,
+        match = (
+            await reconcile_with_expected(
+                db,
+                user_id,
+                account_id=account_id,
+                occurred_at=p.occurred_at,
+                amount=p.amount,
+                currency=currency.upper(),
+                description=p.description,
+                import_hash=p.import_hash,
+            )
+            if try_reconcile
+            else None
         )
         if match is not None:
             reconciled += 1

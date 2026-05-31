@@ -35,6 +35,9 @@
 | `j7e95d1b3f4c` | 21.2 | `accounts` + enums `accounttype`/`accountnature` + WIPE de transactions/import_jobs/receipts + `account_id` (NOT NULL en transactions, opcional en import_jobs y fixed_expenses). |
 | `k8a92c4e7d5a1` | 21.3 | `transactions.transfer_pair_id` (FK auto-referente, NULLABLE, ON DELETE SET NULL) + index parcial `WHERE transfer_pair_id IS NOT NULL AND deleted_at IS NULL`. |
 | `l9b03d5f8e6b2` | 22   | `accounts.apr` (NUMERIC(6,4) NULL) + `accounts.term_months` (INTEGER NULL) + `accounts.start_date` (DATE NULL) — campos opcionales del cuadro de amortización francés para loans/mortgages. |
+| …            | 22→30 | (varias migraciones intermedias no listadas aquí — ver `alembic/versions/`). |
+| `u8k92m4ih7l5j1` | AUDIT-2026-05 | refresh tokens auto-identificables: `refresh_tokens.token_id` (UNIQUE) + `family_id` (índice). Invalida sesiones previas (DELETE). |
+| `v9l14n6kj8m7l3` | AUDIT-2026-05 | `ix_transactions_user_occurred_active` PARTIAL `(user_id, occurred_at) WHERE deleted_at IS NULL`. |
 
 ---
 
@@ -96,6 +99,7 @@
 - `ix_transactions_user_id`.
 - `ix_transactions_category_id`.
 - `ix_transactions_user_id_active` PARTIAL `(user_id) WHERE deleted_at IS NULL` (PHASE-10.1).
+- `ix_transactions_user_occurred_active` PARTIAL `(user_id, occurred_at) WHERE deleted_at IS NULL` (AUDIT-2026-05) — cubre listados ordenados por fecha + rangos `occurred_at <= X` de dashboard/drill-down/debt-history (el btree ascendente sirve el `ORDER BY … DESC` con scan hacia atrás).
 - `uq_transactions_user_import_hash` UNIQUE PARTIAL `(user_id, import_hash) WHERE import_hash IS NOT NULL AND deleted_at IS NULL` — el `AND deleted_at IS NULL` (PHASE-10.1) permite re-importar una fila cuya versión previa fue trasheada.
 
 ### `import_jobs` (`PHASE-4.1`)

@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 
 import {
   useDashboardByCategory,
@@ -15,8 +16,14 @@ import {
   rangeForPeriod,
   type PeriodKey,
 } from '@/components/analysis/stitch-period-toggle';
-import { StitchBalanceChart } from '@/components/dashboard/stitch-balance-chart';
 import { StitchKpiRow } from '@/components/dashboard/stitch-kpi-row';
+import { Skeleton } from '@/components/ui/skeleton';
+
+// AUDIT-2026-05: chart con recharts en chunk diferido (ssr:false).
+const StitchBalanceChart = dynamic(
+  () => import('@/components/dashboard/stitch-balance-chart').then((m) => m.StitchBalanceChart),
+  { ssr: false, loading: () => <Skeleton height={300} /> },
+);
 import { StitchRecentActivity } from '@/components/dashboard/stitch-recent-activity';
 import { StitchSecondaryMetrics } from '@/components/dashboard/stitch-secondary-metrics';
 import { StitchTipCard } from '@/components/dashboard/stitch-tip-card';

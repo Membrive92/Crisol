@@ -37,14 +37,20 @@ async def get_account_by_id(
 
 
 async def get_account_by_name(db: AsyncSession, user_id: uuid.UUID, *, name: str) -> Account | None:
-    """Match case-insensitive por nombre — usado para validar duplicados."""
-    target = name.casefold()
-    query = select(Account).where(Account.user_id == user_id)
-    rows = (await db.execute(query)).scalars().all()
-    for acc in rows:
-        if acc.name.casefold() == target:
-            return acc
-    return None
+    """Match case-insensitive por nombre — usado para validar duplicados.
+
+    AUDIT-2026-05: el match se hace en SQL (`lower()`) en vez de cargar
+    todas las cuentas y escanear en Python. `lower()` cubre los nombres
+    de cuenta reales; difiere de `casefold()` sólo en unicode exótico,
+    irrelevante para este guard de duplicados.
+    """
+    query = (
+        select(Account)
+        .where(Account.user_id == user_id)
+        .where(func.lower(Account.name) == name.lower())
+        .limit(1)
+    )
+    return (await db.execute(query)).scalars().first()
 
 
 async def count_transactions_for_account(

@@ -37,6 +37,15 @@ Items de la auditoría conscientemente diferidos durante la remediación
 - **Cola/worker real para imports/receipts largos**. La Ola 3 los
   saca del event loop vía threadpool; una cola de jobs persistente es
   cambio de infra mayor sin beneficio claro en un único host de dev.
+- **[Ola 5] Cache de tasas FX "de hoy" en debt-health**. Cachear el
+  factor `EUR→X` por divisa dentro de `compute_debt_health` ahorraría
+  un puñado de lookups en usuarios multi-divisa. NO se hizo: los
+  usuarios mono-divisa (mayoría) nunca llaman `_convert_at_today`
+  (la cuenta ya está en `effective_currency`), y cachear el factor de
+  `convert(1, …)` arrastra el riesgo de divergencia por
+  cuantización frente a `convert(x, …)`. Bajo beneficio / riesgo en
+  el camino monetario → diferido. El índice (Ola 5) y el rewrite
+  agrupado de `debt_history` son los wins reales de rendimiento.
 
 ---
 

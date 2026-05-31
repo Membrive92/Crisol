@@ -107,6 +107,16 @@ class Transaction(Base):
             "user_id",
             postgresql_where="deleted_at IS NULL",
         ),
+        # AUDIT-2026-05: compuesto (user_id, occurred_at) parcial. Un
+        # btree ascendente sirve igual los `ORDER BY occurred_at DESC`
+        # (scan hacia atrás) y los rangos `occurred_at <= X` de
+        # dashboard/drill-down/debt-history sin sort adicional.
+        Index(
+            "ix_transactions_user_occurred_active",
+            "user_id",
+            "occurred_at",
+            postgresql_where="deleted_at IS NULL",
+        ),
         # PHASE-19.3: agregados de cashflow/budgets/dashboard excluyen
         # las txs con `transfer_pair_id IS NOT NULL`. Filtramos sobre
         # filas activas (sin papelera) y con pareja, que son las que

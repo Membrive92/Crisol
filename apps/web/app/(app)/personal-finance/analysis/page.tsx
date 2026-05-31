@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 
 import {
   useDashboardByCategory,
@@ -11,8 +12,6 @@ import { useCurrencyStore } from '@crisol/store';
 import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
 
 import { PositionHero } from '@/components/analysis/position-hero';
-import { StitchExpenseBreakdown } from '@/components/analysis/stitch-expense-breakdown';
-import { StitchIncomeVsExpenses } from '@/components/analysis/stitch-income-vs-expenses';
 import { StitchKeyMetrics } from '@/components/analysis/stitch-key-metrics';
 import {
   StitchPeriodToggle,
@@ -23,6 +22,25 @@ import { StitchSmartInsights } from '@/components/analysis/stitch-smart-insights
 import { Card } from '@/components/ui/card';
 import { ErrorState } from '@/components/ui/error-state';
 import { ListIcon } from '@/components/ui/icons';
+import { Skeleton } from '@/components/ui/skeleton';
+
+// AUDIT-2026-05: las cards con recharts se cargan en un chunk aparte
+// (ssr:false) para no inflar el JS inicial de la ruta. El Skeleton cubre
+// el breve hueco hasta que el chunk hidrata.
+const StitchIncomeVsExpenses = dynamic(
+  () =>
+    import('@/components/analysis/stitch-income-vs-expenses').then(
+      (m) => m.StitchIncomeVsExpenses,
+    ),
+  { ssr: false, loading: () => <Skeleton height={340} /> },
+);
+const StitchExpenseBreakdown = dynamic(
+  () =>
+    import('@/components/analysis/stitch-expense-breakdown').then(
+      (m) => m.StitchExpenseBreakdown,
+    ),
+  { ssr: false, loading: () => <Skeleton height={340} /> },
+);
 
 export default function AnalysisPage() {
   const [period, setPeriod] = useState<PeriodKey>('year');

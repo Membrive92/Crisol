@@ -47,6 +47,27 @@ from app.modules.personal_finance.transactions.models import (
 DAYS_TOLERANCE = 3
 
 
+async def has_pending_expected(db: AsyncSession, user_id: uuid.UUID, account_id: uuid.UUID) -> bool:
+    """¿Tiene la cuenta alguna tx `expected` sin conciliar?
+
+    AUDIT-2026-05: el pipeline de imports llamaba a
+    `reconcile_with_expected` una vez por fila, lanzando una query por
+    fila incluso cuando la cuenta no tiene ninguna `expected` pendiente
+    (el caso común). Este `EXISTS` barato se ejecuta una vez por import;
+    si es `False` el caller se salta la reconciliación entera.
+    """
+    query = (
+        select(Transaction.id)
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.account_id == account_id)
+        .where(Transaction.source == TransactionSource.EXPECTED)
+        .where(Transaction.import_hash.is_(None))
+        .where(Transaction.deleted_at.is_(None))
+        .limit(1)
+    )
+    return (await db.execute(query)).first() is not None
+
+
 async def reconcile_with_expected(
     db: AsyncSession,
     user_id: uuid.UUID,

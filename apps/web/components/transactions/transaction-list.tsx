@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { useCurrencyStore } from '@crisol/store';
@@ -39,11 +40,6 @@ interface TransactionRow {
   category: Category | undefined;
 }
 
-function findCategory(categories: Category[], id: string | null): Category | undefined {
-  if (!id) return undefined;
-  return categories.find((c) => c.id === id);
-}
-
 function amountColorFor(kind: CategoryKind | null | undefined): string {
   if (kind === 'income') return colors.income;
   if (kind === 'expense') return colors.expense;
@@ -68,10 +64,21 @@ export function TransactionList({
   const activeCurrency = useCurrencyStore((s) => s.currency);
   const convertAll = useCurrencyStore((s) => s.convertAll);
 
-  const rows: TransactionRow[] = items.map((tx) => ({
-    tx,
-    category: findCategory(categories, tx.category_id),
-  }));
+  // AUDIT-2026-05: índice por id (O(1) lookup) en vez de `categories.find`
+  // por cada fila (O(filas × categorías)). Memoizado para no reconstruir
+  // el Map ni las filas en cada render que no cambie items/categorías.
+  const categoryById = useMemo(
+    () => new Map(categories.map((c) => [c.id, c])),
+    [categories],
+  );
+  const rows: TransactionRow[] = useMemo(
+    () =>
+      items.map((tx) => ({
+        tx,
+        category: tx.category_id ? categoryById.get(tx.category_id) : undefined,
+      })),
+    [items, categoryById],
+  );
 
   const columns: DataTableColumn<TransactionRow>[] = [
     {
@@ -245,6 +252,9 @@ export function TransactionList({
       rowKey={(row) => row.tx.id}
       onRowClick={(row) =>
         router.push(`/personal-finance/transactions/${row.tx.id}` as never)
+      }
+      rowAriaLabel={({ tx }) =>
+        `Ver transacción del ${formatDate(tx.occurred_at)} por ${formatAmount(tx.amount, tx.currency)}`
       }
       emptyMessage="Sin transacciones con los filtros actuales."
     />

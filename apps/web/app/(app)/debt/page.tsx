@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { useMemo, useState } from 'react';
 
 import {
@@ -14,15 +15,27 @@ import { useCurrencyStore } from '@crisol/store';
 import type { DebtTimeRange } from '@crisol/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
-import { DebtCompositionDonut } from '@/components/debt/debt-composition-donut';
 import { DebtList } from '@/components/debt/debt-list';
-import { DebtMonthlyEvolution } from '@/components/debt/debt-monthly-evolution';
-import { DebtTrendChart } from '@/components/debt/debt-trend-chart';
 import { EffortRatioSection } from '@/components/debt/effort-ratio-section';
 import { PaymentsSummaryCard } from '@/components/debt/payments-summary-card';
 import { PeriodNavigator } from '@/components/debt/period-navigator';
 import { RecurringQuotasList } from '@/components/debt/recurring-quotas-list';
 import { ErrorState } from '@/components/ui/error-state';
+import { Skeleton } from '@/components/ui/skeleton';
+
+// AUDIT-2026-05: charts con recharts en chunk diferido (ssr:false).
+const DebtCompositionDonut = dynamic(
+  () => import('@/components/debt/debt-composition-donut').then((m) => m.DebtCompositionDonut),
+  { ssr: false, loading: () => <Skeleton height={280} /> },
+);
+const DebtMonthlyEvolution = dynamic(
+  () => import('@/components/debt/debt-monthly-evolution').then((m) => m.DebtMonthlyEvolution),
+  { ssr: false, loading: () => <Skeleton height={280} /> },
+);
+const DebtTrendChart = dynamic(
+  () => import('@/components/debt/debt-trend-chart').then((m) => m.DebtTrendChart),
+  { ssr: false, loading: () => <Skeleton height={280} /> },
+);
 
 /**
  * Página `/debt` rediseñada en PHASE-30.3.
