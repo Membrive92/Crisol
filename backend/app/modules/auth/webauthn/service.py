@@ -35,8 +35,8 @@ from webauthn.helpers.structs import (
 from app.core.config import settings
 from app.modules.auth.webauthn.models import WebAuthnChallenge, WebAuthnCredential
 from app.modules.auth.webauthn.repository import (
-    consume_authentication_challenge,
     consume_challenge,
+    consume_challenge_by_value,
     create_challenge,
     create_credential,
     get_credential_by_credential_id,
@@ -228,8 +228,26 @@ async def verify_authentication_and_get_user(
             detail="Credencial no coincide con la cuenta",
         )
 
-    pending = await consume_authentication_challenge(db, user_id=user.id)
+    # AUDIT-2026-05: consumimos el challenge EXACTO que el cliente firmó
+    # (extraído del clientDataJSON), no "el último del usuario" — evita el
+    # cross de challenges entre logins discoverable concurrentes.
+    client_challenge = _extract_client_challenge(credential)
+    pending = (
+        await consume_challenge_by_value(
+            db, challenge=client_challenge, purpose=PURPOSE_AUTHENTICATE
+        )
+        if client_challenge is not None
+        else None
+    )
     if pending is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Challenge inválido o expirado",
+        )
+    # Un challenge emitido para un usuario concreto (flujo con email) sólo
+    # puede autenticar a ese usuario; el flujo discoverable lo emite con
+    # user_id=NULL y la identidad sale del credential_id.
+    if pending.user_id is not None and pending.user_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Challenge inválido o expirado",
@@ -288,6 +306,28 @@ def _extract_transports(credential: dict[str, Any]) -> str | None:
         return None
     cleaned = [t for t in transports if isinstance(t, str) and t]
     return ",".join(cleaned) if cleaned else None
+
+
+def _extract_client_challenge(credential: dict[str, Any]) -> bytes | None:
+    """Extrae el challenge (bytes) del `clientDataJSON` de la assertion para
+    consumir el challenge EXACTO que el cliente firmó (AUDIT-2026-05)."""
+    response = credential.get("response", {})
+    if not isinstance(response, dict):
+        return None
+    client_data_b64 = response.get("clientDataJSON")
+    if not isinstance(client_data_b64, str):
+        return None
+    try:
+        client_data = json.loads(_decode_base64url(client_data_b64))
+    except (ValueError, json.JSONDecodeError):
+        return None
+    challenge_b64 = client_data.get("challenge") if isinstance(client_data, dict) else None
+    if not isinstance(challenge_b64, str):
+        return None
+    try:
+        return _decode_base64url(challenge_b64)
+    except ValueError:
+        return None
 
 
 def _decode_base64url(value: str) -> bytes:

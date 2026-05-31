@@ -9,6 +9,8 @@ tokens al autenticar.
 
 from __future__ import annotations
 
+import base64
+import json
 from typing import Any
 from unittest.mock import patch
 
@@ -33,6 +35,20 @@ async def _register_user(
 
 def _auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def _client_data_json(challenge_b64: str) -> str:
+    """Construye un `clientDataJSON` base64url con el challenge de las options.
+    `verify_authentication_response` está mockeado en estos tests, así que sólo
+    importa que el backend consuma el challenge correcto por valor."""
+    raw = json.dumps(
+        {
+            "type": "webauthn.get",
+            "challenge": challenge_b64,
+            "origin": "http://localhost:3030",
+        }
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 
 class _FakeRegistration:
@@ -212,7 +228,7 @@ async def test_full_passkey_authentication_flow_issues_tokens(
         "id": raw_id,
         "rawId": raw_id,
         "type": "public-key",
-        "response": {},
+        "response": {"clientDataJSON": _client_data_json(r_opts.json()["options"]["challenge"])},
     }
     with patch(
         "app.modules.auth.webauthn.service.verify_authentication_response",
@@ -411,7 +427,7 @@ async def test_conditional_ui_full_flow(client: AsyncClient) -> None:
         )
 
     client.cookies.clear()
-    await client.post("/auth/webauthn/authenticate-options", json={})
+    r_opts = await client.post("/auth/webauthn/authenticate-options", json={})
 
     import base64
 
@@ -427,7 +443,9 @@ async def test_conditional_ui_full_flow(client: AsyncClient) -> None:
                     "id": raw_id,
                     "rawId": raw_id,
                     "type": "public-key",
-                    "response": {},
+                    "response": {
+                        "clientDataJSON": _client_data_json(r_opts.json()["options"]["challenge"])
+                    },
                 }
             },
         )

@@ -5,6 +5,7 @@ Vive en core/ porque lo usan tanto el módulo auth como deps.
 
 from __future__ import annotations
 
+import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -47,21 +48,33 @@ def create_access_token(user_id: uuid.UUID) -> str:
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=JWT_ALGORITHM)
 
 
-def create_refresh_token(
-    user_id: uuid.UUID, *, ttl_days: int | None = None
-) -> tuple[str, datetime]:
-    """Crea un refresh token opaco (UUID) y su fecha de expiración.
+def create_refresh_token(*, ttl_days: int | None = None) -> tuple[str, str, datetime]:
+    """Crea un refresh token AUTO-IDENTIFICABLE `<token_id>.<secret>`.
 
-    `ttl_days` permite que el caller pase un TTL personalizado (p.ej. para
-    "Recordarme 30 días"); si no, cae al default de settings.
+    `ttl_days` permite un TTL personalizado ("Recordarme 30 días"); si no,
+    cae al default de settings.
 
-    Retorna (token_plaintext, expires_at). El caller es responsable de
-    hashear el token antes de persistirlo en BD.
+    Retorna `(plaintext, token_id, expires_at)`. `token_id` se indexa en BD
+    para localizar la fila con UNA query y verificar el secreto con UN solo
+    argon2, en vez de escanear toda la tabla con un verify por fila
+    (AUDIT-2026-05 refresh-token-full-table-argon2-scan). El caller hashea
+    `plaintext` antes de persistirlo.
     """
     days = ttl_days if ttl_days is not None else settings.jwt_refresh_token_expire_days
-    token = str(uuid.uuid4())
+    token_id = secrets.token_hex(16)
+    secret = secrets.token_urlsafe(32)
+    plaintext = f"{token_id}.{secret}"
     expires_at = datetime.now(UTC) + timedelta(days=days)
-    return token, expires_at
+    return plaintext, token_id, expires_at
+
+
+def parse_refresh_token_id(plaintext: str) -> str | None:
+    """Extrae el `token_id` del plaintext `<token_id>.<secret>` (o `None`
+    si el formato no es válido). `token_id` es hex puro, sin puntos."""
+    token_id, sep, _secret = plaintext.partition(".")
+    if not sep or not token_id:
+        return None
+    return token_id
 
 
 def hash_refresh_token(token: str) -> str:

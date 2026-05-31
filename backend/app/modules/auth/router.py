@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import CurrentUser
+from app.core.rate_limit import rate_limit
 from app.modules.auth.schemas import (
     LoginRequest,
     RefreshRequest,
@@ -73,7 +74,12 @@ def _resolve_refresh_token(body_token: str | None, cookie_token: str | None) -> 
     return token
 
 
-@router.post("/register", response_model=TokenResponse, status_code=201)
+@router.post(
+    "/register",
+    response_model=TokenResponse,
+    status_code=201,
+    dependencies=[Depends(rate_limit(5, 60))],
+)
 async def register_endpoint(
     body: RegisterRequest,
     response: Response,
@@ -97,7 +103,11 @@ async def register_endpoint(
     return session.tokens
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+    dependencies=[Depends(rate_limit(10, 60))],
+)
 async def login_endpoint(
     body: LoginRequest,
     response: Response,
@@ -114,7 +124,11 @@ async def login_endpoint(
     return session.tokens
 
 
-@router.post("/refresh", response_model=TokenResponse)
+@router.post(
+    "/refresh",
+    response_model=TokenResponse,
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def refresh_endpoint(
     body: RefreshRequest,
     response: Response,

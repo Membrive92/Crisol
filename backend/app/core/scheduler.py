@@ -35,6 +35,7 @@ logger = logging.getLogger("app.scheduler")
 CURRENCY_REFRESH_JOB_ID = "refresh_currency_rates"
 FIXED_EXPENSES_SCAN_JOB_ID = "scan_fixed_expenses"
 FIXED_EXPENSES_AUTOPOST_JOB_ID = "autopost_fixed_expenses"
+PURGE_AUTH_JOB_ID = "purge_expired_auth"
 
 
 def _today_utc() -> date:
@@ -150,6 +151,27 @@ async def scan_fixed_expenses_job() -> None:
         await engine.dispose()
 
 
+async def purge_expired_auth_job() -> None:
+    """Borra refresh tokens y challenges WebAuthn ya expirados para acotar el
+    crecimiento de esas tablas (AUDIT-2026-05). Best-effort — un fallo no
+    tira el scheduler."""
+    from app.modules.auth.repository import purge_expired_tokens
+    from app.modules.auth.webauthn.repository import delete_expired_challenges
+
+    engine = create_async_engine(settings.database_url, future=True)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with session_factory() as db:
+            tokens = await purge_expired_tokens(db)
+            await delete_expired_challenges(db)
+            await db.commit()
+        logger.info("auth purge cron: %s expired refresh tokens removed", tokens)
+    except Exception:
+        logger.exception("auth purge cron failed")
+    finally:
+        await engine.dispose()
+
+
 def create_scheduler() -> AsyncIOScheduler | None:
     """Crea (sin arrancar) el scheduler con los jobs configurados.
 
@@ -164,6 +186,15 @@ def create_scheduler() -> AsyncIOScheduler | None:
         return None
 
     scheduler = AsyncIOScheduler(timezone=UTC)
+
+    # Limpieza diaria de auth (siempre que exista scheduler) — 02:00 UTC.
+    scheduler.add_job(
+        purge_expired_auth_job,
+        trigger=CronTrigger(hour=2, minute=0, timezone=UTC),
+        id=PURGE_AUTH_JOB_ID,
+        replace_existing=True,
+        misfire_grace_time=60 * 60,
+    )
 
     if settings.enable_currency_cron:
         scheduler.add_job(

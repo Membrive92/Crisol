@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import CurrentUser
+from app.core.rate_limit import rate_limit
 from app.modules.auth.schemas import TokenResponse
 from app.modules.auth.service import _issue_tokens
 from app.modules.auth.webauthn.repository import (
@@ -100,6 +101,7 @@ async def register_verify_endpoint(
 @router.post(
     "/authenticate-options",
     response_model=PasskeyAuthenticationOptionsResponse,
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def authenticate_options_endpoint(
     body: PasskeyAuthenticationOptionsRequest,
@@ -111,7 +113,11 @@ async def authenticate_options_endpoint(
     return PasskeyAuthenticationOptionsResponse(options=options)
 
 
-@router.post("/authenticate-verify", response_model=TokenResponse)
+@router.post(
+    "/authenticate-verify",
+    response_model=TokenResponse,
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def authenticate_verify_endpoint(
     body: PasskeyAuthenticationVerifyRequest,
     response: Response,

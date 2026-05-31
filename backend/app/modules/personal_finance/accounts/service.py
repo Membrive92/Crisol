@@ -647,6 +647,24 @@ async def mark_installment_paid(
     from datetime import datetime
 
     inst = await _get_installment_or_404(db, installment_id, user_id)
+    # AUDIT-2026-05: validar pertenencia del `paid_transaction_id` para no
+    # persistir una referencia a una tx ajena en la cuota propia.
+    if paid_transaction_id is not None:
+        from sqlalchemy import select
+
+        from app.modules.personal_finance.transactions.models import Transaction
+
+        owned = await db.execute(
+            select(Transaction.id).where(
+                Transaction.id == paid_transaction_id,
+                Transaction.user_id == user_id,
+            )
+        )
+        if owned.scalar_one_or_none() is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La transacción indicada no existe o no es tuya.",
+            )
     when = paid_at if paid_at is not None else datetime.now(UTC)
     return await repo_mark_paid(
         db,

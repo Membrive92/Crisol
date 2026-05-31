@@ -25,6 +25,22 @@ class RefreshToken(Base):
         nullable=False,
         index=True,
     )
+    # AUDIT-2026-05 — identificador público (parte izquierda de
+    # `<token_id>.<secret>`). Indexado: localiza la fila con UNA query y
+    # luego un único argon2 verify del secreto, en vez de escanear toda la
+    # tabla.
+    token_id: Mapped[str] = mapped_column(
+        String(64),
+        unique=True,
+        index=True,
+        nullable=False,
+    )
+    # AUDIT-2026-05 — linaje de rotación. Se preserva al rotar; si un token
+    # revocado se reutiliza (señal de robo) se revoca toda la familia.
+    family_id: Mapped[uuid.UUID] = mapped_column(
+        index=True,
+        nullable=False,
+    )
     token_hash: Mapped[str] = mapped_column(
         String(512),
         unique=True,

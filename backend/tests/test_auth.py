@@ -259,6 +259,45 @@ async def test_user_isolation(client: AsyncClient) -> None:
         headers={"Authorization": f"Bearer {body_b['access_token']}"},
     )
 
-    assert me_a.json()["email"] == "userA@example.com"
-    assert me_b.json()["email"] == "userB@example.com"
+    # AUDIT-2026-05: el email se normaliza (lowercase) al registrar.
+    assert me_a.json()["email"] == "usera@example.com"
+    assert me_b.json()["email"] == "userb@example.com"
     assert me_a.json()["id"] != me_b.json()["id"]
+
+
+# ─────────────────────────────────────
+# AUDIT-2026-05 — hardening de refresh + email
+# ─────────────────────────────────────
+
+
+async def test_refresh_reuse_detection_revokes_family(client: AsyncClient) -> None:
+    """Reusar un refresh ya rotado (revocado) dispara la detección de robo y
+    revoca toda la familia de tokens."""
+    _, body = await _register(client, email="reuse@example.com")
+    original = body["refresh_token"]
+
+    client.cookies.clear()
+    r1 = await client.post("/auth/refresh", json={"refresh_token": original})
+    assert r1.status_code == 200
+    rotated = r1.json()["refresh_token"]
+
+    # Replay del original (ya revocado por la rotación) → 401 + revoca familia.
+    client.cookies.clear()
+    r_reuse = await client.post("/auth/refresh", json={"refresh_token": original})
+    assert r_reuse.status_code == 401
+
+    # La contención revoca toda la familia: el token rotado también muere.
+    client.cookies.clear()
+    r_after = await client.post("/auth/refresh", json={"refresh_token": rotated})
+    assert r_after.status_code == 401
+
+
+async def test_login_is_case_insensitive(client: AsyncClient) -> None:
+    """Registrar con mayúsculas permite login en minúsculas (email normalizado)."""
+    await _register(client, email="Case@Example.com")
+    client.cookies.clear()
+    r = await client.post(
+        "/auth/login",
+        json={"email": "case@example.com", "password": "SecurePass123"},
+    )
+    assert r.status_code == 200

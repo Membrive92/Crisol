@@ -47,29 +47,27 @@ async def consume_challenge(
     return challenge
 
 
-async def consume_authentication_challenge(
-    db: AsyncSession, *, user_id: uuid.UUID
+async def consume_challenge_by_value(
+    db: AsyncSession, *, challenge: bytes, purpose: str
 ) -> WebAuthnChallenge | None:
-    """Variante de consume para autenticación que acepta también challenges
-    sin usuario (Conditional UI / discoverable). El user_id se infiere del
-    `credential_id` durante la verificación.
-    """
+    """Consume el challenge EXACTO (por su valor) emitido para `purpose` y lo
+    borra. AUDIT-2026-05: vincular por valor —no "el último del usuario o
+    NULL"— elimina la confusión de challenges entre logins discoverable
+    concurrentes (request A consumía el challenge NULL-user de B). El valor
+    del challenge es único e impredecible (lo genera py_webauthn)."""
     now = datetime.now(UTC)
     result = await db.execute(
-        select(WebAuthnChallenge)
-        .where(
-            WebAuthnChallenge.purpose == "authenticate",
+        select(WebAuthnChallenge).where(
+            WebAuthnChallenge.challenge == challenge,
+            WebAuthnChallenge.purpose == purpose,
             WebAuthnChallenge.expires_at > now,
-            ((WebAuthnChallenge.user_id == user_id) | (WebAuthnChallenge.user_id.is_(None))),
         )
-        .order_by(WebAuthnChallenge.created_at.desc())
-        .limit(1)
     )
-    challenge = result.scalar_one_or_none()
-    if challenge is None:
+    record = result.scalar_one_or_none()
+    if record is None:
         return None
-    await db.execute(delete(WebAuthnChallenge).where(WebAuthnChallenge.id == challenge.id))
-    return challenge
+    await db.execute(delete(WebAuthnChallenge).where(WebAuthnChallenge.id == record.id))
+    return record
 
 
 async def delete_expired_challenges(db: AsyncSession) -> None:
