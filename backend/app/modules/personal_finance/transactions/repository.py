@@ -168,6 +168,37 @@ async def get_transaction_by_id(
     return result.scalar_one_or_none()
 
 
+async def get_uncategorized_summary(
+    db: AsyncSession, user_id: uuid.UUID
+) -> tuple[int, Decimal, str]:
+    """Conteo, importe total y moneda mayoritaria de las tx activas sin
+    categoría (AUDIT-2026-05: extraído del router).
+
+    Si el usuario tiene tx sin categoría en varias monedas, devuelve la
+    moneda con más tx y el total en esa moneda — caso borde razonable
+    para el banner UX. Sin tx sin categoría → `(0, Decimal('0'), 'EUR')`.
+    """
+    rows = (
+        await db.execute(
+            select(
+                func.count(Transaction.id),
+                func.coalesce(func.sum(Transaction.amount), 0),
+                Transaction.currency,
+            )
+            .where(Transaction.user_id == user_id)
+            .where(Transaction.deleted_at.is_(None))
+            .where(Transaction.category_id.is_(None))
+            .group_by(Transaction.currency)
+        )
+    ).all()
+    if not rows:
+        return (0, Decimal("0"), "EUR")
+    rows_sorted = sorted(rows, key=lambda r: r[0], reverse=True)
+    _count, amount, currency = rows_sorted[0]
+    total_count = sum(int(r[0]) for r in rows)
+    return (total_count, Decimal(amount or 0), str(currency))
+
+
 async def create_transaction(db: AsyncSession, transaction: Transaction) -> Transaction:
     """Persiste una nueva transacción."""
     db.add(transaction)
@@ -183,8 +214,21 @@ async def soft_delete_transaction(db: AsyncSession, transaction: Transaction) ->
     coherencia con el typing del campo (`Mapped[datetime | None]`); la
     diferencia de microsegundos vs server-clock es irrelevante para el
     uso de papelera (ordenar deleted_at desc).
+
+    AUDIT-2026-05: si la tx es una pata de un par de transferencia
+    interna, deshacemos el par al trashearla. Antes, la pareja quedaba
+    apuntando a una fila trasheada: invisible en `/transfers`
+    (list_pairs descarta el par cuyo partner está borrado) pero seguía
+    excluida del cashflow por tener `transfer_pair_id` no nulo — una
+    discrepancia silenciosa. Al desvincular, la pareja vuelve a ser un
+    movimiento normal y visible.
     """
     transaction.deleted_at = datetime.now(UTC)
+    if transaction.transfer_pair_id is not None:
+        partner = await db.get(Transaction, transaction.transfer_pair_id)
+        if partner is not None and partner.user_id == transaction.user_id:
+            partner.transfer_pair_id = None
+        transaction.transfer_pair_id = None
     await db.flush()
     await db.refresh(transaction)
     return transaction
@@ -217,6 +261,22 @@ async def bulk_soft_delete_transactions(
         deleted="active",
     )
     result = await db.execute(stmt)
+    # AUDIT-2026-05: tras el bulk soft-delete, desvincula cualquier pata
+    # activa que quedara apuntando a una pareja recién trasheada (mismo
+    # motivo que en `soft_delete_transaction`). Set-based + idempotente.
+    trashed_ids = (
+        select(Transaction.id)
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.deleted_at.is_not(None))
+    )
+    orphan_unlink = (
+        update(Transaction)
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.deleted_at.is_(None))
+        .where(Transaction.transfer_pair_id.in_(trashed_ids))
+        .values(transfer_pair_id=None)
+    )
+    await db.execute(orphan_unlink)
     await db.flush()
     return result.rowcount or 0
 

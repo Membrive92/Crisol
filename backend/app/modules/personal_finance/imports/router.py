@@ -8,13 +8,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
-from app.modules.ai import service as ai_service
-from app.modules.ai.exceptions import AiError
 from app.modules.personal_finance.bank_mappings.repository import (
     get_mappings_for_concepts,
     normalize_concept,
@@ -36,6 +33,7 @@ from app.modules.personal_finance.imports.schemas import (
     ImportSource,
 )
 from app.modules.personal_finance.imports.service import (
+    get_ai_suggestions,
     run_commit,
     run_import,
     run_preview,
@@ -407,114 +405,10 @@ async def ai_suggest_endpoint(
     No persiste nada — el frontend muestra las sugerencias para que el
     usuario confirme o corrija; al hacer commit se guardan las
     aceptadas como `bank_category_mappings`.
+
+    AUDIT-2026-05: la lógica vive ahora en `service.get_ai_suggestions`.
     """
-    from app.modules.personal_finance.imports.models import ImportJobStatus
-    from app.modules.personal_finance.imports.repository import get_job_by_id as _get_job
-
-    job = await _get_job(db, job_id, user.id)
-    if job is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job no encontrado")
-    if job.status != ImportJobStatus.PREVIEW:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Job en estado {job.status.value}, no se puede sugerir",
-        )
-    if not job.preview_payload:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Job sin filas")
-
-    payload_data = job.preview_payload
-    rows_raw = payload_data.get("rows") or []
-    effective_mappings = ImportColumnMappings.model_validate(payload_data["effective_mappings"])
-    if not effective_mappings.category_name:
-        return AiSuggestionResponse(suggestions={})
-
-    # Detecta los conceptos únicos sin sugerencia previa: ni mapping
-    # exacto ni regla matching para todas las filas del grupo.
-    saved_mappings = await get_mappings_for_concepts(
-        db,
-        user.id,
-        [str(r.get(effective_mappings.category_name) or "") for r in rows_raw],
-    )
-    rules = await list_rules_for_user(db, user.id, enabled_only=True)
-
-    rows_by_concept: dict[str, list[tuple[str, str | None]]] = {}
-    display_by_concept: dict[str, str] = {}
-    for raw in rows_raw:
-        cell = str(raw.get(effective_mappings.category_name) or "").strip()
-        if not cell:
-            continue
-        norm = normalize_concept(cell)
-        if norm not in rows_by_concept:
-            rows_by_concept[norm] = []
-            display_by_concept[norm] = cell
-        description = (
-            str(raw.get(effective_mappings.description) or "").strip()
-            if effective_mappings.description
-            else ""
-        ) or None
-        rows_by_concept[norm].append((cell, description))
-
-    pending: list[dict[str, str]] = []
-    for norm, rows_in_group in rows_by_concept.items():
-        if norm in saved_mappings:
-            continue
-        if rules:
-            resolved = {
-                find_first_matching_rule(rules, concept=concept, description=description)
-                for concept, description in rows_in_group
-            }
-            cat_ids = {r.category_id for r in resolved if r is not None}
-            if len(cat_ids) == 1 and len(resolved) == 1:
-                # Ya hay sugerencia por regla — no necesita IA.
-                continue
-        # Sin sugerencia previa: candidato para IA. Mando concepto + la
-        # primera description del grupo como ejemplo.
-        first_desc = next((d for _, d in rows_in_group if d), "")
-        pending.append(
-            {
-                "id": norm,
-                "concept": display_by_concept[norm],
-                "description": first_desc or "",
-            }
-        )
-
-    if not pending:
-        return AiSuggestionResponse(suggestions={})
-
-    # Cargar categorías del usuario para el prompt.
-    from app.modules.personal_finance.categories.models import Category
-
-    cats_q = await db.execute(
-        select(Category).where(Category.user_id == user.id).order_by(Category.name)
-    )
-    cats = list(cats_q.scalars().all())
-    cat_payload = [
-        {
-            "id": str(c.id),
-            "name": c.name,
-            "kind": "ingreso" if c.kind.value == "income" else "gasto",
-        }
-        for c in cats
-    ]
-
-    try:
-        ai_result = await ai_service.suggest_categories_for_concepts(pending, cat_payload)
-    except AiError as e:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"IA: {e}") from e
-
-    # Mapeamos `id` (norm concept) → category_id (str). El frontend
-    # espera el concepto en formato display, pero el normalizado es
-    # estable. Lo devolvemos normalizado y el frontend hace el lookup
-    # contra `bank_concept_groups[].concept` (también normalizable).
-    suggestions: dict[str, uuid.UUID | None] = {}
-    for concept_norm, cat_id_str in ai_result.items():
-        if cat_id_str is None:
-            suggestions[concept_norm] = None
-            continue
-        try:
-            suggestions[concept_norm] = uuid.UUID(cat_id_str)
-        except ValueError:
-            suggestions[concept_norm] = None
+    suggestions = await get_ai_suggestions(db, user.id, job_id)
     return AiSuggestionResponse(suggestions=suggestions)
 
 

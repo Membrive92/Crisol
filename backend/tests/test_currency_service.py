@@ -23,6 +23,43 @@ async def _seed_eur_to_usd(db, rate_date: date, rate: str) -> None:  # type: ign
     await repository.upsert_rates(db, [(rate_date, "EUR", "USD", Decimal(rate), "test")])
 
 
+async def _seed_rate(db, rate_date: date, quote: str, rate: str) -> None:  # type: ignore[no-untyped-def]
+    await repository.upsert_rates(db, [(rate_date, "EUR", quote, Decimal(rate), "test")])
+
+
+async def test_cross_rate_reanchors_both_legs_to_common_older_date(test_engine) -> None:  # type: ignore[no-untyped-def]
+    """AUDIT-2026-05 — una cross-rate real (USD→GBP) no debe componer la
+    tasa USD fresca de un día con la GBP rancia de otro. Cuando las dos
+    piernas resuelven a fechas distintas, ambas se re-anclan a la fecha
+    común más antigua.
+
+    Sembrado: EUR→USD en 04-01/03/05; EUR→GBP sólo en 04-01/03.
+    convert(USD→GBP, at=04-05): USD encaja exacto el 04-05 (1.20), GBP
+    cae al 04-03 (0.85). Sin el fix compondría 0.85/1.20 con la USD del
+    04-05; con el fix re-ancla USD al 04-03 (1.15) → 0.85/1.15 ≈ 0.7391,
+    rate_date=04-03 y fallback='previous'.
+    """
+    async with await _session(test_engine) as db:
+        await _seed_rate(db, date(2026, 4, 1), "USD", "1.10")
+        await _seed_rate(db, date(2026, 4, 3), "USD", "1.15")
+        await _seed_rate(db, date(2026, 4, 5), "USD", "1.20")
+        await _seed_rate(db, date(2026, 4, 1), "GBP", "0.80")
+        await _seed_rate(db, date(2026, 4, 3), "GBP", "0.85")
+        await db.commit()
+
+        result = await service.convert(
+            db,
+            amount=Decimal("100"),
+            from_currency="USD",
+            to_currency="GBP",
+            at_date=date(2026, 4, 5),
+        )
+        # Re-anclado al 04-03: USD=1.15, GBP=0.85 → 0.85/1.15 ≈ 0.73913
+        assert result.rate_date == date(2026, 4, 3)
+        assert result.fallback == "previous"
+        assert Decimal("0.738") <= result.rate <= Decimal("0.740"), result.rate
+
+
 async def test_convert_same_currency_returns_amount_unchanged(test_engine) -> None:  # type: ignore[no-untyped-def]
     async with await _session(test_engine) as db:
         result = await service.convert(

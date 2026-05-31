@@ -69,20 +69,6 @@ from app.modules.personal_finance.transfers.schemas import (
 )
 
 
-async def _source_kind(db: AsyncSession, source: Transaction) -> CategoryKind:
-    """Determina el `kind` efectivo de la tx origen para decidir la
-    dirección del transfer. Si no tiene categoría asumimos EXPENSE
-    (caso más común al convertir: "esto fue un envío de dinero"); el
-    usuario puede ajustar luego cambiando la categoría manualmente.
-    """
-    if source.category_id is None:
-        return CategoryKind.EXPENSE
-    cat = await get_category_by_id(db, source.category_id, source.user_id)
-    if cat is None:
-        return CategoryKind.EXPENSE
-    return cat.kind
-
-
 def _delta_days(tx_a: Transaction, tx_b: Transaction) -> int:
     return abs((tx_a.occurred_at - tx_b.occurred_at).days)
 

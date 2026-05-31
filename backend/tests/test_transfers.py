@@ -104,6 +104,37 @@ async def test_link_two_transactions_as_transfer(client: AsyncClient) -> None:
     assert out_tx["transfer_pair_id"] == in_id
 
 
+async def test_soft_delete_unlinks_transfer_pair(client: AsyncClient) -> None:
+    """AUDIT-2026-05 — al trashear una pata del par, la pareja se
+    desvincula (no queda apuntando a una fila borrada: invisible en
+    /transfers pero excluida del cashflow)."""
+    token, _cat, acc_a, acc_b = await _setup_user_with_two_accounts(
+        client, "softdel_pair@example.com"
+    )
+    out_id = await _create_tx(
+        client, token, account_id=acc_a, amount="300.00", occurred_at="2026-04-15T12:00:00Z"
+    )
+    in_id = await _create_tx(
+        client, token, account_id=acc_b, amount="300.00", occurred_at="2026-04-15T13:00:00Z"
+    )
+    link = await client.post(
+        "/transfers/link",
+        json={"out_transaction_id": out_id, "in_transaction_id": in_id},
+        headers=_auth(token),
+    )
+    assert link.status_code == 201
+
+    # Soft-delete (papelera) de la pata de salida.
+    delete = await client.delete(f"/transactions/{out_id}", headers=_auth(token))
+    assert delete.status_code in (200, 204), delete.text
+
+    # El par ya no aparece y la pareja superviviente quedó desvinculada.
+    pairs = (await client.get("/transfers", headers=_auth(token))).json()
+    assert pairs == []
+    in_tx = (await client.get(f"/transactions/{in_id}", headers=_auth(token))).json()
+    assert in_tx["transfer_pair_id"] is None
+
+
 async def test_link_rejects_same_account(client: AsyncClient) -> None:
     token, _cat, acc_a, _acc_b = await _setup_user_with_two_accounts(
         client, "samelinked@example.com"

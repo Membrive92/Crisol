@@ -90,14 +90,18 @@ async def register_endpoint(
     PHASE-20: tras crear el usuario, se siembran automáticamente
     categorías y reglas recomendadas para bancos españoles, para que
     el primer import ya venga mayoritariamente categorizado.
+
+    AUDIT-2026-05: el seed se dispara vía `dispatch_user_created` (hook
+    de dominio cableado en `main.py`) en vez de importar el módulo de
+    dominio aquí — `auth` ya no depende de `personal_finance`.
     """
-    from app.modules.personal_finance.seed.service import seed_recommended
+    from app.core.hooks import dispatch_user_created
     from app.modules.users.repository import get_user_by_email
 
     session = await register(db, body.email, body.password, body.display_name)
     user = await get_user_by_email(db, body.email)
     if user is not None:
-        await seed_recommended(db, user.id)
+        await dispatch_user_created(db, user.id)
     await db.commit()
     _set_refresh_cookie(response, session.tokens.refresh_token, ttl_days=session.refresh_ttl_days)
     return session.tokens

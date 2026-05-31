@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
+from app.core.hooks import register_user_created_hook
 from app.core.scheduler import create_scheduler
 from app.modules.ai.router import router as ai_router
 from app.modules.auth.router import router as auth_router
@@ -27,8 +28,14 @@ from app.modules.personal_finance.fixed_expenses.router import router as fixed_e
 from app.modules.personal_finance.imports.router import router as imports_router
 from app.modules.personal_finance.receipts.router import router as receipts_router
 from app.modules.personal_finance.seed.router import router as seed_router
+from app.modules.personal_finance.seed.service import seed_recommended
 from app.modules.personal_finance.transactions.router import router as transactions_router
 from app.modules.personal_finance.transfers.router import router as transfers_router
+
+# AUDIT-2026-05: cablea el seed de dominio como hook on-user-created, de
+# modo que `auth` no importe `personal_finance.seed` directamente. Este
+# es el único punto que conoce ambos lados (infra + dominio).
+register_user_created_hook(seed_recommended)
 
 
 @asynccontextmanager

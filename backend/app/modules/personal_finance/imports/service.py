@@ -493,6 +493,122 @@ async def _process_and_persist(
     await db.refresh(job)
 
 
+async def get_ai_suggestions(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    job_id: uuid.UUID,
+) -> dict[str, uuid.UUID | None]:
+    """Para un job en PREVIEW, pide al modelo de texto local que sugiera
+    categorías para los conceptos del banco aún sin sugerencia (sin
+    mapping guardado ni regla matching).
+
+    AUDIT-2026-05: lógica movida del router (`router.py` ai_suggest) al
+    service. No persiste nada — el caller devuelve las sugerencias para
+    que el usuario confirme; al commit se guardan las aceptadas como
+    `bank_category_mappings`. Devuelve `{concepto_normalizado: cat_id |
+    None}`. Lanza `HTTPException` si el job no existe, no está en PREVIEW
+    o no tiene filas (mismos contratos que el endpoint previo).
+    """
+    job = await get_job_by_id(db, job_id, user_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job no encontrado")
+    if job.status != ImportJobStatus.PREVIEW:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Job en estado {job.status.value}, no se puede sugerir",
+        )
+    if not job.preview_payload:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Job sin filas")
+
+    payload_data = job.preview_payload
+    rows_raw = payload_data.get("rows") or []
+    effective_mappings = ImportColumnMappings.model_validate(payload_data["effective_mappings"])
+    if not effective_mappings.category_name:
+        return {}
+
+    # Detecta los conceptos únicos sin sugerencia previa: ni mapping
+    # exacto ni regla matching para todas las filas del grupo.
+    saved_mappings = await get_mappings_for_concepts(
+        db,
+        user_id,
+        [str(r.get(effective_mappings.category_name) or "") for r in rows_raw],
+    )
+    rules = await list_rules_for_user(db, user_id, enabled_only=True)
+
+    rows_by_concept: dict[str, list[tuple[str, str | None]]] = {}
+    display_by_concept: dict[str, str] = {}
+    for raw in rows_raw:
+        cell = str(raw.get(effective_mappings.category_name) or "").strip()
+        if not cell:
+            continue
+        norm = normalize_concept(cell)
+        if norm not in rows_by_concept:
+            rows_by_concept[norm] = []
+            display_by_concept[norm] = cell
+        description = (
+            str(raw.get(effective_mappings.description) or "").strip()
+            if effective_mappings.description
+            else ""
+        ) or None
+        rows_by_concept[norm].append((cell, description))
+
+    pending: list[dict[str, str]] = []
+    for norm, rows_in_group in rows_by_concept.items():
+        if norm in saved_mappings:
+            continue
+        if rules:
+            resolved = {
+                find_first_matching_rule(rules, concept=concept, description=description)
+                for concept, description in rows_in_group
+            }
+            cat_ids = {r.category_id for r in resolved if r is not None}
+            if len(cat_ids) == 1 and len(resolved) == 1:
+                # Ya hay sugerencia por regla — no necesita IA.
+                continue
+        # Sin sugerencia previa: candidato para IA. Mando concepto + la
+        # primera description del grupo como ejemplo.
+        first_desc = next((d for _, d in rows_in_group if d), "")
+        pending.append(
+            {
+                "id": norm,
+                "concept": display_by_concept[norm],
+                "description": first_desc or "",
+            }
+        )
+
+    if not pending:
+        return {}
+
+    cats_q = await db.execute(
+        select(Category).where(Category.user_id == user_id).order_by(Category.name)
+    )
+    cats = list(cats_q.scalars().all())
+    cat_payload = [
+        {
+            "id": str(c.id),
+            "name": c.name,
+            "kind": "ingreso" if c.kind.value == "income" else "gasto",
+        }
+        for c in cats
+    ]
+
+    try:
+        ai_result = await ai_service.suggest_categories_for_concepts(pending, cat_payload)
+    except AiError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"IA: {e}") from e
+
+    suggestions: dict[str, uuid.UUID | None] = {}
+    for concept_norm, cat_id_str in ai_result.items():
+        if cat_id_str is None:
+            suggestions[concept_norm] = None
+            continue
+        try:
+            suggestions[concept_norm] = uuid.UUID(cat_id_str)
+        except ValueError:
+            suggestions[concept_norm] = None
+    return suggestions
+
+
 async def _mark_job_failed(db: AsyncSession, job: ImportJob, error: str) -> ImportJob:
     job.status = ImportJobStatus.FAILED
     job.error_log = [{"row": 0, "error": error}]

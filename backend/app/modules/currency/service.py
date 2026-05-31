@@ -132,14 +132,31 @@ async def convert(
     src_rate, src_date, src_fallback = src_resolved
     dst_rate, dst_date, dst_fallback = dst_resolved
 
+    # AUDIT-2026-05: en una cross-rate real (ninguna pata es EUR) las dos
+    # piernas EUR→X se resuelven con ventanas de fallback independientes y
+    # podían acabar en fechas distintas — componiendo una tasa fresca con
+    # una rancia. Re-anclamos ambas a la fecha común más antigua para que
+    # la composición sea coherente; el resultado se marca como "previous".
+    reanchored = False
+    if src != CANONICAL_BASE and dst != CANONICAL_BASE and src_date != dst_date:
+        common = min(src_date, dst_date)
+        src_common = await _resolve_eur_rate(db, quote=src, at_date=common)
+        dst_common = await _resolve_eur_rate(db, quote=dst, at_date=common)
+        if src_common is not None and dst_common is not None:
+            src_rate, src_date, _ = src_common
+            dst_rate, dst_date, _ = dst_common
+            reanchored = True
+
     # rate(FROM→TO) = rate(EUR→TO) / rate(EUR→FROM)
     # Operamos a precisión completa de Decimal y redondeamos al final.
     composed_rate = dst_rate / src_rate
     converted = amount * composed_rate
 
-    # Si alguna pierna usó fallback, el resultado completo es
-    # "previous" — el peor caso domina.
-    fallback: RateFallback = "previous" if "previous" in (src_fallback, dst_fallback) else "exact"
+    # Si alguna pierna usó fallback (o re-anclamos), el resultado completo
+    # es "previous" — el peor caso domina.
+    fallback: RateFallback = (
+        "previous" if reanchored or "previous" in (src_fallback, dst_fallback) else "exact"
+    )
     # Reportamos la fecha más antigua de las dos: la pierna más
     # rancia es la que limita la frescura del resultado. El caso EUR
     # self-shortcut tiene `rate_date == at_date` sintético (no es una

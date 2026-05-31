@@ -9,7 +9,6 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel
-from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -38,6 +37,7 @@ from app.modules.personal_finance.transactions.service import (
     list_trashed_transactions,
     purge_transaction,
     restore_transaction,
+    uncategorized_summary,
     update_transaction,
 )
 
@@ -226,35 +226,13 @@ async def uncategorized_summary_endpoint(
     """Cuántas tx activas (no papelera) tiene el usuario sin categoría
     y por qué importe total. Alimenta el banner que invita a
     categorizar — tras PHASE-31.3 estas tx ya no contaminan el saldo,
-    así que conviene que el usuario las vea explícitamente."""
-    from sqlalchemy import func as sql_func
+    así que conviene que el usuario las vea explícitamente.
 
-    rows = (
-        await db.execute(
-            sa_select(
-                sql_func.count(Transaction.id),
-                sql_func.coalesce(sql_func.sum(Transaction.amount), 0),
-                Transaction.currency,
-            )
-            .where(Transaction.user_id == user.id)
-            .where(Transaction.deleted_at.is_(None))
-            .where(Transaction.category_id.is_(None))
-            .group_by(Transaction.currency)
-        )
-    ).all()
-    # Si el usuario tiene tx sin categoría en varias monedas, devolvemos
-    # la moneda mayoritaria (más tx) y el total en esa moneda. Es
-    # razonable para el banner — un caso bordes que no debería pasar
-    # con un usuario disciplinado.
-    if not rows:
-        return UncategorizedSummaryResponse(count=0, total_amount=Decimal("0"), currency="EUR")
-    rows_sorted = sorted(rows, key=lambda r: r[0], reverse=True)
-    count, amount, currency = rows_sorted[0]
-    total_count = sum(int(r[0]) for r in rows)
-    _ = count
+    AUDIT-2026-05: la agregación vive ahora en service/repository."""
+    count, total_amount, currency = await uncategorized_summary(db, user.id)
     return UncategorizedSummaryResponse(
-        count=total_count,
-        total_amount=Decimal(amount or 0),
+        count=count,
+        total_amount=total_amount,
         currency=currency,
     )
 

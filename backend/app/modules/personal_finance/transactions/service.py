@@ -29,6 +29,9 @@ from app.modules.personal_finance.transactions.repository import (
     get_transaction_by_id,
 )
 from app.modules.personal_finance.transactions.repository import (
+    get_uncategorized_summary as repo_uncategorized_summary,
+)
+from app.modules.personal_finance.transactions.repository import (
     list_transactions as list_all,
 )
 from app.modules.personal_finance.transactions.repository import (
@@ -197,6 +200,12 @@ async def update_transaction(
     await db.flush()
     await db.refresh(transaction)
     return transaction
+
+
+async def uncategorized_summary(db: AsyncSession, user_id: uuid.UUID) -> tuple[int, Decimal, str]:
+    """Conteo + importe + moneda mayoritaria de tx activas sin categoría
+    (AUDIT-2026-05: lógica movida del router al repository)."""
+    return await repo_uncategorized_summary(db, user_id)
 
 
 async def delete_transaction(
