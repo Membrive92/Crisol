@@ -21,6 +21,7 @@ import {
 } from '@/components/analysis/stitch-period-toggle';
 import { StitchSmartInsights } from '@/components/analysis/stitch-smart-insights';
 import { Card } from '@/components/ui/card';
+import { ErrorState } from '@/components/ui/error-state';
 import { ListIcon } from '@/components/ui/icons';
 
 export default function AnalysisPage() {
@@ -58,6 +59,20 @@ export default function AnalysisPage() {
   const monthly = monthlyQuery.data ?? [];
   const expensesByCategory = expensesByCategoryQuery.data ?? [];
   const unconvertible = summary?.unconvertible_count ?? 0;
+
+  const hasError =
+    summaryQuery.isError ||
+    monthlyQuery.isError ||
+    expensesByCategoryQuery.isError;
+  const isRefetching =
+    summaryQuery.isFetching ||
+    monthlyQuery.isFetching ||
+    expensesByCategoryQuery.isFetching;
+  function retryAll() {
+    void summaryQuery.refetch();
+    void monthlyQuery.refetch();
+    void expensesByCategoryQuery.refetch();
+  }
 
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: spacing.lg }}>
@@ -123,6 +138,17 @@ export default function AnalysisPage() {
         </div>
         <StitchPeriodToggle value={period} onChange={setPeriod} />
       </header>
+
+      {hasError ? (
+        <div style={{ marginBottom: spacing.md }}>
+          <ErrorState
+            description="No se pudieron cargar algunos datos del análisis. Las cifras mostradas pueden estar incompletas."
+            onRetry={retryAll}
+            retrying={isRefetching}
+            compact
+          />
+        </div>
+      ) : null}
 
       {/* PHASE-29.5: PositionHero fusiona BalancesCard + DebtHealthCard
           en una única card con 3 secciones (patrimonio neto, salud de

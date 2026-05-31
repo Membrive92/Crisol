@@ -27,6 +27,8 @@ import { MisclassifiedSection } from '@/components/transfers/misclassified-secti
 import { TransferPairCard } from '@/components/transfers/transfer-pair-card';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { ErrorState } from '@/components/ui/error-state';
+import { SkeletonCardList } from '@/components/ui/skeleton';
 
 export default function TransfersPage() {
   const transfersQuery = useTransfers();
@@ -204,7 +206,13 @@ export default function TransfersPage() {
       <section style={{ marginBottom: spacing.xl }}>
         <h2 style={sectionHeaderStyle}>Pares activos</h2>
         {transfersQuery.isLoading ? (
-          <p style={{ color: colors.textMuted }}>Cargando…</p>
+          <SkeletonCardList rows={3} />
+        ) : transfersQuery.isError ? (
+          <ErrorState
+            description="No se pudieron cargar las transferencias enlazadas."
+            onRetry={() => void transfersQuery.refetch()}
+            retrying={transfersQuery.isFetching}
+          />
         ) : pairs.length === 0 ? (
           <Card
             style={{

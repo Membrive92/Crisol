@@ -26,6 +26,12 @@ export interface DataTableProps<T> {
   rowKey: (row: T, index: number) => string;
   /** Click en una fila — opcional. Si está, las filas son focusables. */
   onRowClick?: ((row: T, index: number) => void) | undefined;
+  /**
+   * Nombre accesible por fila cuando `onRowClick` está presente. Sin
+   * esto, un lector de pantalla anunciaría la fila como "botón" sin
+   * más (AUDIT-2026-05). Default genérico "Ver detalle de la fila N".
+   */
+  rowAriaLabel?: ((row: T, index: number) => string) | undefined;
   /** Mensaje cuando `rows.length === 0`. */
   emptyMessage?: string | undefined;
 }
@@ -42,6 +48,7 @@ export function DataTable<T>({
   rows,
   rowKey,
   onRowClick,
+  rowAriaLabel,
   emptyMessage = 'Sin datos.',
 }: DataTableProps<T>) {
   if (rows.length === 0) {
@@ -110,6 +117,7 @@ export function DataTable<T>({
               columns={columns}
               isLast={idx === rows.length - 1}
               onRowClick={onRowClick}
+              rowAriaLabel={rowAriaLabel}
             />
           ))}
         </tbody>
@@ -124,9 +132,10 @@ interface RowProps<T> {
   columns: DataTableColumn<T>[];
   isLast: boolean;
   onRowClick: ((row: T, index: number) => void) | undefined;
+  rowAriaLabel: ((row: T, index: number) => string) | undefined;
 }
 
-function Row<T>({ row, index, columns, isLast, onRowClick }: RowProps<T>) {
+function Row<T>({ row, index, columns, isLast, onRowClick, rowAriaLabel }: RowProps<T>) {
   const clickable = onRowClick !== undefined;
   const baseStyle: CSSProperties = {
     cursor: clickable ? 'pointer' : 'default',
@@ -150,6 +159,11 @@ function Row<T>({ row, index, columns, isLast, onRowClick }: RowProps<T>) {
       onKeyDown={clickable ? handleKeyDown : undefined}
       tabIndex={clickable ? 0 : undefined}
       role={clickable ? 'button' : undefined}
+      aria-label={
+        clickable
+          ? (rowAriaLabel?.(row, index) ?? `Ver detalle de la fila ${index + 1}`)
+          : undefined
+      }
       style={baseStyle}
       onMouseEnter={(e) => {
         e.currentTarget.style.backgroundColor = colors.surfaceMuted;

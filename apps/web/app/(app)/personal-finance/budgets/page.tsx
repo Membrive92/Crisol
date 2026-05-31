@@ -19,6 +19,8 @@ import { BudgetRow } from '@/components/budgets/budget-row';
 import { BudgetStatusCard } from '@/components/budgets/budget-status-card';
 import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { ErrorState } from '@/components/ui/error-state';
+import { Skeleton } from '@/components/ui/skeleton';
 
 export default function BudgetsPage() {
   const { data: categories } = useCategories();
@@ -104,7 +106,24 @@ export default function BudgetsPage() {
       <section style={{ marginBottom: spacing.xl }}>
         <h2 style={sectionHeaderStyle}>Estado del mes</h2>
         {statusQuery.isLoading ? (
-          <p style={{ color: colors.textMuted }}>Cargando…</p>
+          <div
+            aria-busy
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+              gap: spacing.md,
+            }}
+          >
+            {Array.from({ length: 3 }, (_, i) => (
+              <Skeleton key={i} height={96} />
+            ))}
+          </div>
+        ) : statusQuery.isError ? (
+          <ErrorState
+            description="No se pudo cargar el estado de tus presupuestos."
+            onRetry={() => void statusQuery.refetch()}
+            retrying={statusQuery.isFetching}
+          />
         ) : statusItems.length === 0 ? (
           <Card
             style={{
@@ -149,7 +168,16 @@ export default function BudgetsPage() {
         </Card>
       </section>
 
-      {budgets.length > 0 ? (
+      {budgetsQuery.isError ? (
+        <section>
+          <h2 style={sectionHeaderStyle}>Presupuestos activos</h2>
+          <ErrorState
+            description="No se pudo cargar la lista de presupuestos."
+            onRetry={() => void budgetsQuery.refetch()}
+            retrying={budgetsQuery.isFetching}
+          />
+        </section>
+      ) : budgets.length > 0 ? (
         <section>
           <h2 style={sectionHeaderStyle}>Presupuestos activos</h2>
           <Card style={{ padding: 0 }}>

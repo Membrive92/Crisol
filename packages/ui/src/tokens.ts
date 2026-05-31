@@ -43,7 +43,9 @@ export const colors = {
   warningSoft: color('warning-soft', '#fff4e5'),
   text: color('text', '#1f1f1f'),
   textMuted: color('text-muted', '#666666'),
-  textSubtle: color('text-subtle', '#8a8a8a'),
+  // #767676 sobre blanco da 4.54:1 (AA para texto normal). El #8a8a8a
+  // anterior fallaba AA (2.97:1) — AUDIT-2026-05.
+  textSubtle: color('text-subtle', '#767676'),
   border: color('border', '#e0e0e0'),
   borderStrong: color('border-strong', '#bdbdbd'),
   surface: color('surface', '#ffffff'),

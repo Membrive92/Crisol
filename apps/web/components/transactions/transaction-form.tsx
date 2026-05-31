@@ -75,7 +75,12 @@ export function TransactionForm({
   const [values, setValues] = useState<TransactionFormValues>(() =>
     buildInitialValues(initial, activeCurrency),
   );
-  const [error, setError] = useState<string | null>(null);
+  // Errores por campo (AUDIT-2026-05): se pintan inline bajo el control
+  // que falla, en vez de un único mensaje genérico al pie del form.
+  const [fieldErrors, setFieldErrors] = useState<{
+    amount?: string;
+    account_id?: string;
+  }>({});
 
   // Cuando el listado de cuentas llega, si no hay account_id seleccionado
   // tomamos la primera. El guard del layout impide llegar aquí sin
@@ -102,21 +107,32 @@ export function TransactionForm({
 
   function handleChange<K extends keyof TransactionFormValues>(field: K, value: string) {
     setValues((prev) => ({ ...prev, [field]: value }));
+    // Limpia el error del campo en cuanto el usuario lo edita.
+    if (field === 'amount' || field === 'account_id') {
+      setFieldErrors((prev) => {
+        if (!(field in prev)) return prev;
+        const { [field]: _removed, ...rest } = prev;
+        return rest;
+      });
+    }
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
 
     const amount = values.amount.trim().replace(',', '.');
+    const nextErrors: { amount?: string; account_id?: string } = {};
     if (!amount || Number.isNaN(Number(amount)) || Number(amount) <= 0) {
-      setError('Importe debe ser un número positivo');
-      return;
+      nextErrors.amount = 'El importe debe ser un número positivo.';
     }
     if (!values.account_id) {
-      setError('Selecciona una cuenta');
+      nextErrors.account_id = 'Selecciona una cuenta.';
+    }
+    if (nextErrors.amount || nextErrors.account_id) {
+      setFieldErrors(nextErrors);
       return;
     }
+    setFieldErrors({});
 
     const payload: TransactionCreateRequest = {
       account_id: values.account_id,
@@ -157,6 +173,8 @@ export function TransactionForm({
         placeholder="0.00"
         value={values.amount}
         onChange={(e) => handleChange('amount', e.target.value)}
+        error={fieldErrors.amount}
+        aria-invalid={fieldErrors.amount ? true : undefined}
         required
       />
       <Select
@@ -175,6 +193,8 @@ export function TransactionForm({
         value={values.account_id}
         onChange={(e) => handleChange('account_id', e.target.value)}
         disabled={loadingAccounts}
+        error={fieldErrors.account_id}
+        aria-invalid={fieldErrors.account_id ? true : undefined}
         required
       >
         {accountList.map((a) => (
@@ -210,10 +230,6 @@ export function TransactionForm({
         onChange={(e) => handleChange('description', e.target.value)}
         maxLength={500}
       />
-
-      {error ? (
-        <div style={{ color: colors.danger, fontSize: 14, marginBottom: 12 }}>{error}</div>
-      ) : null}
 
       <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
         <Button type="submit" disabled={submitting}>

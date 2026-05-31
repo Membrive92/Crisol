@@ -22,6 +22,7 @@ import { EffortRatioSection } from '@/components/debt/effort-ratio-section';
 import { PaymentsSummaryCard } from '@/components/debt/payments-summary-card';
 import { PeriodNavigator } from '@/components/debt/period-navigator';
 import { RecurringQuotasList } from '@/components/debt/recurring-quotas-list';
+import { ErrorState } from '@/components/ui/error-state';
 
 /**
  * Página `/debt` rediseñada en PHASE-30.3.
@@ -109,6 +110,14 @@ export default function DebtPage() {
           availableFrom={summary?.available_from ?? null}
           availableTo={summary?.available_to ?? null}
         />
+        {summaryQuery.isError ? (
+          <ErrorState
+            description="No se pudieron cargar tus métricas de deuda. Las cifras de abajo pueden estar incompletas."
+            onRetry={() => void summaryQuery.refetch()}
+            retrying={summaryQuery.isFetching}
+            compact
+          />
+        ) : null}
         <EffortRatioSection
           strictRatio={summary?.effort_ratio_strict ?? null}
           strictStatus={summary?.effort_ratio_strict_status ?? 'unknown'}

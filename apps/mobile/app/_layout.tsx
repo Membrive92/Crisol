@@ -5,15 +5,18 @@ import { StatusBar } from 'expo-status-bar';
 import { authApi, useAccounts } from '@crisol/services';
 import { useAuthStore } from '@crisol/store';
 
+import { ErrorBoundary } from '../components/error-boundary';
 import { Toaster } from '../components/ui/toaster';
 import { useAuthInit } from '../lib/auth-provider';
 import { QueryProvider } from '../lib/query-provider';
 
 export default function RootLayout() {
   return (
-    <QueryProvider>
-      <RootLayoutInner />
-    </QueryProvider>
+    <ErrorBoundary>
+      <QueryProvider>
+        <RootLayoutInner />
+      </QueryProvider>
+    </ErrorBoundary>
   );
 }
 

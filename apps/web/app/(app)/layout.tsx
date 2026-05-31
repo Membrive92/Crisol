@@ -30,6 +30,26 @@ import { Toaster } from '@/components/ui/toaster';
 // para colapsar offsets de sidebar y mostrar/ocultar elementos
 // `data-mobile-only` según el breakpoint.
 const MOBILE_NAV_GLOBAL_STYLES = `
+  .crisol-skip-link {
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    z-index: 200;
+    padding: 8px 16px;
+    border-radius: 8px;
+    background: var(--color-primary, #c4671f);
+    color: var(--color-on-primary, #fff8f0);
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+    transform: translateY(-150%);
+    transition: transform 140ms ease;
+  }
+  .crisol-skip-link:focus {
+    transform: translateY(0);
+    outline: 2px solid var(--color-primary, #c4671f);
+    outline-offset: 2px;
+  }
   @media (max-width: ${MOBILE_BREAKPOINT_PX - 1}px) {
     [data-app-main] { padding-left: 0 !important; }
     [data-app-header] { left: 0 !important; }
@@ -143,6 +163,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <div style={{ minHeight: '100vh', backgroundColor: colors.background }}>
       <style>{MOBILE_NAV_GLOBAL_STYLES}</style>
 
+      {/* Skip-link: primer elemento focusable; salta directo al
+          contenido principal sin tabular por toda la chrome
+          (AUDIT-2026-05). Visualmente oculto hasta recibir foco. */}
+      <a href="#main-content" className="crisol-skip-link">
+        Saltar al contenido
+      </a>
+
       {/* Sidebar fija con lista de MÓDULOS — full height para que el
           corner top-left de la pantalla pertenezca a la sidebar y no
           a un hueco del header. En <768px se transforma en drawer
@@ -221,7 +248,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
 
         {hasSections && (
-          <div
+          <nav
+            aria-label="Secciones del módulo"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -232,17 +260,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             }}
           >
             <ModuleSections module={activeModule} />
-          </div>
+          </nav>
         )}
       </header>
 
       <main
+        id="main-content"
+        tabIndex={-1}
         data-app-main="true"
         style={{
           paddingTop: hasSections ? HEADER_HEIGHT : HEADER_HEIGHT_BARE,
           paddingLeft: SIDEBAR_WIDTH,
           minHeight: '100vh',
           boxSizing: 'border-box',
+          outline: 'none',
         }}
       >
         <PasskeyPrompt />

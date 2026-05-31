@@ -24,6 +24,8 @@ import { FixedExpenseCard } from '@/components/fixed-expenses/fixed-expense-card
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { ErrorState } from '@/components/ui/error-state';
+import { SkeletonCardList } from '@/components/ui/skeleton';
 
 export default function FixedExpensesPage() {
   const { data: categories } = useCategories();
@@ -252,7 +254,13 @@ export default function FixedExpensesPage() {
       <section style={{ marginBottom: spacing.xl }}>
         <h2 style={sectionHeaderStyle}>Sugeridos (revisa y confirma)</h2>
         {pendingQuery.isLoading ? (
-          <p style={{ color: colors.textMuted }}>Cargando…</p>
+          <SkeletonCardList rows={3} />
+        ) : pendingQuery.isError ? (
+          <ErrorState
+            description="No se pudieron cargar los gastos fijos sugeridos."
+            onRetry={() => void pendingQuery.refetch()}
+            retrying={pendingQuery.isFetching}
+          />
         ) : pending.length === 0 ? (
           <Card
             style={{

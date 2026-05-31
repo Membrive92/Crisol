@@ -156,6 +156,7 @@ function SearchInput({
         type="search"
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        aria-label="Buscar transacciones, comercios o importes"
         placeholder="Buscar transacciones, comercios o importes..."
         style={{
           width: '100%',

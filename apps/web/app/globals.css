@@ -23,7 +23,8 @@
   --color-warning-soft: #fff4e5;
   --color-text: #1f1f1f;
   --color-text-muted: #666666;
-  --color-text-subtle: #8a8a8a;
+  /* AUDIT-2026-05: #767676 cumple AA (4.54:1) sobre surface blanco. */
+  --color-text-subtle: #767676;
   --color-border: #e0e0e0;
   --color-border-strong: #bdbdbd;
   --color-surface: #ffffff;
@@ -54,7 +55,9 @@
   --color-warning-soft: #322318;
   --color-text: #e6e7ea;
   --color-text-muted: #9aa0aa;
-  --color-text-subtle: #6c7280;
+  /* AUDIT-2026-05: #868d99 cumple AA (≈5.2:1) sobre surface oscuro;
+     el #6c7280 anterior se quedaba en ≈3.6:1. */
+  --color-text-subtle: #868d99;
   --color-border: #272c36;
   --color-border-strong: #3a4150;
   --color-surface: #171a21;

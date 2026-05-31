@@ -12,7 +12,31 @@
 >   (no se tacha) — la phase doc deja la traza histórica.
 > - Si un item se promueve a fase formal, se traslada a
 >   `phases/phase-X.Y-*.md` y se borra de aquí.
-> - Última actualización: 2026-05-05 (PHASE-13.1).
+> - Última actualización: 2026-05-31 (AUDIT-2026-05, Ola 4).
+
+---
+
+## AUDIT-2026-05 — follow-ups diferidos
+
+Items de la auditoría conscientemente diferidos durante la remediación
+(ver `audits/2026-05-30-full-app-audit.md`):
+
+- **[Ola 4] Focus-trap del drawer mobile** (`(app)/layout.tsx`). El
+  modal principal (`confirm-dialog.tsx`) ya atrapa el foco; el drawer
+  lateral (chrome sólo-mobile) se cierra con ESC + backdrop pero no
+  atrapa el `Tab`. Menor: la experiencia móvil real es la app RN.
+- **[Ola 4] Bentos no responsive en web** (`analysis/page.tsx`,
+  `debt/page.tsx`). Los grids 8fr/4fr y 7fr/5fr son ratios de diseño
+  deliberados; en viewport < ~660px se comprimen. No se convierten a
+  `auto-fit` para no regresar el diseño desktop (la web es
+  desktop-first). `budgets` y el panel de filtros ya usan `auto-fit`.
+- **[Ola 4→7] Test del interceptor `api/client.ts`** (cola de 401
+  concurrentes + reintento con `FormData`). Trasladado a la ola de
+  cobertura de tests (Ola 7), donde encaja con los endpoint-client
+  tests.
+- **Cola/worker real para imports/receipts largos**. La Ola 3 los
+  saca del event loop vía threadpool; una cola de jobs persistente es
+  cambio de infra mayor sin beneficio claro en un único host de dev.
 
 ---
 

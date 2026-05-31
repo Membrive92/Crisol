@@ -30,6 +30,7 @@ import {
 import { SavingsRateCard } from '../../../../components/dashboard/savings-rate-card';
 import { SmartInsights } from '../../../../components/dashboard/smart-insights';
 import { TopExpensesList } from '../../../../components/dashboard/top-expenses-list';
+import { ErrorState } from '../../../../components/ui/error-state';
 import { FabLink } from '../../../../components/ui/fab';
 
 const TOP_EXPENSES_LIMIT = 5;
@@ -144,6 +145,11 @@ export default function AnalysisScreen() {
   }
 
   const expensesByCategory = byCategoryQuery.data ?? [];
+  const hasError =
+    summaryQuery.isError ||
+    monthlyQuery.isError ||
+    byCategoryQuery.isError ||
+    topExpensesQuery.isError;
 
   return (
     <View style={styles.container}>
@@ -216,6 +222,16 @@ export default function AnalysisScreen() {
         </View>
         <PeriodToggle value={period} onChange={setPeriod} />
 
+        {hasError ? (
+          <View style={{ marginBottom: spacing.md }}>
+            <ErrorState
+              description="No se pudieron cargar algunas secciones del análisis. Las cifras pueden estar incompletas."
+              onRetry={handleRefresh}
+              retrying={refreshing}
+            />
+          </View>
+        ) : null}
+
         <BalancesCard />
         <DebtHealthCard />
         <KpiCards summary={summaryQuery.data} isLoading={summaryQuery.isLoading} />
@@ -242,13 +258,6 @@ export default function AnalysisScreen() {
           expensesByCategory={expensesByCategory}
           currency={currency}
         />
-
-        {(summaryQuery.isError ||
-          monthlyQuery.isError ||
-          byCategoryQuery.isError ||
-          topExpensesQuery.isError) && (
-          <Text style={styles.errorText}>Error cargando alguna sección del análisis.</Text>
-        )}
       </ScrollView>
 
       <FabLink
@@ -320,5 +329,4 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   logoutText: { fontSize: fontSize.sm, color: colors.danger, fontWeight: fontWeight.medium },
-  errorText: { color: colors.danger, fontSize: fontSize.sm, marginTop: spacing.sm },
 });
