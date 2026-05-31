@@ -18,7 +18,7 @@ import {
   useUpdateFixedExpense,
 } from '@crisol/services';
 import { toast } from '@crisol/store';
-import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, pluralize, spacing } from '@crisol/ui';
 
 import { FixedExpenseCard } from '@/components/fixed-expenses/fixed-expense-card';
 import { Button } from '@/components/ui/button';
@@ -72,9 +72,11 @@ export default function FixedExpensesPage() {
         res.created === 0
           ? toast.info('No había gastos fijos vencidos pendientes.')
           : toast.success(
-              `Auto-añadidas ${res.created} ${
-                res.created === 1 ? 'transacción' : 'transacciones'
-              }.`,
+              `Auto-añadidas ${res.created} ${pluralize(
+                res.created,
+                'transacción',
+                'transacciones',
+              )}.`,
             ),
       onError: (err) => toast.error(formatApiError(err, 'Error al auto-añadir.')),
     });

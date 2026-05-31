@@ -74,4 +74,31 @@ describe('queryKeys', () => {
   it('receipts.detail incluye el id', () => {
     expect(queryKeys.receipts.detail('r1')).toEqual(['receipts', 'detail', 'r1']);
   });
+
+  // AUDIT-2026-05 — consolidación del módulo deuda: las tres queries de
+  // deuda cuelgan de `debt.all`, de modo que invalidar `debt.all` las
+  // refresca todas (Capa 1 + Capa 2). Antes debt-health/history vivían
+  // bajo `accounts.*` y `debt.all` no las alcanzaba.
+  it('debt-health y debt-history cuelgan de debt.all', () => {
+    expect(queryKeys.debt.all).toEqual(['debt']);
+    const root = queryKeys.debt.all[0];
+    expect(queryKeys.debt.health()[0]).toBe(root);
+    expect(queryKeys.debt.history()[0]).toBe(root);
+    expect(queryKeys.debt.categorySummary()[0]).toBe(root);
+    // Forma estable de las nuevas keys.
+    expect(queryKeys.debt.health('USD')).toEqual(['debt', 'health', 'USD']);
+    expect(queryKeys.debt.history(6, 6, 'USD')).toEqual([
+      'debt',
+      'history',
+      6,
+      6,
+      'USD',
+    ]);
+    expect(queryKeys.debt.health()).toEqual(['debt', 'health', 'native']);
+  });
+
+  it('accounts ya no expone debtHealth/debtHistory (movidas a debt)', () => {
+    expect('debtHealth' in queryKeys.accounts).toBe(false);
+    expect('debtHistory' in queryKeys.accounts).toBe(false);
+  });
 });

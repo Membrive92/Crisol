@@ -18,6 +18,7 @@ import {
   fontWeight,
   formatAmount,
   formatDate,
+  pluralize,
   radius,
   spacing,
 } from '@crisol/ui';
@@ -60,15 +61,15 @@ export default function TransfersPage() {
         }
         const parts: string[] = [];
         if (linked > 0) {
-          parts.push(
-            `${linked} ${linked === 1 ? 'par enlazado' : 'pares enlazados'}`,
-          );
+          parts.push(`${linked} ${pluralize(linked, 'par enlazado', 'pares enlazados')}`);
         }
         if (pending > 0) {
           parts.push(
-            `${pending} ${
-              pending === 1 ? 'candidato ambiguo' : 'candidatos ambiguos'
-            } esperando confirmación`,
+            `${pending} ${pluralize(
+              pending,
+              'candidato ambiguo',
+              'candidatos ambiguos',
+            )} esperando confirmación`,
           );
         }
         toast.success(parts.join(' · '));
