@@ -122,9 +122,28 @@ export default function TransactionsScreen() {
               {item.description ?? '(sin descripción)'}
             </Text>
             {isTransfer ? (
-              <View style={styles.transferBadge}>
-                <Text style={styles.transferBadgeText}>
-                  {item.is_debt_pair ? 'Deuda' : 'Transferencia'}
+              <View
+                style={[
+                  styles.transferBadge,
+                  item.transfer_pair_id === null &&
+                    !item.is_debt_pair &&
+                    styles.transferBadgeWarning,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.transferBadgeText,
+                    item.transfer_pair_id === null &&
+                      !item.is_debt_pair &&
+                      styles.transferBadgeTextWarning,
+                  ]}
+                >
+                  {/* P3 — 3 estados: Deuda / Transferencia (par) / Sin pareja (huérfana). */}
+                  {item.is_debt_pair
+                    ? 'Deuda'
+                    : item.transfer_pair_id !== null
+                      ? 'Transferencia'
+                      : 'Sin pareja'}
                 </Text>
               </View>
             ) : null}
@@ -402,6 +421,9 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
+  // P3 — tono de aviso para la transferencia "Sin pareja" (incompleta).
+  transferBadgeWarning: { backgroundColor: colors.warningSoft },
+  transferBadgeTextWarning: { color: colors.warning },
   meta: { fontSize: fontSize.sm, color: colors.textMuted, marginTop: 2 },
   amount: { fontSize: fontSize.md, fontWeight: fontWeight.semibold, color: colors.text },
   amountIncome: { color: colors.income },

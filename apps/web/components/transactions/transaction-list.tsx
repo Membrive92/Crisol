@@ -135,7 +135,7 @@ export function TransactionList({
             {tx.description ?? '(sin descripción)'}
           </span>
           {tx.transfer_pair_id !== null || category?.is_transfer ? (
-            <TransferBadge label={tx.is_debt_pair ? 'Deuda' : 'Transferencia'} />
+            <TransferBadge tx={tx} />
           ) : null}
         </span>
       ),
@@ -269,20 +269,57 @@ export function TransactionList({
 }
 
 /**
- * Chip que marca una transacción como mitad de un par interno
- * (PHASE-19.3). `label` distingue una transferencia activo↔activo
- * ("Transferencia") de una conversión a deuda activo↔pasivo ("Deuda").
- * Es informativo, no clicable: las acciones "Deshacer" y "Borrar"
- * viven en la columna de acciones de la fila.
+ * P3 (transfers-ux) — el badge distingue TRES estados, que antes
+ * colapsaban en un único "Transferencia":
+ *  - "Deuda": pata de una operación financiada (activo↔pasivo).
+ *  - "Transferencia": par interno activo↔activo, con contraparte.
+ *  - "Sin pareja" (tono aviso): categoría is_transfer pero SIN
+ *    `transfer_pair_id` — está fuera del cashflow pero no enlazada a
+ *    ninguna contraparte. Antes mostraba el mismo chip que un par real,
+ *    así que el usuario creía "ya está" cuando faltaba enlazarla.
  */
-function TransferBadge({ label }: { label: string }) {
+function badgeFor(tx: Transaction): {
+  label: string;
+  title: string;
+  tone: 'info' | 'warning';
+} {
+  if (tx.is_debt_pair) {
+    return {
+      label: 'Deuda',
+      title: 'Operación financiada, enlazada a una cuenta de deuda.',
+      tone: 'info',
+    };
+  }
+  if (tx.transfer_pair_id !== null) {
+    return {
+      label: 'Transferencia',
+      title: 'Movimiento entre tus cuentas, emparejado con su contraparte.',
+      tone: 'info',
+    };
+  }
+  return {
+    label: 'Sin pareja',
+    title: 'Marcada como transferencia pero sin contraparte. Enlázala desde Transferencias.',
+    tone: 'warning',
+  };
+}
+
+/**
+ * Chip informativo (no clicable: "Deshacer"/"Borrar" viven en la columna
+ * de acciones). El tono `warning` señala una transferencia incompleta.
+ */
+function TransferBadge({ tx }: { tx: Transaction }) {
+  const { label, title, tone } = badgeFor(tx);
+  const bg = tone === 'warning' ? colors.warningSoft : colors.primarySoft;
+  const fg = tone === 'warning' ? colors.warning : colors.primary;
   return (
     <span
+      title={title}
       style={{
         display: 'inline-block',
         padding: `${spacing.xs / 2}px ${spacing.sm}px`,
-        backgroundColor: colors.primarySoft,
-        color: colors.primary,
+        backgroundColor: bg,
+        color: fg,
         borderRadius: radius.sm,
         fontSize: fontSize.xs,
         fontWeight: fontWeight.semibold,

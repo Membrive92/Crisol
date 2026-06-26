@@ -90,6 +90,20 @@ describe('TransactionList — pata de deuda / transferencia', () => {
     expect(container.textContent).not.toContain('+');
   });
 
+  it('una categoría is_transfer SIN pareja muestra el badge "Sin pareja" (no "Transferencia")', () => {
+    const orphan = makeTx({
+      category_id: 'cat-income', // is_transfer: true en las categorías del test
+      transfer_pair_id: null,
+      is_debt_pair: false,
+    });
+    render(
+      <TransactionList items={[orphan]} categories={categories} onDelete={vi.fn()} />,
+    );
+    expect(screen.getByText('Sin pareja')).toBeDefined();
+    expect(screen.queryByText('Transferencia')).toBeNull();
+    expect(screen.queryByText('Deuda')).toBeNull();
+  });
+
   it('un ingreso normal (no par) sí lleva "+" y sin badge de transferencia', () => {
     const plainIncome = makeTx({
       category_id: 'cat-plain-income',
