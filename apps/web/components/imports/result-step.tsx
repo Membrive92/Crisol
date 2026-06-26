@@ -15,8 +15,15 @@ export interface ResultStepProps {
 
 export function ResultStep({ job, onRestart }: ResultStepProps) {
   const isSuccess = job.status === 'completed';
-  const visibleErrors = job.error_log.slice(0, 10);
-  const remainingErrors = Math.max(0, job.error_log.length - visibleErrors.length);
+  // P5 (transfers-ux): el backend mezcla en `error_log` fallos reales y
+  // avisos de revisión (flag `review`). Los separamos: "A revisar" son
+  // filas que SÍ se importaron pero conviene mirar (no son errores).
+  const errors = job.error_log.filter((e) => e.review !== true);
+  const reviews = job.error_log.filter((e) => e.review === true);
+  const visibleErrors = errors.slice(0, 10);
+  const remainingErrors = Math.max(0, errors.length - visibleErrors.length);
+  const visibleReviews = reviews.slice(0, 10);
+  const remainingReviews = Math.max(0, reviews.length - visibleReviews.length);
 
   return (
     <div>
@@ -37,7 +44,7 @@ export function ResultStep({ job, onRestart }: ResultStepProps) {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))',
           gap: spacing.sm,
           marginBottom: spacing.lg,
         }}
@@ -46,6 +53,9 @@ export function ResultStep({ job, onRestart }: ResultStepProps) {
         <Stat label="Importadas" value={job.rows_ok} tone="success" />
         <Stat label="Duplicadas" value={job.rows_skipped} tone="muted" />
         <Stat label="Con error" value={job.rows_failed} tone="danger" />
+        {reviews.length > 0 ? (
+          <Stat label="A revisar" value={reviews.length} tone="warning" />
+        ) : null}
       </div>
 
       {visibleErrors.length > 0 ? (
@@ -97,6 +107,72 @@ export function ResultStep({ job, onRestart }: ResultStepProps) {
         </div>
       ) : null}
 
+      {visibleReviews.length > 0 ? (
+        <div style={{ marginBottom: spacing.lg }}>
+          <h3
+            style={{
+              fontSize: fontSize.md,
+              fontWeight: fontWeight.semibold,
+              color: colors.text,
+              margin: `0 0 ${spacing.xs}px 0`,
+            }}
+          >
+            A revisar
+          </h3>
+          <p
+            style={{
+              margin: `0 0 ${spacing.sm}px 0`,
+              fontSize: fontSize.xs,
+              color: colors.textMuted,
+            }}
+          >
+            Estas filas SÍ se importaron, pero conviene que las revises (por
+            ejemplo, transferencias cuya dirección no pudimos determinar).
+          </p>
+          <ul
+            style={{
+              listStyle: 'none',
+              padding: 0,
+              margin: 0,
+              border: `1px solid ${colors.warning}`,
+              borderRadius: radius.sm,
+              backgroundColor: colors.warningSoft,
+            }}
+          >
+            {visibleReviews.map((entry) => (
+              <li
+                key={`r-${entry.row}-${entry.error}`}
+                style={{
+                  padding: spacing.sm,
+                  borderBottom: `1px solid ${colors.warning}`,
+                  fontSize: fontSize.sm,
+                  color: colors.text,
+                }}
+              >
+                <strong>Fila {entry.row}:</strong> {entry.error}
+              </li>
+            ))}
+          </ul>
+          {remainingReviews > 0 ? (
+            <div
+              style={{
+                marginTop: spacing.xs,
+                fontSize: fontSize.xs,
+                color: colors.textMuted,
+              }}
+            >
+              … y {remainingReviews} fila{remainingReviews === 1 ? '' : 's'} más a
+              revisar.
+            </div>
+          ) : null}
+          <div style={{ marginTop: spacing.sm }}>
+            <Link href="/personal-finance/transfers">
+              <Button variant="secondary">Revisar transferencias</Button>
+            </Link>
+          </div>
+        </div>
+      ) : null}
+
       <div style={{ display: 'flex', gap: spacing.sm }}>
         {isSuccess ? (
           <Link href="/personal-finance/transactions">
@@ -117,7 +193,7 @@ export function ResultStep({ job, onRestart }: ResultStepProps) {
 interface StatProps {
   label: string;
   value: number;
-  tone?: 'success' | 'danger' | 'muted';
+  tone?: 'success' | 'danger' | 'muted' | 'warning';
 }
 
 function Stat({ label, value, tone }: StatProps) {
@@ -126,9 +202,11 @@ function Stat({ label, value, tone }: StatProps) {
       ? colors.success
       : tone === 'danger'
         ? colors.danger
-        : tone === 'muted'
-          ? colors.textMuted
-          : colors.text;
+        : tone === 'warning'
+          ? colors.warning
+          : tone === 'muted'
+            ? colors.textMuted
+            : colors.text;
 
   return (
     <div

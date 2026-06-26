@@ -66,6 +66,13 @@ export interface BankCategoryMapping {
 export interface ImportErrorEntry {
   row: number;
   error: string;
+  /**
+   * P5 (transfers-ux): `true` cuando la fila SÍ se importó pero requiere
+   * revisión manual (p. ej. una transferencia cuya dirección no se pudo
+   * determinar). No es un error: la UI la muestra en el canal "A revisar",
+   * no en "Errores", y no cuenta en `rows_failed`.
+   */
+  review?: boolean;
 }
 
 export interface ImportColumnMappings {
