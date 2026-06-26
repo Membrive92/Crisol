@@ -20,6 +20,7 @@ interface Option {
   name: string;
   kind: 'income' | 'expense' | 'none';
   icon: string | null;
+  isTransfer: boolean;
 }
 
 const NONE_OPTION: Option = {
@@ -27,6 +28,7 @@ const NONE_OPTION: Option = {
   name: 'Sin categoría',
   kind: 'none',
   icon: null,
+  isTransfer: false,
 };
 
 // Diacríticos (propiedad Unicode `\p{Diacritic}` + flag `u`): ASCII puro
@@ -70,9 +72,13 @@ export function CategoryCombobox({
   );
   const selectedLabel = value === '' ? '' : (selected?.name ?? '');
 
-  // Lista filtrada y partida por kind. La lista PLANA (`flat`) sostiene
+  // Lista filtrada y partida en buckets. La lista PLANA (`flat`) sostiene
   // el índice del resaltado por teclado; el render la reagrupa.
-  const { income, expense, none, flat } = useMemo(() => {
+  // P4 (transfers-ux): las categorías is_transfer van a su propio grupo
+  // "Transferencias" en vez de mezclarse con gastos/ingresos reales —
+  // así el usuario ve que elegirlas es marcar un movimiento entre cuentas,
+  // no un gasto normal (origen de las "patas huérfanas").
+  const { income, expense, transfers, none, flat } = useMemo(() => {
     const q = fold(query);
     const matches = (o: Option) => q === '' || fold(o.name).includes(q);
     const cats: Option[] = categories.map((c) => ({
@@ -80,15 +86,18 @@ export function CategoryCombobox({
       name: c.name,
       kind: c.kind === 'income' ? 'income' : 'expense',
       icon: c.icon ?? null,
+      isTransfer: c.is_transfer === true,
     }));
     const noneList = matches(NONE_OPTION) ? [NONE_OPTION] : [];
-    const incomeList = cats.filter((o) => o.kind === 'income' && matches(o));
-    const expenseList = cats.filter((o) => o.kind === 'expense' && matches(o));
+    const transferList = cats.filter((o) => o.isTransfer && matches(o));
+    const incomeList = cats.filter((o) => !o.isTransfer && o.kind === 'income' && matches(o));
+    const expenseList = cats.filter((o) => !o.isTransfer && o.kind === 'expense' && matches(o));
     return {
       none: noneList,
       income: incomeList,
       expense: expenseList,
-      flat: [...noneList, ...incomeList, ...expenseList],
+      transfers: transferList,
+      flat: [...noneList, ...incomeList, ...expenseList, ...transferList],
     };
   }, [categories, query]);
 
@@ -271,6 +280,21 @@ export function CategoryCombobox({
           })}
           {expense.length > 0 ? <GroupHeader label="Gastos" /> : null}
           {expense.map((o) => {
+            const idx = runningIndex++;
+            return (
+              <Row
+                key={o.id}
+                option={o}
+                id={`${baseId}-opt-${idx}`}
+                active={idx === activeIndex}
+                selected={o.id === value}
+                onPick={() => choose(o)}
+                onHover={() => setActiveIndex(idx)}
+              />
+            );
+          })}
+          {transfers.length > 0 ? <GroupHeader label="Transferencias" /> : null}
+          {transfers.map((o) => {
             const idx = runningIndex++;
             return (
               <Row

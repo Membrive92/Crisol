@@ -6,14 +6,19 @@ import type { Category } from '@crisol/types';
 
 import { CategoryCombobox } from './category-combobox';
 
-function cat(id: string, name: string, kind: 'income' | 'expense'): Category {
+function cat(
+  id: string,
+  name: string,
+  kind: 'income' | 'expense',
+  isTransfer = false,
+): Category {
   return {
     id,
     user_id: 'u-1',
     name,
     kind,
-    is_transfer: false,
-    role: 'GENERIC',
+    is_transfer: isTransfer,
+    role: isTransfer ? 'TRANSFER' : 'GENERIC',
     icon: null,
     color: null,
     created_at: '2026-01-01T00:00:00Z',
@@ -27,6 +32,8 @@ const categories: Category[] = [
   cat('exp-1', 'Comidas fuera', 'expense'),
   cat('exp-2', 'Inglés', 'expense'),
   cat('exp-3', 'Juegos (Ocio)', 'expense'),
+  cat('tr-in', 'Transferencia a favor', 'income', true),
+  cat('tr-out', 'Transferencias', 'expense', true),
 ];
 
 function setup(value = '', onChange = vi.fn()) {
@@ -85,6 +92,21 @@ describe('CategoryCombobox', () => {
     await user.click(input);
     await user.click(screen.getByRole('option', { name: /Sin categoría/ }));
     expect(onChange).toHaveBeenCalledWith('');
+  });
+
+  it('las categorías is_transfer van a su propio grupo "Transferencias", no a Ingresos/Gastos', async () => {
+    const user = userEvent.setup();
+    const { input } = setup();
+    await user.click(input);
+    const lis = Array.from(document.querySelectorAll('li')).map((li) => li.textContent ?? '');
+    const iTransferHeader = lis.indexOf('Transferencias');
+    const iIncomeHeader = lis.indexOf('Ingresos');
+    const iTransferOpt = lis.findIndex((t) => t.includes('Transferencia a favor'));
+    expect(iTransferHeader).toBeGreaterThan(-1);
+    // "Transferencia a favor" (income + is_transfer) cae bajo el grupo
+    // Transferencias, que va DESPUÉS de Ingresos, no dentro de él.
+    expect(iTransferHeader).toBeGreaterThan(iIncomeHeader);
+    expect(iTransferOpt).toBeGreaterThan(iTransferHeader);
   });
 
   it('navegación con teclado: flecha abajo + Enter selecciona', async () => {
