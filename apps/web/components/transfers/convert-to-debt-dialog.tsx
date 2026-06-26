@@ -19,6 +19,12 @@ import { Select, TextInput } from '@/components/ui/field';
 
 interface Props {
   transaction: Transaction;
+  /**
+   * P2 (transfers-ux): la heurística de descripción ya no OCULTA el
+   * bloque (siempre visible si la tx no está pareada); sólo lo DESTACA
+   * con un chip "sugerido" cuando el texto parece una compra financiada.
+   */
+  suggested?: boolean;
   onConverted: (pair: TransferPair) => void;
   onError: (err: unknown) => void;
 }
@@ -41,7 +47,12 @@ const LIABILITY_TYPE_LABEL: Record<LiabilityType, string> = {
  * - Usar una cuenta de deuda existente.
  * - Crear una nueva al vuelo (con APR/plazo/fecha si es loan/mortgage).
  */
-export function ConvertToDebtDialog({ transaction, onConverted, onError }: Props) {
+export function ConvertToDebtDialog({
+  transaction,
+  suggested,
+  onConverted,
+  onError,
+}: Props) {
   const accountsQuery = useAccounts({ includeArchived: false });
   const mutation = useConvertToDebt();
 
@@ -132,9 +143,28 @@ export function ConvertToDebtDialog({ transaction, onConverted, onError }: Props
           fontSize: fontSize.lg,
           fontWeight: fontWeight.semibold,
           color: colors.text,
+          display: 'flex',
+          alignItems: 'center',
+          gap: spacing.sm,
         }}
       >
         ¿Es una operación financiada?
+        {suggested ? (
+          <span
+            style={{
+              padding: `${spacing.xs / 2}px ${spacing.sm}px`,
+              backgroundColor: colors.primarySoft,
+              color: colors.primary,
+              borderRadius: radius.sm,
+              fontSize: fontSize.xs,
+              fontWeight: fontWeight.semibold,
+              textTransform: 'uppercase',
+              letterSpacing: '0.04em',
+            }}
+          >
+            Sugerido
+          </span>
+        ) : null}
       </h2>
       <p
         style={{

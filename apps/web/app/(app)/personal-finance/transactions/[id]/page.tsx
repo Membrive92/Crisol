@@ -100,10 +100,10 @@ export default function EditTransactionPage({ params }: { params: Promise<{ id: 
             </Button>
           </Card>
 
-          {data.transfer_pair_id === null &&
-          looksLikeFinancedOperation(data.description) ? (
+          {data.transfer_pair_id === null ? (
             <ConvertToDebtDialog
               transaction={data}
+              suggested={looksLikeFinancedOperation(data.description)}
               onConverted={(pair) => {
                 toast.success(
                   `Deuda registrada (${pair.amount} ${pair.currency}). Revisa el cuadro de amortización en la cuenta.`,

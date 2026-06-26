@@ -70,22 +70,19 @@ export default function EditTransactionScreen() {
               toast.error(formatApiError(err, 'No se pudo convertir.'))
             }
           />
-          {looksLikeFinancedOperation(data.description) ? (
-            <ConvertToDebtBlock
-              transaction={data}
-              onConverted={(pair) => {
-                toast.success(
-                  `Deuda registrada (${pair.amount} ${pair.currency}).`,
-                );
-                router.replace('/(modules)/personal-finance/accounts');
-              }}
-              onError={(err) =>
-                toast.error(
-                  formatApiError(err, 'No se pudo registrar la deuda.'),
-                )
-              }
-            />
-          ) : null}
+          <ConvertToDebtBlock
+            transaction={data}
+            suggested={looksLikeFinancedOperation(data.description)}
+            onConverted={(pair) => {
+              toast.success(
+                `Deuda registrada (${pair.amount} ${pair.currency}).`,
+              );
+              router.replace('/(modules)/personal-finance/accounts');
+            }}
+            onError={(err) =>
+              toast.error(formatApiError(err, 'No se pudo registrar la deuda.'))
+            }
+          />
         </>
       ) : null}
     </ScrollView>

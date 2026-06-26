@@ -17,6 +17,9 @@ import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 interface Props {
   transaction: Transaction;
+  /** P2 (transfers-ux): la heurística ya no oculta el bloque; sólo lo
+   * destaca con un chip "Sugerido". */
+  suggested?: boolean;
   onConverted: (pair: TransferPair) => void;
   onError: (err: unknown) => void;
 }
@@ -34,7 +37,12 @@ const LIABILITY_TYPE_LABEL: Record<LiabilityType, string> = {
  * PHASE-24 — equivalente mobile de ConvertToDebtDialog.
  * Mismo flujo: usar liability existente o crear nueva al vuelo.
  */
-export function ConvertToDebtBlock({ transaction, onConverted, onError }: Props) {
+export function ConvertToDebtBlock({
+  transaction,
+  suggested,
+  onConverted,
+  onError,
+}: Props) {
   const accountsQuery = useAccounts({ includeArchived: false });
   const mutation = useConvertToDebt();
 
@@ -114,7 +122,14 @@ export function ConvertToDebtBlock({ transaction, onConverted, onError }: Props)
 
   return (
     <View style={styles.card}>
-      <Text style={styles.title}>¿Es una operación financiada?</Text>
+      <View style={styles.titleRow}>
+        <Text style={styles.title}>¿Es una operación financiada?</Text>
+        {suggested ? (
+          <View style={styles.suggestedChip}>
+            <Text style={styles.suggestedChipText}>Sugerido</Text>
+          </View>
+        ) : null}
+      </View>
       <Text style={styles.hint}>
         Si el banco te abonó este importe como compra a plazos o préstamo,
         regístralo como deuda. Se creará la contraparte y la deuda crecerá
@@ -322,11 +337,29 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     marginTop: spacing.md,
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginBottom: spacing.xs,
+  },
   title: {
     fontSize: fontSize.md,
     fontWeight: fontWeight.semibold,
     color: colors.text,
-    marginBottom: spacing.xs,
+  },
+  suggestedChip: {
+    paddingVertical: 1,
+    paddingHorizontal: spacing.xs,
+    borderRadius: radius.sm,
+    backgroundColor: colors.primarySoft,
+  },
+  suggestedChipText: {
+    fontSize: 10,
+    fontWeight: fontWeight.semibold,
+    color: colors.primary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
   },
   hint: {
     fontSize: fontSize.sm,
