@@ -95,12 +95,16 @@ export default function TransactionsScreen() {
 
   function renderItem({ item }: { item: Transaction }) {
     const category = findCategory(categories ?? [], item.category_id);
-    const isIncome = category?.kind === 'income';
-    // PHASE-23.1: el badge "Transferencia" cubre tanto pares
-    // emparejados (transfer_pair_id) como txs cuya categoría tiene
-    // is_transfer=true (caso "una pata").
+    // PHASE-23.1: el badge cubre tanto pares emparejados
+    // (transfer_pair_id) como txs cuya categoría tiene is_transfer=true
+    // (caso "una pata"). `is_debt_pair` distingue deuda (activo↔pasivo)
+    // de transferencia interna (activo↔activo).
     const isTransfer =
       item.transfer_pair_id !== null || category?.is_transfer === true;
+    // Una pata de transferencia/deuda no es ingreso ni gasto: está fuera
+    // del cashflow y (en deuda) aporta 0 al patrimonio. Se pinta en
+    // neutro, sin "+" ni color income — el badge ya identifica la fila.
+    const isIncome = category?.kind === 'income' && !isTransfer;
     return (
       <TouchableOpacity
         style={styles.row}
@@ -119,7 +123,9 @@ export default function TransactionsScreen() {
             </Text>
             {isTransfer ? (
               <View style={styles.transferBadge}>
-                <Text style={styles.transferBadgeText}>Transferencia</Text>
+                <Text style={styles.transferBadgeText}>
+                  {item.is_debt_pair ? 'Deuda' : 'Transferencia'}
+                </Text>
               </View>
             ) : null}
           </View>

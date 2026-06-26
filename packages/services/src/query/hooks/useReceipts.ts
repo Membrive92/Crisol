@@ -10,6 +10,7 @@ import type {
 } from '@crisol/types';
 
 import { receiptsApi } from '../../api/endpoints/receipts';
+import { invalidateTransactionSideEffects } from '../invalidate';
 import { queryKeys } from '../keys';
 
 export function useReceipts(query: ReceiptListQuery = {}) {
@@ -44,8 +45,10 @@ export function useConfirmReceipt(id: string) {
     mutationFn: (payload) => receiptsApi.confirm(id, payload),
     onSuccess: (updated) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.receipts.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+      // AUDIT-2026-06: confirmar un ticket crea transacciones → mismo
+      // blast radius que un alta de tx. Antes faltaban budgets, saldos
+      // de cuenta (accounts.all) y deuda (debt.all).
+      invalidateTransactionSideEffects(queryClient);
       queryClient.setQueryData(queryKeys.receipts.detail(updated.id), updated);
     },
   });

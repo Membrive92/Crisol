@@ -32,6 +32,10 @@ const DebtMonthlyEvolution = dynamic(
   () => import('@/components/debt/debt-monthly-evolution').then((m) => m.DebtMonthlyEvolution),
   { ssr: false, loading: () => <Skeleton height={280} /> },
 );
+const DebtDailyEvolution = dynamic(
+  () => import('@/components/debt/debt-daily-evolution').then((m) => m.DebtDailyEvolution),
+  { ssr: false, loading: () => <Skeleton height={280} /> },
+);
 const DebtTrendChart = dynamic(
   () => import('@/components/debt/debt-trend-chart').then((m) => m.DebtTrendChart),
   { ssr: false, loading: () => <Skeleton height={280} /> },
@@ -165,11 +169,20 @@ export default function DebtPage() {
             currency={referenceCurrency}
             isLoading={summaryQuery.isLoading}
           />
-          <DebtMonthlyEvolution
-            items={summary?.monthly_series ?? []}
-            currency={referenceCurrency}
-            isLoading={summaryQuery.isLoading}
-          />
+          {range === 'month' ? (
+            <DebtDailyEvolution
+              items={summary?.daily_series ?? []}
+              currency={referenceCurrency}
+              isLoading={summaryQuery.isLoading}
+              monthLabel={periodLabel(range, anchorMonth)}
+            />
+          ) : (
+            <DebtMonthlyEvolution
+              items={summary?.monthly_series ?? []}
+              currency={referenceCurrency}
+              isLoading={summaryQuery.isLoading}
+            />
+          )}
         </div>
 
         <RecurringQuotasList

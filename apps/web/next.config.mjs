@@ -6,6 +6,55 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // eslint-disable-next-line no-undef
 const BACKEND_ORIGIN = process.env.BACKEND_ORIGIN ?? 'http://localhost:8001';
 
+// eslint-disable-next-line no-undef
+const isProd = process.env.NODE_ENV === 'production';
+
+// AUDIT-FIX (csp-default-src-none-en-toda-respuesta): la CSP del backend
+// (`default-src 'none'`) protege las respuestas de la API, pero NO la SPA —
+// el HTML/JS del frontend lo sirve Next.js, no FastAPI. Añadimos aquí las
+// cabeceras de seguridad para las respuestas del frontend.
+//
+// Cuidado con la CSP en Next.js:
+//   - En dev, React Fast Refresh y el runtime de Next requieren
+//     `'unsafe-eval'` y websockets; una CSP estricta rompe el HMR.
+//   - En prod, Next.js inyecta scripts inline para hidratación, así que sin
+//     nonces hace falta `'unsafe-inline'` en `script-src`. Implementar nonces
+//     por request exige un middleware dedicado (TODO: endurecer a nonce-based
+//     cuando haya capacidad de probar el flujo completo de hidratación).
+//
+// Estrategia conservadora: cabeceras de bajo riesgo SIEMPRE; CSP razonable
+// (no estricta) sólo en producción para no romper el dev server. `connect-src`
+// incluye 'self' (el rewrite `/api/*` es same-origin) y, en dev, el websocket
+// del HMR.
+const cspProd = [
+  "default-src 'self'",
+  // 'unsafe-inline' por la hidratación de Next sin nonces (ver TODO arriba).
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "object-src 'none'",
+].join('; ');
+
+const securityHeaders = [
+  { key: 'X-Content-Type-Options', value: 'nosniff' },
+  { key: 'X-Frame-Options', value: 'DENY' },
+  { key: 'Referrer-Policy', value: 'no-referrer' },
+  // HSTS sólo tiene sentido sobre HTTPS; el navegador la ignora en HTTP, pero
+  // la emitimos siempre para cubrir el caso de despliegue tras TLS. 2 años.
+  {
+    key: 'Strict-Transport-Security',
+    value: 'max-age=63072000; includeSubDomains',
+  },
+  // CSP sólo en prod: en dev rompería Fast Refresh / HMR (necesita
+  // 'unsafe-eval' + ws). En dev se omite y se confía en el resto de cabeceras.
+  ...(isProd ? [{ key: 'Content-Security-Policy', value: cspProd }] : []),
+];
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -28,6 +77,17 @@ const nextConfig = {
       {
         source: '/api/:path*',
         destination: `${BACKEND_ORIGIN}/:path*`,
+      },
+    ];
+  },
+  // Cabeceras de seguridad para TODAS las respuestas del frontend (ver bloque
+  // `securityHeaders` arriba). No aplican a `/api/*` (esas las sirve FastAPI
+  // con su propia CSP de defensa en profundidad).
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: securityHeaders,
       },
     ];
   },

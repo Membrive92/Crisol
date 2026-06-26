@@ -9,6 +9,11 @@ import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 import { FilterIcon, SearchIcon } from '@/components/ui/icons';
 import { TimeSelector } from '@/components/ui/time-selector';
 
+// Valor sentinela del <option> "Sin categoría" en el filtro de categoría.
+// No colisiona con un `category_id` real (son UUIDs). Mapea a
+// `uncategorized: true` en el query.
+const CATEGORY_UNCATEGORIZED = '__uncategorized__';
+
 export interface StitchSearchToolbarProps {
   value: TransactionListQuery;
   onChange: (next: TransactionListQuery) => void;
@@ -37,6 +42,21 @@ export function StitchSearchToolbar({
     next: TransactionListQuery[K] | '',
   ) {
     onChange({ ...value, [key]: next === '' ? undefined : next, offset: 0 });
+  }
+
+  // El filtro de categoría incluye un valor especial "sin categoría":
+  // `category_id` y `uncategorized` son excluyentes, así que reconstruimos
+  // `value` omitiendo ambos y añadiendo el que toque (evita asignar
+  // `undefined` explícito — exactOptionalPropertyTypes).
+  function applyCategoryFilter(next: string) {
+    const { category_id: _c, uncategorized: _u, ...rest } = value;
+    if (next === CATEGORY_UNCATEGORIZED) {
+      onChange({ ...rest, uncategorized: true, offset: 0 });
+    } else if (next) {
+      onChange({ ...rest, category_id: next, offset: 0 });
+    } else {
+      onChange({ ...rest, offset: 0 });
+    }
   }
 
   function applyTimeRange(range: {
@@ -103,10 +123,11 @@ export function StitchSearchToolbar({
           </FilterSelect>
           <FilterSelect
             label="Categoría"
-            value={value.category_id ?? ''}
-            onChange={(v) => update('category_id', v)}
+            value={value.uncategorized ? CATEGORY_UNCATEGORIZED : (value.category_id ?? '')}
+            onChange={applyCategoryFilter}
           >
             <option value="">Todas</option>
+            <option value={CATEGORY_UNCATEGORIZED}>Sin categoría</option>
             {categories.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}

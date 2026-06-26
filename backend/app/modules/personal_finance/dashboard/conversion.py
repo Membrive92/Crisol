@@ -31,6 +31,8 @@ from sqlalchemy import (
     Numeric,
     case,
     cast,
+    func,
+    literal,
     select,
 )
 from sqlalchemy.sql.elements import ColumnElement
@@ -58,11 +60,76 @@ def _latest_rate_subquery(quote: Any, occurred_at: Any) -> ColumnElement[Any]:
     floor_date = rate_date_col - _FALLBACK_WINDOW_DAYS
     quote_expr = quote  # SQLAlchemy maneja literal vs column automáticamente.
 
+    # AUDIT — sql-no-zero-rate-guard (b): defensa en profundidad. Aunque el
+    # cliente HTTP (a) ya rechaza tasas <= 0, una fila histórica corrupta o
+    # cargada por otra vía haría que `amount / from_rate` reventara con
+    # división por cero (500) o invirtiera el signo. Proyectamos la tasa con
+    # un CASE que devuelve NULL si no es estrictamente positiva → la fila
+    # queda "inconvertible" (mismo comportamiento que "sin tasa") en lugar
+    # de propagar un error. Filtramos también en el WHERE para no elegir una
+    # fila no-positiva como "última" tapando una válida más antigua.
+    positive_rate = case(
+        (ExchangeRate.rate > literal(0), ExchangeRate.rate),
+        else_=None,
+    )
+
     return (
-        select(ExchangeRate.rate)
+        select(positive_rate)
         .where(ExchangeRate.base == CANONICAL_BASE)
         .where(ExchangeRate.quote == quote_expr)
+        .where(ExchangeRate.rate > literal(0))
         .where(ExchangeRate.rate_date <= rate_date_col)
+        .where(ExchangeRate.rate_date >= floor_date)
+        .order_by(ExchangeRate.rate_date.desc())
+        .limit(1)
+        .correlate(Transaction)
+        .scalar_subquery()
+    )
+
+
+def _latest_rate_date_subquery(quote: Any, occurred_at: Any) -> ColumnElement[Any]:
+    """Subquery escalar: la `rate_date` de la última tasa EUR→`quote` ≤ `occurred_at`.
+
+    Gemela de `_latest_rate_subquery` pero devuelve la FECHA en vez de la
+    tasa. Sirve para calcular el ancla común de una cross-rate (AUDIT —
+    sql-crossrate-no-reanchor): necesitamos saber a qué fecha resolvió cada
+    pierna antes de poder re-anclarlas a la más antigua.
+    """
+    rate_date_col = cast(occurred_at, Date)
+    floor_date = rate_date_col - _FALLBACK_WINDOW_DAYS
+
+    return (
+        select(ExchangeRate.rate_date)
+        .where(ExchangeRate.base == CANONICAL_BASE)
+        .where(ExchangeRate.quote == quote)
+        .where(ExchangeRate.rate > literal(0))
+        .where(ExchangeRate.rate_date <= rate_date_col)
+        .where(ExchangeRate.rate_date >= floor_date)
+        .order_by(ExchangeRate.rate_date.desc())
+        .limit(1)
+        .correlate(Transaction)
+        .scalar_subquery()
+    )
+
+
+def _rate_at_anchor_subquery(quote: Any, anchor_date: Any) -> ColumnElement[Any]:
+    """Última tasa EUR→`quote` ≤ `anchor_date` (mismo criterio que `_latest_…`).
+
+    `anchor_date` es una expresión de fecha (no `occurred_at`): la fecha
+    común a la que re-anclamos ambas piernas de una cross-rate. La ventana
+    de 14 días se mide igualmente hacia atrás desde el ancla.
+    """
+    floor_date = anchor_date - _FALLBACK_WINDOW_DAYS
+    positive_rate = case(
+        (ExchangeRate.rate > literal(0), ExchangeRate.rate),
+        else_=None,
+    )
+    return (
+        select(positive_rate)
+        .where(ExchangeRate.base == CANONICAL_BASE)
+        .where(ExchangeRate.quote == quote)
+        .where(ExchangeRate.rate > literal(0))
+        .where(ExchangeRate.rate_date <= anchor_date)
         .where(ExchangeRate.rate_date >= floor_date)
         .order_by(ExchangeRate.rate_date.desc())
         .limit(1)
@@ -83,7 +150,8 @@ def converted_amount_expr(target_currency: str) -> ColumnElement[Any]:
     amount = cast(Transaction.amount, Numeric(20, 8))
 
     if target == CANONICAL_BASE:
-        # Convertir FROM cualquier moneda → EUR.
+        # Convertir FROM cualquier moneda → EUR. Una sola pierna (EUR→FROM):
+        # no hay nada que re-anclar.
         from_rate = _latest_rate_subquery(Transaction.currency, occurred_at)
         return case(
             (Transaction.currency == CANONICAL_BASE, amount),
@@ -91,12 +159,29 @@ def converted_amount_expr(target_currency: str) -> ColumnElement[Any]:
         )
 
     # Convertir FROM cualquier moneda → target (no-EUR).
+    #
+    # Cuando la tx ya está en target → amount tal cual (sin tasa).
+    # Cuando la tx está en EUR → una sola pierna (EUR→target): no se re-ancla.
     to_rate = _latest_rate_subquery(target, occurred_at)
-    from_rate = _latest_rate_subquery(Transaction.currency, occurred_at)
+
+    # AUDIT — sql-crossrate-no-reanchor: en una cross-rate real (la tx no es
+    # ni EUR ni target) las dos piernas EUR→X se resolvían con ventanas de
+    # fallback independientes y podían acabar en fechas distintas, componiendo
+    # una tasa fresca con una rancia. Replicamos el re-anclaje de
+    # `currency.service.convert` (AUDIT-2026-05): ambas piernas se anclan a la
+    # fecha común más antigua de las dos `rate_date` resueltas
+    # (`LEAST(from_date, to_date)`) y se re-leen a ese ancla. Así
+    # `converted_amount_expr` y `service.convert` componen la MISMA tasa.
+    from_date = _latest_rate_date_subquery(Transaction.currency, occurred_at)
+    to_date = _latest_rate_date_subquery(target, occurred_at)
+    anchor = func.least(from_date, to_date)
+    from_rate_anchored = _rate_at_anchor_subquery(Transaction.currency, anchor)
+    to_rate_anchored = _rate_at_anchor_subquery(target, anchor)
+
     return case(
         (Transaction.currency == target, amount),
         (Transaction.currency == CANONICAL_BASE, amount * to_rate),
-        else_=amount * to_rate / from_rate,
+        else_=amount * to_rate_anchored / from_rate_anchored,
     )
 
 

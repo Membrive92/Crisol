@@ -1,13 +1,7 @@
 import { useEffect, useState } from 'react';
-import {
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-import { useAccounts, useCategories } from '@crisol/services';
+import { pickPreferredAccountId, useAccounts, useCategories } from '@crisol/services';
 import type { Account, ReceiptConfirmRequest, ReceiptExtraction } from '@crisol/types';
 import {
   colors,
@@ -52,9 +46,7 @@ function buildInitialValues(
     account_id: defaultAccountId,
     amount: asString(ext['total']),
     currency: asString(ext['currency']) || 'EUR',
-    occurred_at: occurred
-      ? toDateInputValue(occurred)
-      : toDateInputValue(new Date().toISOString()),
+    occurred_at: occurred ? toDateInputValue(occurred) : toDateInputValue(new Date().toISOString()),
     description: asString(ext['merchant']),
     category_id: '',
   };
@@ -74,7 +66,8 @@ export function ReceiptCaptureForm({
   // llegar aquí, pero defensivo).
   const { data: accounts } = useAccounts();
   const activeAccounts: Account[] = (accounts ?? []).filter((a) => !a.is_archived);
-  const defaultAccountId = activeAccounts[0]?.id ?? '';
+  // PHASE-32: pre-selecciona la cuenta principal; fallback al primer activo.
+  const defaultAccountId = pickPreferredAccountId(activeAccounts);
 
   const [values, setValues] = useState<FormValues>(() =>
     buildInitialValues(extraction, defaultAccountId),
@@ -129,15 +122,15 @@ export function ReceiptCaptureForm({
   return (
     <View>
       <Text style={styles.helper}>
-        Edita los datos extraídos antes de confirmar — la transacción se crea
-        con los valores definitivos.
+        Edita los datos extraídos antes de confirmar — la transacción se crea con los valores
+        definitivos.
       </Text>
 
       <Text style={styles.label}>Cuenta</Text>
       {noAccounts ? (
         <Text style={styles.warning}>
-          No tienes cuentas activas. Crea una desde Análisis → Cuentas para
-          poder confirmar el ticket.
+          No tienes cuentas activas. Crea una desde Análisis → Cuentas para poder confirmar el
+          ticket.
         </Text>
       ) : (
         <View style={styles.categoryRow}>
@@ -149,12 +142,7 @@ export function ReceiptCaptureForm({
                 style={[styles.categoryChip, active && styles.categoryChipActive]}
                 onPress={() => handleChange('account_id', a.id)}
               >
-                <Text
-                  style={[
-                    styles.categoryChipText,
-                    active && styles.categoryChipTextActive,
-                  ]}
-                >
+                <Text style={[styles.categoryChipText, active && styles.categoryChipTextActive]}>
                   {a.icon ? `${a.icon} ` : ''}
                   {a.name} ({a.currency})
                 </Text>
@@ -201,17 +189,11 @@ export function ReceiptCaptureForm({
       <Text style={styles.label}>Categoría (opcional)</Text>
       <View style={styles.categoryRow}>
         <TouchableOpacity
-          style={[
-            styles.categoryChip,
-            !values.category_id && styles.categoryChipActive,
-          ]}
+          style={[styles.categoryChip, !values.category_id && styles.categoryChipActive]}
           onPress={() => handleChange('category_id', '')}
         >
           <Text
-            style={[
-              styles.categoryChipText,
-              !values.category_id && styles.categoryChipTextActive,
-            ]}
+            style={[styles.categoryChipText, !values.category_id && styles.categoryChipTextActive]}
           >
             Sin categoría
           </Text>
@@ -224,12 +206,7 @@ export function ReceiptCaptureForm({
               style={[styles.categoryChip, active && styles.categoryChipActive]}
               onPress={() => handleChange('category_id', c.id)}
             >
-              <Text
-                style={[
-                  styles.categoryChipText,
-                  active && styles.categoryChipTextActive,
-                ]}
-              >
+              <Text style={[styles.categoryChipText, active && styles.categoryChipTextActive]}>
                 {c.name}
               </Text>
             </TouchableOpacity>
@@ -246,9 +223,7 @@ export function ReceiptCaptureForm({
           onPress={handleSubmit}
           disabled={submitting || noAccounts}
         >
-          <Text style={styles.primaryButtonText}>
-            {submitting ? 'Guardando…' : 'Confirmar'}
-          </Text>
+          <Text style={styles.primaryButtonText}>{submitting ? 'Guardando…' : 'Confirmar'}</Text>
         </TouchableOpacity>
         {onReject ? (
           <TouchableOpacity

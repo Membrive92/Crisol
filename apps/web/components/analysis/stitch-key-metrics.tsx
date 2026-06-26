@@ -164,9 +164,14 @@ export function StitchKeyMetrics({ summary, currency, monthly }: StitchKeyMetric
               fontVariantNumeric: 'tabular-nums',
             }}
           >
+            {/* Ratio adimensional: NO lleva símbolo de divisa (sería
+                el mismo en numerador y denominador). Coma decimal es-ES. */}
             Gastas{' '}
-            {(Math.abs(balance) / Math.max(incomeNum, 1) + 1).toFixed(2)} €
-            por cada 1 € ingresado
+            {(Math.abs(balance) / Math.max(incomeNum, 1) + 1).toLocaleString(
+              'es-ES',
+              { minimumFractionDigits: 2, maximumFractionDigits: 2 },
+            )}{' '}
+            por cada 1 ingresado
           </span>
         ) : null}
         <CenteredRateBar rate={savingRate} />

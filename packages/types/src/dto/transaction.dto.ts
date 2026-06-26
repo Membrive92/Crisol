@@ -22,6 +22,15 @@ export interface TransactionUpdateRequest {
 export interface TransactionListQuery {
   account_id?: string;
   category_id?: string;
+  /**
+   * Filtra las transacciones SIN categoría (`category_id IS NULL`).
+   * Sostiene el atajo "Ver y categorizar" del banner. Excluyente con
+   * `category_id`: si se pasa `uncategorized`, el backend ignora
+   * `category_id`. No combinar con acciones bulk (el backend de borrado/
+   * reasignación NO aplica este filtro; la UI deshabilita esos botones
+   * mientras está activo).
+   */
+  uncategorized?: boolean;
   date_from?: string;
   date_to?: string;
   search?: string;

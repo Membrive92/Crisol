@@ -30,6 +30,137 @@ def _auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+async def test_bulk_reassign_account_moves_matching(client: AsyncClient) -> None:
+    """PHASE-32 — mover en bloque a la cuenta principal las tx de un mes,
+    respetando los filtros (el mes que no matchea se queda)."""
+    token, cat_id, source_id = await _setup_user(client, "reassign@example.com")
+    bbva = await client.post(
+        "/accounts",
+        json={"name": "BBVA", "type": "bank", "currency": "EUR"},
+        headers=_auth(token),
+    )
+    bbva_id = bbva.json()["id"]
+
+    async def _post(amount: str, when: str) -> None:
+        r = await client.post(
+            "/transactions",
+            json={
+                "account_id": source_id,
+                "category_id": cat_id,
+                "amount": amount,
+                "currency": "EUR",
+                "occurred_at": when,
+            },
+            headers=_auth(token),
+        )
+        assert r.status_code == 201, r.text
+
+    await _post("100.00", "2024-04-05T12:00:00Z")
+    await _post("50.00", "2024-04-20T12:00:00Z")
+    await _post("30.00", "2024-05-03T12:00:00Z")  # otro mes → no se mueve
+
+    r = await client.post(
+        "/transactions/reassign-account",
+        json={
+            "target_account_id": bbva_id,
+            "date_from": "2024-04-01T00:00:00Z",
+            "date_to": "2024-04-30T23:59:59Z",
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["reassigned_count"] == 2
+
+    bbva_list = (
+        await client.get(f"/transactions?account_id={bbva_id}", headers=_auth(token))
+    ).json()
+    assert bbva_list["total"] == 2
+    src_list = (
+        await client.get(f"/transactions?account_id={source_id}", headers=_auth(token))
+    ).json()
+    assert src_list["total"] == 1  # la de mayo se queda
+
+
+async def test_bulk_reassign_account_rejects_foreign_target(client: AsyncClient) -> None:
+    """PHASE-32 — la cuenta destino debe pertenecer al usuario → 404 si no."""
+    import uuid as _uuid
+
+    token, _cat, _acc = await _setup_user(client, "reassign_foreign@example.com")
+    r = await client.post(
+        "/transactions/reassign-account",
+        json={"target_account_id": str(_uuid.uuid4())},
+        headers=_auth(token),
+    )
+    assert r.status_code == 404
+
+
+async def test_bulk_reassign_skips_other_currency(client: AsyncClient) -> None:
+    """PHASE-32 HIGH#3 — reasignar a una cuenta sólo mueve las tx de SU
+    divisa; las de otra divisa se quedan (el saldo por cuenta sólo cuenta
+    `currency == account.currency`, moverlas las haría desaparecer del saldo)
+    y se reportan en `skipped_other_currency`."""
+    token, cat_id, source_id = await _setup_user(client, "reassign_currency@example.com")
+    bbva = await client.post(
+        "/accounts",
+        json={"name": "BBVA", "type": "bank", "currency": "EUR"},
+        headers=_auth(token),
+    )
+    bbva_id = bbva.json()["id"]
+
+    async def _post(amount: str, currency: str) -> None:
+        r = await client.post(
+            "/transactions",
+            json={
+                "account_id": source_id,
+                "category_id": cat_id,
+                "amount": amount,
+                "currency": currency,
+                "occurred_at": "2024-04-05T12:00:00Z",
+            },
+            headers=_auth(token),
+        )
+        assert r.status_code == 201, r.text
+
+    await _post("100.00", "EUR")
+    await _post("50.00", "EUR")
+    await _post("30.00", "USD")  # otra divisa → no se mueve
+
+    r = await client.post(
+        "/transactions/reassign-account",
+        json={"target_account_id": bbva_id},  # BBVA es EUR
+        headers=_auth(token),
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["reassigned_count"] == 2
+    assert body["skipped_other_currency"] == 1
+
+    # La USD sigue en la cuenta origen.
+    src = (await client.get(f"/transactions?account_id={source_id}", headers=_auth(token))).json()
+    assert src["total"] == 1
+    assert src["items"][0]["currency"] == "USD"
+
+
+async def test_create_transaction_normalizes_currency_casing(client: AsyncClient) -> None:
+    """fix-review LOW — la divisa se normaliza a mayúsculas: el saldo por
+    cuenta sólo agrega `currency == account.currency` (upper), así que una
+    'eur' minúscula quedaría invisible al saldo y al reassign."""
+    token, cat_id, account_id = await _setup_user(client, "currency-case@example.com")
+    r = await client.post(
+        "/transactions",
+        json={
+            "account_id": account_id,
+            "category_id": cat_id,
+            "amount": "10.00",
+            "currency": "eur",
+            "occurred_at": "2026-04-15T12:00:00Z",
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["currency"] == "EUR"
+
+
 async def test_create_transaction(client: AsyncClient) -> None:
     token, cat_id, account_id = await _setup_user(client)
     r = await client.post(
@@ -119,6 +250,59 @@ async def test_filter_by_search(client: AsyncClient) -> None:
 
     r = await client.get("/transactions", params={"search": "café"}, headers=_auth(token))
     assert r.json()["total"] == 1
+
+
+async def test_filter_uncategorized(client: AsyncClient) -> None:
+    """`uncategorized=true` devuelve sólo las tx sin categoría
+    (`category_id IS NULL`) — sostiene el atajo "Ver y categorizar".
+    Si llegan `uncategorized` y `category_id`, gana "sin categoría".
+    """
+    token, cat_id, account_id = await _setup_user(client, "txuncat@example.com")
+    # Una con categoría…
+    await client.post(
+        "/transactions",
+        json={
+            "account_id": account_id,
+            "category_id": cat_id,
+            "amount": "10.00",
+            "occurred_at": "2026-04-15T12:00:00Z",
+            "description": "Con categoría",
+        },
+        headers=_auth(token),
+    )
+    # …y dos sin categoría.
+    for i in range(2):
+        await client.post(
+            "/transactions",
+            json={
+                "account_id": account_id,
+                "amount": f"{20 + i}.00",
+                "occurred_at": f"2026-04-{16 + i}T12:00:00Z",
+                "description": "Sin categoría",
+            },
+            headers=_auth(token),
+        )
+
+    # Sin filtro → las 3.
+    r_all = await client.get("/transactions", headers=_auth(token))
+    assert r_all.json()["total"] == 3
+
+    # uncategorized=true → sólo las 2 sin categoría.
+    r_uncat = await client.get(
+        "/transactions", params={"uncategorized": "true"}, headers=_auth(token)
+    )
+    body = r_uncat.json()
+    assert body["total"] == 2
+    assert len(body["items"]) == 2
+    assert all(item["category_id"] is None for item in body["items"])
+
+    # uncategorized gana sobre category_id si llegan ambos.
+    r_both = await client.get(
+        "/transactions",
+        params={"uncategorized": "true", "category_id": cat_id},
+        headers=_auth(token),
+    )
+    assert r_both.json()["total"] == 2
 
 
 async def test_update_transaction(client: AsyncClient) -> None:

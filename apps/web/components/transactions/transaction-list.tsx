@@ -135,7 +135,7 @@ export function TransactionList({
             {tx.description ?? '(sin descripción)'}
           </span>
           {tx.transfer_pair_id !== null || category?.is_transfer ? (
-            <TransferBadge />
+            <TransferBadge label={tx.is_debt_pair ? 'Deuda' : 'Transferencia'} />
           ) : null}
         </span>
       ),
@@ -151,6 +151,13 @@ export function TransactionList({
       align: 'right',
       width: 160,
       render: ({ tx, category }) => {
+        // Una pata de transferencia/deuda no es ingreso ni gasto: está
+        // fuera del cashflow y (en deuda) aporta 0 al patrimonio. Se
+        // pinta en neutro, sin signo ni color income/expense — el badge
+        // "Deuda"/"Transferencia" ya explica de qué fila se trata.
+        const isTransferLike =
+          tx.transfer_pair_id !== null || category?.is_transfer === true;
+        const displayKind = isTransferLike ? null : (category?.kind ?? null);
         // PHASE-8.4: el backend convierte per-row cuando el toggle
         // está ON (la página pasa `target_currency`). La fila trae
         // `converted_amount` listo, o `null` si no hay tasa para esa
@@ -181,12 +188,12 @@ export function TransactionList({
               style={{
                 fontSize: fontSize.sm,
                 fontWeight: fontWeight.semibold,
-                color: amountColorFor(category?.kind),
+                color: amountColorFor(displayKind),
                 fontVariantNumeric: 'tabular-nums',
                 whiteSpace: 'nowrap',
               }}
             >
-              {amountSignFor(category?.kind)}
+              {amountSignFor(displayKind)}
               {formatAmount(tx.amount, tx.currency)}
             </span>
             {convertedDisplay ? (
@@ -262,11 +269,13 @@ export function TransactionList({
 }
 
 /**
- * Chip que marca una transacción como mitad de una transferencia
- * interna (PHASE-19.3). Es informativo, no clicable: las acciones
- * "Deshacer" y "Borrar" viven en la columna de acciones de la fila.
+ * Chip que marca una transacción como mitad de un par interno
+ * (PHASE-19.3). `label` distingue una transferencia activo↔activo
+ * ("Transferencia") de una conversión a deuda activo↔pasivo ("Deuda").
+ * Es informativo, no clicable: las acciones "Deshacer" y "Borrar"
+ * viven en la columna de acciones de la fila.
  */
-function TransferBadge() {
+function TransferBadge({ label }: { label: string }) {
   return (
     <span
       style={{
@@ -283,7 +292,7 @@ function TransferBadge() {
         flex: '0 0 auto',
       }}
     >
-      Transferencia
+      {label}
     </span>
   );
 }

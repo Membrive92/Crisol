@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-import { useAccounts, useCategories } from '@crisol/services';
+import { pickPreferredAccountId, useAccounts, useCategories } from '@crisol/services';
 import type {
   Account,
   Category,
@@ -67,7 +67,8 @@ export function TransactionForm({
   // archivada desde el form.
   const { data: accounts } = useAccounts();
   const activeAccounts: Account[] = (accounts ?? []).filter((a) => !a.is_archived);
-  const defaultAccountId = activeAccounts[0]?.id ?? '';
+  // PHASE-32: pre-selecciona la cuenta principal; fallback al primer activo.
+  const defaultAccountId = pickPreferredAccountId(activeAccounts);
 
   const [values, setValues] = useState<TransactionFormValues>(() =>
     buildInitialValues(initial, defaultAccountId),
@@ -119,8 +120,8 @@ export function TransactionForm({
       <Text style={styles.label}>Cuenta</Text>
       {noAccounts ? (
         <Text style={styles.warning}>
-          No tienes cuentas activas. Crea una desde Análisis → Cuentas para
-          poder registrar transacciones.
+          No tienes cuentas activas. Crea una desde Análisis → Cuentas para poder registrar
+          transacciones.
         </Text>
       ) : (
         <View style={styles.categoryList}>
@@ -132,12 +133,7 @@ export function TransactionForm({
                 style={[styles.categoryChip, selected && styles.categoryChipActive]}
                 onPress={() => update('account_id', a.id)}
               >
-                <Text
-                  style={[
-                    styles.categoryChipText,
-                    selected && styles.categoryChipTextActive,
-                  ]}
-                >
+                <Text style={[styles.categoryChipText, selected && styles.categoryChipTextActive]}>
                   {a.icon ? `${a.icon} ` : ''}
                   {a.name} ({a.currency})
                 </Text>
@@ -197,9 +193,7 @@ export function TransactionForm({
               style={[styles.categoryChip, selected && styles.categoryChipActive]}
               onPress={() => update('category_id', c.id)}
             >
-              <Text
-                style={[styles.categoryChipText, selected && styles.categoryChipTextActive]}
-              >
+              <Text style={[styles.categoryChipText, selected && styles.categoryChipTextActive]}>
                 {c.name}
               </Text>
             </TouchableOpacity>
@@ -254,7 +248,12 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   textarea: { minHeight: 80, textAlignVertical: 'top' },
-  categoryList: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginBottom: spacing.sm },
+  categoryList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    marginBottom: spacing.sm,
+  },
   categoryChip: {
     borderWidth: 1,
     borderColor: colors.border,
@@ -281,7 +280,11 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg,
   },
   submitDisabled: { opacity: 0.6 },
-  submitText: { color: colors.surface, fontSize: fontSize.md, fontWeight: fontWeight.semibold as '600' },
+  submitText: {
+    color: colors.surface,
+    fontSize: fontSize.md,
+    fontWeight: fontWeight.semibold as '600',
+  },
   cancel: {
     paddingVertical: spacing.sm,
     alignItems: 'center',

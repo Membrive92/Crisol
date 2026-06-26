@@ -2,9 +2,17 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 
-import { useAccounts, useCategories } from '@crisol/services';
+import { pickPreferredAccount, useAccounts, useCategories } from '@crisol/services';
 import type { ReceiptConfirmRequest, ReceiptExtraction } from '@crisol/types';
-import { colors, fontSize, fontWeight, formatCategoryKind, fromDateInputValue, spacing, toDateInputValue } from '@crisol/ui';
+import {
+  colors,
+  fontSize,
+  fontWeight,
+  formatCategoryKind,
+  fromDateInputValue,
+  spacing,
+  toDateInputValue,
+} from '@crisol/ui';
 
 import { Button } from '../ui/button';
 import { Select, TextArea, TextInput } from '../ui/field';
@@ -30,9 +38,7 @@ function asString(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
-function buildInitialValues(
-  extraction: ReceiptExtraction | Record<string, unknown>,
-): FormValues {
+function buildInitialValues(extraction: ReceiptExtraction | Record<string, unknown>): FormValues {
   const ext = extraction as Record<string, unknown>;
   const occurred = asString(ext['occurred_at']);
   return {
@@ -57,16 +63,16 @@ export function ReceiptConfirmForm({
   const [values, setValues] = useState<FormValues>(() => buildInitialValues(extraction));
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  // Pre-seleccionar la primera cuenta cuando llegue la lista. El
-  // guard del layout impide llegar aquí sin cuentas, pero por defensa
-  // no dejamos crashear el form si la lista llega vacía.
+  // Pre-seleccionar la cuenta principal (PHASE-32) o la primera cuando
+  // llegue la lista. El guard del layout impide llegar aquí sin cuentas,
+  // pero por defensa no dejamos crashear el form si llega vacía.
   useEffect(() => {
     if (!accounts || accounts.length === 0) return;
     setValues((prev) => {
       if (prev.account_id) return prev;
-      const first = accounts[0];
-      if (!first) return prev;
-      return { ...prev, account_id: first.id };
+      const preferred = pickPreferredAccount(accounts);
+      if (!preferred) return prev;
+      return { ...prev, account_id: preferred.id };
     });
   }, [accounts]);
 
@@ -116,8 +122,8 @@ export function ReceiptConfirmForm({
           color: colors.textMuted,
         }}
       >
-        El modelo de visión propone estos datos. Revísalos y edítalos antes de
-        confirmar — la transacción se crea con los valores definitivos.
+        El modelo de visión propone estos datos. Revísalos y edítalos antes de confirmar — la
+        transacción se crea con los valores definitivos.
       </p>
 
       <TextInput
@@ -142,9 +148,7 @@ export function ReceiptConfirmForm({
         disabled={loadingAccounts || accountList.length === 0}
         required
       >
-        {accountList.length === 0 ? (
-          <option value="">— Crea una cuenta primero —</option>
-        ) : null}
+        {accountList.length === 0 ? <option value="">— Crea una cuenta primero —</option> : null}
         {accountList.map((a) => (
           <option key={a.id} value={a.id}>
             {a.icon ? `${a.icon} ` : ''}
@@ -227,7 +231,8 @@ export function ExtractionSummary({ extraction }: ExtractionSummaryProps) {
       <ul style={{ marginTop: spacing.xs, paddingLeft: spacing.lg, fontSize: fontSize.sm }}>
         {lineItems.map((raw, idx) => {
           const item = raw as Record<string, unknown>;
-          const desc = typeof item['description'] === 'string' ? item['description'] : `Línea ${idx + 1}`;
+          const desc =
+            typeof item['description'] === 'string' ? item['description'] : `Línea ${idx + 1}`;
           const total = typeof item['total'] === 'string' ? item['total'] : '—';
           return (
             <li key={idx} style={{ color: colors.text }}>

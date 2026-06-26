@@ -1,7 +1,7 @@
 'use client';
 
 import type { CategoryBreakdownItem, DashboardSummary } from '@crisol/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@crisol/ui';
 
 import { Card } from '@/components/ui/card';
 import {
@@ -146,8 +146,14 @@ function computeInsights(
   return out;
 }
 
+/**
+ * Formatea la diferencia `a - b` como importe en la divisa activa.
+ * Delega en `formatAmount` para respetar el símbolo de la divisa y el
+ * formato es-ES (punto de millares + coma decimal) en vez de pegar el
+ * código de divisa con un separador de punto.
+ */
 function currencyDelta(a: number, b: number, currency: string): string {
-  return `${(a - b).toFixed(2)} ${currency}`;
+  return formatAmount(String((a - b).toFixed(2)), currency);
 }
 
 function InsightCard({ insight }: { insight: Insight }) {

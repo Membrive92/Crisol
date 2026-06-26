@@ -2,16 +2,15 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 
+import { colors, fromDateInputValue, toDateInputValue } from '@crisol/ui';
 import {
-  colors,
-  formatCategoryKind,
-  fromDateInputValue,
-  toDateInputValue,
-} from '@crisol/ui';
-import { useAccounts, useCategories, useUserCurrencies } from '@crisol/services';
+  pickPreferredAccount,
+  useAccounts,
+  useCategories,
+  useUserCurrencies,
+} from '@crisol/services';
 import { useCurrencyStore } from '@crisol/store';
 import type {
-  Category,
   Transaction,
   TransactionCreateRequest,
   TransactionUpdateRequest,
@@ -19,6 +18,7 @@ import type {
 
 import { Button } from '../ui/button';
 import { Select, TextArea, TextInput } from '../ui/field';
+import { CategoryCombobox } from './category-combobox';
 
 // Mismas monedas siempre visibles que en el selector global del header.
 // Mantener sincronizado con `currency-menu.tsx` cuando se amplíe.
@@ -83,15 +83,16 @@ export function TransactionForm({
   }>({});
 
   // Cuando el listado de cuentas llega, si no hay account_id seleccionado
-  // tomamos la primera. El guard del layout impide llegar aquí sin
-  // cuentas, pero por defensa añadimos un fallback visual abajo.
+  // tomamos la cuenta principal (PHASE-32) o, en su defecto, la primera.
+  // El guard del layout impide llegar aquí sin cuentas, pero por defensa
+  // añadimos un fallback visual abajo.
   useEffect(() => {
     if (!accounts || accounts.length === 0) return;
     setValues((prev) => {
       if (prev.account_id) return prev;
-      const first = accounts[0];
-      if (!first) return prev;
-      return { ...prev, account_id: first.id };
+      const preferred = pickPreferredAccount(accounts);
+      if (!preferred) return prev;
+      return { ...prev, account_id: preferred.id };
     });
   }, [accounts]);
 
@@ -150,8 +151,8 @@ export function TransactionForm({
     return (
       <div>
         <p style={{ color: colors.textMuted, marginTop: 0 }}>
-          Crea una cuenta primero. Cada transacción debe imputarse a una
-          cuenta para que los KPIs sean correctos.
+          Crea una cuenta primero. Cada transacción debe imputarse a una cuenta para que los KPIs
+          sean correctos.
         </p>
         {onCancel ? (
           <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
@@ -211,19 +212,13 @@ export function TransactionForm({
         onChange={(e) => handleChange('occurred_at', e.target.value)}
         required
       />
-      <Select
+      <CategoryCombobox
         label="Categoría"
+        categories={categories ?? []}
         value={values.category_id}
-        onChange={(e) => handleChange('category_id', e.target.value)}
+        onChange={(id) => handleChange('category_id', id)}
         disabled={loadingCategories}
-      >
-        <option value="">— Sin categoría —</option>
-        {(categories ?? []).map((c: Category) => (
-          <option key={c.id} value={c.id}>
-            {c.name} ({formatCategoryKind(c.kind)})
-          </option>
-        ))}
-      </Select>
+      />
       <TextArea
         label="Descripción"
         value={values.description}

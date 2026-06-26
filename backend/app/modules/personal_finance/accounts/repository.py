@@ -5,12 +5,30 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.modules.personal_finance.accounts.models import Account, AccountNature
 from app.modules.personal_finance.categories.models import Category, CategoryKind
 from app.modules.personal_finance.transactions.models import Transaction
+
+
+async def clear_default_accounts(
+    db: AsyncSession, user_id: uuid.UUID, *, except_id: uuid.UUID | None = None
+) -> None:
+    """Desmarca `is_default` en todas las cuentas del usuario (PHASE-32),
+    opcionalmente preservando `except_id`. Garantiza una sola cuenta
+    principal por usuario."""
+    stmt = (
+        update(Account)
+        .where(Account.user_id == user_id)
+        .where(Account.is_default.is_(True))
+        .values(is_default=False)
+    )
+    if except_id is not None:
+        stmt = stmt.where(Account.id != except_id)
+    await db.execute(stmt)
 
 
 async def list_accounts(
@@ -98,9 +116,27 @@ async def get_balances_for_user(db: AsyncSession, user_id: uuid.UUID) -> dict[uu
     - Sin categoría: el signo natural por `nature` (asset suma, liability
       suma como una entrada cualquiera).
     - Txs en papelera no cuentan.
-    - Las transferencias internas SÍ cuentan al saldo individual de su
-      cuenta (el `transfer_pair_id` excluye sólo de los agregados del
-      dashboard, no del saldo por cuenta).
+    - Las transferencias internas activo↔activo SÍ cuentan al saldo
+      individual de su cuenta. Modo cash para TODAS las cuentas
+      (PHASE-23.1) — esta función es la fuente del saldo cash y del
+      patrimonio neto agregado, donde las DOS patas de una transferencia
+      interna activo↔activo se cancelan. El "ahorro neto" de la cuenta
+      principal (PHASE-32) es un refinamiento de DISPLAY que vive en
+      `service.get_balances` vía `get_net_savings_movement_for_account`;
+      NO se aplica aquí para no romper la cancelación de patas en el
+      agregado (si lo hiciéramos, una transferencia interna a la cuenta
+      principal encogería el patrimonio neto — bug HIGH#1).
+    - EXCEPCIÓN deuda (fix pata-activo fantasma): la pata-ACTIVO de un
+      par de conversión a deuda (activo↔pasivo, p.ej. una compra
+      financiada / aplazamiento de tarjeta) aporta 0. Ese ingreso es
+      dinero PRESTADO, no ahorro disponible: si contara, inflaría
+      `total_assets` mientras la pata-pasivo eleva `total_liabilities`,
+      dejando un "activo fantasma". A diferencia de activo↔activo (donde
+      las dos patas caen en total_assets con signo opuesto y se anulan),
+      un par activo↔pasivo NO se cancela dentro de un bucket. Se anula
+      SÓLO la pata cuya cuenta es ASSET y cuya pareja es LIABILITY; la
+      pata-pasivo se mantiene intacta (sigue elevando la deuda y el
+      principal de la liability).
 
     Sólo agrega txs cuya `currency` coincide con la `currency` de la
     cuenta. Multi-divisa dentro de una cuenta queda fuera.
@@ -108,7 +144,19 @@ async def get_balances_for_user(db: AsyncSession, user_id: uuid.UUID) -> dict[uu
     El saldo final del frontend es:
         opening_balance + balances[account_id]
     """
+    # Pareja (self-join) para detectar la pata-activo de un par de deuda.
+    # `paired_account.nature == LIABILITY` con esta cuenta ASSET = dinero
+    # prestado entrando en un activo → no es patrimonio (ver docstring).
+    paired_tx = aliased(Transaction)
+    paired_account = aliased(Account)
+    asset_leg_of_debt_pair = (Account.nature == AccountNature.ASSET) & (
+        paired_account.nature == AccountNature.LIABILITY
+    )
+
     signed_amount = case(
+        # Pata-activo de una conversión a deuda (activo↔pasivo): dinero
+        # prestado, no ahorro. Va PRIMERO para ganar a las ramas por kind.
+        (asset_leg_of_debt_pair, Decimal("0")),
         # Liability: signos invertidos respecto a asset.
         (
             (Account.nature == AccountNature.LIABILITY) & (Category.kind == CategoryKind.EXPENSE),
@@ -137,6 +185,8 @@ async def get_balances_for_user(db: AsyncSession, user_id: uuid.UUID) -> dict[uu
         .select_from(Transaction)
         .join(Account, Account.id == Transaction.account_id)
         .outerjoin(Category, Category.id == Transaction.category_id)
+        .outerjoin(paired_tx, paired_tx.id == Transaction.transfer_pair_id)
+        .outerjoin(paired_account, paired_account.id == paired_tx.account_id)
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
         .where(Transaction.currency == Account.currency)
@@ -146,40 +196,69 @@ async def get_balances_for_user(db: AsyncSession, user_id: uuid.UUID) -> dict[uu
     return {acc_id: Decimal(total) for acc_id, total in result.all()}
 
 
-async def get_balance_for_account(
-    db: AsyncSession,
-    account_id: uuid.UUID,
-    user_id: uuid.UUID,
-    *,
-    account_currency: str,
-    account_nature: AccountNature = AccountNature.ASSET,
+async def get_net_savings_movement_for_account(
+    db: AsyncSession, user_id: uuid.UUID, account_id: uuid.UUID
 ) -> Decimal:
-    """Igual que `get_balances_for_user` pero para una sola cuenta.
+    """Movimiento neto de UNA cuenta excluyendo transferencias internas
+    (AHORRO NETO de la cuenta principal, PHASE-32).
 
-    `account_nature` decide la convención del signo (ver
-    `get_balances_for_user`). Default `ASSET` para compatibilidad con
-    callers existentes.
+    Igual convención de signo que `get_balances_for_user`, pero las txs
+    cuya categoría es `is_transfer` aportan 0: mover dinero entre tus
+    propias cuentas no es ahorrar ni gastar. Se usa SÓLO para el saldo
+    que se MUESTRA de la cuenta principal; los agregados de patrimonio
+    siguen usando el saldo cash de `get_balances_for_user` para que las
+    dos patas de una transferencia interna se cancelen (HIGH#1).
+
+    La pata-activo de un par de conversión a deuda también aporta 0 aquí
+    (vía la misma señal pareja-LIABILITY que usa `get_balances_for_user`),
+    no sólo vía `is_transfer`: así el saldo MOSTRADO de la principal y el
+    AGREGADO excluyen el activo fantasma de forma idéntica aunque la tx
+    origen no hubiera quedado marcada como transferencia.
     """
-    # PHASE-31.3 — `else_=Decimal("0")` igual que `get_balances_for_user`.
-    if account_nature == AccountNature.LIABILITY:
-        signed_amount = case(
-            (Category.kind == CategoryKind.EXPENSE, Transaction.amount),
-            (Category.kind == CategoryKind.INCOME, -Transaction.amount),
-            else_=Decimal("0"),
-        )
-    else:
-        signed_amount = case(
-            (Category.kind == CategoryKind.EXPENSE, -Transaction.amount),
-            (Category.kind == CategoryKind.INCOME, Transaction.amount),
-            else_=Decimal("0"),
-        )
+    paired_tx = aliased(Transaction)
+    paired_account = aliased(Account)
+    signed_amount = case(
+        (Category.is_transfer.is_(True), Decimal("0")),
+        # Pata-activo de una conversión a deuda (activo↔pasivo): dinero
+        # prestado, no ahorro (consistente con get_balances_for_user).
+        (
+            (Account.nature == AccountNature.ASSET)
+            & (paired_account.nature == AccountNature.LIABILITY),
+            Decimal("0"),
+        ),
+        (
+            (Account.nature == AccountNature.LIABILITY) & (Category.kind == CategoryKind.EXPENSE),
+            Transaction.amount,
+        ),
+        (
+            (Account.nature == AccountNature.LIABILITY) & (Category.kind == CategoryKind.INCOME),
+            -Transaction.amount,
+        ),
+        (Category.kind == CategoryKind.EXPENSE, -Transaction.amount),
+        (Category.kind == CategoryKind.INCOME, Transaction.amount),
+        else_=Decimal("0"),
+    )
     query = (
         select(func.coalesce(func.sum(signed_amount), 0))
         .select_from(Transaction)
+        .join(Account, Account.id == Transaction.account_id)
         .outerjoin(Category, Category.id == Transaction.category_id)
+        .outerjoin(paired_tx, paired_tx.id == Transaction.transfer_pair_id)
+        .outerjoin(paired_account, paired_account.id == paired_tx.account_id)
         .where(Transaction.user_id == user_id)
         .where(Transaction.account_id == account_id)
         .where(Transaction.deleted_at.is_(None))
-        .where(Transaction.currency == account_currency)
+        .where(Transaction.currency == Account.currency)
     )
     return Decimal((await db.execute(query)).scalar_one())
+
+
+# AUDIT-2026-06 (fix #9) — Se eliminó `get_balance_for_account`. Era
+# código MUERTO (ningún caller en código ni tests; sólo aparecía en docs
+# históricas de PHASE-21.2/31). Replicaba la convención de signo de
+# `get_balances_for_user` con un `case` PARALELO que NUNCA recibió el
+# carve-out de PHASE-32 (la cuenta `is_default`/`is_transfer` que refleja
+# ahorro neto), así que era una bomba latente: cualquiera que lo
+# resucitara obtendría un saldo de la cuenta principal divergente del de
+# `/balances`. La fuente ÚNICA de verdad del signo del saldo es
+# `get_balances_for_user`.

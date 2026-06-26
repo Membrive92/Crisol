@@ -25,6 +25,7 @@ export type {
 export type {
   AmortizationRow,
   AmortizationSchedule,
+  DailyDebtPoint,
   DebtCategorySummary,
   DebtHealthKpis,
   DebtHistoryPoint,

@@ -9,13 +9,31 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.personal_finance.bank_mappings.models import BankCategoryMapping
+from app.modules.personal_finance.category_rules.repository import normalize as _normalize_text
 
 
 def normalize_concept(value: str) -> str:
-    """Normaliza un concepto del banco para que el matching sea
-    consistente. Misma función en cliente y servidor: casefold + trim.
+    """Normaliza un concepto del banco para que el matching sea consistente.
+
+    AUDIT — normalize-concept-no-quita-acentos: antes hacía sólo
+    `casefold + trim`, así que "Telefónica" y "Telefonica" producían claves
+    distintas. Eso fragmentaba el autoaprendizaje (bank_mappings) frente al
+    matching de reglas (`category_rules.normalize`, que SÍ quita acentos vía
+    NFD). Ahora ambos comparten EXACTAMENTE el mismo helper
+    (`category_rules.normalize`: NFD + strip acentos + lower + trim) para que
+    una misma cadena resuelva igual por las dos vías.
+
+    OJO — DATOS PENDIENTES: los `bank_concept` ya persistidos se guardaron con
+    la normalización antigua (con acentos). Re-normalizarlos requiere una
+    migración de datos APARTE que, además, debe FUSIONAR colisiones (dos filas
+    que tras quitar acentos colapsan a la misma clave con el `(user_id,
+    bank_concept)` único). Esa migración NO se ha hecho aquí por ser una tarea
+    de datos arriesgada: este cambio sólo unifica la normalización para
+    mappings/lookups NUEVOS. Hasta migrar, un concepto acentuado viejo podría
+    no casar con su versión nueva sin acentos (degradación benigna: el
+    autolearn lo recrea).
     """
-    return (value or "").strip().casefold()
+    return _normalize_text(value)
 
 
 async def list_mappings(db: AsyncSession, user_id: uuid.UUID) -> list[BankCategoryMapping]:

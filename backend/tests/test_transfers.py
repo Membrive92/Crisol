@@ -894,14 +894,19 @@ async def test_from_source_debt_creates_new_liability_and_pairs(
     client: AsyncClient,
 ) -> None:
     """`POST /transfers/from-source-debt` con `new_liability` crea la
-    cuenta de deuda al vuelo + contraparte + empareja. Saldos: BBVA
-    +amount (asset+income), liability +amount (deuda). Cashflow
+    cuenta de deuda al vuelo + contraparte + empareja.
+
+    Fix activo-fantasma: la pata-ACTIVO del par (el "abono" en BBVA) es
+    dinero PRESTADO, no ahorro disponible, así que aporta 0 al saldo del
+    activo y a `total_assets`. La pata-PASIVO sí eleva la deuda. Cashflow
     agregado: 0 (par excluido).
     """
     token, _expense_cat, acc_a, _acc_b = await _setup_user_with_two_accounts(
         client, "debt-new@example.com"
     )
-    # Categoría INCOME (el extracto del banco abona el importe)
+    # Categoría INCOME (el extracto del banco abona el importe). NO es
+    # is_transfer a propósito: el fix debe excluir la pata-activo por la
+    # señal "pareja=liability", no por la categoría.
     income_cat = await client.post(
         "/categories",
         json={"name": "Op. financiada (abono)", "kind": "income"},
@@ -943,11 +948,17 @@ async def test_from_source_debt_creates_new_liability_and_pairs(
     assert new_acc["nature"] == "liability"
     assert new_acc["type"] == "credit_card"
 
-    # Balances: BBVA +824.77 (asset+income), liability +824.77 (debt up)
+    # Balances: la pata-activo del par de deuda NO infla el activo (0),
+    # pero la deuda sí sube (+824.77). total_assets excluye el fantasma y
+    # net_worth refleja la deuda completa (-824.77, sin compensar).
     balances = await client.get("/accounts/balances", headers=_auth(token))
-    by_id = {b["account_id"]: b for b in balances.json()["items"]}
-    assert Decimal(by_id[acc_a]["movements_balance"]) == Decimal("824.77")
+    body = balances.json()
+    by_id = {b["account_id"]: b for b in body["items"]}
+    assert Decimal(by_id[acc_a]["movements_balance"]) == Decimal("0.00")
     assert Decimal(by_id[new_acc["id"]]["movements_balance"]) == Decimal("824.77")
+    assert Decimal(body["total_assets"]) == Decimal("0.00")
+    assert Decimal(body["total_liabilities"]) == Decimal("824.77")
+    assert Decimal(body["net_worth"]) == Decimal("-824.77")
 
     # Cashflow agregado: cero (par emparejado excluido)
     summary = await client.get("/dashboard/summary?currency=EUR", headers=_auth(token))
@@ -996,6 +1007,132 @@ async def test_from_source_debt_uses_existing_liability(
     accs = await client.get("/accounts", headers=headers)
     liabilities = [a for a in accs.json() if a["nature"] == "liability"]
     assert len(liabilities) == 1
+
+    # El fix es agnóstico al kind del origen: aquí la tx origen es un
+    # GASTO (-500) en el activo. Tras convertirla a deuda, la pata-activo
+    # se anula igual (no resta del activo) y la deuda sube +500.
+    balances = await client.get("/accounts/balances", headers=headers)
+    body = balances.json()
+    by_id = {b["account_id"]: b for b in body["items"]}
+    assert Decimal(by_id[acc_a]["movements_balance"]) == Decimal("0.00")
+    assert Decimal(by_id[liability_id]["movements_balance"]) == Decimal("500.00")
+    assert Decimal(body["total_liabilities"]) == Decimal("500.00")
+    assert Decimal(body["net_worth"]) == Decimal("-500.00")
+
+
+async def test_list_transactions_flags_is_debt_pair(client: AsyncClient) -> None:
+    """El listado expone `is_debt_pair=True` en AMBAS patas de un par de
+    conversión a deuda (activo↔pasivo) y `False` en transferencias
+    internas (activo↔activo) y movimientos normales. La UI usa la señal
+    para el badge "Deuda" y para pintar el importe en neutro (coherente
+    con el fix activo-fantasma: la pata-activo aporta 0 al patrimonio).
+    """
+    token, expense_cat, acc_a, acc_b = await _setup_user_with_two_accounts(
+        client, "debtflag@example.com"
+    )
+
+    # 1) Movimiento normal (sin par) → is_debt_pair False.
+    normal_id = await _create_tx(
+        client,
+        token,
+        account_id=acc_a,
+        amount="10.00",
+        occurred_at="2026-04-10T12:00:00Z",
+        category_id=expense_cat,
+        description="Compra normal",
+    )
+
+    # 2) Transferencia interna activo↔activo (200) → False en ambas patas.
+    transfer_src = await _create_tx(
+        client,
+        token,
+        account_id=acc_a,
+        amount="200.00",
+        occurred_at="2026-04-11T12:00:00Z",
+        category_id=expense_cat,
+        description="Traspaso a broker",
+    )
+    rt = await client.post(
+        "/transfers/from-source",
+        json={
+            "source_transaction_id": transfer_src,
+            "originating_account_id": acc_a,
+            "beneficiary_account_id": acc_b,
+        },
+        headers=_auth(token),
+    )
+    assert rt.status_code == 201, rt.text
+
+    # 3) Conversión a deuda activo↔pasivo (824.77) → True en ambas patas.
+    income_cat = await client.post(
+        "/categories",
+        json={"name": "Abono financiado", "kind": "income"},
+        headers=_auth(token),
+    )
+    debt_src = await _create_tx(
+        client,
+        token,
+        account_id=acc_a,
+        amount="824.77",
+        occurred_at="2026-04-12T12:00:00Z",
+        category_id=income_cat.json()["id"],
+        description="OPERACION FINANCIADA",
+    )
+    rd = await client.post(
+        "/transfers/from-source-debt",
+        json={
+            "source_transaction_id": debt_src,
+            "new_liability": {
+                "name": "Tarjeta financiada",
+                "type": "credit_card",
+                "currency": "EUR",
+            },
+        },
+        headers=_auth(token),
+    )
+    assert rd.status_code == 201, rd.text
+
+    # 4) Cargo normal SIN par en una cuenta liability (tarjeta) → False.
+    #    Regresión: el flag exige emparejamiento, no basta con que la
+    #    cuenta sea liability (un cargo suelto en tarjeta NO es deuda
+    #    contraída vía conversión).
+    card = await client.post(
+        "/accounts",
+        json={"name": "Visa", "type": "credit_card", "currency": "EUR"},
+        headers=_auth(token),
+    )
+    card_charge_id = await _create_tx(
+        client,
+        token,
+        account_id=card.json()["id"],
+        amount="33.00",
+        occurred_at="2026-04-13T12:00:00Z",
+        category_id=expense_cat,
+        description="Cargo suelto en tarjeta",
+    )
+
+    lst = await client.get("/transactions?limit=200", headers=_auth(token))
+    assert lst.status_code == 200, lst.text
+    items = lst.json()["items"]
+    by_id = {t["id"]: t for t in items}
+
+    # Normal (en activo, sin par) → False
+    assert by_id[normal_id]["is_debt_pair"] is False
+    # Cargo suelto en liability (sin par) → False
+    assert by_id[card_charge_id]["transfer_pair_id"] is None
+    assert by_id[card_charge_id]["is_debt_pair"] is False
+
+    # Las dos patas de la transferencia interna (importe 200) → False
+    transfer_legs = [t for t in items if t["amount"] == "200.00"]
+    assert len(transfer_legs) == 2
+    assert all(t["transfer_pair_id"] is not None for t in transfer_legs)
+    assert all(t["is_debt_pair"] is False for t in transfer_legs)
+
+    # Las dos patas de la deuda (importe 824.77) → True
+    debt_legs = [t for t in items if t["amount"] == "824.77"]
+    assert len(debt_legs) == 2
+    assert all(t["transfer_pair_id"] is not None for t in debt_legs)
+    assert all(t["is_debt_pair"] is True for t in debt_legs)
 
 
 async def test_from_source_debt_400_when_destination_is_asset(

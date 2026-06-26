@@ -28,6 +28,7 @@ from app.modules.personal_finance.transactions.schemas import (
 from app.modules.personal_finance.transactions.service import (
     bulk_delete_transactions,
     bulk_purge_trashed_transactions,
+    bulk_reassign_transactions,
     bulk_restore_trashed_transactions,
     create_transaction,
     delete_transaction,
@@ -60,6 +61,29 @@ class BulkPurgeResponse(BaseModel):
     purged_count: int
 
 
+class ReassignAccountRequest(BaseModel):
+    """PHASE-32 — Reasigna en bloque a `target_account_id` las tx activas
+    que matcheen los filtros (mismos que el listado). Útil para consolidar
+    un mes en la cuenta principal. Sin filtros, mueve todas las activas
+    (excepto transferencias internas)."""
+
+    target_account_id: uuid.UUID
+    account_id: uuid.UUID | None = None
+    """Filtro: sólo las de esta cuenta origen. NULL = de cualquiera."""
+    category_id: uuid.UUID | None = None
+    date_from: datetime | None = None
+    date_to: datetime | None = None
+    search: str | None = None
+
+
+class ReassignAccountResponse(BaseModel):
+    reassigned_count: int
+    # HIGH#3 — tx que matchean los filtros pero NO se movieron por tener una
+    # divisa distinta a la de la cuenta destino (se las dejó donde estaban
+    # para no sacarlas del saldo). La UI lo informa.
+    skipped_other_currency: int = 0
+
+
 class AvailablePeriodItem(BaseModel):
     """Un año con la lista de meses (1-12) que tienen transacciones."""
 
@@ -82,18 +106,26 @@ router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 
 def _build_response(
-    tx: Transaction, converted: Decimal | None, target_currency: str | None
+    tx: Transaction,
+    converted: Decimal | None,
+    is_debt_pair: bool,
+    target_currency: str | None,
 ) -> TransactionResponse:
-    """Construye la respuesta enriqueciendo con la conversión per-row."""
-    payload = TransactionResponse.model_validate(tx)
+    """Construye la respuesta enriqueciendo con la conversión per-row y
+    la señal `is_debt_pair` (que el ORM no lleva como columna).
+
+    AUDIT: `converted` llega de SQL con precisión `Numeric(20, 8)` (8
+    decimales). Si se devolviera tal cual, la UI sumaría filas con 8
+    decimales y el total no cuadraría con un total cuantizado a
+    céntimos. Se cuantiza cada fila a 2 decimales — misma política que
+    `dashboard.get_category_detail`/`get_summary` — para que
+    `sum(filas) == total` a nivel de presentación.
+    """
+    update: dict[str, object] = {"is_debt_pair": is_debt_pair}
     if target_currency is not None and converted is not None:
-        payload = payload.model_copy(
-            update={
-                "converted_amount": converted,
-                "converted_currency": target_currency.upper(),
-            }
-        )
-    return payload
+        update["converted_amount"] = converted.quantize(Decimal("0.01"))
+        update["converted_currency"] = target_currency.upper()
+    return TransactionResponse.model_validate(tx).model_copy(update=update)
 
 
 @router.get("", response_model=TransactionListResponse)
@@ -102,6 +134,7 @@ async def list_endpoint(
     db: Annotated[AsyncSession, Depends(get_db)],
     account_id: uuid.UUID | None = None,
     category_id: uuid.UUID | None = None,
+    uncategorized: bool = False,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     search: str | None = None,
@@ -114,6 +147,9 @@ async def list_endpoint(
     PHASE-19.4: `account_id` permite filtrar por cuenta. Las
     soft-deleted (PHASE-10.1) NO aparecen aquí — usar `/trash`.
 
+    `uncategorized=true` filtra las tx sin categoría (atajo "Ver y
+    categorizar" del banner); ignora `category_id` si llegan ambos.
+
     Si se pasa `target_currency`, cada fila incluye `converted_amount`
     + `converted_currency` (PHASE-8.4) — la UI puede pintar el
     equivalente en moneda activa sin lanzar fetches por fecha.
@@ -123,6 +159,7 @@ async def list_endpoint(
         user.id,
         account_id=account_id,
         category_id=category_id,
+        uncategorized=uncategorized,
         date_from=date_from,
         date_to=date_to,
         search=search,
@@ -131,7 +168,10 @@ async def list_endpoint(
         offset=offset,
     )
     return TransactionListResponse(
-        items=[_build_response(tx, conv, target_currency) for tx, conv in items],
+        items=[
+            _build_response(tx, conv, is_debt_pair, target_currency)
+            for tx, conv, is_debt_pair in items
+        ],
         total=total,
         limit=limit,
         offset=offset,
@@ -335,6 +375,38 @@ async def bulk_delete_endpoint(
     )
     await db.commit()
     return BulkDeleteResponse(deleted_count=count)
+
+
+@router.post("/reassign-account", response_model=ReassignAccountResponse)
+async def reassign_account_endpoint(
+    body: ReassignAccountRequest,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ReassignAccountResponse:
+    """PHASE-32 — Mueve en bloque a la cuenta destino las transacciones
+    activas que matcheen los filtros (mismos que `GET /transactions`).
+
+    Pensado para consolidar "el mes en mi cuenta principal (BBVA)": el
+    saldo de la cuenta destino pasa a reflejar esos movimientos. Excluye
+    transferencias internas (mover una pata rompería el par) y las que ya
+    están en la cuenta destino. 404 si la cuenta destino no es del usuario.
+
+    HIGH#3 — sólo mueve tx de la MISMA divisa que la cuenta destino; las de
+    otra divisa se quedan donde están (moverlas las sacaría del saldo) y se
+    reportan en `skipped_other_currency`.
+    """
+    count, skipped = await bulk_reassign_transactions(
+        db,
+        user.id,
+        target_account_id=body.target_account_id,
+        account_id=body.account_id,
+        category_id=body.category_id,
+        date_from=body.date_from,
+        date_to=body.date_to,
+        search=body.search,
+    )
+    await db.commit()
+    return ReassignAccountResponse(reassigned_count=count, skipped_other_currency=skipped)
 
 
 @router.delete("/{transaction_id}", status_code=204, response_class=Response)

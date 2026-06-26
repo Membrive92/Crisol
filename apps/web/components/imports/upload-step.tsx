@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 
-import { useAccounts, useCategories } from '@crisol/services';
+import { pickPreferredAccount, useAccounts, useCategories } from '@crisol/services';
 import { colors, fontSize, fontWeight, formatCategoryKind, radius, spacing } from '@crisol/ui';
 
 import { Button } from '../ui/button';
@@ -41,12 +41,13 @@ export function UploadStep({ onContinue }: UploadStepProps) {
   useEffect(() => {
     if (!accounts || accounts.length === 0) return;
     if (!accountId) {
-      const first = accounts[0];
-      if (first) {
-        setAccountId(first.id);
+      // PHASE-32: la cuenta principal por defecto; fallback al primer activo.
+      const preferred = pickPreferredAccount(accounts);
+      if (preferred) {
+        setAccountId(preferred.id);
         // Si no han tocado la moneda, sincronizamos con la cuenta — es
         // el caso más común (extracto del banco en su moneda nativa).
-        setCurrency((prev) => (prev === 'EUR' ? first.currency : prev));
+        setCurrency((prev) => (prev === 'EUR' ? preferred.currency : prev));
       }
     }
   }, [accounts, accountId]);
@@ -115,9 +116,7 @@ export function UploadStep({ onContinue }: UploadStepProps) {
         disabled={loadingAccounts || accountList.length === 0}
         required
       >
-        {accountList.length === 0 ? (
-          <option value="">— Sin cuentas disponibles —</option>
-        ) : null}
+        {accountList.length === 0 ? <option value="">— Sin cuentas disponibles —</option> : null}
         {accountList.map((a) => (
           <option key={a.id} value={a.id}>
             {a.icon ? `${a.icon} ` : ''}

@@ -235,6 +235,7 @@ function NetWorthSection({
         totalAssets={totalAssets}
         totalLiabilities={totalLiabilities}
         referenceCurrency={referenceCurrency}
+        mixedCurrencies={mixedCurrencies}
       />
     </section>
   );
@@ -246,13 +247,33 @@ function CompositionBar({
   totalAssets,
   totalLiabilities,
   referenceCurrency,
+  mixedCurrencies,
 }: {
   assetItems: AccountBalance[];
   liabilityItems: AccountBalance[];
   totalAssets: string;
   totalLiabilities: string;
   referenceCurrency: string;
+  mixedCurrencies: boolean;
 }) {
+  // Con divisas mixtas, sumar magnitudes de cuentas sin convertir produce
+  // pesos sin sentido (un saldo de 1.000 ¥ y otro de 1.000 € no son
+  // comparables). El banner de aviso ya está arriba; aquí no pintamos la
+  // barra para no comunicar una composición falsa. No inventamos
+  // conversión client-side.
+  if (mixedCurrencies) {
+    return (
+      <div
+        style={{
+          fontSize: fontSize.xs,
+          color: colors.textSubtle,
+          padding: `${spacing.sm}px 0`,
+        }}
+      >
+        Composición no disponible con cuentas en varias divisas.
+      </div>
+    );
+  }
   const totalAssetsNum = Math.max(0, Number(totalAssets));
   const totalLiabsNum = Math.max(0, Number(totalLiabilities));
   const grandTotal = totalAssetsNum + totalLiabsNum;

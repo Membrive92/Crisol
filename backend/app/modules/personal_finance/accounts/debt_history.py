@@ -131,11 +131,17 @@ async def _compute_historical_points(
         else Transaction.amount
     )
 
-    # Inversión de signo en SQL idéntica a get_balances_for_user.
+    # Inversión de signo en SQL idéntica a la rama liability de
+    # get_balances_for_user: expense sube la deuda, income la baja.
+    # AUDIT-2026-06 (fix #8) — tx SIN categoría NO contribuye (`else_=0`,
+    # PHASE-31.3). Antes era `else_=amount_expr`, lo que contradecía el
+    # propio docstring del módulo ("misma inversión de signo que
+    # get_balances_for_user") y metía cargos sin categoría en el saldo
+    # histórico de deuda, divergiendo del saldo real de `/balances`.
     signed_amount = case(
         (Category.kind == CategoryKind.EXPENSE, amount_expr),
         (Category.kind == CategoryKind.INCOME, -amount_expr),
-        else_=amount_expr,
+        else_=Decimal("0"),
     )
 
     # Lista de meses de la ventana (cronológica).
@@ -182,12 +188,24 @@ async def _compute_historical_points(
 
     # Query B — principal amortizado por mes (income transfer pair a
     # liabilities), dentro de la ventana.
+    # AUDIT-2026-06 (fix #1) — "principal amortizado" es SÓLO la pata que
+    # REDUCE la deuda: por la convención de signo (rama liability de
+    # get_balances_for_user) eso es `Category.kind == INCOME`. Antes esta
+    # query sumaba TODA tx con `transfer_pair_id` en una cuenta-pasivo,
+    # incluyendo la pata de gasto que SUBE la deuda (p.ej. la contraparte
+    # de una operación financiada o un cargo pareado), inflando el
+    # "principal amortizado" del histórico. El join a Category es interno
+    # a propósito: una pata que reduce deuda es INCOME y por tanto tiene
+    # categoría; las tx sin categoría nunca son la pata amortizadora.
     principal_q = (
         select(month_bucket.label("bucket"), func.coalesce(func.sum(amount_expr), 0))
+        .select_from(Transaction)
+        .join(Category, Category.id == Transaction.category_id)
         .where(Transaction.user_id == user_id)
         .where(Transaction.account_id.in_(liability_ids))
         .where(Transaction.deleted_at.is_(None))
         .where(Transaction.transfer_pair_id.is_not(None))
+        .where(Category.kind == CategoryKind.INCOME)
         .where(Transaction.occurred_at >= first_month_start)
         .where(Transaction.occurred_at <= last_month_end)
         .group_by(month_bucket)

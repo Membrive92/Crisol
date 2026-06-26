@@ -5,10 +5,13 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import {
+  formatApiError,
+  pickPreferredAccountId,
   useAccounts,
   useBulkDeleteTransactions,
   useCategories,
   useDeleteTransaction,
+  useReassignAccount,
   useRestoreTransaction,
   useTransactions,
   useTrashedTransactions,
@@ -16,7 +19,7 @@ import {
 } from '@crisol/services';
 import { toast, useCurrencyStore } from '@crisol/store';
 import type { TransactionListQuery } from '@crisol/types';
-import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, pluralize, radius, spacing } from '@crisol/ui';
 
 import { StitchSearchToolbar } from '@/components/transactions/stitch-search-toolbar';
 import { StitchTransactionsKpiRow } from '@/components/transactions/stitch-transactions-kpi-row';
@@ -49,10 +52,7 @@ export default function TransactionsPage() {
     // por cada cambio de filtro o cambio de página — el botón
     // "atrás" del navegador debe seguir saliendo de la lista, no
     // recorrer paginación.
-    router.replace(
-      `/personal-finance/transactions${qs ? `?${qs}` : ''}`,
-      { scroll: false },
-    );
+    router.replace(`/personal-finance/transactions${qs ? `?${qs}` : ''}`, { scroll: false });
   }
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const currency = useCurrencyStore((s) => s.currency);
@@ -75,11 +75,22 @@ export default function TransactionsPage() {
   const deleteMutation = useDeleteTransaction();
   const restoreMutation = useRestoreTransaction();
   const bulkDeleteMutation = useBulkDeleteTransactions();
+  const reassignMutation = useReassignAccount();
   const unlinkTransferMutation = useUnlinkTransfer();
   // Conteo de papelera para mostrar badge cuando hay items.
   const trashCountQuery = useTrashedTransactions({ limit: 1 });
   const trashCount = trashCountQuery.data?.total ?? 0;
   const [confirmingBulkDelete, setConfirmingBulkDelete] = useState(false);
+  // PHASE-32 — reasignación en bloque a una cuenta (consolidar el mes en
+  // la principal). El destino por defecto es la cuenta principal.
+  const activeAccounts = (accounts ?? []).filter((a) => !a.is_archived);
+  const [reassignTargetId, setReassignTargetId] = useState('');
+  // AUDIT MEDIUM#9 / LOW#14 — destino por defecto: la principal, o el primer
+  // ACTIVO (nunca un pasivo), nunca '' (antes dejaba el botón deshabilitado).
+  const reassignTarget = reassignTargetId || pickPreferredAccountId(accounts ?? []);
+  const reassignTargetName =
+    activeAccounts.find((a) => a.id === reassignTarget)?.name ?? 'la cuenta';
+  const [confirmingReassign, setConfirmingReassign] = useState(false);
 
   const total = data?.total ?? 0;
   const items = data?.items ?? [];
@@ -87,18 +98,24 @@ export default function TransactionsPage() {
   const limit = filters.limit ?? PAGE_SIZE;
   const hasActiveFilters = Boolean(
     filters.account_id ||
-      filters.category_id ||
-      filters.date_from ||
-      filters.date_to ||
-      filters.search,
+    filters.category_id ||
+    filters.uncategorized ||
+    filters.date_from ||
+    filters.date_to ||
+    filters.search,
   );
+  // Las acciones bulk (borrar todo / reasignar) NO aplican el filtro
+  // "sin categoría" en el backend; con ese filtro activo operarían sobre
+  // TODO el resto de filtros (vacíos) → borrarían/moverían todo. Se
+  // deshabilitan mientras el filtro está activo (el flujo de "Ver y
+  // categorizar" es clasificar una a una, no en bloque).
+  const bulkDisabledByUncategorized = Boolean(filters.uncategorized);
 
   // Periodo para los KPIs: el rango activo del filtro o todo el año
   // actual si no hay rango.
   const now = new Date();
   const dateFrom = filters.date_from ?? new Date(now.getFullYear(), 0, 1).toISOString();
-  const dateTo =
-    filters.date_to ?? new Date(now.getFullYear(), 11, 31, 23, 59, 59).toISOString();
+  const dateTo = filters.date_to ?? new Date(now.getFullYear(), 11, 31, 23, 59, 59).toISOString();
 
   function handleDelete(id: string) {
     setPendingDeleteId(id);
@@ -107,8 +124,7 @@ export default function TransactionsPage() {
   function handleUnlinkTransfer(id: string) {
     unlinkTransferMutation.mutate(id, {
       onSuccess: () => toast.info('Transferencia interna deshecha.'),
-      onError: () =>
-        toast.error('No se pudo deshacer la transferencia.'),
+      onError: () => toast.error('No se pudo deshacer la transferencia.'),
     });
   }
 
@@ -146,6 +162,55 @@ export default function TransactionsPage() {
               : 'Error al borrar transacciones',
           );
         },
+      },
+    );
+  }
+
+  function confirmReassign() {
+    setConfirmingReassign(false);
+    if (!reassignTarget) return;
+    const { account_id, category_id, date_from, date_to, search } = filters;
+    reassignMutation.mutate(
+      {
+        targetAccountId: reassignTarget,
+        filters: {
+          ...(account_id ? { account_id } : {}),
+          ...(category_id ? { category_id } : {}),
+          ...(date_from ? { date_from } : {}),
+          ...(date_to ? { date_to } : {}),
+          ...(search ? { search } : {}),
+        },
+      },
+      {
+        onSuccess: ({ reassigned_count, skipped_other_currency }) => {
+          // HIGH#3 — las tx de otra divisa NO se mueven (las sacaría del
+          // saldo); el backend las cuenta aparte y aquí lo informamos.
+          const skippedNote =
+            skipped_other_currency > 0
+              ? ` (${skipped_other_currency} ${pluralize(
+                  skipped_other_currency,
+                  'omitida',
+                  'omitidas',
+                )} por tener otra divisa)`
+              : '';
+          if (reassigned_count === 0) {
+            toast.info(
+              skipped_other_currency > 0
+                ? `Nada movido${skippedNote}.`
+                : 'Nada que mover (ya estaban en esa cuenta o son transferencias internas).',
+            );
+            return;
+          }
+          const accName = activeAccounts.find((a) => a.id === reassignTarget)?.name ?? 'la cuenta';
+          toast.success(
+            `Movidas ${reassigned_count} ${pluralize(
+              reassigned_count,
+              'transacción',
+              'transacciones',
+            )} a ${accName}.${skippedNote}`,
+          );
+        },
+        onError: (err) => toast.error(formatApiError(err, 'No se pudo reasignar')),
       },
     );
   }
@@ -275,23 +340,15 @@ export default function TransactionsPage() {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg }}>
-        <StitchTransactionsKpiRow
-          currency={currency}
-          dateFrom={dateFrom}
-          dateTo={dateTo}
-        />
+        <StitchTransactionsKpiRow currency={currency} dateFrom={dateFrom} dateTo={dateTo} />
 
         <UncategorizedBanner
           onSeeUncategorized={() => {
-            // PHASE-31.3 — atajo al filtro de sin categoría. El backend
-            // todavía no acepta `category_id=null` como query, así que
-            // de momento el banner se queda informativo cuando no hay
-            // filtro custom. Cuando se añada el filtro, basta con
-            // `setFilters({ ...filters, category_id: 'none', offset: 0 })`.
-            //
-            // Aquí, hasta que llegue, hacemos scroll a la lista para
-            // que el usuario al menos las vea pasar.
-            window.scrollTo({ top: 400, behavior: 'smooth' });
+            // Filtra el listado por "sin categoría" (el backend ya soporta
+            // `uncategorized=true`). Limpiamos el resto de filtros para que
+            // lo mostrado coincida con el conteo del banner, que es global
+            // (todas las sin categoría del usuario, no las del mes/cuenta).
+            setFilters({ limit: PAGE_SIZE, offset: 0, uncategorized: true });
           }}
         />
 
@@ -328,14 +385,74 @@ export default function TransactionsPage() {
                   ? `${total} ${total === 1 ? 'resultado' : 'resultados'} con los filtros activos`
                   : `${total} ${total === 1 ? 'transacción' : 'transacciones'} en total`}
               </span>
-              <Button
-                variant="ghost"
-                onClick={() => setConfirmingBulkDelete(true)}
-                disabled={total === 0 || bulkDeleteMutation.isPending}
-                style={{ color: colors.danger, borderColor: colors.danger }}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: spacing.sm,
+                  flexWrap: 'wrap',
+                }}
               >
-                {bulkDeleteMutation.isPending ? 'Borrando…' : 'Borrar todo'}
-              </Button>
+                {/* PHASE-32 — reasignar en bloque a una cuenta (consolidar el
+                    mes en tu cuenta principal). Usa los filtros activos. */}
+                {activeAccounts.length > 0 ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: spacing.xs }}>
+                    <select
+                      value={reassignTarget}
+                      onChange={(e) => setReassignTargetId(e.target.value)}
+                      aria-label="Cuenta destino para reasignar"
+                      style={{
+                        padding: `${spacing.xs}px ${spacing.sm}px`,
+                        borderRadius: radius.sm,
+                        border: `1px solid ${colors.border}`,
+                        backgroundColor: colors.surface,
+                        color: colors.text,
+                        fontSize: fontSize.sm,
+                      }}
+                    >
+                      {activeAccounts.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.icon ? `${a.icon} ` : ''}
+                          {a.name}
+                          {a.is_default ? ' (principal)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      variant="secondary"
+                      onClick={() => setConfirmingReassign(true)}
+                      disabled={
+                        total === 0 ||
+                        !reassignTarget ||
+                        reassignMutation.isPending ||
+                        bulkDisabledByUncategorized
+                      }
+                      title={
+                        bulkDisabledByUncategorized
+                          ? "No disponible con el filtro 'sin categoría'"
+                          : undefined
+                      }
+                    >
+                      {reassignMutation.isPending ? 'Moviendo…' : 'Mover a la cuenta'}
+                    </Button>
+                  </span>
+                ) : null}
+                <Button
+                  variant="ghost"
+                  onClick={() => setConfirmingBulkDelete(true)}
+                  disabled={
+                    total === 0 || bulkDeleteMutation.isPending || bulkDisabledByUncategorized
+                  }
+                  title={
+                    bulkDisabledByUncategorized
+                      ? "No disponible con el filtro 'sin categoría'"
+                      : undefined
+                  }
+                  style={{ color: colors.danger, borderColor: colors.danger }}
+                >
+                  {bulkDeleteMutation.isPending ? 'Borrando…' : 'Borrar todo'}
+                </Button>
+              </div>
             </div>
 
             <TransactionList
@@ -343,13 +460,9 @@ export default function TransactionsPage() {
               categories={categories ?? []}
               onDelete={handleDelete}
               onUnlinkTransfer={handleUnlinkTransfer}
-              deletingId={
-                deleteMutation.isPending ? (deleteMutation.variables as string) : null
-              }
+              deletingId={deleteMutation.isPending ? (deleteMutation.variables ?? null) : null}
               unlinkingId={
-                unlinkTransferMutation.isPending
-                  ? (unlinkTransferMutation.variables as string)
-                  : null
+                unlinkTransferMutation.isPending ? (unlinkTransferMutation.variables ?? null) : null
               }
             />
 
@@ -358,9 +471,7 @@ export default function TransactionsPage() {
               offset={offset}
               limit={limit}
               pageItemCount={items.length}
-              onChange={(nextOffset) =>
-                setFilters({ ...filters, offset: nextOffset })
-              }
+              onChange={(nextOffset) => setFilters({ ...filters, offset: nextOffset })}
             />
           </>
         )}
@@ -396,6 +507,29 @@ export default function TransactionsPage() {
         onCancel={() => setConfirmingBulkDelete(false)}
       />
 
+      <ConfirmDialog
+        open={confirmingReassign}
+        title={
+          hasActiveFilters
+            ? `¿Mover las transacciones filtradas a "${reassignTargetName}"?`
+            : `¿Mover TODAS tus transacciones activas a "${reassignTargetName}"?`
+        }
+        description={
+          // AUDIT LOW#12 — no prometemos un número exacto: el backend
+          // excluye transferencias internas, las ya en destino y las de otra
+          // divisa, así que el `total` del listado sobreestimaba lo que se
+          // mueve. El toast posterior informa cuántas se movieron y omitieron.
+          (hasActiveFilters
+            ? 'Se moverán las que coinciden con los filtros activos. '
+            : 'Se reasignarán todas tus transacciones activas. ') +
+          'Se excluyen las transferencias internas, las que ya están en esa cuenta y las de otra divisa. El saldo de la cuenta destino reflejará estos movimientos.'
+        }
+        confirmLabel="Mover a la cuenta"
+        tone="primary"
+        loading={reassignMutation.isPending}
+        onConfirm={confirmReassign}
+        onCancel={() => setConfirmingReassign(false)}
+      />
     </div>
   );
 }
@@ -412,12 +546,10 @@ function filtersFromSearchParams(
 ): TransactionListQuery {
   const rawOffset = searchParams.get('offset');
   const parsedOffset = rawOffset ? Number(rawOffset) : 0;
-  const offset =
-    Number.isFinite(parsedOffset) && parsedOffset > 0
-      ? Math.floor(parsedOffset)
-      : 0;
+  const offset = Number.isFinite(parsedOffset) && parsedOffset > 0 ? Math.floor(parsedOffset) : 0;
   const accountId = searchParams.get('account_id');
   const categoryId = searchParams.get('category_id');
+  const uncategorized = searchParams.get('uncategorized') === '1';
   const dateFrom = searchParams.get('date_from');
   const dateTo = searchParams.get('date_to');
   const search = searchParams.get('search');
@@ -425,7 +557,13 @@ function filtersFromSearchParams(
     limit: PAGE_SIZE,
     offset,
     ...(accountId ? { account_id: accountId } : {}),
-    ...(categoryId ? { category_id: categoryId } : {}),
+    // `uncategorized` es excluyente con `category_id`: si ambos vienen en
+    // la URL (no debería), gana "sin categoría".
+    ...(uncategorized
+      ? { uncategorized: true }
+      : categoryId
+        ? { category_id: categoryId }
+        : {}),
     ...(dateFrom ? { date_from: dateFrom } : {}),
     ...(dateTo ? { date_to: dateTo } : {}),
     ...(search ? { search } : {}),
@@ -443,7 +581,8 @@ function filtersToSearchParams(filters: TransactionListQuery): URLSearchParams {
     sp.set('offset', String(filters.offset));
   }
   if (filters.account_id) sp.set('account_id', filters.account_id);
-  if (filters.category_id) sp.set('category_id', filters.category_id);
+  if (filters.uncategorized) sp.set('uncategorized', '1');
+  else if (filters.category_id) sp.set('category_id', filters.category_id);
   if (filters.date_from) sp.set('date_from', filters.date_from);
   if (filters.date_to) sp.set('date_to', filters.date_to);
   if (filters.search) sp.set('search', filters.search);

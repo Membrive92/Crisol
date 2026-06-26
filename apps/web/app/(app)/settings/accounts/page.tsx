@@ -533,6 +533,20 @@ function AccountRow({
     );
   }
 
+  // PHASE-32: marca esta cuenta como principal (el backend desmarca las
+  // demás). Es la cuenta pre-seleccionada en transacciones/imports/tickets.
+  function makeDefault() {
+    setRowError(null);
+    update.mutate(
+      { is_default: true },
+      {
+        onSuccess: () => toast.success(`"${account.name}" es ahora tu cuenta principal.`),
+        onError: (err) =>
+          setRowError(formatApiError(err, 'No se pudo marcar como principal')),
+      },
+    );
+  }
+
   function handleDelete() {
     setRowError(null);
     remove.mutate(account.id, {
@@ -643,6 +657,23 @@ function AccountRow({
               Deuda
             </span>
           ) : null}
+          {account.is_default ? (
+            <span
+              style={{
+                marginLeft: spacing.xs,
+                fontSize: 10,
+                fontWeight: fontWeight.semibold,
+                color: colors.primary,
+                backgroundColor: colors.primarySoft,
+                padding: '1px 6px',
+                borderRadius: radius.sm,
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+              }}
+            >
+              Principal
+            </span>
+          ) : null}
         </div>
         <div style={{ fontSize: fontSize.xs, color: colors.textMuted }}>
           {TYPE_LABEL[account.type] ?? account.type} · {account.currency}
@@ -686,6 +717,16 @@ function AccountRow({
             onClick={() => setPayingDebt(true)}
           >
             Pagar cuota
+          </Button>
+        ) : null}
+        {!account.is_archived && !account.is_default && !isLiability ? (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={makeDefault}
+            disabled={update.isPending}
+          >
+            Hacer principal
           </Button>
         ) : null}
         <Button type="button" variant="ghost" onClick={startEdit}>

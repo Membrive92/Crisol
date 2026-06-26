@@ -57,6 +57,15 @@ export interface Transaction {
   converted_amount: string | null;
   converted_currency: string | null;
   /**
+   * `true` cuando la transacción es una pata de un par de conversión a
+   * deuda (activo↔pasivo): la lista la marca con el badge "Deuda" (en
+   * vez de "Transferencia") y pinta el importe en neutro — coherente con
+   * el fix activo-fantasma, donde la pata-activo aporta 0 al patrimonio.
+   * Sólo el endpoint de listado lo computa; en lecturas individuales y
+   * en POST/PUT es `false`.
+   */
+  is_debt_pair: boolean;
+  /**
    * Alert proactiva (PHASE-14.5). Sólo presente en la respuesta del
    * POST /transactions cuando la nueva tx empuja la categoría a
    * warning/over. `null` siempre en lecturas y cuando no aplica.

@@ -364,7 +364,7 @@ _OUTGOING_DESCRIPTION_HINTS = (
 )
 
 
-def _infer_transfer_kind(
+def infer_transfer_kind(
     description: str | None,
     *,
     existing_category_kind: CategoryKind | None = None,
@@ -390,11 +390,25 @@ def _infer_transfer_kind(
     if description is None:
         return None
     lowered = description.lower()
-    if any(hint in lowered for hint in _INCOMING_DESCRIPTION_HINTS):
+    incoming = any(hint in lowered for hint in _INCOMING_DESCRIPTION_HINTS)
+    outgoing = any(hint in lowered for hint in _OUTGOING_DESCRIPTION_HINTS)
+    # AUDIT MEDIUM#8 — guard de ambigüedad: si el texto matchea AMBAS listas
+    # (p. ej. "TRASPASO A FAVOR DE JOSE" lleva "a favor"=incoming y
+    # "traspaso a"=outgoing), no adivinamos: devolvemos None y el caller
+    # decide (en imports, cae al signo del extracto). Antes ganaba siempre
+    # incoming por orden, pudiendo invertir el signo.
+    if incoming and not outgoing:
         return CategoryKind.INCOME
-    if any(hint in lowered for hint in _OUTGOING_DESCRIPTION_HINTS):
+    if outgoing and not incoming:
         return CategoryKind.EXPENSE
     return None
+
+
+# Alias retro-compatible: la función era privada hasta PHASE-32, cuando se
+# expuso para reutilizarla en el pipeline de imports (corrección de
+# dirección de transferencias). Tests y callers internos previos siguen
+# importando el nombre con guion bajo.
+_infer_transfer_kind = infer_transfer_kind
 
 
 async def mark_as_transfer(

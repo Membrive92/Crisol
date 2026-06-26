@@ -90,7 +90,13 @@ async def test_import_csv_creates_transactions(client: AsyncClient) -> None:
     assert all(t["source"] == "import" for t in body["items"])
 
 
-async def test_import_dedupes_within_batch(client: AsyncClient) -> None:
+async def test_import_keeps_distinct_identical_rows_within_batch(client: AsyncClient) -> None:
+    """AUDIT-FIX (dedup-hash-colapsa-tx-mismo-dia): dos líneas IDÉNTICAS del
+    mismo extracto (mismo importe+fecha+descripción) son dos movimientos
+    reales distintos (p. ej. dos cafés de 10€ el mismo día) y NO deben
+    colapsarse. El dedup por hash sólo debe garantizar idempotencia de
+    RE-imports del mismo fichero (cubierto por test_import_dedupes_against_existing),
+    no perder líneas legítimas dentro de un mismo lote."""
     token, account_id = await _setup_user(client, "dedup@example.com")
     csv_text = "Fecha,Importe,Concepto\n" "2026-04-15,10.00,Cafe\n" "2026-04-15,10.00,Cafe\n"
     job = await _post_csv(
@@ -104,8 +110,11 @@ async def test_import_dedupes_within_batch(client: AsyncClient) -> None:
             "description": "Concepto",
         },
     )
-    assert job["rows_ok"] == 1
-    assert job["rows_skipped"] == 1
+    assert job["rows_ok"] == 2
+    assert job["rows_skipped"] == 0
+
+    r = await client.get("/transactions", headers=_auth(token))
+    assert r.json()["total"] == 2
 
 
 async def test_import_dedupes_against_existing(client: AsyncClient) -> None:
@@ -589,3 +598,54 @@ async def test_preview_pdf_smart_returns_fixed_keys(client: AsyncClient) -> None
     descriptions = [row["description"] for row in body["rows"]]
     assert "AMAZON.ES" in descriptions
     assert "Total ingresos" not in descriptions
+
+
+async def test_import_corrects_transfer_direction_over_bad_mapping(
+    client: AsyncClient,
+) -> None:
+    """PHASE-32 — Un bank-mapping mal aprendido que manda un cobro
+    ("TRANSFERENCIA RECIBIDA") a la categoría de transferencia de GASTO no
+    debe restar del saldo: el import corrige la dirección por la
+    descripción y persiste el cobro con kind=income (y al revés para los
+    envíos). Reproduce el bug de "BBVA a 0 con ingreso neto".
+
+    Usa las categorías de transferencia que siembra el registro
+    ("Transferencias"/expense y "Transferencia a favor"/income), igual que
+    el usuario real.
+    """
+    token, account_id = await _setup_user(client, email="transferdir@example.com")
+
+    cats = (await client.get("/categories", headers=_auth(token))).json()
+    kind_by_id = {c["id"]: c["kind"] for c in cats}
+    transfer_expense = next(c for c in cats if c["is_transfer"] and c["kind"] == "expense")
+    transfer_income = next(c for c in cats if c["is_transfer"] and c["kind"] == "income")
+
+    # Equivalencias aprendidas AL REVÉS: cobro→gasto, envío→ingreso.
+    for concept, cat_id in (
+        ("TRANSFERENCIA RECIBIDA DE JOSE", transfer_expense["id"]),
+        ("TRANSFERENCIA REALIZADA A WISE", transfer_income["id"]),
+    ):
+        m = await client.post(
+            "/bank-mappings",
+            json={"bank_concept": concept, "category_id": cat_id},
+            headers=_auth(token),
+        )
+        assert m.status_code == 201, m.text
+
+    csv_text = (
+        "Fecha,Importe,Concepto,Categoria\n"
+        "2026-01-06,5000.00,TRANSFERENCIA RECIBIDA DE JOSE,TRANSFERENCIA RECIBIDA DE JOSE\n"
+        "2026-01-07,200.00,TRANSFERENCIA REALIZADA A WISE,TRANSFERENCIA REALIZADA A WISE\n"
+    )
+    job = await _post_csv(client, token, account_id, csv_text)
+    assert job["rows_ok"] == 2, job
+
+    r = await client.get("/transactions", headers=_auth(token))
+    items = {t["description"]: t for t in r.json()["items"]}
+
+    # Cobro: el mapping decía GASTO, pero "RECIBIDA" lo lleva a INCOME.
+    recibida = items["TRANSFERENCIA RECIBIDA DE JOSE"]
+    assert kind_by_id[recibida["category_id"]] == "income"
+    # Envío: el mapping decía INGRESO, pero "REALIZADA" lo lleva a EXPENSE.
+    realizada = items["TRANSFERENCIA REALIZADA A WISE"]
+    assert kind_by_id[realizada["category_id"]] == "expense"

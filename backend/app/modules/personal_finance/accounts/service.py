@@ -37,10 +37,12 @@ from app.modules.personal_finance.accounts.models import (
     AccountType,
 )
 from app.modules.personal_finance.accounts.repository import (
+    clear_default_accounts,
     count_transactions_for_account,
     get_account_by_id,
     get_account_by_name,
     get_balances_for_user,
+    get_net_savings_movement_for_account,
 )
 from app.modules.personal_finance.accounts.repository import (
     create_account as persist_account,
@@ -203,6 +205,15 @@ async def create_account(db: AsyncSession, user_id: uuid.UUID, data: AccountCrea
     await _validate_debt_category_link(
         db, user_id, account_type=data.type, category_id=data.category_id
     )
+    # PHASE-32 (HIGH#2) — la cuenta principal refleja ahorro neto y SÓLO
+    # tiene sentido sobre un activo. Una cuenta de pasivo no puede ser
+    # principal: su carve-out de transferencias no aplica y su saldo es
+    # deuda, no ahorro. La UI ya oculta el botón; lo reforzamos en backend.
+    if data.is_default and _nature_for_type(data.type) == AccountNature.LIABILITY:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Una cuenta de pasivo no puede ser la cuenta principal.",
+        )
     account = Account(
         user_id=user_id,
         name=data.name,
@@ -222,9 +233,13 @@ async def create_account(db: AsyncSession, user_id: uuid.UUID, data: AccountCrea
             data.interest_only_first_payment if accepts_amortization else None
         ),
         display_order=data.display_order,
+        is_default=data.is_default,
         category_id=data.category_id,
     )
     persisted = await persist_account(db, account)
+    # PHASE-32: si se crea como principal, desmarcar cualquier otra.
+    if data.is_default:
+        await clear_default_accounts(db, user_id, except_id=persisted.id)
     # PHASE-24.1: si es loan/mortgage con todos los campos, generar las
     # cuotas persistidas inmediatamente para que el editor del cuadro
     # tenga datos desde el minuto cero. Idempotente.
@@ -271,6 +286,30 @@ async def update_account(
             account_type=effective_type,
             category_id=payload["category_id"],
         )
+    # AUDIT MEDIUM#6 — archivar una cuenta la saca de la pre-selección (los
+    # formularios sólo cargan cuentas activas). Si era la principal, limpiamos
+    # is_default para no dejar un puntero colgante a una cuenta invisible. El
+    # archivado gana sobre cualquier is_default que venga en el payload.
+    if payload.get("is_archived") is True:
+        payload["is_default"] = False
+    # PHASE-32 (HIGH#2 + fix-review) — una cuenta de pasivo no puede ser la
+    # cuenta principal. Cubre DOS caminos: (a) marcar is_default en un
+    # pasivo, y (b) convertir a pasivo (cambio de `type`) una cuenta que YA
+    # es principal sin tocar is_default en el payload — el guard antiguo sólo
+    # miraba `payload["is_default"]` y se saltaba este caso. `account.nature`
+    # ya está re-sincronizada arriba si el payload cambió el `type`.
+    effective_is_default = payload.get("is_default", account.is_default)
+    if effective_is_default and account.nature == AccountNature.LIABILITY:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Una cuenta de pasivo no puede ser la cuenta principal. "
+                "Desmarca la principal antes de cambiarla a un tipo de deuda."
+            ),
+        )
+    # Marcar como principal desmarca el resto (única por usuario).
+    if payload.get("is_default") is True:
+        await clear_default_accounts(db, user_id, except_id=account.id)
     for field, value in payload.items():
         setattr(account, field, value)
     await db.flush()
@@ -300,16 +339,95 @@ async def delete_account(db: AsyncSession, account_id: uuid.UUID, user_id: uuid.
     await remove_account(db, account)
 
 
-async def get_balances(db: AsyncSession, user_id: uuid.UUID) -> AccountBalancesResponse:
+async def _convert_at_today(
+    db: AsyncSession,
+    amount: Decimal,
+    *,
+    from_currency: str,
+    target_currency: str,
+) -> Decimal | None:
+    """Convierte `amount` con la tasa de HOY o devuelve `None` si no hay
+    tasa.
+
+    AUDIT-FIX (finding 5): se replica aquí el mismo helper que ya existe
+    en `accounts/debt_health.py` y `debt/service.py` (cada uno con su
+    copia para evitar dependencias circulares con `currency.service`).
+    La lógica real vive en `currency.service.convert`; aquí sólo
+    decidimos "snapshot a hoy" + señalización de tasa ausente.
+    """
+    from datetime import UTC, datetime
+
+    from app.modules.currency.service import convert as currency_convert
+
+    result = await currency_convert(
+        db,
+        amount=amount,
+        from_currency=from_currency,
+        to_currency=target_currency,
+        at_date=datetime.now(UTC).date(),
+    )
+    if result.fallback == "missing":
+        return None
+    return result.amount
+
+
+async def get_balances(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    target_currency: str | None = None,
+) -> AccountBalancesResponse:
     """Saldo por cuenta + agregados de patrimonio (PHASE-19.4).
 
     Sólo cuentas no archivadas entran en los totales agregados, pero
-    `items` incluye también las archivadas (display sólo). Si las
-    monedas activas no son homogéneas, `mixed_currencies=True` y los
-    totales son suma cruda — la UI debe avisarlo.
+    `items` incluye también las archivadas (display sólo).
+
+    Dos modos (AUDIT-FIX finding 5):
+
+    - **Crudo (por defecto, `target_currency=None`)**: comportamiento
+      histórico intacto. Si las monedas activas no son homogéneas,
+      `mixed_currencies=True` y los totales son suma cruda en monedas
+      mezcladas — la UI debe avisarlo. NO se rompe ningún consumidor
+      existente del flag.
+    - **Convertido (`target_currency="USD"`, etc.)**: cada saldo se
+      convierte a `target_currency` con la tasa de HOY (snapshot
+      simple, igual que `/debt-health` y `/debt-history`). Las cuentas
+      cuya moneda no tiene tasa quedan EXCLUIDAS del agregado (mismo
+      contrato que el modo crudo con `mixed_currencies`); `items`
+      sigue mostrando su saldo nativo. En este modo `net_worth` ya es
+      una cifra con sentido y `mixed_currencies` se reporta `False`
+      (todo viene homogeneizado a `reference_currency`).
+
+    `items[*].current_balance` SIEMPRE va en la moneda nativa de la
+    cuenta — la conversión sólo afecta a los agregados, para no romper
+    la UI por-cuenta.
     """
     accounts = await list_all(db, user_id, include_archived=True)
     movements = await get_balances_for_user(db, user_id)
+
+    # PHASE-32 (HIGH#1) — la cuenta principal MUESTRA ahorro neto (excluye
+    # transferencias internas), pero AGREGA al patrimonio por su saldo cash,
+    # de modo que las dos patas de una transferencia interna se cancelan en
+    # el agregado. Sin esto, transferir a la principal encogía el net_worth.
+    # `nature == ASSET` es defensa en profundidad: el ahorro neto sólo tiene
+    # sentido sobre un activo (HIGH#2 ya impide marcar principal un pasivo);
+    # si por cualquier vía existiera un pasivo principal, NO se le aplica el
+    # carve-out de display (mostraría su deuda real, no ahorro neto).
+    default_account_id = next(
+        (
+            a.id
+            for a in accounts
+            if a.is_default and not a.is_archived and a.nature == AccountNature.ASSET
+        ),
+        None,
+    )
+    net_savings_movement = (
+        await get_net_savings_movement_for_account(db, user_id, default_account_id)
+        if default_account_id is not None
+        else None
+    )
+
+    effective_target = target_currency.upper() if target_currency else None
 
     items: list[AccountBalance] = []
     active_currencies: set[str] = set()
@@ -317,8 +435,14 @@ async def get_balances(db: AsyncSession, user_id: uuid.UUID) -> AccountBalancesR
     total_liabilities = Decimal("0")
 
     for account in accounts:
-        movements_balance = movements.get(account.id, Decimal("0"))
-        current_balance = account.opening_balance + movements_balance
+        cash_movement = movements.get(account.id, Decimal("0"))
+        cash_balance = account.opening_balance + cash_movement
+        # Display: la cuenta principal muestra ahorro neto; el resto, cash.
+        if account.id == default_account_id and net_savings_movement is not None:
+            display_movement = net_savings_movement
+        else:
+            display_movement = cash_movement
+        display_balance = account.opening_balance + display_movement
         is_unvalued = account.type in _UNVALUED_ACCOUNT_TYPES
         items.append(
             AccountBalance(
@@ -330,8 +454,8 @@ async def get_balances(db: AsyncSession, user_id: uuid.UUID) -> AccountBalancesR
                 color=account.color,
                 icon=account.icon,
                 opening_balance=account.opening_balance,
-                movements_balance=movements_balance,
-                current_balance=current_balance,
+                movements_balance=display_movement,
+                current_balance=display_balance,
                 is_unvalued=is_unvalued,
             )
         )
@@ -344,23 +468,46 @@ async def get_balances(db: AsyncSession, user_id: uuid.UUID) -> AccountBalancesR
         # válido de transferencias.
         if is_unvalued:
             continue
-        if account.nature == AccountNature.LIABILITY:
-            total_liabilities += current_balance
+        # Decidir el saldo "agregable":
+        # - Sin target: saldo nativo (suma cruda; el flag avisa).
+        # - Con target: convertir a la moneda destino con la tasa de hoy;
+        #   excluir la cuenta del agregado si no hay tasa.
+        # Agregado SIEMPRE por saldo cash (no display) para que las dos
+        # patas de una transferencia interna se cancelen entre cuentas (HIGH#1).
+        if effective_target is None or account.currency.upper() == effective_target:
+            aggregable_balance = cash_balance
         else:
-            total_assets += current_balance
+            converted = await _convert_at_today(
+                db,
+                cash_balance,
+                from_currency=account.currency,
+                target_currency=effective_target,
+            )
+            if converted is None:
+                continue
+            aggregable_balance = converted
+        if account.nature == AccountNature.LIABILITY:
+            total_liabilities += aggregable_balance
+        else:
+            total_assets += aggregable_balance
 
-    mixed_currencies = len(active_currencies) > 1
-    if active_currencies:
-        # Determinista: el primero por display_order/name de la lista
-        # es la primera cuenta activa.
-        for account in accounts:
-            if not account.is_archived:
-                reference_currency = account.currency
-                break
+    if effective_target is not None:
+        # Modo convertido: todo homogeneizado al target → no hay mezcla.
+        reference_currency = effective_target
+        mixed_currencies = False
+    else:
+        mixed_currencies = len(active_currencies) > 1
+        if active_currencies:
+            # Determinista: el primero por display_order/name de la lista
+            # es la primera cuenta activa.
+            for account in accounts:
+                if not account.is_archived:
+                    reference_currency = account.currency
+                    break
+            else:
+                reference_currency = DEFAULT_REFERENCE_CURRENCY
         else:
             reference_currency = DEFAULT_REFERENCE_CURRENCY
-    else:
-        reference_currency = DEFAULT_REFERENCE_CURRENCY
 
     return AccountBalancesResponse(
         items=items,
@@ -432,16 +579,33 @@ async def get_amortization_schedule(
     installments = await repo_list_installments(db, account_id, user_id)
     if installments:
         # Path PHASE-24.1: cuotas persistidas (con overrides y estado de pago).
-        total_paid = sum((i.payment for i in installments), Decimal("0"))
-        total_interest = sum((i.interest for i in installments), Decimal("0"))
+        rows_payment = sum((i.payment for i in installments), Decimal("0"))
+        rows_interest = sum((i.interest for i in installments), Decimal("0"))
         monthly_payment = installments[0].payment
         # `principal` para mostrar en cabecera: derivado de la primera cuota
         # (principal_1 + remaining_balance_1 = principal total).
         first = installments[0]
         principal_total = first.principal + first.remaining_balance
+        # AUDIT-FIX (finding 3): el primer pago sólo-intereses, si existe,
+        # es 100% interés. Se incorpora a `total_interest` Y a `total_paid`
+        # con la MISMA fórmula que usa la base de `extra_charges`, de modo
+        # que se preserva la identidad global
+        #   total_paid == principal_total + total_interest
+        # Por construcción del cuadro (finding 1): rows_payment ==
+        # rows_interest + principal_total. Sumando interest_only a ambos
+        # lados (es interés puro): total_paid == principal_total +
+        # total_interest.
+        interest_only = account.interest_only_first_payment or Decimal("0")
+        total_paid = rows_payment + interest_only
+        total_interest = rows_interest + interest_only
+        # AUDIT-FIX (finding 2): `extra_charges` se calcula contra
+        # `Σ(payments)` reales (no `n × payment`), por lo que el ajuste de
+        # la última cuota no propaga residuo a los cargos derivados. La
+        # base (rows_payment + interest_only) == total_paid, manteniendo
+        # `extra_charges == total_to_pay − total_paid`.
         extra = _compute_extra_charges(
             total_to_pay=account.total_to_pay,
-            installments_total=total_paid,
+            installments_total=rows_payment,
             interest_only=account.interest_only_first_payment,
         )
         return AmortizationScheduleResponse(
@@ -485,12 +649,18 @@ async def get_amortization_schedule(
         term_months=account.term_months,
         start_date=account.start_date,
     )
-    total_paid = sum((r.payment for r in rows), Decimal("0"))
-    total_interest = sum((r.interest for r in rows), Decimal("0"))
+    rows_payment = sum((r.payment for r in rows), Decimal("0"))
+    rows_interest = sum((r.interest for r in rows), Decimal("0"))
     monthly_payment = rows[0].payment if rows else Decimal("0")
+    # AUDIT-FIX (findings 2+3): misma coherencia que en el path persistido.
+    # `total_paid`/`total_interest` incorporan el primer pago sólo-intereses;
+    # `extra_charges` se mide contra Σ(payments) reales del cuadro.
+    interest_only = account.interest_only_first_payment or Decimal("0")
+    total_paid = rows_payment + interest_only
+    total_interest = rows_interest + interest_only
     extra = _compute_extra_charges(
         total_to_pay=account.total_to_pay,
-        installments_total=total_paid,
+        installments_total=rows_payment,
         interest_only=account.interest_only_first_payment,
     )
     return AmortizationScheduleResponse(

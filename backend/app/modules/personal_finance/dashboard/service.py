@@ -16,7 +16,7 @@ preferido. Si no llega ninguno, se asume legacy con `_DEFAULT_CURRENCY`.
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException, status
@@ -143,7 +143,14 @@ async def get_summary(
     prev_balance: Decimal | None = None
     if date_from is not None and date_to is not None:
         period_length = date_to - date_from
-        prev_to = date_from
+        # AUDIT — get-summary-prev-period-solape-frontera: el repositorio filtra
+        # con intervalo CERRADO [date_from, date_to] (`>=` y `<=`). Si el
+        # periodo previo terminara exactamente en `date_from`, una tx con
+        # `occurred_at == date_from` caería en AMBOS periodos (cuenta doble en
+        # la frontera). Hacemos el límite superior del periodo previo
+        # exclusivo restando 1 microsegundo → [prev_from, date_from) sin
+        # solape con el periodo actual [date_from, date_to].
+        prev_to = date_from - timedelta(microseconds=1)
         prev_from = date_from - period_length
         prev_totals = await repository.get_totals_by_kind(
             db,

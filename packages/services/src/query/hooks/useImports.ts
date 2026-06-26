@@ -11,6 +11,7 @@ import {
   type CreateImportPayload,
   type PreviewImportPayload,
 } from '../../api/endpoints/imports';
+import { invalidateTransactionSideEffects } from '../invalidate';
 import { queryKeys } from '../keys';
 
 export function useImports(query: ImportListQuery = {}) {
@@ -34,9 +35,11 @@ export function useCreateImport() {
   return useMutation<ImportJob, Error, CreateImportPayload>({
     mutationFn: (payload) => importsApi.create(payload),
     onSuccess: () => {
+      // El job en sí (imports.all). AUDIT-2026-06: si el create
+      // persiste filas, mueve tx/dashboard/budgets/saldos/deuda igual
+      // que cualquier alta de tx — antes faltaban budgets/accounts/debt.
       void queryClient.invalidateQueries({ queryKey: queryKeys.imports.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+      invalidateTransactionSideEffects(queryClient);
     },
   });
 }
@@ -81,8 +84,10 @@ export function useCommitImport() {
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.imports.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+      // AUDIT-2026-06: commit persiste las tx del job → mismo blast
+      // radius que un alta de tx. Antes faltaban budgets/accounts/debt
+      // (saldos y lista de deuda quedaban stale tras importar).
+      invalidateTransactionSideEffects(queryClient);
       // El commit puede haber creado equivalencias nuevas vía
       // `category_overrides` → invalida bank-mappings.
       void queryClient.invalidateQueries({ queryKey: queryKeys.bankMappings.all });

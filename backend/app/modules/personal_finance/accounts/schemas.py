@@ -57,6 +57,9 @@ class AccountCreate(BaseModel):
     )
     """PHASE-24.3 — Primer pago especial sólo de intereses."""
     display_order: int = Field(default=0, ge=0)
+    is_default: bool = False
+    """PHASE-32 — Marcar como cuenta principal al crear. Única por
+    usuario: el service desmarca las demás."""
     category_id: uuid.UUID | None = None
     """PHASE-30.4 — Categoría de pagos vinculada (sólo liability +
     role DEBT_*). El service valida ambas condiciones; pasa por aquí
@@ -83,6 +86,9 @@ class AccountUpdate(BaseModel):
     )
     display_order: int | None = Field(default=None, ge=0)
     is_archived: bool | None = None
+    is_default: bool | None = None
+    """PHASE-32 — `true` marca esta cuenta como principal y desmarca las
+    demás (lo fuerza el service). `false` la desmarca. `null` no toca."""
     category_id: uuid.UUID | None = None
     """PHASE-30.4 — Mismo contrato que en `AccountCreate`. Para
     desvincular, enviar explícitamente `null`."""
@@ -109,6 +115,9 @@ class AccountResponse(BaseModel):
     interest_only_first_payment: Decimal | None = None
     display_order: int
     is_archived: bool
+    is_default: bool = False
+    """PHASE-32 — Cuenta principal del usuario (pre-seleccionada en
+    formularios). Única por usuario."""
     category_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime

@@ -124,3 +124,18 @@ async def test_ambiguous_transferencia_does_not_get_arbitrary_kind(
         )
         == CategoryKind.EXPENSE
     )
+
+
+async def test_infer_transfer_kind_ambiguous_text_returns_none() -> None:
+    """AUDIT MEDIUM#8 — una descripción que matchea AMBAS listas de hints
+    (incoming y outgoing) es ambigua: no se adivina, se devuelve None y el
+    caller decide (en imports, cae al signo del extracto). Antes ganaba
+    incoming por orden, pudiendo invertir el signo."""
+    from app.modules.personal_finance.categories.models import CategoryKind
+    from app.modules.personal_finance.transfers.service import infer_transfer_kind
+
+    # "a favor" (incoming) + "traspaso a" (outgoing) en el mismo texto.
+    assert infer_transfer_kind("TRASPASO A FAVOR DE JOSE") is None
+    # Un hint único sigue decidiendo.
+    assert infer_transfer_kind("TRASPASO RECIBIDO") == CategoryKind.INCOME
+    assert infer_transfer_kind("TRASPASO ENVIADO") == CategoryKind.EXPENSE

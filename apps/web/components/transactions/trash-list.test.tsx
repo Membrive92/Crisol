@@ -24,6 +24,7 @@ function makeTx(overrides: Partial<Transaction> = {}): Transaction {
     deleted_at: '2026-05-04T18:00:00Z',
     converted_amount: null,
     converted_currency: null,
+    is_debt_pair: false,
     ...overrides,
   };
 }

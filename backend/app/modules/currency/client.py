@@ -90,9 +90,18 @@ async def fetch_rates(
     for quote, value in raw_rates.items():
         try:
             # Convertimos vía str para evitar el ruido binario de float.
-            out[quote.upper()] = Decimal(str(value))
+            parsed = Decimal(str(value))
         except (ArithmeticError, TypeError, ValueError) as e:
             raise FrankfurterInvalidResponseError(f"Tasa inválida para {quote}: {value!r}") from e
+        # AUDIT — sql-no-zero-rate-guard (a): una tasa <= 0 (o NaN) es
+        # físicamente imposible y, persistida, provocaría división por cero
+        # o signo invertido al convertir importes (conversion.py compone
+        # `amount / from_rate`). Descartamos la respuesta entera con la
+        # excepción de "payload inválido" que el módulo ya define, en vez
+        # de envenenar la tabla con un valor que reviente más tarde.
+        if not parsed.is_finite() or parsed <= 0:
+            raise FrankfurterInvalidResponseError(f"Tasa no positiva para {quote}: {value!r}")
+        out[quote.upper()] = parsed
     return out
 
 

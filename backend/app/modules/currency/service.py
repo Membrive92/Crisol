@@ -33,6 +33,17 @@ from app.modules.currency.schemas import ConversionResult, RateFallback
 CANONICAL_BASE = "EUR"
 _QUANTIZE = Decimal("0.01")
 
+# AUDIT — jpy-zero-decimal-rounding: el redondeo fijo a 2 decimales asume que
+# toda moneda tiene céntimos. JPY (y otras como KRW) son monedas de 0
+# decimales: "100,50 ¥" no existe. Mapeamos los dígitos por moneda y el
+# default cae a 2. El quantize se construye dinámicamente
+# (`Decimal("1")` para 0 dígitos, `Decimal("0.01")` para 2).
+_CURRENCY_DECIMALS: dict[str, int] = {
+    "JPY": 0,
+    "KRW": 0,
+}
+_DEFAULT_DECIMALS = 2
+
 # Conjunto canónico de monedas que pre-cargamos cuando hacemos un fetch
 # lazy. Coincide con el snapshot embebido y con `CURRENCY_SYMBOL` del
 # `currency-menu.tsx` del frontend. Mantener sincronizado.
@@ -53,9 +64,23 @@ def _normalize(code: str) -> str:
     return code.strip().upper()
 
 
-def _round_money(value: Decimal) -> Decimal:
-    """Redondea a 2 decimales con ROUND_HALF_EVEN."""
-    return value.quantize(_QUANTIZE, rounding=ROUND_HALF_EVEN)
+def _quantum_for(currency: str) -> Decimal:
+    """Devuelve el `Decimal` exponente (`1` / `0.01`) según los dígitos de la moneda."""
+    decimals = _CURRENCY_DECIMALS.get(_normalize(currency), _DEFAULT_DECIMALS)
+    if decimals == 0:
+        return Decimal("1")
+    # `Decimal(1).scaleb(-n)` → 0.01 para n=2, generaliza a cualquier n.
+    return Decimal(1).scaleb(-decimals)
+
+
+def _round_money(value: Decimal, currency: str = CANONICAL_BASE) -> Decimal:
+    """Redondea con ROUND_HALF_EVEN a los decimales de `currency`.
+
+    AUDIT — jpy-zero-decimal-rounding: monedas de 0 decimales (JPY, KRW)
+    se redondean a entero; el resto a 2. `currency` por defecto EUR para
+    no romper callers que no pasen moneda.
+    """
+    return value.quantize(_quantum_for(currency), rounding=ROUND_HALF_EVEN)
 
 
 async def _resolve_eur_rate(
@@ -112,7 +137,7 @@ async def convert(
 
     if src == dst:
         return ConversionResult(
-            amount=_round_money(amount),
+            amount=_round_money(amount, dst),
             rate=Decimal("1"),
             rate_date=at_date,
             fallback="same",
@@ -122,8 +147,10 @@ async def convert(
     dst_resolved = await _resolve_eur_rate(db, quote=dst, at_date=at_date)
 
     if src_resolved is None or dst_resolved is None:
+        # `amount` se devuelve sin convertir (en `src`), así que el redondeo
+        # se hace con los decimales de la moneda ORIGEN, no la destino.
         return ConversionResult(
-            amount=_round_money(amount),
+            amount=_round_money(amount, src),
             rate=Decimal("1"),
             rate_date=at_date,
             fallback="missing",
@@ -174,7 +201,7 @@ async def convert(
     effective_date = min(src_date, dst_date)
 
     return ConversionResult(
-        amount=_round_money(converted),
+        amount=_round_money(converted, dst),
         # La tasa expuesta en el resultado es la composición
         # (amount destino / amount origen). La cuantizamos a 8
         # decimales para que el HTTP response sea legible.

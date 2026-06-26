@@ -28,6 +28,8 @@ from app.modules.personal_finance.budgets.schemas import (
     BudgetStatusResponse,
     BudgetUpdate,
 )
+from app.modules.personal_finance.categories.models import CategoryKind
+from app.modules.personal_finance.categories.repository import get_category_by_id
 from app.modules.personal_finance.dashboard.service import ensure_rates_for_user_scope
 
 WARNING_THRESHOLD = 80.0
@@ -88,6 +90,31 @@ async def create_budget(db: AsyncSession, user_id: uuid.UUID, data: BudgetCreate
     Para reemplazar: DELETE el actual y crear el nuevo.
     """
     today = _today_utc()
+
+    # PHASE-12 (audit-fix): validar la categoría ANTES de comprobar
+    # duplicados / persistir. `category_id IS NULL` = budget global
+    # (suma todo el gasto) y no requiere categoría. Si viene una
+    # categoría debe ser del usuario y de gasto real:
+    #   - 404 si no es del usuario (o no existe) — no filtrar IDs ajenos.
+    #   - 400 si kind != EXPENSE: un budget sobre una categoría de
+    #     ingreso no tiene sentido (sum_expenses_in_period sólo cuenta
+    #     EXPENSE, así que un budget INCOME quedaría siempre a 0).
+    #   - 400 si is_transfer: las transferencias internas se excluyen del
+    #     cashflow (finding #1), así que su gasto siempre sería 0 →
+    #     budget inerte. Mejor rechazar en la frontera de entrada.
+    if data.category_id is not None:
+        category = await get_category_by_id(db, data.category_id, user_id)
+        if category is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Categoría no encontrada",
+            )
+        if category.kind != CategoryKind.EXPENSE or category.is_transfer:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El presupuesto solo puede asociarse a una categoría de gasto.",
+            )
+
     existing = await get_active_budget_for_category(
         db, user_id, category_id=data.category_id, today=today
     )

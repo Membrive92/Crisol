@@ -275,6 +275,8 @@ y [`design-explorations/debt-redesign-30/wireframe.md`](design-explorations/debt
 | 30.5 | Mobile parity                                                | ✅     | —  |
 | 30.6 | Selector de divisa del header propagado a los 3 endpoints de deuda | ✅ | — |
 | 30.7 | Selector temporal `month/quarter/year` (alineado con `StitchPeriodToggle`) + donut por tipo de cuenta vinculada | ✅ | — |
+| 30.8 | Navegador de período (Capa 1) con flechas acotadas a datos + KPIs period-scoped | ✅ | — |
+| 30.9 | Serie diaria del saldo de deuda (`range=month`) + chart combo emisión/amortización | 🚧 | — |
 
 ### Fase 31 — Saneamiento de cuentas e integridad de saldos
 
@@ -289,6 +291,16 @@ y [`design-explorations/debt-redesign-30/wireframe.md`](design-explorations/debt
 > Pre-requisito completado antes de PHASE-30. Hotfix SQL aplicado al
 > usuario `membrij7@gmail.com` (~7 tx, ~€11.7k recategorizadas) durante
 > la implementación.
+
+### Fase 32 — Cuenta principal, reasignación e integridad de transferencias
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 32   | `accounts.is_default` (cuenta principal = ahorro neto, pre-seleccionada) + `POST /transactions/reassign-account` (consolidar mes) + fix dirección de transferencias en imports + invalidación debt al mutar cuentas | 🚧 | — |
+
+> Detalle en [`phases/phase-32-default-account-and-transfer-direction.md`](phases/phase-32-default-account-and-transfer-direction.md).
+> Código completo y verde (FE + 445 tests BE); pendiente prueba manual del
+> usuario y commit.
 
 ---
 

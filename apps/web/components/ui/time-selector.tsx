@@ -79,8 +79,13 @@ export function TimeSelector({
       onChange({ dateFrom: undefined, dateTo: undefined });
       return;
     }
-    const start = new Date(year, 0, 1);
-    const end = new Date(year, 11, 31, 23, 59, 59);
+    // Límites en UTC: las tx se guardan con `fromDateInputValue`
+    // (`T00:00:00Z`), así que el rango debe construirse en UTC. Con
+    // `new Date(year, 0, 1)` (hora local) → `.toISOString()` el límite se
+    // desplazaba según el huso del navegador y dejaba fuera/dentro tx del
+    // borde de año.
+    const start = new Date(Date.UTC(year, 0, 1, 0, 0, 0));
+    const end = new Date(Date.UTC(year, 11, 31, 23, 59, 59));
     onChange({ dateFrom: start.toISOString(), dateTo: end.toISOString() });
   }
 
@@ -89,8 +94,10 @@ export function TimeSelector({
       onChange({ dateFrom: undefined, dateTo: undefined });
       return;
     }
-    const start = new Date(year, monthIdx, 1);
-    const end = new Date(year, monthIdx + 1, 0, 23, 59, 59);
+    // Mismo motivo que `pickYear`: límites en UTC. Día 0 del mes
+    // siguiente = último día del mes actual.
+    const start = new Date(Date.UTC(year, monthIdx, 1, 0, 0, 0));
+    const end = new Date(Date.UTC(year, monthIdx + 1, 0, 23, 59, 59));
     onChange({ dateFrom: start.toISOString(), dateTo: end.toISOString() });
   }
 
@@ -334,20 +341,23 @@ function inferActiveRange(
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
     return { activeYear: null, activeMonth: null, isFullYear: false, isFullMonth: false };
   }
-  const year = start.getFullYear();
+  // Leemos en UTC para casar con los límites que emite `pickYear`/
+  // `pickMonth` (construidos con `Date.UTC`). Con getters locales, un
+  // navegador en huso != UTC nunca detectaría el año/mes como "completo".
+  const year = start.getUTCFullYear();
   const isFullYear =
-    start.getMonth() === 0 &&
-    start.getDate() === 1 &&
-    end.getFullYear() === year &&
-    end.getMonth() === 11 &&
-    end.getDate() === 31;
-  const month = start.getMonth();
-  const lastDayOfMonth = new Date(year, month + 1, 0).getDate();
+    start.getUTCMonth() === 0 &&
+    start.getUTCDate() === 1 &&
+    end.getUTCFullYear() === year &&
+    end.getUTCMonth() === 11 &&
+    end.getUTCDate() === 31;
+  const month = start.getUTCMonth();
+  const lastDayOfMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
   const isFullMonth =
-    start.getDate() === 1 &&
-    end.getFullYear() === year &&
-    end.getMonth() === month &&
-    end.getDate() === lastDayOfMonth;
+    start.getUTCDate() === 1 &&
+    end.getUTCFullYear() === year &&
+    end.getUTCMonth() === month &&
+    end.getUTCDate() === lastDayOfMonth;
   return {
     activeYear: year,
     activeMonth: isFullMonth ? month : null,

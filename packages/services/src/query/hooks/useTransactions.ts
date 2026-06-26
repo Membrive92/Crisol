@@ -8,6 +8,7 @@ import type {
 } from '@crisol/types';
 
 import { transactionsApi } from '../../api/endpoints/transactions';
+import { invalidateTransactionSideEffects } from '../invalidate';
 import { queryKeys } from '../keys';
 
 export function useTransactions(query: TransactionListQuery = {}) {
@@ -37,10 +38,7 @@ export function useTransaction(id: string | undefined) {
  * crear/borrar/categorizar tx (invalidación del grupo `transactions.all`).
  */
 export function useUncategorizedSummary() {
-  return useQuery<
-    { count: number; total_amount: string; currency: string },
-    Error
-  >({
+  return useQuery<{ count: number; total_amount: string; currency: string }, Error>({
     queryKey: queryKeys.transactions.uncategorizedSummary(),
     queryFn: () => transactionsApi.uncategorizedSummary(),
     staleTime: 1000 * 30,
@@ -65,14 +63,11 @@ export function useCreateTransaction() {
   const queryClient = useQueryClient();
   return useMutation<Transaction, Error, TransactionCreateRequest>({
     mutationFn: (data) => transactionsApi.create(data),
+    // AUDIT-2026-06: crear una tx mueve listado, dashboard, budgets,
+    // saldos de cuenta y deuda. Antes faltaban dashboard.all y
+    // accounts.all (saldos/lista de deuda quedaban stale).
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
-      // Crear afecta budgets — invalidamos el grupo entero para que
-      // los status cards refresquen sin esperar al staleTime.
-      void queryClient.invalidateQueries({ queryKey: queryKeys.budgets.all });
-      // AUDIT-2026-05: una tx categorizada como pago/interés de deuda
-      // mueve los KPIs de deuda (Capa 1 + Capa 2).
-      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
+      invalidateTransactionSideEffects(queryClient);
     },
   });
 }
@@ -81,10 +76,11 @@ export function useUpdateTransaction(id: string) {
   const queryClient = useQueryClient();
   return useMutation<Transaction, Error, TransactionUpdateRequest>({
     mutationFn: (data) => transactionsApi.update(id, data),
+    // AUDIT-2026-06: editar una tx puede cambiar importe, cuenta o
+    // categoría → afecta dashboard y saldos además de budgets/deuda.
+    // Antes faltaban dashboard.all y accounts.all.
     onSuccess: (updated) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.budgets.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
+      invalidateTransactionSideEffects(queryClient);
       queryClient.setQueryData(queryKeys.transactions.detail(updated.id), updated);
     },
   });
@@ -94,14 +90,11 @@ export function useDeleteTransaction() {
   const queryClient = useQueryClient();
   return useMutation<void, Error, string>({
     mutationFn: (id) => transactionsApi.remove(id),
+    // Soft-delete (PHASE-10.1) — la fila se va de list/dashboard y
+    // aparece en trash. AUDIT-2026-06: borrar también mueve budgets
+    // (faltaba) y saldos de cuenta (faltaba); el helper engloba todo.
     onSuccess: () => {
-      // Soft-delete (PHASE-10.1) — la fila se va de list/dashboard y
-      // aparece en trash. Invalidamos `transactions.all` (cubre list,
-      // trash y detail) y `dashboard.all` para que summary/top-expenses
-      // se actualicen sin esperar a staleTime.
-      void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
+      invalidateTransactionSideEffects(queryClient);
     },
   });
 }
@@ -115,11 +108,33 @@ export function useBulkDeleteTransactions() {
   const queryClient = useQueryClient();
   return useMutation<{ deleted_count: number }, Error, TransactionListQuery>({
     mutationFn: (query) => transactionsApi.bulkRemove(query),
+    // AUDIT-2026-06: mismo blast radius que delete; añade accounts.all
+    // (saldos) vía el helper, que antes no se invalidaba.
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.budgets.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
+      invalidateTransactionSideEffects(queryClient);
+    },
+  });
+}
+
+/**
+ * PHASE-32 — Reasigna en bloque las tx que matcheen los filtros a otra
+ * cuenta (consolidar el mes en la cuenta principal). Cambia balances →
+ * invalida también `accounts.balances` y dashboard/debt.
+ */
+export function useReassignAccount() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    { reassigned_count: number; skipped_other_currency: number },
+    Error,
+    { targetAccountId: string; filters: TransactionListQuery }
+  >({
+    mutationFn: ({ targetAccountId, filters }) =>
+      transactionsApi.reassignAccount(targetAccountId, filters),
+    // AUDIT-2026-06: el helper invalida accounts.all (engloba la
+    // balances() que ya se invalidaba aquí) además de tx/dashboard/
+    // budgets/deuda.
+    onSuccess: () => {
+      invalidateTransactionSideEffects(queryClient);
     },
   });
 }
@@ -136,12 +151,11 @@ export function useRestoreTransaction() {
   const queryClient = useQueryClient();
   return useMutation<Transaction, Error, string>({
     mutationFn: (id) => transactionsApi.restore(id),
+    // Vuelve a list/dashboard, sale de trash. Mismo blast radius que
+    // delete pero al revés. AUDIT-2026-06: añade budgets.all y
+    // accounts.all (saldos) vía el helper, que antes faltaban.
     onSuccess: () => {
-      // Vuelve a list/dashboard, sale de trash. Mismo blast radius
-      // que delete pero al revés.
-      void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
+      invalidateTransactionSideEffects(queryClient);
     },
   });
 }
@@ -167,11 +181,10 @@ export function useBulkRestoreTrash() {
   const queryClient = useQueryClient();
   return useMutation<{ restored_count: number }, Error, void>({
     mutationFn: () => transactionsApi.bulkRestoreTrash(),
+    // AUDIT-2026-06: mismo blast radius que restore; el helper añade
+    // accounts.all (saldos), que antes no se invalidaba.
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.budgets.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
+      invalidateTransactionSideEffects(queryClient);
     },
   });
 }

@@ -23,6 +23,7 @@ import {
 import { DebtPaymentWizard } from '../../../components/accounts/debt-payment-wizard';
 import { DebtCompositionDonut } from '../../../components/debt/debt-composition-donut';
 import { DebtList } from '../../../components/debt/debt-list';
+import { DebtDailyEvolution } from '../../../components/debt/debt-daily-evolution';
 import { DebtMonthlyEvolution } from '../../../components/debt/debt-monthly-evolution';
 import { DebtTrendChart } from '../../../components/debt/debt-trend-chart';
 import { EffortRatioSection } from '../../../components/debt/effort-ratio-section';
@@ -166,11 +167,20 @@ export default function DebtScreen() {
           isLoading={summaryQuery.isLoading}
         />
 
-        <DebtMonthlyEvolution
-          items={summary?.monthly_series ?? []}
-          currency={referenceCurrency}
-          isLoading={summaryQuery.isLoading}
-        />
+        {range === 'month' ? (
+          <DebtDailyEvolution
+            items={summary?.daily_series ?? []}
+            currency={referenceCurrency}
+            isLoading={summaryQuery.isLoading}
+            monthLabel={periodLabel(range, anchorMonth)}
+          />
+        ) : (
+          <DebtMonthlyEvolution
+            items={summary?.monthly_series ?? []}
+            currency={referenceCurrency}
+            isLoading={summaryQuery.isLoading}
+          />
+        )}
 
         <RecurringQuotasList
           items={summary?.recurring_quotas ?? []}

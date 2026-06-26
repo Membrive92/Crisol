@@ -33,12 +33,13 @@ import statistics
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.personal_finance.categories.models import Category, CategoryKind
 from app.modules.personal_finance.transactions.models import Transaction
 
 # Mínimo de ocurrencias para considerar un patrón regular.
@@ -68,6 +69,27 @@ MERCHANT_MAX_LEN = 30
 # grupos como el mismo merchant. "netflixsuscrip" + "netflixcom"
 # comparten "netflix" (7 chars) → match. "spotify" + "spaceshop"
 # comparten "sp" → no match. 6 es un punto medio razonable.
+#
+# AUDIT (merge por prefijo — falsos positivos / no-transitividad):
+# este criterio es heurístico y tiene dos debilidades conocidas que se
+# documentan aquí en lugar de endurecerse (endurecer el umbral o exigir
+# un ratio sobre el merchant más corto rompe casos legítimos como
+# "netflixmonthly" + "netflixsuscripcionplus", que comparten sólo
+# "netflix" = 7/14 chars):
+#   1. Falsos positivos por prefijo genérico: dos comercios distintos
+#      que empiezan igual ("restaurantelopez" + "restaurantemartin"
+#      comparten "restaurante" = 11 ≥ 6) se fusionarían erróneamente,
+#      mezclando importes de comercios diferentes. El amount + currency
+#      iguales son una salvaguarda parcial (dos restaurantes con el
+#      mismo cargo exacto y la misma cadencia es poco probable).
+#   2. No-transitividad: en `_merge_by_common_prefix` cada grupo se
+#      compara SÓLO contra el representante (el merchant más largo del
+#      bucket), no contra todos los miembros ya absorbidos. A↔B y A↔C
+#      NO implican B↔C, así que el resultado depende del representante.
+# Mitigación operativa (no de código): un falso positivo se descarta
+# una vez y el detector no lo re-sugiere (estado `dismissed`). Un
+# clustering por similitud completa queda como follow-up si producción
+# muestra fusiones erróneas frecuentes.
 MIN_COMMON_PREFIX = 6
 
 
@@ -192,14 +214,35 @@ async def detect_for_user(
 ) -> list[Candidate]:
     """Devuelve todos los patrones subscription-like del usuario.
 
-    Sólo considera transacciones activas (excluye soft-deleted
-    PHASE-10.1). El service decide qué hacer con cada `Candidate`
-    (crear `pending`, refrescar existente, ignorar si está
-    `dismissed`).
+    Sólo considera **gastos reales** (excluye soft-deleted PHASE-10.1
+    e ingresos/transferencias, AUDIT-fix): un "gasto fijo" es, por
+    definición coherente con dashboard/budgets/saldos, una tx con
+    `category.kind == EXPENSE`, `category.is_transfer == False` y
+    `transfer_pair_id IS NULL`. Sin este filtro, la nómina y las
+    transferencias periódicas se detectaban como "gasto fijo" y, al
+    confirmarse con auto_post, generaban txs `expected` mal tipadas
+    que ensuciaban presupuestos, dashboard y saldos.
+
+    El service decide qué hacer con cada `Candidate` (crear
+    `pending`, refrescar existente, ignorar si está `dismissed`).
     """
-    today = today or datetime.now().date()
+    # AUDIT-fix: usar UTC y no la hora local. `next_due` es un DATE sin
+    # timezone y el cron de autopost ancla en UTC (_today_utc); usar
+    # `datetime.now()` local desalinea la ventana de detección y las
+    # fechas derivadas según la TZ del proceso.
+    today = today or datetime.now(UTC).date()
     since = today - timedelta(days=lookback_days)
 
+    # AUDIT-fix: INNER JOIN a Category para restringir a gastos reales.
+    # - kind == EXPENSE → excluye nóminas/ingresos (mismo criterio que
+    #   el dashboard, repository._period_totals_by_kind).
+    # - is_transfer == False → excluye transferencias internas
+    #   (categoría marcada como transferencia), igual que
+    #   _exclude_transfer_kind del dashboard.
+    # - transfer_pair_id IS NULL → excluye la pata emparejada de una
+    #   transferencia entre cuentas (_apply_scope del dashboard).
+    # El INNER JOIN ya descarta txs sin categoría (category_id NULL):
+    # un gasto fijo sin categoría no es accionable y no debe sugerirse.
     query = (
         select(
             Transaction.occurred_at,
@@ -208,8 +251,12 @@ async def detect_for_user(
             Transaction.currency,
             Transaction.category_id,
         )
+        .join(Category, Category.id == Transaction.category_id)
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
+        .where(Transaction.transfer_pair_id.is_(None))
+        .where(Category.kind == CategoryKind.EXPENSE)
+        .where(Category.is_transfer.is_(False))
         .where(Transaction.occurred_at >= datetime.combine(since, datetime.min.time()))
     )
     rows = (await db.execute(query)).all()
@@ -265,6 +312,17 @@ def _merge_by_common_prefix(
     cada pareja con prefijo común suficientemente largo, fusiona el
     más corto en el más largo. Es un solo pase O(n²) por bucket;
     para volúmenes esperados (< 100 grupos por user) trivial.
+
+    AUDIT — falsos positivos y no-transitividad: cada grupo `j` se
+    compara SÓLO contra el representante `i` (el merchant más largo aún
+    no absorbido), no contra todos los miembros ya fusionados en `i`.
+    A↔B y A↔C no implican B↔C, así que el resultado depende de quién es
+    el representante. Combinado con el riesgo de prefijo genérico
+    (ver el comentario de `MIN_COMMON_PREFIX`), una fusión puede unir
+    comercios distintos. El umbral NO se endurece aquí porque rompe
+    casos legítimos (`netflixmonthly` comparte sólo 7/14 chars con
+    `netflixsuscripcionplus`); la mitigación es operativa (`dismissed`)
+    y el endurecimiento por clustering completo queda como follow-up.
     """
     by_amount: dict[
         tuple[Decimal, str], list[tuple[str, list[tuple[date, str, uuid.UUID | None]]]]

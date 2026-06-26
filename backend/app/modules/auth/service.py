@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -37,6 +38,26 @@ from app.modules.users.repository import create_user, get_user_by_email, normali
 # no existe, para que el login tarde lo mismo exista o no el usuario (mitiga
 # enumeración por timing — AUDIT-2026-05).
 _DUMMY_PASSWORD_HASH = hash_password("crisol-timing-equalizer-not-a-real-password")
+
+
+def _absolute_session_days() -> int:
+    """Vida ABSOLUTA de una sesión (familia de refresh tokens), en días.
+
+    AUDIT-FIX (refresh-rotacion-sin-vida-absoluta-de-sesion): la rotación
+    reinicia `expires_at` a `now + ttl` en cada uso → sesión deslizante que,
+    con `remember_me`, nunca caduca mientras se use. Imponemos un límite duro
+    medido desde el PRIMER login de la familia: pasado ese plazo el usuario
+    debe re-autenticarse, refresque cuanto refresque.
+
+    Configurable vía `AUTH_ABSOLUTE_SESSION_DAYS` (settings ignora env extra,
+    así que no hace falta tocar `config.py`). Default: 3× el TTL extendido
+    (90 días con los defaults) — holgado para no molestar a usuarios reales,
+    pero acota un token robado a una ventana finita.
+    """
+    configured = getattr(settings, "auth_absolute_session_days", None)
+    if isinstance(configured, int) and configured > 0:
+        return configured
+    return settings.jwt_refresh_token_remember_me_expire_days * 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,7 +180,12 @@ async def refresh(
         )
 
     if token_record.expires_at < datetime.now(UTC):
-        await revoke_token(db, token_record.id)
+        # AUDIT-FIX (refresh-revoke-expirado-se-revierte-por-falta-de-commit):
+        # NO revocamos aquí. El chequeo de `expires_at` ya rechaza el token, y
+        # `purge_expired_tokens` borra la fila por su cuenta. Antes se hacía un
+        # `revoke_token` cuyo UPDATE el router NUNCA commitea (sólo commitea
+        # tras un refresh exitoso), así que se revertía con un rollback
+        # silencioso: un UPDATE inútil que además no persistía.
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Refresh token expirado",
@@ -173,6 +199,25 @@ async def refresh(
         )
 
     user_id = token_record.user_id
+
+    # AUDIT-FIX (refresh-rotacion-sin-vida-absoluta-de-sesion): límite duro
+    # desde el PRIMER login de la familia. Como no hay columna `created_at`
+    # heredada explícita, derivamos el origen de la sesión del `created_at`
+    # más antiguo de la familia (el primer token, no rotado). Si la sesión ya
+    # superó la vida absoluta, forzamos re-login revocando la familia entera.
+    now = datetime.now(UTC)
+    family_started_at = await _family_started_at(db, token_record.family_id)
+    absolute_deadline = family_started_at + timedelta(days=_absolute_session_days())
+    if now >= absolute_deadline:
+        await revoke_family(db, token_record.family_id)
+        # Igual que la rama de reuse: el router sólo commitea tras un refresh
+        # exitoso, así que persistimos la revocación aquí antes del 401.
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sesión caducada por antigüedad; inicia sesión de nuevo",
+        )
+
     original_ttl_days = (token_record.expires_at - token_record.created_at).days
     ttl_days = (
         settings.jwt_refresh_token_remember_me_expire_days
@@ -184,6 +229,9 @@ async def refresh(
 
     access = create_access_token(user_id)
     new_plain, new_token_id, expires_at = create_refresh_token(ttl_days=ttl_days)
+    # El nuevo token nunca vive más allá del límite absoluto de la sesión:
+    # `expires_at = min(now + ttl, absolute_deadline)`.
+    expires_at = min(expires_at, absolute_deadline)
     new_record = RefreshToken(
         user_id=user_id,
         token_id=new_token_id,
@@ -243,3 +291,27 @@ async def _issue_tokens(
     await persist_refresh_token(db, record)
     tokens = TokenResponse(access_token=access, refresh_token=plain)
     return IssuedSession(tokens=tokens, refresh_ttl_days=effective_ttl)
+
+
+async def _family_started_at(db: AsyncSession, family_id: uuid.UUID) -> datetime:
+    """Momento del PRIMER login de una familia de refresh tokens.
+
+    AUDIT-FIX (vida absoluta de sesión): es el `created_at` más antiguo de la
+    familia — el token original emitido en login/register, antes de cualquier
+    rotación. Se usa como ancla para el límite de vida absoluta de la sesión.
+
+    Si la familia no tuviera filas (caso degenerado), se cae a `now` para no
+    revocar de forma agresiva por un dato ausente.
+    """
+    result = await db.execute(
+        select(func.min(RefreshToken.created_at)).where(RefreshToken.family_id == family_id)
+    )
+    started_at: datetime | None = result.scalar_one_or_none()
+    if started_at is None:
+        return datetime.now(UTC)
+    # `created_at` es TIMESTAMPTZ → SQLAlchemy lo devuelve tz-aware; pero por
+    # robustez (algunos drivers/SQLite-en-memoria devuelven naive), forzamos
+    # UTC para que la resta con `datetime.now(UTC)` no lance TypeError.
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=UTC)
+    return started_at

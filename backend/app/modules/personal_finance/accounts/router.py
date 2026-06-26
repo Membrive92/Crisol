@@ -60,14 +60,20 @@ async def list_endpoint(
 async def balances_endpoint(
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
+    target_currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
 ) -> AccountBalancesResponse:
     """Saldo actual de cada cuenta + agregado de patrimonio (PHASE-19.4).
 
     Cada cuenta devuelve `opening_balance + Σ(income − expense)` en su
     moneda nativa. Sólo cuentas activas suman a los totales. Si las
     monedas activas no son homogéneas, `mixed_currencies=true`.
+
+    AUDIT-2026-06 (#net-worth-mixed-currencies) — `?target_currency=`
+    convierte cada saldo a esa moneda con la tasa de hoy y excluye las
+    cuentas sin tasa, devolviendo un agregado con sentido en vez de una
+    suma cruda de monedas mezcladas. Sin el parámetro, modo crudo + flag.
     """
-    return await get_balances(db, user.id)
+    return await get_balances(db, user.id, target_currency=target_currency)
 
 
 @router.get("/debt-health", response_model=DebtHealthKpis)

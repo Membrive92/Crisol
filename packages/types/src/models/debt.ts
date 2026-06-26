@@ -116,6 +116,24 @@ export interface MonthlyDebtPoint {
   capital: string;
 }
 
+/**
+ * PHASE-30.9 — Un día del mes en la vista diaria (sólo `range='month'`).
+ * Modela la evolución del SALDO de deuda dentro del mes:
+ * - `emitida`: cargos que suben la deuda (compras a plazos, aplazamientos).
+ * - `amortizado`: pagos que la bajan (entradas a la cuenta-pasivo).
+ * - `interest`: intereses pagados ese día (informativo, no mueve el saldo).
+ * - `balance`: saldo de deuda al cierre del día; `null` si el usuario no
+ *   tiene cuentas-pasivo (sin Capa 2 no hay línea de saldo).
+ */
+export interface DailyDebtPoint {
+  /** Día del mes (1-31). */
+  day: number;
+  emitida: string;
+  amortizado: string;
+  interest: string;
+  balance: string | null;
+}
+
 export interface RecurringQuotaRef {
   fixed_expense_id: string;
   merchant: string;
@@ -142,6 +160,11 @@ export interface DebtCategorySummary {
   capital_amortized: string;
   by_type: DebtTypeBreakdown[];
   monthly_series: MonthlyDebtPoint[];
+  /**
+   * PHASE-30.9 — Sólo para `range='month'`: un punto por día del mes con
+   * la evolución del saldo de deuda. `null` en `quarter`/`year`.
+   */
+  daily_series: DailyDebtPoint[] | null;
   monthly_income_avg: string;
   /** PHASE-30.8 — Pago a deuda medio mensual del período (numerador
    * de la tasa de esfuerzo estricta). */

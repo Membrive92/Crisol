@@ -26,10 +26,7 @@ export {
   type CreateImportPayload,
   type PreviewImportPayload,
 } from './api/endpoints/imports';
-export {
-  bankMappingsApi,
-  type BankMappingUpsertPayload,
-} from './api/endpoints/bank-mappings';
+export { bankMappingsApi, type BankMappingUpsertPayload } from './api/endpoints/bank-mappings';
 export { categoryRulesApi } from './api/endpoints/category-rules';
 export { receiptsApi } from './api/endpoints/receipts';
 export {
@@ -40,6 +37,8 @@ export {
 } from './api/endpoints/currency';
 
 export { queryKeys } from './query/keys';
+export { invalidateTransactionSideEffects } from './query/invalidate';
+export { pickPreferredAccount, pickPreferredAccountId } from './select/accounts';
 export {
   useAccount,
   useAccountBalances,
@@ -73,11 +72,7 @@ export {
   useUpdateCategory,
   useDeleteCategory,
 } from './query/hooks/useCategories';
-export {
-  useDebtCategorySummary,
-  useDebtHealth,
-  useDebtHistory,
-} from './query/hooks/useDebt';
+export { useDebtCategorySummary, useDebtHealth, useDebtHistory } from './query/hooks/useDebt';
 export {
   periodLabel,
   stepAnchor,
@@ -94,6 +89,7 @@ export {
   useUpdateTransaction,
   useDeleteTransaction,
   useBulkDeleteTransactions,
+  useReassignAccount,
   useTrashedTransactions,
   useRestoreTransaction,
   usePurgeTransaction,

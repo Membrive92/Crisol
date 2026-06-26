@@ -15,15 +15,19 @@ from app.modules.personal_finance.accounts.debt_health import (
     classify_effort,
     windowed_income_total,
 )
-from app.modules.personal_finance.accounts.models import Account
+from app.modules.personal_finance.accounts.models import Account, AccountNature
 from app.modules.personal_finance.categories.models import Category, CategoryRole
 from app.modules.personal_finance.debt.repository import (
     aggregate_debt_payments_by_category,
     aggregate_debt_payments_by_role,
+    daily_category_flows,
+    daily_liability_flows,
     debt_movement_bounds,
+    liability_signed_before,
     monthly_debt_series,
 )
 from app.modules.personal_finance.debt.schemas import (
+    DailyDebtPoint,
     DebtCategorySummary,
     DebtTimeRange,
     DebtTypeBreakdown,
@@ -370,6 +374,111 @@ async def _load_non_debt_fixed_expense_monthly_total(
 
 
 # ─────────────────────────────────────────────────────────────────────
+# Serie diaria (sólo range='month') — evolución del saldo de deuda
+# ─────────────────────────────────────────────────────────────────────
+
+
+async def _build_daily_series(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    native_currency: str,
+    effective_currency: str,
+    range_start: date,
+    range_end: date,
+    start_dt: datetime,
+    end_dt: datetime,
+    target_currency: str | None,
+) -> list[DailyDebtPoint]:
+    """Construye la serie diaria del mes (PHASE-30.9).
+
+    Con cuentas-pasivo: línea de saldo (apertura + carry + Σ flujos
+    diarios) + barras emitida/amortizado/interés. Sin cuentas-pasivo:
+    cae a barras de pagos categorizados (capital DEBT_PAYMENT) + interés,
+    sin línea de saldo (`balance=None`) — así el chart diario sigue
+    siendo útil aunque el usuario no haya declarado contratos.
+    """
+    q = Decimal("0.01")
+    acc_q = select(Account).where(Account.user_id == user_id).where(Account.is_archived.is_(False))
+    accounts = list((await db.execute(acc_q)).scalars().all())
+    if target_currency is None:
+        liabilities = [
+            a
+            for a in accounts
+            if a.nature == AccountNature.LIABILITY and a.currency == native_currency
+        ]
+    else:
+        liabilities = [a for a in accounts if a.nature == AccountNature.LIABILITY]
+    liability_ids = [a.id for a in liabilities]
+
+    # Interés diario (Capa 1) + capital categorizado (fallback sin pasivos).
+    cat_flows = await daily_category_flows(
+        db, user_id, native_currency, start=start_dt, end=end_dt, target_currency=target_currency
+    )
+    last_day = range_end.day
+    points: list[DailyDebtPoint] = []
+
+    if not liability_ids:
+        for d in range(1, last_day + 1):
+            capital, interest = cat_flows.get(d, (Decimal("0"), Decimal("0")))
+            points.append(
+                DailyDebtPoint(
+                    day=d,
+                    emitida=Decimal("0.00"),
+                    amortizado=capital.quantize(q),
+                    interest=interest.quantize(q),
+                    balance=None,
+                )
+            )
+        return points
+
+    flows = await daily_liability_flows(
+        db,
+        user_id,
+        liability_ids=liability_ids,
+        start=start_dt,
+        end=end_dt,
+        reference_currency=native_currency,
+        target_currency=target_currency,
+    )
+    carry = await liability_signed_before(
+        db,
+        user_id,
+        liability_ids=liability_ids,
+        before=start_dt,
+        reference_currency=native_currency,
+        target_currency=target_currency,
+    )
+    # Apertura agregada de los pasivos (convertida a hoy en modo target).
+    opening = Decimal("0")
+    for a in liabilities:
+        if target_currency is None or a.currency.upper() == effective_currency:
+            opening += a.opening_balance
+            continue
+        converted = await _convert_at_today(
+            db, a.opening_balance, from_currency=a.currency, target_currency=effective_currency
+        )
+        if converted is not None:
+            opening += converted
+
+    balance = opening + carry
+    for d in range(1, last_day + 1):
+        emitida, amortizado = flows.get(d, (Decimal("0"), Decimal("0")))
+        _capital, interest = cat_flows.get(d, (Decimal("0"), Decimal("0")))
+        balance = balance + emitida - amortizado
+        points.append(
+            DailyDebtPoint(
+                day=d,
+                emitida=emitida.quantize(q),
+                amortizado=amortizado.quantize(q),
+                interest=interest.quantize(q),
+                balance=max(balance, Decimal("0")).quantize(q),
+            )
+        )
+    return points
+
+
+# ─────────────────────────────────────────────────────────────────────
 # Orquestador principal
 # ─────────────────────────────────────────────────────────────────────
 
@@ -440,6 +549,23 @@ async def compute_category_summary(
         )
         for month_start, payments, interests in series_rows
     ]
+
+    # ── 3b. Serie diaria (sólo range='month'): evolución del saldo ───
+    daily_series = (
+        await _build_daily_series(
+            db,
+            user_id,
+            native_currency=native_currency,
+            effective_currency=effective_currency,
+            range_start=range_start,
+            range_end=range_end,
+            start_dt=start_dt,
+            end_dt=end_dt,
+            target_currency=target_currency,
+        )
+        if range_ == "month"
+        else None
+    )
 
     # ── 4. Tasa de esfuerzo (period-scoped, PHASE-30.8) ──────────────
     #
@@ -528,6 +654,7 @@ async def compute_category_summary(
         capital_amortized=capital_amortized.quantize(Decimal("0.01")),
         by_type=by_type,
         monthly_series=monthly_series,
+        daily_series=daily_series,
         monthly_income_avg=monthly_income,
         monthly_debt_payment_avg=avg_monthly_debt_payment,
         effort_ratio_strict=strict,

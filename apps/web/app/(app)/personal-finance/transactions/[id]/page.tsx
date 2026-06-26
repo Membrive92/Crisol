@@ -108,7 +108,11 @@ export default function EditTransactionPage({ params }: { params: Promise<{ id: 
                 toast.success(
                   `Deuda registrada (${pair.amount} ${pair.currency}). Revisa el cuadro de amortización en la cuenta.`,
                 );
-                router.push('/personal-finance/accounts');
+                // La lista de cuentas en web vive en /settings/accounts
+                // (bajo /personal-finance/accounts sólo existe la ruta
+                // [id]/amortization). Antes empujaba a /personal-finance/
+                // accounts → 404.
+                router.push('/settings/accounts');
               }}
               onError={(err) =>
                 toast.error(formatApiError(err, 'No se pudo registrar la deuda'))

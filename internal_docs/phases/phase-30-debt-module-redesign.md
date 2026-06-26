@@ -481,6 +481,177 @@ diseño, RN equivalent components, tokens compartidos).
 
 ---
 
+## PHASE-30.6 — Selector de divisa del header → endpoints de deuda
+
+Polish post-MVP. El selector global de divisa del header ya no se
+ignoraba en `/debt`: ahora se propaga como `target_currency` a los
+tres endpoints del módulo (`category-summary`, `debt-health`,
+`debt-history`), con conversión per-tx (igual que dashboard). Sin
+`convertAll` se mantiene el modo native. Se eliminaron además literales
+de enum filtrados en la respuesta. (Commit `a3b954e`.)
+
+---
+
+## PHASE-30.7 — Selector temporal unificado + donut por cuenta vinculada
+
+Dos cambios de polish que cierran inconsistencias detectadas tras
+30.6:
+
+### 1. Rango temporal `month / quarter / year`
+
+El selector de `/debt` usaba los valores legacy `ytd | 12m | month`,
+distintos del `StitchPeriodToggle` del dashboard y análisis
+(`month | quarter | year`). Se alinea el contrato completo:
+
+- `DebtTimeRange` pasa a `'month' | 'quarter' | 'year'` (default `year`).
+- `_resolve_range` (service): `month` = mes en curso (1 bucket);
+  `quarter` = trimestre natural en curso (Q1 Ene-Mar … Q4 Oct-Dic, 3
+  buckets); `year` = YTD (enero..mes actual, `today.month` buckets).
+- Propagado a `schemas.py`, `router.py` (default), tipos shared
+  (`debt.ts`), `endpoints/debt.ts`, `useDebt.ts`, `query/keys.ts`.
+- UI web y mobile: labels `Mes / Trimestre / Año` y restyle del
+  `RangeSelector` como espejo visual de `StitchPeriodToggle`.
+
+### 2. Donut de composición por tipo: señal primaria = cuenta vinculada
+
+Antes el bucket (`mortgage / loan / credit_card / other`) se infería
+solo del nombre de la categoría. Ahora:
+
+- **Señal primaria**: `account.type` de la liability vinculada a la
+  categoría (`accounts.category_id`, PHASE-30.4), vía subquery escalar
+  correlacionada en `aggregate_debt_payments_by_category`. Si la
+  categoría apunta a una `mortgage`, su bucket es `mortgage` con
+  certeza, etc.
+- **Fallback** (sin cuenta vinculada): matching por nombre, pero con
+  **`loan` chequeado ANTES que `mortgage`**, para que la categoría
+  seed "Préstamos e hipotecas" caiga en `loan` (la usan mayormente
+  usuarios sin hipoteca real). Una hipoteca explícita ("Hipoteca
+  BBVA") no contiene "préstamo" → cae en `mortgage`.
+
+### Archivos
+
+```
+backend/app/modules/personal_finance/debt/{schemas,service,router,repository}.py
+backend/tests/test_debt_category_summary.py   [tests rango + clasificación]
+packages/types/src/models/debt.ts
+packages/services/src/api/endpoints/debt.ts
+packages/services/src/query/hooks/useDebt.ts
+packages/services/src/query/keys.ts
+apps/web/app/(app)/debt/page.tsx
+apps/web/components/debt/payments-summary-card.tsx
+apps/mobile/app/(modules)/debt/index.tsx
+apps/mobile/components/debt/payments-summary-card.tsx
+internal_docs/api/endpoints.md
+```
+
+### Tests nuevos / actualizados
+
+- `test_summary_prestamos_hipotecas_seed_classified_as_loan` — la
+  categoría seed cae en `loan` (regresión loan-first).
+- `test_summary_linked_account_type_overrides_name_match` — cuenta
+  `mortgage` vinculada gana sobre nombre que matchea "préstamo".
+- `test_summary_quarter_returns_three_monthly_buckets` — `quarter`
+  devuelve 3 buckets.
+- `test_summary_year_returns_ytd_buckets` — `year` devuelve
+  `today.month` buckets.
+- Resto de tests migrados de `range=ytd|12m` → `year|quarter`.
+
+### Verificación
+
+- [x] `pytest tests/test_debt_category_summary.py tests/test_debt.py` — 43 verde.
+- [x] `mypy` sin errores nuevos (los 13 pre-existentes en
+      `conversion.py` / `repository.py` / `service.py` ya estaban en HEAD).
+- [x] `pnpm typecheck`, `pnpm lint`, `pnpm test` verdes.
+
+### Lección
+
+Cuando una pista (nombre de categoría) puede mentir y existe una señal
+fuerte (cuenta vinculada con `type` explícito), usar la señal fuerte
+como primaria y la pista como fallback. Análogo a la lección de
+PHASE-28 (dirección de transferencia explícita > inferida).
+
+---
+
+## PHASE-30.8 — Navegador de período (Capa 1) + KPIs period-scoped
+
+El selector temporal de 30.7 elegía la *granularidad* (mes / trimestre
+/ año) pero siempre anclaba al período en curso. 30.8 añade un
+**navegador** para moverse a períodos pasados sin salir de la
+granularidad elegida, y reescala los KPIs a la ventana visible.
+
+- **Ancla compartida (`anchor`)**: un día cualquiera dentro del período
+  objetivo. `_period_window(anchor, range)` es la fuente ÚNICA de verdad
+  del `range_start`/`range_end`, usada por la serie, la tasa de esfuerzo
+  y los ingresos medios — todos miran la misma ventana.
+- **Flechas con clamp a datos**: `range_start`/`range_end` de la
+  respuesta (`debt_movement_bounds`) acotan hasta dónde puede navegar el
+  usuario; no hay flechas hacia meses sin movimientos.
+- **KPIs period-scoped**: `monthly_income_avg` y
+  `monthly_debt_payment_avg` se promedian sobre los meses **cerrados**
+  del período (se excluye el mes en curso para no diluir la media con un
+  mes incompleto). La tasa de esfuerzo se deriva de esa misma ventana.
+
+(Commit `96087b1`.)
+
+---
+
+## PHASE-30.9 — Serie diaria del saldo de deuda (`range='month'`)
+
+Con `range='month'` la serie mensual degeneraba en **una sola barra**
+(un único bucket = el mes). Inútil. 30.9 la sustituye por una vista
+diaria que modela la **evolución del saldo de deuda dentro del mes**.
+
+### Backend
+
+- **`DailyDebtPoint`** (schema): `{ day, emitida, amortizado, interest,
+  balance }`. Campo `daily_series: list[DailyDebtPoint] | None` en
+  `DebtCategorySummary`, poblado **sólo** con `range='month'` (`None`
+  para quarter/year, que usan `monthly_series`).
+- **`_build_daily_series`** (service) orquesta dos modos:
+  - **Con cuentas-pasivo** (Capa 2): línea de `balance` = apertura
+    agregada de los pasivos + *carry* (`liability_signed_before`, Σ
+    firmada antes del mes) + Σ flujos diarios. `emitida` ↑ (cargos que
+    suben deuda: expense/sin-categoría) y `amortizado` ↓ (entradas que
+    la bajan: income) vienen de `daily_liability_flows`. El saldo se
+    clampa a ≥ 0.
+  - **Sin cuentas-pasivo** (fallback): `balance=None` (no hay línea) y
+    `amortizado` toma los pagos de capital categorizados
+    (`DEBT_PAYMENT`) de `daily_category_flows` — el chart sigue siendo
+    útil aunque el usuario no haya declarado contratos.
+  - `interest` (informativo) = Σ `DEBT_INTEREST` del día
+    (`daily_category_flows`); se paga en cash y NO mueve el principal.
+- Mismo split de signo que `get_balances_for_user`/`debt_history`
+  (expense/sin-cat suman al saldo de un pasivo, income resta) y mismas
+  fronteras UTC que el resto de la serie. Respeta `target_currency`
+  (per-tx) igual que 30.6.
+
+### Frontend
+
+- **`DebtDailyEvolution`** (web Recharts `ComposedChart` + mobile
+  gifted-charts), nuevo en `apps/{web,mobile}/components/debt/`. Combo:
+  línea de `balance` (eje izq.) + barras `emitida`/`amortizado` (eje
+  der.); el interés va en el tooltip.
+- `/debt` (web + mobile) hace swap condicional: `range='month'` →
+  `DebtDailyEvolution`, en otro caso `DebtMonthlyEvolution`. Lazy-loaded
+  en web (`dynamic`, `ssr:false`).
+
+### Tests
+
+- `test_daily_series_tracks_balance_emission_and_payment` — línea de
+  saldo + emisión/amortización con cuentas-pasivo.
+- `test_daily_series_fallback_without_liabilities` — `balance=None` y
+  amortizado = pagos categorizados.
+- `test_daily_series_null_for_year_range` — `daily_series=None` fuera de
+  `month`.
+
+### Lección
+
+Cuando una granularidad colapsa una serie en un solo punto (mes = 1
+bucket), no muestres una barra única: cambia el modelo de la vista
+(saldo diario) para que la dimensión temporal siga aportando información.
+
+---
+
 ## Archivos clave (vista consolidada)
 
 ### Backend
@@ -529,7 +700,12 @@ apps/web/app/(app)/personal-finance/accounts/[id]/amortization/page.tsx [→ red
 
 ## Endpoints añadidos
 
-- `GET /debt/category-summary?range=ytd|12m|month` — Capa 1 completa.
+- `GET /debt/category-summary?range=month|quarter|year` (def `year`,
+  PHASE-30.7; `&anchor=YYYY-MM-DD` opc desde PHASE-30.8 para navegar a
+  períodos pasados; `target_currency` opc desde PHASE-30.6) — Capa 1
+  completa. Desde PHASE-30.9 incluye `daily_series` (sólo `range=month`)
+  con la evolución diaria del saldo de deuda + `range_start`/`range_end`
+  para acotar el navegador.
 
 ## Endpoints modificados
 

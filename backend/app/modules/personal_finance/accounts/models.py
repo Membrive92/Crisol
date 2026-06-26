@@ -142,6 +142,14 @@ class Account(Base):
     is_archived: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    is_default: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    """PHASE-32 — Cuenta principal del usuario. Las transacciones,
+    imports y tickets la pre-seleccionan por defecto, de modo que
+    ingresos y gastos iteran sobre ella sin elegirla cada vez (su saldo
+    refleja el ahorro neto). Única por usuario: marcar una desmarca las
+    demás (lo fuerza el service)."""
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -157,5 +165,16 @@ class Account(Base):
             "ix_accounts_category_id",
             "category_id",
             postgresql_where=text("category_id IS NOT NULL"),
+        ),
+        # PHASE-32 (AUDIT LOW#11) — una sola cuenta principal por usuario.
+        # Índice parcial único creado en la migración y2o47q9nm1p0o6; se
+        # declara aquí para que `create_all` (tests) y `alembic check`
+        # (parity) coincidan con producción. Backstop de BD a la unicidad
+        # que ya fuerza el service (`clear_default_accounts`).
+        Index(
+            "uq_accounts_one_default_per_user",
+            "user_id",
+            unique=True,
+            postgresql_where=text("is_default"),
         ),
     )

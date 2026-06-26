@@ -11,16 +11,23 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.personal_finance.accounts.service import ensure_account_exists
+from app.modules.personal_finance.categories.repository import get_category_by_id
 from app.modules.personal_finance.dashboard.service import ensure_rates_for_user_scope
 from app.modules.personal_finance.transactions.models import Transaction
 from app.modules.personal_finance.transactions.repository import (
     bulk_purge_trashed as bulk_purge_trashed_in_db,
 )
 from app.modules.personal_finance.transactions.repository import (
+    bulk_reassign_account as bulk_reassign_in_db,
+)
+from app.modules.personal_finance.transactions.repository import (
     bulk_restore_trashed as bulk_restore_trashed_in_db,
 )
 from app.modules.personal_finance.transactions.repository import (
     bulk_soft_delete_transactions as bulk_soft_delete_in_db,
+)
+from app.modules.personal_finance.transactions.repository import (
+    count_reassignable_skipped_by_currency as count_reassign_skipped_in_db,
 )
 from app.modules.personal_finance.transactions.repository import (
     create_transaction as persist_transaction,
@@ -55,18 +62,22 @@ async def list_transactions(
     *,
     account_id: uuid.UUID | None = None,
     category_id: uuid.UUID | None = None,
+    uncategorized: bool = False,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     search: str | None = None,
     target_currency: str | None = None,
     limit: int = 50,
     offset: int = 0,
-) -> tuple[list[tuple[Transaction, Decimal | None]], int]:
+) -> tuple[list[tuple[Transaction, Decimal | None, bool]], int]:
     """Lista transacciones del usuario con filtros (sólo activas).
 
     Cuando se pasa `target_currency`, dispara el backfill on-demand de
     tasas (mismo helper que el dashboard) antes de listar para que las
     fechas históricas queden cubiertas.
+
+    `uncategorized=True` filtra las tx sin categoría (atajo del banner
+    "Ver y categorizar").
     """
     if target_currency is not None:
         await ensure_rates_for_user_scope(
@@ -81,6 +92,7 @@ async def list_transactions(
         user_id,
         account_id=account_id,
         category_id=category_id,
+        uncategorized=uncategorized,
         date_from=date_from,
         date_to=date_to,
         search=search,
@@ -159,6 +171,29 @@ async def get_trashed_transaction(
     return transaction
 
 
+async def _ensure_category_owned(
+    db: AsyncSession, user_id: uuid.UUID, category_id: uuid.UUID
+) -> None:
+    """Valida que `category_id` pertenece a `user_id` o lanza 400.
+
+    AUDIT: create/update eran el ÚNICO punto del backend que asignaba
+    `category_id` sin comprobar pertenencia (rules, mappings, receipts
+    sí la hacen). Sin esta validación un usuario podía referenciar una
+    categoría de otro usuario, filtrando sus metadatos (nombre, color,
+    kind, is_transfer) en breakdowns/respuestas y, al heredar el `kind`
+    e `is_transfer` ajenos, corromper el cálculo de su propio saldo.
+    Se reutiliza el mismo mensaje/código (400) que
+    `category_rules._ensure_category_owned` y `receipts.confirm` para
+    coherencia de la API.
+    """
+    cat = await get_category_by_id(db, category_id, user_id)
+    if cat is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="category_id no pertenece al usuario",
+        )
+
+
 async def create_transaction(
     db: AsyncSession, user_id: uuid.UUID, data: TransactionCreate
 ) -> Transaction:
@@ -168,8 +203,13 @@ async def create_transaction(
     mismo usuario (lo valida `ensure_account_exists` lanzando 404 si
     no es el dueño — no exponemos diferencia entre "no existe" y
     "es de otro usuario").
+
+    AUDIT: si se pasa `category_id`, se valida que sea del usuario antes
+    de asociarla (cierre de fuga multi-tenant — ver `_ensure_category_owned`).
     """
     await ensure_account_exists(db, data.account_id, user_id)
+    if data.category_id is not None:
+        await _ensure_category_owned(db, user_id, data.category_id)
     transaction = Transaction(
         user_id=user_id,
         account_id=data.account_id,
@@ -190,11 +230,18 @@ async def update_transaction(
 
     Si se incluye `account_id` en el payload, valida que la nueva
     cuenta pertenece al usuario antes de reasignar.
+
+    AUDIT: idem para `category_id` — si llega en el payload y no es NULL,
+    se valida pertenencia antes del setattr para no reasignar la tx a
+    una categoría ajena (mismo patrón que `account_id` y que
+    `category_rules.update_rule`).
     """
     transaction = await get_transaction(db, transaction_id, user_id)
     payload = data.model_dump(exclude_unset=True)
     if "account_id" in payload and payload["account_id"] is not None:
         await ensure_account_exists(db, payload["account_id"], user_id)
+    if "category_id" in payload and payload["category_id"] is not None:
+        await _ensure_category_owned(db, user_id, payload["category_id"])
     for field, value in payload.items():
         setattr(transaction, field, value)
     await db.flush()
@@ -244,6 +291,53 @@ async def bulk_delete_transactions(
         date_to=date_to,
         search=search,
     )
+
+
+async def bulk_reassign_transactions(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    target_account_id: uuid.UUID,
+    account_id: uuid.UUID | None = None,
+    category_id: uuid.UUID | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    search: str | None = None,
+) -> tuple[int, int]:
+    """PHASE-32 — Mueve en bloque las tx activas que matcheen los filtros
+    a `target_account_id` (p. ej. consolidar el mes en tu cuenta
+    principal). Valida que la cuenta destino es del usuario; excluye
+    transferencias internas.
+
+    HIGH#3: sólo mueve las tx cuya divisa coincide con la de la cuenta
+    destino — el saldo por cuenta sólo cuenta `currency == account.currency`,
+    así que mover otras las sacaría del saldo (pérdida silenciosa). Devuelve
+    `(movidas, omitidas_por_divisa)` para que la UI informe de las omitidas.
+    """
+    target = await ensure_account_exists(db, target_account_id, user_id)
+    skipped = await count_reassign_skipped_in_db(
+        db,
+        user_id,
+        target_account_id=target_account_id,
+        target_currency=target.currency,
+        account_id=account_id,
+        category_id=category_id,
+        date_from=date_from,
+        date_to=date_to,
+        search=search,
+    )
+    reassigned = await bulk_reassign_in_db(
+        db,
+        user_id,
+        target_account_id=target_account_id,
+        target_currency=target.currency,
+        account_id=account_id,
+        category_id=category_id,
+        date_from=date_from,
+        date_to=date_to,
+        search=search,
+    )
+    return reassigned, skipped
 
 
 async def restore_transaction(

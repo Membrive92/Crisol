@@ -110,7 +110,12 @@ async def register_endpoint(
 @router.post(
     "/login",
     response_model=TokenResponse,
-    dependencies=[Depends(rate_limit(10, 60))],
+    # AUDIT-FIX (rate-limit): keyea el bucket por (IP_real, path, email) además
+    # de por IP. Así el cupo es por-cuenta: rotar IPs no permite bloquear a una
+    # víctima concreta, y un ataque desde una sola IP contra muchas cuentas no
+    # se enmascara bajo el cupo de una. La IP real respeta el primer hop de
+    # confianza (ver core/rate_limit.get_client_key).
+    dependencies=[Depends(rate_limit(10, 60, per_email=True))],
 )
 async def login_endpoint(
     body: LoginRequest,
@@ -152,14 +157,28 @@ async def refresh_endpoint(
     return session.tokens
 
 
-@router.post("/logout", status_code=204, response_class=Response)
+@router.post(
+    "/logout",
+    status_code=204,
+    response_class=Response,
+    dependencies=[Depends(rate_limit(30, 60))],
+)
 async def logout_endpoint(
     body: RefreshRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _user: CurrentUser,
     refresh_cookie: Annotated[str | None, Cookie(alias=settings.auth_cookie_name)] = None,
 ) -> Response:
-    """Revoca el refresh token y limpia la cookie."""
+    """Revoca el refresh token y limpia la cookie.
+
+    AUDIT-FIX (logout-exige-access-token-valido): el logout ya NO exige un
+    access token válido (`CurrentUser`). Antes, con el access caducado el
+    usuario no podía cerrar sesión / revocar su refresh — justo cuando más
+    falta hace. La autorización la da el propio refresh token: `logout()`
+    verifica su SECRETO (no sólo el `token_id` público), así que presentar un
+    refresh válido es prueba de posesión suficiente para revocarlo. No se
+    puede revocar la sesión de otro sin su refresh. Se mantiene un rate-limit
+    para no dejar el endpoint abierto a abuso.
+    """
     token = _resolve_refresh_token(body.refresh_token, refresh_cookie)
     await logout(db, token)
     await db.commit()

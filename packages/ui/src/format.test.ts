@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  convertAmount,
   formatAmount,
-  formatConverted,
   formatDate,
   formatMonthLabel,
   fromDateInputValue,
@@ -23,6 +21,22 @@ describe('formatAmount', () => {
 
   it('devuelve la cadena original si no es numérica', () => {
     expect(formatAmount('abc')).toBe('abc');
+  });
+
+  it('respeta los decimales canónicos: JPY sin decimales', () => {
+    // ISO 4217: JPY tiene 0 dígitos fraccionarios → NO debe aparecer una
+    // parte decimal de 2 dígitos al final (",00" en es-ES). Comparamos
+    // contra un EUR equivalente, que SÍ la lleva, para no depender del
+    // separador de millares ni del símbolo del build ICU de Node.
+    const jpy = formatAmount('1234', 'JPY', 'es-ES');
+    const eur = formatAmount('1234', 'EUR', 'es-ES');
+    expect(jpy).not.toMatch(/,00/);
+    expect(eur).toMatch(/,00/);
+  });
+
+  it('mantiene 2 decimales con coma para EUR (es-ES)', () => {
+    // EUR conserva 2 decimales con coma decimal es-ES.
+    expect(formatAmount('1234.5', 'EUR', 'es-ES')).toMatch(/,50/);
   });
 });
 
@@ -74,86 +88,5 @@ describe('formatMonthLabel', () => {
   it('soporta locales distintos', () => {
     const result = formatMonthLabel('2026-01', 'en-US');
     expect(result).toMatch(/Jan/i);
-  });
-});
-
-describe('convertAmount', () => {
-  const rates = { USD: 1.1, GBP: 0.85, JPY: 165 };
-
-  it('devuelve igual cuando from === to', () => {
-    const r = convertAmount(100, 'EUR', 'EUR', rates);
-    expect(r).toEqual({ value: 100, rate: 1, missing: false });
-  });
-
-  it('convierte EUR → quote directo', () => {
-    const r = convertAmount(100, 'EUR', 'USD', rates);
-    expect(r.value).toBeCloseTo(110, 6);
-    expect(r.rate).toBeCloseTo(1.1, 6);
-    expect(r.missing).toBe(false);
-  });
-
-  it('invierte cuando to === EUR', () => {
-    const r = convertAmount(110, 'USD', 'EUR', rates);
-    expect(r.value).toBeCloseTo(100, 6);
-    expect(r.rate).toBeCloseTo(1 / 1.1, 6);
-  });
-
-  it('compone non-EUR vía EUR', () => {
-    const r = convertAmount(110, 'USD', 'GBP', rates);
-    // 110 USD / 1.1 = 100 EUR ; 100 × 0.85 = 85 GBP
-    expect(r.value).toBeCloseTo(85, 6);
-  });
-
-  it('marca missing cuando falta una pata', () => {
-    const r = convertAmount(100, 'USD', 'CHF', rates);
-    expect(r.missing).toBe(true);
-    expect(r.value).toBe(100);
-    expect(r.rate).toBe(1);
-  });
-
-  it('respeta NaN', () => {
-    const r = convertAmount(Number.NaN, 'EUR', 'USD', rates);
-    expect(r.missing).toBe(true);
-  });
-});
-
-describe('formatConverted', () => {
-  const rates = { USD: 1.1 };
-
-  it('mismo currency: sin prefijo ni tooltip', () => {
-    const r = formatConverted('100', 'EUR', 'EUR', rates);
-    expect(r.isApprox).toBe(false);
-    expect(r.isMissing).toBe(false);
-    expect(r.tooltip).toBe('');
-    expect(r.display).not.toMatch(/≈/);
-  });
-
-  it('conversión real: prefijo ≈ + tooltip', () => {
-    const r = formatConverted('100', 'EUR', 'USD', rates);
-    expect(r.isApprox).toBe(true);
-    expect(r.display.startsWith('≈')).toBe(true);
-    expect(r.display).toContain('110');
-    expect(r.tooltip).toMatch(/100,00/);
-    expect(r.tooltip).toContain('1.1');
-    expect(r.tooltip).toContain('USD/EUR');
-  });
-
-  it('sin tasa: muestra original + flag missing', () => {
-    const r = formatConverted('100', 'JPY', 'GBP', { USD: 1.1 });
-    expect(r.isMissing).toBe(true);
-    expect(r.isApprox).toBe(false);
-    expect(r.display).not.toMatch(/≈/);
-    expect(r.tooltip).toMatch(/Sin tasa/);
-  });
-
-  it('amount no numérico: missing pero devuelve string original', () => {
-    const r = formatConverted('abc', 'EUR', 'USD', rates);
-    expect(r.isMissing).toBe(true);
-    expect(r.display).toBe('abc');
-  });
-
-  it('incluye la fecha en el tooltip cuando se pasa rateDate', () => {
-    const r = formatConverted('100', 'EUR', 'USD', rates, undefined, '2026-04-15');
-    expect(r.tooltip).toContain('el 2026-04-15');
   });
 });

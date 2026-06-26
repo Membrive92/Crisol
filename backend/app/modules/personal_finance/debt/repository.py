@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.modules.personal_finance.accounts.models import Account
-from app.modules.personal_finance.categories.models import Category, CategoryRole
+from app.modules.personal_finance.categories.models import Category, CategoryKind, CategoryRole
 from app.modules.personal_finance.dashboard.conversion import (
     converted_amount_expr,
 )
@@ -213,6 +213,141 @@ async def monthly_debt_series(
         )
         series.append((month_start, payments, interests))
     return series
+
+
+async def daily_liability_flows(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    liability_ids: list[uuid.UUID],
+    start: datetime,
+    end: datetime,
+    reference_currency: str,
+    target_currency: str | None = None,
+) -> dict[int, tuple[Decimal, Decimal]]:
+    """Por día del mes, flujo sobre cuentas-pasivo (PHASE-30.9):
+    `{día: (emitida, amortizado)}`.
+
+    - `emitida` = Σ cargos que SUBEN la deuda (gasto categorizado).
+    - `amortizado` = Σ entradas que la BAJAN (income, típicamente pagos).
+
+    AUDIT-2026-06 (fix #7) — Mismo split de signo que
+    `get_balances_for_user` (la fuente de verdad del saldo) y que
+    `debt_history`: expense suma al saldo de un pasivo, income resta y
+    **tx SIN categoría NO contribuye** (PHASE-31.3, `else_=0`). Antes
+    `emitida` usaba `else_=amount`, contando como "deuda emitida" cargos
+    sin categorizar — divergía de `get_balances_for_user`, que los ignora,
+    y desplazaba la línea de saldo del chart diario respecto al saldo real
+    de la cuenta. Bucket por día truncado en UTC para coincidir con las
+    fronteras `_month_start_utc`/`_range_end_utc` sea cual sea la TZ de
+    sesión.
+    """
+    if not liability_ids:
+        return {}
+    amount = _amount_expr(target_currency)
+    day_expr = func.extract("day", func.timezone("UTC", Transaction.occurred_at))
+    # Sólo gasto categorizado sube la deuda; income e sin-categoría → 0.
+    emitida_expr = case((Category.kind == CategoryKind.EXPENSE, amount), else_=Decimal("0"))
+    # Sólo income categorizado amortiza; gasto e sin-categoría → 0.
+    amortizado_expr = case((Category.kind == CategoryKind.INCOME, amount), else_=Decimal("0"))
+    query = (
+        select(
+            day_expr.label("d"),
+            func.coalesce(func.sum(emitida_expr), 0),
+            func.coalesce(func.sum(amortizado_expr), 0),
+        )
+        .select_from(Transaction)
+        .outerjoin(Category, Category.id == Transaction.category_id)
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.account_id.in_(liability_ids))
+        .where(Transaction.deleted_at.is_(None))
+        .where(Transaction.occurred_at >= start)
+        .where(Transaction.occurred_at <= end)
+        .group_by("d")
+    )
+    if target_currency is None:
+        query = query.where(Transaction.currency == reference_currency)
+    rows = (await db.execute(query)).all()
+    return {int(d): (Decimal(em), Decimal(am)) for d, em, am in rows}
+
+
+async def liability_signed_before(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    liability_ids: list[uuid.UUID],
+    before: datetime,
+    reference_currency: str,
+    target_currency: str | None = None,
+) -> Decimal:
+    """Σ del saldo firmado de los pasivos ANTES de `before` (PHASE-30.9):
+    el "carry" para anclar la línea de saldo del mes.
+
+    AUDIT-2026-06 (fix #7) — Signo IDÉNTICO al de la rama liability de
+    `get_balances_for_user`: expense suma (sube la deuda), income resta
+    (la amortiza) y **tx SIN categoría NO contribuye** (PHASE-31.3,
+    `else_=0`). Antes usaba `else_=amount`, contando cargos sin categoría
+    como deuda emitida → el carry divergía del saldo real del pasivo y
+    desanclaba la línea de saldo respecto a `/balances`."""
+    if not liability_ids:
+        return Decimal("0")
+    amount = _amount_expr(target_currency)
+    signed = case(
+        (Category.kind == CategoryKind.EXPENSE, amount),
+        (Category.kind == CategoryKind.INCOME, -amount),
+        else_=Decimal("0"),
+    )
+    query = (
+        select(func.coalesce(func.sum(signed), 0))
+        .select_from(Transaction)
+        .outerjoin(Category, Category.id == Transaction.category_id)
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.account_id.in_(liability_ids))
+        .where(Transaction.deleted_at.is_(None))
+        .where(Transaction.occurred_at < before)
+    )
+    if target_currency is None:
+        query = query.where(Transaction.currency == reference_currency)
+    return Decimal((await db.execute(query)).scalar_one())
+
+
+async def daily_category_flows(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    reference_currency: str,
+    *,
+    start: datetime,
+    end: datetime,
+    target_currency: str | None = None,
+) -> dict[int, tuple[Decimal, Decimal]]:
+    """Por día del mes, flujo de categorías de deuda (Capa 1):
+    `{día: (capital, interest)}` donde capital=Σ DEBT_PAYMENT e
+    interest=Σ DEBT_INTEREST. Sirve para el interés (barra informativa)
+    y como fallback de "amortizado" cuando no hay cuentas-pasivo."""
+    amount = _amount_expr(target_currency)
+    day_expr = func.extract("day", func.timezone("UTC", Transaction.occurred_at))
+    capital_expr = case((Category.role == CategoryRole.DEBT_PAYMENT, amount), else_=Decimal("0"))
+    interest_expr = case((Category.role == CategoryRole.DEBT_INTEREST, amount), else_=Decimal("0"))
+    query = (
+        select(
+            day_expr.label("d"),
+            func.coalesce(func.sum(capital_expr), 0),
+            func.coalesce(func.sum(interest_expr), 0),
+        )
+        .select_from(Transaction)
+        .join(Category, Category.id == Transaction.category_id)
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.deleted_at.is_(None))
+        .where(Transaction.transfer_pair_id.is_(None))
+        .where(Category.role.in_(DEBT_ROLES))
+        .where(Transaction.occurred_at >= start)
+        .where(Transaction.occurred_at <= end)
+        .group_by("d")
+    )
+    if target_currency is None:
+        query = query.where(Transaction.currency == reference_currency)
+    rows = (await db.execute(query)).all()
+    return {int(d): (Decimal(cap), Decimal(intr)) for d, cap, intr in rows}
 
 
 async def debt_movement_bounds(

@@ -21,6 +21,7 @@ from decimal import Decimal, InvalidOperation
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.ai import service as ai_service
@@ -33,7 +34,7 @@ from app.modules.personal_finance.bank_mappings.repository import (
 from app.modules.personal_finance.bank_mappings.repository import (
     upsert_mapping as upsert_bank_mapping,
 )
-from app.modules.personal_finance.categories.models import Category
+from app.modules.personal_finance.categories.models import Category, CategoryKind
 from app.modules.personal_finance.category_rules.models import CategoryRule
 from app.modules.personal_finance.category_rules.repository import (
     find_first_matching_rule,
@@ -64,6 +65,7 @@ from app.modules.personal_finance.imports.schemas import (
     ImportSource,
 )
 from app.modules.personal_finance.transactions.models import Transaction, TransactionSource
+from app.modules.personal_finance.transfers.service import infer_transfer_kind
 
 MAX_ERROR_LOG = 100
 DEFAULT_CURRENCY = "EUR"
@@ -358,6 +360,36 @@ async def _persist_user_category_overrides(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+async def _load_transfer_categories(
+    db: AsyncSession, user_id: uuid.UUID
+) -> tuple[set[uuid.UUID], dict[CategoryKind, uuid.UUID]]:
+    """PHASE-32 — Carga las categorías `is_transfer` del usuario.
+
+    Devuelve (a) el set de sus ids y (b) un mapa `kind → id` con la más
+    antigua de cada kind (misma elección que
+    `get_or_create_default_transfer_category`). Sirve para forzar la
+    dirección correcta al importar: una transferencia cuya descripción
+    dice "RECIBIDA" debe quedar en la categoría de transferencia INCOME
+    aunque un bank-mapping aprendido apunte a la de EXPENSE (y al revés).
+    No crea nada: si el usuario no tiene la categoría del kind necesario,
+    el caller deja la resuelta tal cual.
+    """
+    rows = (
+        await db.execute(
+            select(Category.id, Category.kind)
+            .where(Category.user_id == user_id)
+            .where(Category.is_transfer.is_(True))
+            .order_by(Category.created_at.asc())
+        )
+    ).all()
+    ids: set[uuid.UUID] = set()
+    by_kind: dict[CategoryKind, uuid.UUID] = {}
+    for cat_id, kind in rows:
+        ids.add(cat_id)
+        by_kind.setdefault(kind, cat_id)
+    return ids, by_kind
+
+
 async def _process_and_persist(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -383,6 +415,11 @@ async def _process_and_persist(
     """
     job.rows_total = len(rows)
     category_lookup = await _build_category_lookup(db, user_id)
+    # AUDIT finding #1: necesitamos el kind de cada categoría para
+    # validar la dirección de la fila contra el signo del extracto, y un
+    # mapa nombre+kind para reasignar a la categoría hermana en caso de
+    # contradicción.
+    category_kinds, sibling_by_name_kind = await _build_category_kinds(db, user_id)
 
     # Carga equivalencias `bank_concept → category_id` para los
     # conceptos presentes en las filas. Combina con los overrides del
@@ -404,12 +441,24 @@ async def _process_and_persist(
     # Ya vienen ordenadas por priority asc (el repository las ordena).
     rules = await list_rules_for_user(db, user_id, enabled_only=True)
 
+    # PHASE-32 — la dirección de una transferencia la decide SIEMPRE la
+    # descripción (RECIBIDA/REALIZADA…), no la equivalencia aprendida. Un
+    # cobro mal aprendido como "Transferencias (gasto)" restaría del saldo
+    # en lugar de sumar (bug reportado: BBVA a 0 con ingreso neto).
+    transfer_cat_ids, transfer_by_kind = await _load_transfer_categories(db, user_id)
+
     parsed: list[ParsedRow] = []
     errors: list[dict[str, object]] = []
+    # AUDIT finding #1: filas cuyo signo de extracto contradice el kind
+    # de la categoría resuelta y NO tienen categoría hermana del kind
+    # correcto. Se persisten igual (no perdemos datos), pero se marcan en
+    # el error_log con `"review": True` para que el preview avise al
+    # usuario en lugar de guardar un signo erróneo en silencio.
+    review: list[dict[str, object]] = []
 
     for idx, raw in enumerate(rows, start=1):
         try:
-            parsed_row = _parse_row(
+            parsed_row, review_note = _parse_row(
                 raw,
                 mappings=effective_mappings,
                 user_id=user_id,
@@ -418,13 +467,45 @@ async def _process_and_persist(
                 default_category_id=default_category_id,
                 bank_mappings=saved_mappings,
                 rules=rules,
+                transfer_cat_ids=transfer_cat_ids,
+                transfer_by_kind=transfer_by_kind,
+                category_kinds=category_kinds,
+                sibling_by_name_kind=sibling_by_name_kind,
             )
         except _RowError as e:
             if len(errors) < MAX_ERROR_LOG:
                 errors.append({"row": idx, "error": str(e)})
             continue
+        if review_note is not None and len(review) < MAX_ERROR_LOG:
+            review.append({"row": idx, "error": review_note, "review": True})
         parsed.append(parsed_row)
 
+    # AUDIT finding #2: asigna un ordinal de ocurrencia DENTRO del lote a
+    # cada grupo de filas con el mismo hash base (user+amount+currency+
+    # date+desc). La primera ocurrencia conserva el hash histórico
+    # (occurrence=0); la 2ª, 3ª... reciben hashes derivados distintos. Así
+    # dos líneas legítimas idénticas el mismo día NO colapsan, pero
+    # re-importar el mismo fichero sigue siendo idempotente (mismas filas,
+    # mismo orden → mismos ordinales → mismos hashes).
+    occurrence_counter: dict[str, int] = {}
+    for p in parsed:
+        base = p.import_hash
+        occ = occurrence_counter.get(base, 0)
+        occurrence_counter[base] = occ + 1
+        if occ:
+            p.import_hash = _compute_hash(
+                user_id=user_id,
+                amount=p.amount,
+                currency=currency.upper(),
+                occurred_at=p.occurred_at,
+                description=p.description,
+                occurrence=occ,
+            )
+
+    # Tras asignar ordinales, dos filas idénticas tienen hashes distintos,
+    # así que este paso ya sólo elimina re-procesos defensivos (no debería
+    # quitar filas legítimas). Se mantiene por robustez frente a hashes
+    # repetidos inesperados.
     seen_hashes_in_batch: set[str] = set()
     deduped: list[ParsedRow] = []
     for p in parsed:
@@ -450,8 +531,19 @@ async def _process_and_persist(
     # host único de dev; revisitar si se pasa a multi-worker.
     try_reconcile = await has_pending_expected(db, user_id, account_id)
 
-    inserted = 0
     reconciled = 0
+    # AUDIT finding #3: con `autoflush=False` y sin flush en el bucle, dos
+    # filas distintas del mismo importe/fecha/descripción podían reconciliar
+    # AMBAS contra la misma tx `expected` (la query de
+    # `reconcile_with_expected` filtra por `import_hash IS NULL` pero el
+    # primer match sólo muta el objeto EN MEMORIA — sin flush la BD sigue
+    # viéndola sin conciliar). La segunda fila reconciliaba en vez de
+    # insertarse → se perdía una tx real. Fix robusto: el caller lleva el
+    # set de ids ya consumidos en este lote, ignora un match repetido (cae
+    # a inserción), y hace `flush()` tras cada match para que la siguiente
+    # query ya no vea la `expected` consumida.
+    consumed_expected_ids: set[uuid.UUID] = set()
+    pending_inserts: list[ParsedRow] = []
     for p in deduped:
         if p.import_hash in existing:
             continue
@@ -473,33 +565,103 @@ async def _process_and_persist(
             if try_reconcile
             else None
         )
-        if match is not None:
+        if match is not None and match.id not in consumed_expected_ids:
+            consumed_expected_ids.add(match.id)
+            # Flush para que el `import_hash` recién asignado sea visible a
+            # la query de la siguiente fila (evita doble-match — finding #3).
+            await db.flush()
             reconciled += 1
             continue
-        db.add(
-            Transaction(
-                user_id=user_id,
-                account_id=account_id,
-                category_id=p.category_id,
-                amount=p.amount,
-                currency=currency.upper(),
-                occurred_at=p.occurred_at,
-                description=p.description,
-                source=TransactionSource.IMPORT,
-                import_hash=p.import_hash,
-            )
-        )
-        inserted += 1
+        # Si el match repite una `expected` ya consumida en este lote, lo
+        # tratamos como NO-match y caemos a inserción: dos filas reales no
+        # deben colapsar en una sola `expected`.
+        pending_inserts.append(p)
+
+    inserted = await _flush_inserts(
+        db,
+        pending_inserts,
+        user_id=user_id,
+        account_id=account_id,
+        currency=currency.upper(),
+        existing=existing,
+    )
 
     skipped_existing = len(deduped) - inserted - reconciled
 
     job.rows_ok = inserted + reconciled
     job.rows_failed = len(errors)
     job.rows_skipped = skipped_in_batch + skipped_existing
-    job.error_log = errors
+    # AUDIT finding #1: adjuntamos las advertencias de revisión (signo de
+    # extracto vs. kind sin categoría hermana) al error_log para que el
+    # preview las muestre. No cuentan como filas fallidas — la tx se
+    # persiste igual; el usuario decide si corrige la categoría.
+    job.error_log = errors + review
     job.status = ImportJobStatus.COMPLETED
     await db.flush()
     await db.refresh(job)
+
+
+async def _flush_inserts(
+    db: AsyncSession,
+    rows: list[ParsedRow],
+    *,
+    user_id: uuid.UUID,
+    account_id: uuid.UUID,
+    currency: str,
+    existing: set[str],
+) -> int:
+    """Persiste las filas a insertar y devuelve cuántas se insertaron.
+
+    AUDIT finding #6 — manejo defensivo de `IntegrityError`. Camino rápido:
+    bulk-add + UN flush (comportamiento histórico, sin coste por fila).
+    Sólo si ese flush colisiona con el índice parcial único
+    (user_id, import_hash) — posible si un proceso concurrente insertó la
+    misma fila entre nuestro `find_existing_hashes` y este flush — se hace
+    rollback del flush fallido y se reintenta fila a fila dentro de
+    SAVEPOINTs (`begin_nested`): cada colisión se trata como
+    "ya existe → skipped" en lugar de propagar un 500, y las filas sanas
+    del lote se conservan. Carrera consciente y rara (mismo fichero
+    importado en paralelo); resolución defensiva sin locks complejos.
+    """
+    if not rows:
+        return 0
+
+    def _new_tx(p: ParsedRow) -> Transaction:
+        return Transaction(
+            user_id=user_id,
+            account_id=account_id,
+            category_id=p.category_id,
+            amount=p.amount,
+            currency=currency,
+            occurred_at=p.occurred_at,
+            description=p.description,
+            source=TransactionSource.IMPORT,
+            import_hash=p.import_hash,
+        )
+
+    # Camino rápido: añade todo y flush una vez.
+    try:
+        async with db.begin_nested():
+            db.add_all([_new_tx(p) for p in rows])
+        return len(rows)
+    except IntegrityError:
+        # El flush en bloque falló por una colisión. Reintentamos fila a
+        # fila para aislar la(s) culpable(s) y conservar el resto.
+        pass
+
+    inserted = 0
+    for p in rows:
+        if p.import_hash in existing:
+            continue
+        try:
+            async with db.begin_nested():
+                db.add(_new_tx(p))
+            existing.add(p.import_hash)
+            inserted += 1
+        except IntegrityError:
+            existing.add(p.import_hash)
+            continue
+    return inserted
 
 
 async def get_ai_suggestions(
@@ -732,8 +894,20 @@ def _parse_row(
     default_category_id: uuid.UUID | None,
     bank_mappings: dict[str, uuid.UUID] | None = None,
     rules: list[CategoryRule] | None = None,
-) -> ParsedRow:
+    transfer_cat_ids: set[uuid.UUID] | None = None,
+    transfer_by_kind: dict[CategoryKind, uuid.UUID] | None = None,
+    category_kinds: dict[uuid.UUID, CategoryKind] | None = None,
+    sibling_by_name_kind: dict[tuple[str, CategoryKind], uuid.UUID] | None = None,
+) -> tuple[ParsedRow, str | None]:
     """Aplica mapping + validación + hash a una fila.
+
+    Devuelve `(ParsedRow, review_note)`. `review_note` es `None` salvo que
+    haya que corregir la dirección y no exista categoría hermana del kind
+    correcto: (a) categoría normal cuyo kind contradice el signo del
+    extracto (AUDIT finding #1), o (b) categoría de transferencia cuya
+    dirección (texto o signo) contradice su kind y falta la transfer
+    hermana del kind correcto (PHASE-32 HIGH#4). En ambos casos es un
+    mensaje para marcar la fila para revisión en el preview.
 
     Prioridad para `category_id` (de mayor a menor):
     1. `bank_mappings[concepto_normalizado]` — equivalencia explícita
@@ -744,6 +918,25 @@ def _parse_row(
        `description` según el `field` de cada regla.
     4. `default_category_id` del usuario al subir el fichero.
     5. `None` (transacción sin categoría).
+
+    Corrección de dirección (lección PHASE-28/31/32 — la dirección NUNCA
+    se infiere de `category.kind`, se deriva del SIGNO del extracto o del
+    texto):
+    - Si la categoría es `is_transfer`, la dirección la decide el texto
+      (RECIBIDA/REALIZADA); si el texto no decide, el SIGNO del extracto
+      (PHASE-32 HIGH#5 — muchos bancos no llevan esas palabras). Sólo se
+      reasigna a la hermana si el kind ACTUAL de la categoría resuelta NO
+      coincide con la dirección inferida (AUDIT finding #5: antes
+      reasignaba siempre a la `is_transfer` más antigua del kind,
+      descartando la categoría específica correcta). Si falta la transfer
+      hermana del kind correcto, se marca la fila para revisión en vez de
+      persistir el signo invertido (PHASE-32 HIGH#4).
+    - Para categorías normales, si el extracto trae el importe FIRMADO
+      (cargo `-` / abono `+`), ese signo es la verdad sobre la dirección.
+      Si contradice el kind de la categoría resuelta, se reasigna a una
+      categoría con el mismo nombre y el kind correcto (hermana); si no
+      existe, se deja la resuelta y se marca la fila para revisión
+      (AUDIT finding #1) — nunca se persiste un signo erróneo en silencio.
     """
     amount_raw = raw.get(mappings.amount, "").strip()
     occurred_raw = raw.get(mappings.occurred_at, "").strip()
@@ -757,11 +950,12 @@ def _parse_row(
     if not occurred_raw:
         raise _RowError(f"columna '{mappings.occurred_at}' vacía")
 
-    amount = _parse_amount(amount_raw)
+    amount, bank_sign = _parse_amount_signed(amount_raw)
     occurred_at = _parse_datetime(occurred_raw)
     description = description_raw or None
 
     category_id: uuid.UUID | None = default_category_id
+    resolved_name: str | None = None
     matched = False
     if category_name_raw:
         normalized = category_name_raw.casefold().strip()
@@ -770,6 +964,7 @@ def _parse_row(
             matched = True
         elif (cat_match := category_lookup.get(normalized)) is not None:
             category_id = cat_match
+            resolved_name = normalized
             matched = True
     if not matched and rules:
         rule = find_first_matching_rule(
@@ -777,6 +972,91 @@ def _parse_row(
         )
         if rule is not None:
             category_id = rule.category_id
+
+    review_note: str | None = None
+
+    # Dirección de TRANSFERENCIAS — el signo lo manda el texto
+    # (RECIBIDA/REALIZADA), no la equivalencia aprendida. AUDIT finding #5:
+    # sólo reasignar si el kind actual de la categoría resuelta NO coincide
+    # con la dirección inferida; si ya coincide, dejar la categoría
+    # específica que se resolvió (no degradar a la `is_transfer` más
+    # antigua del kind).
+    if (
+        category_id is not None
+        and transfer_cat_ids
+        and transfer_by_kind
+        and category_id in transfer_cat_ids
+    ):
+        direction = infer_transfer_kind(f"{category_name_raw} {description or ''}".strip())
+        # HIGH#5 — si el texto no decide la dirección (muchos bancos: BIZUM,
+        # ABONO, NÓMINA, TRASPASO… no llevan RECIBIDA/REALIZADA), caer al
+        # SIGNO del extracto, que es prueba directa de la dirección.
+        if direction is None and bank_sign != 0:
+            direction = CategoryKind.INCOME if bank_sign > 0 else CategoryKind.EXPENSE
+        if direction is not None:
+            current_kind = (category_kinds or {}).get(category_id)
+            if current_kind != direction:
+                sibling = transfer_by_kind.get(direction)
+                if sibling is not None:
+                    category_id = sibling
+                else:
+                    # HIGH#4 — falta la categoría de transferencia del kind
+                    # correcto. NO dejamos la dirección errónea en silencio
+                    # (reintroduce el bug "BBVA a 0 con ingreso neto" de
+                    # lessons.md): marcamos la fila para revisión.
+                    direction_label = (
+                        "recibida (ingreso)"
+                        if direction == CategoryKind.INCOME
+                        else "enviada (gasto)"
+                    )
+                    review_note = (
+                        f"Transferencia {direction_label} pero no tienes una "
+                        "categoría de transferencia de esa dirección. Revisa "
+                        "antes de confirmar para no invertir el signo del saldo."
+                    )
+    # Dirección de categorías NORMALES desde el SIGNO del extracto
+    # (AUDIT finding #1). Sólo cuando el banco declara el signo
+    # (`bank_sign != 0`) y la categoría resuelta no es transferencia
+    # (esas ya las maneja el bloque anterior por texto).
+    elif (
+        category_id is not None
+        and bank_sign != 0
+        and category_kinds is not None
+        and category_id in category_kinds
+    ):
+        expected_kind = CategoryKind.INCOME if bank_sign > 0 else CategoryKind.EXPENSE
+        current_kind = category_kinds[category_id]
+        if current_kind != expected_kind:
+            # El extracto contradice el kind de la categoría resuelta. La
+            # verdad es el signo del banco. Buscamos una categoría hermana
+            # del kind correcto (mismo nombre) para no persistir un signo
+            # erróneo.
+            sibling_name = resolved_name
+            if sibling_name is None:
+                # Categoría resuelta vía bank-mapping/regla/default: no
+                # tenemos su nombre aquí, pero podemos intentar con el
+                # concepto del banco si coincide en el lookup.
+                sibling_name = category_name_raw.casefold().strip() or None
+            sibling = (
+                (sibling_by_name_kind or {}).get((sibling_name, expected_kind))
+                if sibling_name
+                else None
+            )
+            if sibling is not None:
+                category_id = sibling
+            else:
+                # Sin hermana: dejamos la categoría resuelta pero marcamos
+                # la fila para revisión en el preview. No perdemos la tx ni
+                # silenciamos el conflicto.
+                direction_label = "ingreso/abono" if bank_sign > 0 else "gasto/cargo"
+                # `current_kind` es el de la categoría resuelta (el que
+                # contradice al extracto).
+                resolved_label = "ingreso" if current_kind == CategoryKind.INCOME else "gasto"
+                review_note = (
+                    "El extracto marca esta línea como "
+                    f"{direction_label} pero la categoría asignada es de "
+                    f"{resolved_label}. Revisa la categoría antes de confirmar."
+                )
 
     import_hash = _compute_hash(
         user_id=user_id,
@@ -786,26 +1066,49 @@ def _parse_row(
         description=description,
     )
 
-    return ParsedRow(
-        amount=amount,
-        occurred_at=occurred_at,
-        description=description,
-        category_id=category_id,
-        import_hash=import_hash,
+    return (
+        ParsedRow(
+            amount=amount,
+            occurred_at=occurred_at,
+            description=description,
+            category_id=category_id,
+            import_hash=import_hash,
+        ),
+        review_note,
     )
 
 
 def _parse_amount(value: str) -> Decimal:
+    """Devuelve la MAGNITUD (siempre positiva) del importe del extracto.
+
+    Wrapper retro-compatible de `_parse_amount_signed` que descarta el
+    signo del banco. Se conserva para callers/tests que sólo necesitan
+    la cantidad. El pipeline usa `_parse_amount_signed` cuando necesita
+    el signo del extracto como señal de dirección (AUDIT finding #1).
+    """
+    amount, _sign = _parse_amount_signed(value)
+    return amount
+
+
+def _parse_amount_signed(value: str) -> tuple[Decimal, int]:
     """Acepta `1.234,56`, `1,234.56`, `25.50`, signos `+`/`-` y
     símbolos de moneda comunes (`€`, `$`, `£`, ` EUR`, ` USD`...).
 
+    Devuelve `(magnitud_positiva, sign)` donde `sign` es:
+      `-1` el extracto trae el importe en negativo (cargo / gasto),
+      `+1` el extracto trae el importe en positivo con `+` explícito
+           (abono / ingreso señalado de forma inequívoca),
+       `0` el extracto NO declara dirección (importe sin signo): el
+           caso de muchos CSV donde la dirección la da la categoría.
+
     El sistema almacena importes siempre positivos y deduce el signo
-    de la categoría (income/expense). Los extractos bancarios reales
-    suelen traer gastos con signo negativo, así que aceptamos el
-    signo y devolvemos el valor absoluto. La asignación correcta de
-    categoría por nombre (PHASE-17.x) y la pantalla de preview es
-    la responsable de coherencia gasto/ingreso. Importes a 0 o
-    sin dígitos siguen rechazándose.
+    de la categoría (income/expense). PERO el signo del extracto, cuando
+    existe, es la VERDAD sobre la dirección del movimiento (lección
+    PHASE-28/31/32: la dirección se deriva del extracto, no de
+    `category.kind`). Por eso lo devolvemos como señal separada en lugar
+    de descartarlo con `abs()` — un abono (+) que un bank-mapping mal
+    aprendido clasifica como gasto restaría del saldo. El caller usa el
+    signo para forzar/validar el kind de la categoría resuelta.
 
     Limpieza: filtra cualquier carácter que no sea dígito, separador
     decimal/miles (`.`, `,`) o signo (`+`, `-`). Eso elimina espacios,
@@ -813,7 +1116,12 @@ def _parse_amount(value: str) -> Decimal:
     y cualquier otro adorno que el banco añada al PDF.
     """
     cleaned = re.sub(r"[^\d.,+-]", "", value)
-    if cleaned.startswith(("+", "-")):
+    sign = 0
+    if cleaned.startswith("-"):
+        sign = -1
+        cleaned = cleaned[1:]
+    elif cleaned.startswith("+"):
+        sign = 1
         cleaned = cleaned[1:]
     has_comma = "," in cleaned
     has_dot = "." in cleaned
@@ -825,6 +1133,20 @@ def _parse_amount(value: str) -> Decimal:
             cleaned = cleaned.replace(",", "")
     elif has_comma:
         cleaned = cleaned.replace(",", ".")
+    elif has_dot and cleaned.count(".") == 1:
+        # AUDIT finding #4: desambiguar miles vs. decimal cuando sólo hay
+        # un punto y ninguna coma. "1.500" europeo son MIL QUINIENTOS, no
+        # uno coma cinco. Heurística por nº de dígitos tras el separador:
+        #   - exactamente 3 dígitos y un único punto → separador de miles
+        #     (`1.500` → 1500, `12.345` → 12345).
+        #   - 1 ó 2 dígitos → decimal anglosajón (`25.50` → 25.5).
+        #   - más de 3 dígitos (`1234.5678`) → decimal (no es agrupación
+        #     de miles válida).
+        # No afecta a los casos ya soportados arriba (coma decimal es-ES y
+        # punto-miles + coma-decimal viajan por las ramas previas).
+        decimals = cleaned.split(".", 1)[1]
+        if len(decimals) == 3:
+            cleaned = cleaned.replace(".", "")
     try:
         amount = Decimal(cleaned)
     except InvalidOperation as e:
@@ -832,7 +1154,7 @@ def _parse_amount(value: str) -> Decimal:
     amount = abs(amount)
     if amount <= 0:
         raise _RowError(f"importe debe ser distinto de cero: {value!r}")
-    return amount.quantize(Decimal("0.01"))
+    return amount.quantize(Decimal("0.01")), sign
 
 
 def _parse_datetime(value: str) -> datetime:
@@ -859,8 +1181,27 @@ def _compute_hash(
     currency: str,
     occurred_at: datetime,
     description: str | None,
+    occurrence: int = 0,
 ) -> str:
-    """SHA-256 sobre los campos clave de una transacción."""
+    """SHA-256 sobre los campos clave de una transacción.
+
+    AUDIT finding #2: `occurrence` es el índice ordinal (0-based) de esta
+    fila dentro de su grupo de filas idénticas en el MISMO lote
+    (user+amount+currency+date+desc). Sin él, dos transacciones legítimas
+    idénticas el mismo día (p. ej. dos cafés de 3,50 € sin componente
+    horario en el extracto) colapsan al mismo hash y la segunda se
+    descartaba en silencio.
+
+    Con el ordinal:
+      - Dos líneas distintas del MISMO fichero → ordinales 0, 1 → hashes
+        distintos → ambas se importan.
+      - Re-importar el MISMO fichero → las filas salen en el mismo orden,
+        cada una recibe el mismo ordinal → mismos hashes → idempotente
+        (las captura `find_existing_hashes`).
+
+    `occurrence=0` (default) reproduce el hash histórico para grupos de
+    una sola fila, así que los imports previos siguen siendo idempotentes.
+    """
     parts = [
         str(user_id),
         f"{amount:.2f}",
@@ -868,6 +1209,11 @@ def _compute_hash(
         occurred_at.isoformat(),
         (description or "").strip().casefold(),
     ]
+    if occurrence:
+        # Sólo se añade para la 2ª+ ocurrencia: preserva el hash histórico
+        # del caso común (1 fila por grupo) y evita rehashear imports ya
+        # persistidos.
+        parts.append(f"#{occurrence}")
     raw = "|".join(parts).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
 
@@ -876,6 +1222,36 @@ async def _build_category_lookup(db: AsyncSession, user_id: uuid.UUID) -> dict[s
     """Mapa case-insensitive `name → id` de las categorías del usuario."""
     result = await db.execute(select(Category.id, Category.name).where(Category.user_id == user_id))
     return {name.casefold(): cat_id for cat_id, name in result.all()}
+
+
+async def _build_category_kinds(
+    db: AsyncSession, user_id: uuid.UUID
+) -> tuple[dict[uuid.UUID, CategoryKind], dict[tuple[str, CategoryKind], uuid.UUID]]:
+    """AUDIT finding #1 — Carga el kind de cada categoría del usuario.
+
+    Devuelve dos mapas:
+      - `kind_by_id`: `category_id → CategoryKind`. Permite al pipeline
+        comparar el signo del extracto con el kind de la categoría
+        resuelta y detectar contradicciones (un abono clasificado como
+        gasto).
+      - `sibling_by_name_kind`: `(name_casefold, kind) → category_id`.
+        Permite reasignar a la "categoría hermana" del kind correcto
+        cuando hay contradicción: una categoría con el MISMO nombre pero
+        el kind que dicta el signo del banco (p. ej. "Transferencias"
+        income vs. expense). Si no existe la hermana, el caller deja la
+        resuelta y marca la fila para revisión.
+    """
+    rows = (
+        await db.execute(
+            select(Category.id, Category.name, Category.kind).where(Category.user_id == user_id)
+        )
+    ).all()
+    kind_by_id: dict[uuid.UUID, CategoryKind] = {}
+    sibling_by_name_kind: dict[tuple[str, CategoryKind], uuid.UUID] = {}
+    for cat_id, name, kind in rows:
+        kind_by_id[cat_id] = kind
+        sibling_by_name_kind[(name.casefold().strip(), kind)] = cat_id
+    return kind_by_id, sibling_by_name_kind
 
 
 async def _user_owns_category(db: AsyncSession, user_id: uuid.UUID, category_id: uuid.UUID) -> bool:

@@ -189,6 +189,32 @@ importe) puede mentir y deriva varias decisiones distintas, exponer la
 dirección como input explícito de la API y forzar el estado canónico
 después; no inferir.
 
+### [PHASE-32] Los bank-mappings aprendidos colapsan la dirección de las transferencias
+**Error:** El usuario reportó "BBVA a 0 con ingreso neto". Una
+`TRANSFERENCIA RECIBIDA DE Jose` (+5000 €) se persistió en la categoría
+`Transferencias` (kind=EXPENSE) en lugar de `Transferencia a favor`
+(kind=INCOME), restando 5000 € del saldo en vez de sumarlos. El seed de
+reglas (PHASE-31.1) ya distinguía RECIBIDA→income / REALIZADA→expense,
+pero un **bank-mapping aprendido** (auto-learn de un preview anterior)
+tenía mayor prioridad que las reglas y mandaba el concepto entrante a la
+categoría de gasto.
+**Causa:** El auto-aprendizaje guarda `concepto_normalizado → category_id`
+incluyendo el nombre de la contraparte, y colapsa las DOS direcciones de
+una transferencia en una sola categoría. Para conceptos de transferencia,
+"qué categoría" y "qué dirección" son ortogonales: la dirección la dice
+el texto (RECIBIDA/REALIZADA), no la equivalencia aprendida una vez.
+**Solución:** En el pipeline de imports, tras resolver la categoría
+(mapping > lookup > regla), si es `is_transfer` se corrige la dirección
+con `infer_transfer_kind(concepto + descripción)` y se reasigna a la
+categoría hermana del kind correcto (`_load_transfer_categories`). No
+crea categorías como efecto colateral: si falta la hermana, deja la
+resuelta. Data-fix puntual: repuntados los 3 mapeos "recibida/abono" a la
+categoría income + recategorizada la tx afectada (BBVA 0 → 10 000 €).
+**Regla:** Para categorías cuyo signo depende de la dirección del
+movimiento (transferencias), deriva la dirección SIEMPRE del texto de la
+tx en el punto de uso; no confíes en una equivalencia aprendida que la
+fija de una vez. Generaliza la lección de PHASE-28 a los bank-mappings.
+
 ### [PHASE-26] Cabeceras XLSX en la fila 1 fallan con extractos bancarios reales
 **Error:** El parser XLSX asumía cabecera en la fila 1 (`next(iterator)`).
 Los XLSX de BBVA / Santander / ING / CaixaBank llevan 5-10 filas iniciales

@@ -7,7 +7,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.modules.personal_finance.transactions.models import TransactionSource
 
@@ -43,6 +43,15 @@ class TransactionCreate(BaseModel):
     description: str | None = Field(default=None, max_length=500)
     source: TransactionSource = TransactionSource.MANUAL
 
+    @field_validator("currency")
+    @classmethod
+    def _upper_currency(cls, v: str) -> str:
+        # AUDIT — normalizar la divisa a mayúsculas (las cuentas ya la
+        # guardan upper). El saldo por cuenta sólo agrega tx cuya
+        # `currency == account.currency`; sin normalizar, una "eur"
+        # minúscula quedaría invisible al saldo y al reassign.
+        return v.upper()
+
 
 class TransactionUpdate(BaseModel):
     """Datos para actualizar una transacción (parcial)."""
@@ -53,6 +62,11 @@ class TransactionUpdate(BaseModel):
     currency: str | None = Field(default=None, max_length=3)
     occurred_at: datetime | None = None
     description: str | None = None
+
+    @field_validator("currency")
+    @classmethod
+    def _upper_currency(cls, v: str | None) -> str | None:
+        return v.upper() if v is not None else v
 
 
 class TransactionResponse(BaseModel):
@@ -84,6 +98,13 @@ class TransactionResponse(BaseModel):
     deleted_at: datetime | None = None
     converted_amount: Decimal | None = None
     converted_currency: str | None = None
+    # True cuando la tx es una pata de un par de conversión a deuda
+    # (activo↔pasivo): la UI la marca "Deuda" en vez de "Transferencia"
+    # y pinta el importe en neutro (coherente con el fix activo-fantasma,
+    # que hace que la pata-activo aporte 0 al patrimonio). Sólo el
+    # endpoint de LISTADO lo computa; el resto de endpoints devuelven
+    # `False` (no consumen esta señal).
+    is_debt_pair: bool = False
     # PHASE-14.5: sólo viene en la respuesta del POST cuando la tx
     # creada empuja la categoría a warning/over. None en cualquier
     # otro endpoint (list, get, put).

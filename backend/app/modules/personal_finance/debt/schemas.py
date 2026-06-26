@@ -47,6 +47,36 @@ class MonthlyDebtPoint(BaseModel):
     """`payments - interests`."""
 
 
+class DailyDebtPoint(BaseModel):
+    """Un día del mes en la vista diaria (sólo `range='month'`).
+
+    A diferencia de la serie mensual (que mira PAGOS categorizados),
+    la vista diaria modela la **evolución del saldo de deuda** dentro
+    del mes a partir de las cuentas-pasivo (Capa 2):
+
+    - `emitida`: Σ cargos del día que SUBEN la deuda (gastos sobre
+      cuentas-pasivo: compras a plazos, aplazamientos, disposiciones).
+    - `amortizado`: Σ del día que BAJA la deuda (entradas a cuentas
+      -pasivo, típicamente transferencias de pago de capital).
+    - `interest`: Σ intereses pagados ese día (categorías DEBT_INTEREST,
+      Capa 1) — informativo; se paga en cash y NO mueve el principal.
+    - `balance`: saldo agregado de deuda al cierre del día. `None`
+      cuando el usuario no tiene cuentas-pasivo declaradas (sin Capa 2
+      no hay saldo que dibujar; el chart cae a barras de pagos).
+
+    Degradación: sin cuentas-pasivo, `emitida=0`, `balance=None` y
+    `amortizado` toma los pagos de capital categorizados (DEBT_PAYMENT)
+    para que el chart diario siga siendo útil.
+    """
+
+    day: int
+    """Día del mes (1-31)."""
+    emitida: Decimal
+    amortizado: Decimal
+    interest: Decimal
+    balance: Decimal | None
+
+
 class RecurringQuotaRef(BaseModel):
     """Referencia cross-link a un `fixed_expense` con categoría de deuda."""
 
@@ -95,6 +125,11 @@ class DebtCategorySummary(BaseModel):
     """Un punto por mes del período (meses sin actividad en 0): 1 para
     `month`, hasta 3 para `quarter`, hasta 12 para `year`. El período
     en curso sólo incluye los meses transcurridos."""
+
+    daily_series: list[DailyDebtPoint] | None = None
+    """Sólo poblado cuando `range='month'`: un punto por día del mes con
+    la evolución del saldo de deuda (emisión ↑ / amortización ↓) + el
+    saldo acumulado. `None` para `quarter`/`year` (se usa `monthly_series`)."""
 
     monthly_income_avg: Decimal
     """Ingreso medio mensual de la categoría INCOME (sin transferencias

@@ -131,14 +131,16 @@ export function StitchRecentActivity() {
 
 function ActivityRow({ tx, category }: { tx: Transaction; category: Category | undefined }) {
   const Icon = iconForTransaction(tx.description, category?.name);
-  const amountColor =
-    category?.kind === 'income'
-      ? colors.success
-      : category?.kind === 'expense'
-        ? colors.text
-        : colors.text;
+  // Una pata de transferencia/deuda no es ingreso ni gasto: se pinta en
+  // neutro, sin signo — igual que en la lista de transacciones. Sin esto,
+  // la pata-activo de una operación financiada (categoría income) saldría
+  // como "+824,77 €" verde en el dashboard, justo tras convertirla.
+  const isTransferLike =
+    tx.transfer_pair_id !== null || category?.is_transfer === true;
+  const displayKind = isTransferLike ? null : (category?.kind ?? null);
+  const amountColor = displayKind === 'income' ? colors.success : colors.text;
   const sign =
-    category?.kind === 'income' ? '+' : category?.kind === 'expense' ? '-' : '';
+    displayKind === 'income' ? '+' : displayKind === 'expense' ? '-' : '';
 
   return (
     <Link

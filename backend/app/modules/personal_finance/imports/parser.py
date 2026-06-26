@@ -413,15 +413,23 @@ _DATE_HEADER_HINTS = (
     "f contab",
     "operación",
     "operacion",
-    "valor",
+    "fecha valor",
+    "f. valor",
+    "f.valor",
     "date",
 )
 # IMPORTANT: NO incluir "saldo" — los extractos típicos tienen
 # columnas Importe + Saldo y la heurística de "último match" se quedaría
 # con el saldo (acumulado), no con el importe de la transacción. El
 # usuario verá saldos como si fueran transacciones — bug grave.
-# "valor" tampoco: confunde con "Fecha valor" en cabeceras de extractos
-# bancarios españoles. Mantenemos sinónimos seguros.
+# AUDIT finding #7: NO incluir "valor" suelto. El comentario decía que no
+# debía estar, pero el hint seguía en la lista — "valor" hacía match con
+# cualquier cabecera que lo contuviera (p. ej. "Valoración"). Para
+# soportar "Fecha valor" usamos hints específicos ("fecha valor",
+# "f. valor") en lugar del genérico. Nota: "occurred_at" se asigna al
+# PRIMER match de fecha (`_classify_columns`), así que "Fecha" (operación)
+# gana sobre "Fecha valor" cuando ambas existen — el orden de la cabecera
+# decide, no el orden de estos hints.
 _AMOUNT_HEADER_HINTS = (
     "importe",
     "amount",

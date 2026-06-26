@@ -73,6 +73,9 @@ export interface Account {
   interest_only_first_payment?: string | null;
   display_order: number;
   is_archived: boolean;
+  /** PHASE-32 — Cuenta principal del usuario: pre-seleccionada en los
+   * formularios (transacción, import, ticket). Única por usuario. */
+  is_default: boolean;
   /** PHASE-30.4 — Categoría de pagos vinculada (chip en Capa 2 de
    * /debt). NULL = sin vincular. Sólo significativo en liabilities. */
   category_id?: string | null;

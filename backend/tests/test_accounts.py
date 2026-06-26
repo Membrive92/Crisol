@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from httpx import AsyncClient
 
 
@@ -24,6 +26,48 @@ async def test_list_empty(client: AsyncClient) -> None:
     r = await client.get("/accounts", headers=_auth(token))
     assert r.status_code == 200
     assert r.json() == []
+
+
+async def test_create_account_as_default(client: AsyncClient) -> None:
+    """PHASE-32 — crear una cuenta como principal devuelve `is_default=true`."""
+    token = await _setup_user(client, "isdefault@example.com")
+    r = await client.post(
+        "/accounts",
+        json={"name": "BBVA", "type": "bank", "currency": "EUR", "is_default": True},
+        headers=_auth(token),
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["is_default"] is True
+
+
+async def test_only_one_default_account_per_user(client: AsyncClient) -> None:
+    """PHASE-32 — marcar una cuenta como principal desmarca la anterior
+    (única cuenta principal por usuario)."""
+    token = await _setup_user(client, "onedefault@example.com")
+    a = await client.post(
+        "/accounts",
+        json={"name": "BBVA", "type": "bank", "currency": "EUR", "is_default": True},
+        headers=_auth(token),
+    )
+    a_id = a.json()["id"]
+    b = await client.post(
+        "/accounts",
+        json={"name": "Santander", "type": "bank", "currency": "EUR"},
+        headers=_auth(token),
+    )
+    b_id = b.json()["id"]
+    assert b.json()["is_default"] is False
+
+    # Marcar B como principal vía PUT.
+    upd = await client.put(f"/accounts/{b_id}", json={"is_default": True}, headers=_auth(token))
+    assert upd.status_code == 200, upd.text
+    assert upd.json()["is_default"] is True
+
+    # A ya no es la principal.
+    accounts = (await client.get("/accounts", headers=_auth(token))).json()
+    by_id = {x["id"]: x for x in accounts}
+    assert by_id[a_id]["is_default"] is False
+    assert by_id[b_id]["is_default"] is True
 
 
 async def test_create_account(client: AsyncClient) -> None:
@@ -382,3 +426,176 @@ async def test_brokerage_account_excluded_from_net_worth(
     assert body["net_worth"] == "5000.00"
     # Ambas cuentas siguen apareciendo en `items`.
     assert len(body["items"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# PHASE-32 — la cuenta principal (is_default) refleja AHORRO NETO.
+# ---------------------------------------------------------------------------
+
+
+async def test_default_account_balance_excludes_internal_transfers(
+    client: AsyncClient,
+) -> None:
+    """PHASE-32 — La cuenta principal (`is_default`) refleja ahorro neto: las
+    transferencias internas (`is_transfer`) NO cuentan en su saldo. Una
+    cuenta NO principal sí las cuenta (modo cash, PHASE-23.1)."""
+    token = await _setup_user(client, "default-savings@example.com")
+
+    cats = (await client.get("/categories", headers=_auth(token))).json()
+    income = next(c for c in cats if c["kind"] == "income" and not c["is_transfer"])
+    transfer_in = next(c for c in cats if c["kind"] == "income" and c["is_transfer"])
+
+    main = await client.post(
+        "/accounts",
+        json={"name": "Principal", "type": "bank", "currency": "EUR", "is_default": True},
+        headers=_auth(token),
+    )
+    main_id = main.json()["id"]
+    other = await client.post(
+        "/accounts",
+        json={"name": "Otra", "type": "bank", "currency": "EUR"},
+        headers=_auth(token),
+    )
+    other_id = other.json()["id"]
+
+    # En cada cuenta: 100 de ingreso real + 500 de transferencia interna.
+    for acc_id in (main_id, other_id):
+        for amount, cat in (("100.00", income["id"]), ("500.00", transfer_in["id"])):
+            r = await client.post(
+                "/transactions",
+                json={
+                    "amount": amount,
+                    "currency": "EUR",
+                    "occurred_at": "2026-01-15T12:00:00Z",
+                    "account_id": acc_id,
+                    "category_id": cat,
+                },
+                headers=_auth(token),
+            )
+            assert r.status_code == 201, r.text
+
+    by_id = {
+        b["account_id"]: b
+        for b in (await client.get("/accounts/balances", headers=_auth(token))).json()["items"]
+    }
+    # Principal: solo el ingreso real (100); la transferencia NO cuenta.
+    assert Decimal(by_id[main_id]["movements_balance"]) == Decimal("100.00")
+    # Otra: ingreso + transferencia (modo cash).
+    assert Decimal(by_id[other_id]["movements_balance"]) == Decimal("600.00")
+
+
+async def test_net_worth_unaffected_by_transfer_into_default_account(
+    client: AsyncClient,
+) -> None:
+    """PHASE-32 HIGH#1 — una transferencia interna HACIA la cuenta principal
+    NO debe cambiar el patrimonio neto agregado. La pata entrante está zerada
+    en el DISPLAY de ahorro neto de la principal, pero el agregado usa el
+    saldo CASH, así que se cancela con la pata saliente de la otra cuenta.
+    Antes (bug), el net_worth encogía por el importe de la transferencia."""
+    token = await _setup_user(client, "networth-transfer@example.com")
+
+    cats = (await client.get("/categories", headers=_auth(token))).json()
+    income = next(c for c in cats if c["kind"] == "income" and not c["is_transfer"])
+    transfer_in = next(c for c in cats if c["kind"] == "income" and c["is_transfer"])
+    transfer_out = next(c for c in cats if c["kind"] == "expense" and c["is_transfer"])
+
+    main = await client.post(
+        "/accounts",
+        json={"name": "Principal", "type": "bank", "currency": "EUR", "is_default": True},
+        headers=_auth(token),
+    )
+    main_id = main.json()["id"]
+    other = await client.post(
+        "/accounts",
+        json={"name": "Otra", "type": "bank", "currency": "EUR"},
+        headers=_auth(token),
+    )
+    other_id = other.json()["id"]
+
+    async def _post(acc_id: str, amount: str, cat_id: str) -> None:
+        r = await client.post(
+            "/transactions",
+            json={
+                "amount": amount,
+                "currency": "EUR",
+                "occurred_at": "2026-01-15T12:00:00Z",
+                "account_id": acc_id,
+                "category_id": cat_id,
+            },
+            headers=_auth(token),
+        )
+        assert r.status_code == 201, r.text
+
+    # Ahorro real en la principal: +100.
+    await _post(main_id, "100.00", income["id"])
+    # Transferencia interna de 500 "Otra" → "Principal": dos patas.
+    await _post(main_id, "500.00", transfer_in["id"])  # +500 entra a la principal
+    await _post(other_id, "500.00", transfer_out["id"])  # -500 sale de la otra
+
+    bal = (await client.get("/accounts/balances", headers=_auth(token))).json()
+    by_id = {b["account_id"]: b for b in bal["items"]}
+
+    # DISPLAY: la principal muestra ahorro neto (100, sin la transferencia).
+    assert Decimal(by_id[main_id]["movements_balance"]) == Decimal("100.00")
+    # AGREGADO: net_worth = sólo el ahorro real (100). Las dos patas de la
+    # transferencia (+500 principal cash, -500 otra) se cancelan.
+    assert Decimal(bal["net_worth"]) == Decimal("100.00")
+    assert Decimal(bal["total_assets"]) == Decimal("100.00")
+
+
+async def test_liability_account_cannot_be_default_on_create(client: AsyncClient) -> None:
+    """PHASE-32 HIGH#2 — una cuenta de pasivo no puede crearse como principal
+    (su saldo es deuda, no ahorro; el carve-out de transferencias no aplica)."""
+    token = await _setup_user(client, "liab-default-create@example.com")
+    r = await client.post(
+        "/accounts",
+        json={"name": "Visa", "type": "credit_card", "currency": "EUR", "is_default": True},
+        headers=_auth(token),
+    )
+    assert r.status_code == 400, r.text
+
+
+async def test_liability_account_cannot_be_default_on_update(client: AsyncClient) -> None:
+    """PHASE-32 HIGH#2 — marcar una cuenta de pasivo como principal vía PUT
+    también se rechaza."""
+    token = await _setup_user(client, "liab-default-update@example.com")
+    cc = await client.post(
+        "/accounts",
+        json={"name": "Visa", "type": "credit_card", "currency": "EUR"},
+        headers=_auth(token),
+    )
+    cc_id = cc.json()["id"]
+    r = await client.put(f"/accounts/{cc_id}", json={"is_default": True}, headers=_auth(token))
+    assert r.status_code == 400, r.text
+
+
+async def test_default_asset_converted_to_liability_type_is_rejected(client: AsyncClient) -> None:
+    """PHASE-32 fix-review — cambiar el `type` de una cuenta principal ASSET a
+    un tipo de pasivo, SIN tocar `is_default` en el payload, se rechaza: no
+    debe quedar `is_default=True` sobre un pasivo (gap del guard antiguo)."""
+    token = await _setup_user(client, "default-to-liability@example.com")
+    a = await client.post(
+        "/accounts",
+        json={"name": "Principal", "type": "bank", "currency": "EUR", "is_default": True},
+        headers=_auth(token),
+    )
+    a_id = a.json()["id"]
+    r = await client.put(f"/accounts/{a_id}", json={"type": "credit_card"}, headers=_auth(token))
+    assert r.status_code == 400, r.text
+
+
+async def test_archiving_default_account_clears_is_default(client: AsyncClient) -> None:
+    """PHASE-32 (AUDIT MEDIUM#6) — archivar la cuenta principal limpia
+    `is_default`: los formularios sólo cargan cuentas activas, así que dejar
+    el flag colgando perdería la pre-selección en silencio."""
+    token = await _setup_user(client, "archive-default@example.com")
+    a = await client.post(
+        "/accounts",
+        json={"name": "Principal", "type": "bank", "currency": "EUR", "is_default": True},
+        headers=_auth(token),
+    )
+    a_id = a.json()["id"]
+    r = await client.put(f"/accounts/{a_id}", json={"is_archived": True}, headers=_auth(token))
+    assert r.status_code == 200, r.text
+    assert r.json()["is_archived"] is True
+    assert r.json()["is_default"] is False

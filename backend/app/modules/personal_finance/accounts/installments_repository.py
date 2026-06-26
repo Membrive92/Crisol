@@ -104,12 +104,38 @@ async def update_installment_amount_and_date(
     payment: object | None = None,
     due_date: object | None = None,
 ) -> LiabilityInstallment:
-    """Override puntual de importe / fecha. No recomputa intereses ni
-    saldos restantes — la edición es un override puntual (PHASE-24.1
-    decisión arquitectónica).
+    """Override puntual de importe / fecha.
+
+    AUDIT-FIX (finding 4): al editar el `payment` de una cuota, se
+    recalcula el split de ESA fila para que siga cumpliendo la
+    identidad `payment == interest + principal`. Antes el override
+    cambiaba sólo `payment` y dejaba `interest`/`principal` sin tocar,
+    rompiendo la identidad de la fila y desligando el cuadro de los
+    totales.
+
+    Decisión deliberadamente mínima (no recompone las cuotas
+    siguientes): el `interest` de la cuota se mantiene (es el interés
+    devengado sobre el saldo de entrada de ese mes, que no cambia
+    porque las filas previas no se tocan), y el `principal` absorbe la
+    diferencia: `principal = payment − interest`. NO se recalcula
+    `remaining_balance` ni las cuotas posteriores — el override sigue
+    siendo puntual, pero internamente coherente fila a fila. Si el
+    nuevo `payment` es menor que el interés del mes, el principal
+    resultante sería negativo: en ese caso se deja `principal = 0` y el
+    `interest` se ajusta a `payment` para no fabricar amortización
+    negativa (caso degenerado de cuota inferior al interés).
     """
     if payment is not None:
-        inst.payment = payment  # type: ignore[assignment]
+        new_payment: Decimal = payment  # type: ignore[assignment]
+        inst.payment = new_payment
+        # Recalcular el split manteniendo el interés devengado del mes.
+        if new_payment >= inst.interest:
+            inst.principal = new_payment - inst.interest
+        else:
+            # Cuota inferior al interés del mes: no hay amortización de
+            # principal; toda la cuota es interés.
+            inst.interest = new_payment
+            inst.principal = Decimal("0")
     if due_date is not None:
         inst.due_date = due_date  # type: ignore[assignment]
     await db.flush()

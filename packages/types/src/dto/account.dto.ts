@@ -20,6 +20,8 @@ export interface AccountCreateRequest {
   /** PHASE-24.3 — Primer pago sólo de intereses. */
   interest_only_first_payment?: string | null;
   display_order?: number;
+  /** PHASE-32 — Crear como cuenta principal (desmarca las demás). */
+  is_default?: boolean;
   /** PHASE-30.4 — Categoría de pagos vinculada. Sólo válida para
    * liabilities con role DEBT_PAYMENT o DEBT_INTEREST. */
   category_id?: string | null;
@@ -41,6 +43,9 @@ export interface AccountUpdateRequest {
   interest_only_first_payment?: string | null;
   display_order?: number;
   is_archived?: boolean;
+  /** PHASE-32 — `true` marca como principal (desmarca las demás), `false`
+   * la desmarca. */
+  is_default?: boolean;
   /** PHASE-30.4 — Vincular o desvincular categoría (null para desvincular). */
   category_id?: string | null;
 }

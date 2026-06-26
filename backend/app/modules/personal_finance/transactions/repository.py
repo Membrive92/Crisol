@@ -7,9 +7,11 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Literal
 
-from sqlalchemy import Delete, Select, Update, func, null, select, update
+from sqlalchemy import Delete, Select, Update, case, func, null, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
+from app.modules.personal_finance.accounts.models import Account, AccountNature
 from app.modules.personal_finance.dashboard.conversion import converted_amount_expr
 from app.modules.personal_finance.transactions.models import Transaction
 
@@ -26,6 +28,7 @@ def _scope[Q: Select[Any] | Update | Delete](
     *,
     account_id: uuid.UUID | None = None,
     category_id: uuid.UUID | None = None,
+    uncategorized: bool = False,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     search: str | None = None,
@@ -35,6 +38,11 @@ def _scope[Q: Select[Any] | Update | Delete](
 
     Aplicable tanto a SELECT como a UPDATE (bulk soft-delete) — el
     `where()` chaining funciona idéntico en ambos.
+
+    `uncategorized=True` filtra las tx SIN categoría (`category_id IS
+    NULL`) y, al ser el caso "sin categoría", IGNORA `category_id` (no
+    tiene sentido pedir ambos). Sostiene el atajo "Ver y categorizar"
+    del banner de transacciones sin clasificar.
     """
     conditions: list[Any] = [Transaction.user_id == user_id]
     if deleted == "active":
@@ -43,7 +51,9 @@ def _scope[Q: Select[Any] | Update | Delete](
         conditions.append(Transaction.deleted_at.is_not(None))
     if account_id is not None:
         conditions.append(Transaction.account_id == account_id)
-    if category_id is not None:
+    if uncategorized:
+        conditions.append(Transaction.category_id.is_(None))
+    elif category_id is not None:
         conditions.append(Transaction.category_id == category_id)
     if date_from is not None:
         conditions.append(Transaction.occurred_at >= date_from)
@@ -62,13 +72,14 @@ async def list_transactions(
     *,
     account_id: uuid.UUID | None = None,
     category_id: uuid.UUID | None = None,
+    uncategorized: bool = False,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     search: str | None = None,
     target_currency: str | None = None,
     limit: int = 50,
     offset: int = 0,
-) -> tuple[list[tuple[Transaction, Decimal | None]], int]:
+) -> tuple[list[tuple[Transaction, Decimal | None, bool]], int]:
     """Lista transacciones activas filtradas + total count.
 
     Las soft-deleted no aparecen — para verlas usar `list_trashed_transactions`.
@@ -78,6 +89,14 @@ async def list_transactions(
     (vía `converted_amount_expr`). NULL si no hay tasa disponible. En
     modo legacy (`target_currency=None`) la segunda parte de la tupla
     es siempre `None`.
+
+    El tercer elemento de la tupla es `is_debt_pair`: `True` cuando la
+    tx forma parte de un par de conversión a deuda (activo↔pasivo), es
+    decir cuando su cuenta O la cuenta de su pareja es una liability. La
+    UI usa esa señal para marcar la fila como "Deuda" (en vez de
+    "Transferencia") y pintar el importe en neutro — coherente con que
+    la pata-activo aporta 0 al patrimonio (fix activo-fantasma). Un par
+    de transferencia interna activo↔activo da `False`.
     """
     count_query = select(func.count()).select_from(Transaction)
     count_query = _scope(
@@ -85,6 +104,7 @@ async def list_transactions(
         user_id,
         account_id=account_id,
         category_id=category_id,
+        uncategorized=uncategorized,
         date_from=date_from,
         date_to=date_to,
         search=search,
@@ -96,12 +116,41 @@ async def list_transactions(
     else:
         converted_col = null().label("converted_amount")
 
-    items_query = select(Transaction, converted_col)
+    # Self-joins para clasificar el par: la cuenta propia y la de la
+    # pareja (si la hay). Una fila es "pata de deuda" SÓLO si está
+    # emparejada (`transfer_pair_id` no nulo) Y alguna de las dos patas
+    # vive en una liability (par activo↔pasivo). El requisito de
+    # emparejamiento es clave: sin él, un cargo normal en una tarjeta
+    # (cuenta liability, sin par) saldría marcado como deuda. El inner
+    # join sobre la cuenta propia es seguro: `account_id` es NOT NULL
+    # desde PHASE-21.2.
+    own_account = aliased(Account)
+    partner_tx = aliased(Transaction)
+    partner_account = aliased(Account)
+    is_debt_pair_col = case(
+        (
+            Transaction.transfer_pair_id.is_not(None)
+            & (
+                (own_account.nature == AccountNature.LIABILITY)
+                | (partner_account.nature == AccountNature.LIABILITY)
+            ),
+            True,
+        ),
+        else_=False,
+    ).label("is_debt_pair")
+
+    items_query = (
+        select(Transaction, converted_col, is_debt_pair_col)
+        .join(own_account, own_account.id == Transaction.account_id)
+        .outerjoin(partner_tx, partner_tx.id == Transaction.transfer_pair_id)
+        .outerjoin(partner_account, partner_account.id == partner_tx.account_id)
+    )
     items_query = _scope(
         items_query,
         user_id,
         account_id=account_id,
         category_id=category_id,
+        uncategorized=uncategorized,
         date_from=date_from,
         date_to=date_to,
         search=search,
@@ -109,9 +158,11 @@ async def list_transactions(
     items_query = items_query.order_by(Transaction.occurred_at.desc()).limit(limit).offset(offset)
 
     result = await db.execute(items_query)
-    items: list[tuple[Transaction, Decimal | None]] = []
-    for tx, converted in result.all():
-        items.append((tx, Decimal(converted) if converted is not None else None))
+    items: list[tuple[Transaction, Decimal | None, bool]] = []
+    for tx, converted, is_debt_pair in result.all():
+        items.append(
+            (tx, Decimal(converted) if converted is not None else None, bool(is_debt_pair))
+        )
     return items, total
 
 
@@ -291,6 +342,90 @@ async def bulk_soft_delete_transactions(
         await db.execute(orphan_unlink)
     await db.flush()
     return result.rowcount or 0
+
+
+async def bulk_reassign_account(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    target_account_id: uuid.UUID,
+    target_currency: str,
+    account_id: uuid.UUID | None = None,
+    category_id: uuid.UUID | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    search: str | None = None,
+) -> int:
+    """PHASE-32 — Mueve a `target_account_id` todas las tx activas del
+    usuario que matcheen los filtros (mismos que el listado). Devuelve
+    cuántas se reasignaron.
+
+    Excluye:
+    - Transferencias internas (`transfer_pair_id` no nulo): mover una
+      sola pata corrompería el par. El usuario las gestiona aparte.
+    - Las que ya están en la cuenta destino (no-op).
+    - **HIGH#3**: las de una divisa distinta a `target_currency` (la de la
+      cuenta destino). El saldo por cuenta sólo agrega txs cuya
+      `currency == account.currency` (ver `get_balances_for_user`), así
+      que mover una tx EUR a una cuenta USD la haría DESAPARECER del saldo
+      de ambas cuentas — pérdida silenciosa. Se quedan donde están; el
+      caller informa cuántas se omitieron por divisa.
+    """
+    stmt = update(Transaction).values(account_id=target_account_id)
+    stmt = _scope(
+        stmt,
+        user_id,
+        account_id=account_id,
+        category_id=category_id,
+        date_from=date_from,
+        date_to=date_to,
+        search=search,
+        deleted="active",
+    )
+    stmt = (
+        stmt.where(Transaction.transfer_pair_id.is_(None))
+        .where(Transaction.account_id != target_account_id)
+        .where(Transaction.currency == target_currency)
+    )
+    result = await db.execute(stmt)
+    await db.flush()
+    return result.rowcount or 0
+
+
+async def count_reassignable_skipped_by_currency(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    target_account_id: uuid.UUID,
+    target_currency: str,
+    account_id: uuid.UUID | None = None,
+    category_id: uuid.UUID | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    search: str | None = None,
+) -> int:
+    """HIGH#3 — cuántas tx matchean los filtros del reassign pero NO se
+    mueven por tener una divisa distinta a la de la cuenta destino (las
+    dejamos donde están para no sacarlas del saldo). Mismo scope que
+    `bulk_reassign_account` salvo el signo del filtro de divisa.
+    """
+    stmt = select(func.count()).select_from(Transaction)
+    stmt = _scope(
+        stmt,
+        user_id,
+        account_id=account_id,
+        category_id=category_id,
+        date_from=date_from,
+        date_to=date_to,
+        search=search,
+        deleted="active",
+    )
+    stmt = (
+        stmt.where(Transaction.transfer_pair_id.is_(None))
+        .where(Transaction.account_id != target_account_id)
+        .where(Transaction.currency != target_currency)
+    )
+    return int((await db.execute(stmt)).scalar_one())
 
 
 async def bulk_restore_trashed(db: AsyncSession, user_id: uuid.UUID) -> int:

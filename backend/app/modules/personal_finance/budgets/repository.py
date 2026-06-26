@@ -19,10 +19,20 @@ from app.modules.personal_finance.transactions.models import Transaction
 
 
 async def list_active_budgets(db: AsyncSession, user_id: uuid.UUID, *, today: date) -> list[Budget]:
-    """Lista presupuestos activos: `effective_to IS NULL` o `>= today`."""
+    """Lista presupuestos activos: ya empezados (`effective_from <= today`)
+    y aún no cerrados (`effective_to IS NULL` o `>= today`).
+
+    PHASE-12 (audit-fix): sin el filtro `effective_from <= today` un
+    presupuesto con fecha de inicio futura ya se reportaba activo —
+    acumulaba gasto del mes en curso y, vía la política de "un activo por
+    categoría", bloqueaba crear otro presupuesto para esa categoría hoy.
+    `today` llega del service en UTC (`_today_utc`) para que el rango sea
+    determinista (igual que el cálculo del mes).
+    """
     query = (
         select(Budget)
         .where(Budget.user_id == user_id)
+        .where(Budget.effective_from <= today)
         .where(or_(Budget.effective_to.is_(None), Budget.effective_to >= today))
         .order_by(Budget.created_at.desc())
     )
@@ -48,10 +58,17 @@ async def get_active_budget_for_category(
     """Devuelve el presupuesto activo para una categoría dada (o global
     si `category_id IS NULL`). Usado por el service para evitar
     duplicados antes de crear uno nuevo.
+
+    PHASE-12 (audit-fix): mismo criterio de "activo" que
+    `list_active_budgets` — ya empezado (`effective_from <= today`) y no
+    cerrado. Así un presupuesto con inicio futuro no se cuenta como
+    activo y deja de bloquear la creación de otro hoy (y, recíprocamente,
+    no aparece en el status hasta que llega su fecha).
     """
     query = (
         select(Budget)
         .where(Budget.user_id == user_id)
+        .where(Budget.effective_from <= today)
         .where(or_(Budget.effective_to.is_(None), Budget.effective_to >= today))
     )
     if category_id is None:
@@ -114,6 +131,17 @@ async def sum_expenses_in_period(
             # PHASE-19.3: una salida que es transferencia interna no
             # cuenta como gasto y no consume presupuesto.
             .where(Transaction.transfer_pair_id.is_(None))
+            # PHASE-23.1 (audit-fix): complementa el filtro por pareja
+            # para el caso "una sola pata importada". transfer_pair_id
+            # sólo está poblado cuando el matcher emparejó las dos patas;
+            # una transferencia importada como un único movimiento no
+            # tiene pareja pero su categoría sí lleva is_transfer=True, y
+            # sin este filtro consumía presupuesto (over-budget falsos).
+            # Mismo criterio EXACTO que el dashboard (rama inner-join de
+            # `_exclude_transfer_kind`): aquí el JOIN es inner, así que
+            # toda fila tiene Category y basta `is_transfer = false` (no
+            # hace falta tolerar NULL). Budgets y dashboard nunca divergen.
+            .where(Category.is_transfer.is_(False))
             .where(Transaction.currency == currency)
             .where(Transaction.occurred_at >= month_start)
             .where(Transaction.occurred_at <= month_end)
@@ -134,6 +162,10 @@ async def sum_expenses_in_period(
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
         .where(Transaction.transfer_pair_id.is_(None))
+        # PHASE-23.1 (audit-fix): excluir transferencias internas sin
+        # pareja (una sola pata importada) — mismo criterio que el
+        # dashboard (inner-join → is_transfer=false).
+        .where(Category.is_transfer.is_(False))
         .where(Transaction.occurred_at >= month_start)
         .where(Transaction.occurred_at <= month_end)
         .where(Category.kind == CategoryKind.EXPENSE)
@@ -148,6 +180,11 @@ async def sum_expenses_in_period(
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
         .where(Transaction.transfer_pair_id.is_(None))
+        # PHASE-23.1 (audit-fix): el recuento de inconvertibles debe
+        # contar el MISMO universo que el SUM — si una transferencia
+        # interna inconvertible se colaba aquí, reportaríamos un
+        # unconvertible_count fantasma para gasto que ni siquiera cuenta.
+        .where(Category.is_transfer.is_(False))
         .where(Transaction.occurred_at >= month_start)
         .where(Transaction.occurred_at <= month_end)
         .where(Category.kind == CategoryKind.EXPENSE)

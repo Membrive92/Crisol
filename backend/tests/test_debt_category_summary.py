@@ -810,6 +810,77 @@ async def test_summary_available_bounds_null_when_empty(client: AsyncClient) -> 
     assert body["available_to"] is None
 
 
+async def test_daily_series_tracks_balance_emission_and_payment(client: AsyncClient) -> None:
+    """PHASE-30.9 — `range=month` devuelve la serie diaria: línea de saldo
+    (apertura + emisión − amortización) + barras emitida/amortizado/interés.
+
+    Tarjeta EUR (apertura 1000): compra +500 el día 5, pago 300 el día 20
+    (income a la tarjeta), interés 50 el día 10 en una cuenta bank (sólo
+    barra de interés, no toca el saldo)."""
+    token = await _register(client, "daily_series@example.com")
+    card = await _create_account(
+        client, token, name="Visa", type="credit_card", currency="EUR", opening_balance="1000"
+    )
+    bank = await _create_account(
+        client, token, name="Cte", type="bank", currency="EUR", opening_balance="0"
+    )
+    purchase = await _create_category(client, token, "Compra tarjeta", kind="expense")
+    payment = await _create_category(client, token, "Pago tarjeta", kind="income")
+    interest = await _create_category(client, token, "Intereses tarjeta", role="DEBT_INTEREST")
+
+    await _post_tx(client, token, card["id"], purchase, "500.00", "2024-04-05T12:00:00Z")
+    await _post_tx(client, token, card["id"], payment, "300.00", "2024-04-20T12:00:00Z")
+    await _post_tx(client, token, bank["id"], interest, "50.00", "2024-04-10T12:00:00Z")
+
+    r = await client.get(
+        "/debt/category-summary?range=month&anchor=2024-04-10", headers=_auth(token)
+    )
+    body = r.json()
+    daily = body["daily_series"]
+    assert daily is not None
+    assert len(daily) == 30  # abril completo (mes pasado)
+    by_day = {p["day"]: p for p in daily}
+    assert Decimal(by_day[1]["balance"]) == Decimal("1000.00")
+    assert Decimal(by_day[5]["emitida"]) == Decimal("500.00")
+    assert Decimal(by_day[5]["balance"]) == Decimal("1500.00")
+    assert Decimal(by_day[10]["interest"]) == Decimal("50.00")
+    assert Decimal(by_day[10]["balance"]) == Decimal("1500.00")  # interés no mueve principal
+    assert Decimal(by_day[20]["amortizado"]) == Decimal("300.00")
+    assert Decimal(by_day[20]["balance"]) == Decimal("1200.00")
+
+
+async def test_daily_series_fallback_without_liabilities(client: AsyncClient) -> None:
+    """PHASE-30.9 — sin cuentas-pasivo, la serie diaria cae a barras de
+    pagos categorizados (capital DEBT_PAYMENT) + interés, sin línea de
+    saldo (`balance=None`)."""
+    token = await _register(client, "daily_fallback@example.com")
+    cte = await _create_account(
+        client, token, name="Cte", type="bank", currency="EUR", opening_balance="5000"
+    )
+    cap_id = await _create_category(client, token, "Préstamos e hipotecas", role="DEBT_PAYMENT")
+    await _post_tx(client, token, cte["id"], cap_id, "400.00", "2024-04-07T12:00:00Z")
+
+    r = await client.get(
+        "/debt/category-summary?range=month&anchor=2024-04-10", headers=_auth(token)
+    )
+    daily = r.json()["daily_series"]
+    assert daily is not None
+    by_day = {p["day"]: p for p in daily}
+    assert by_day[7]["balance"] is None
+    assert Decimal(by_day[7]["amortizado"]) == Decimal("400.00")
+    assert Decimal(by_day[7]["emitida"]) == Decimal("0")
+
+
+async def test_daily_series_null_for_year_range(client: AsyncClient) -> None:
+    """`range=year` no trae serie diaria (se usa la mensual)."""
+    token = await _register(client, "daily_year@example.com")
+    await _create_account(
+        client, token, name="Cte", type="bank", currency="EUR", opening_balance="100"
+    )
+    r = await client.get("/debt/category-summary?range=year", headers=_auth(token))
+    assert r.json()["daily_series"] is None
+
+
 async def test_summary_future_anchor_is_graceful(client: AsyncClient) -> None:
     """Un anchor en el futuro (defensa; las flechas lo evitan) no rompe:
     devuelve ceros y la tasa de esfuerzo `None` (sin meses cerrados)."""

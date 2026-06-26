@@ -245,6 +245,7 @@ otro campo, pero no se duplica la combinación exacta.
 | `start_date` | `DATE` | opcional (PHASE-22). Fecha de inicio del cuadro francés. Sólo relevante en loans/mortgages. |
 | `display_order` | `INTEGER` | default `0`. Orden en UI. |
 | `is_archived` | `BOOLEAN` | default `FALSE`. Si TRUE, oculta del selector pero conserva histórico. |
+| `is_default` | `BOOLEAN` | default `FALSE` (PHASE-32, migración `w0m25o7lk9n8m4`). Cuenta principal del usuario, pre-seleccionada en formularios. Única por usuario (la fuerza el service, sin constraint en BD). Su saldo refleja ahorro neto (ver excepción abajo). |
 | `created_at`/`updated_at` | `TIMESTAMPTZ` | `now()`. |
 
 `transactions.account_id` (NOT NULL, FK CASCADE),
@@ -256,6 +257,9 @@ esta tabla.
 `get_balances_for_user` calcula el `signed_amount` con un CASE que
 tiene en cuenta `nature` y `Category.kind`:
 
+- `is_default` + `is_transfer` → `0` (PHASE-32: la cuenta principal
+  refleja ahorro neto; las transferencias internas no la mueven). Se
+  evalúa ANTES que los casos de abajo.
 - `LIABILITY` + `EXPENSE` → `+amount` (la compra sube la deuda)
 - `LIABILITY` + `INCOME` → `-amount` (un pago la baja)
 - `ASSET` + `EXPENSE` → `-amount`
@@ -263,7 +267,9 @@ tiene en cuenta `nature` y `Category.kind`:
 
 Esto permite tratar tarjetas de crédito como cuenta con saldo
 arrastrado (cada compra suma deuda, cada pago la resta) sin invertir
-las transacciones en sí.
+las transacciones en sí. El resto de cuentas (no `is_default`) sí
+suma las transferencias internas a su saldo individual (modo cash,
+PHASE-23.1).
 
 ### `exchange_rates` (`PHASE-8.1`)
 

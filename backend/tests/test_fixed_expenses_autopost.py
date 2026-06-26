@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.modules.personal_finance.fixed_expenses.models import FixedExpense
 from app.modules.personal_finance.fixed_expenses.service import (
+    _advance_due,
     autopost_due_for_user,
 )
 from app.modules.personal_finance.transactions.models import Transaction
@@ -150,9 +151,13 @@ async def test_autopost_creates_expected_tx_and_advances_next_due(
         assert expected_txs[0].category_id == item.category_id
         assert expected_txs[0].description == item.raw_description
 
-        # next_due avanzado un ciclo.
+        # next_due avanzado un ciclo. AUDIT-FIX (autopost-cadence-days-drift):
+        # para cadencias mensuales/anuales el avance es por calendario,
+        # anclado al día de cargo (first_seen_at), no por días fijos. Para
+        # cadencias semanales/quincenales sigue siendo por días.
         await db.refresh(item)
-        assert item.next_due == yesterday + timedelta(days=item.cadence_days)
+        anchor_day = (item.first_seen_at or yesterday).day
+        assert item.next_due == _advance_due(yesterday, item.cadence_days, anchor_day=anchor_day)
 
 
 async def test_autopost_backfills_multiple_cycles_capped_at_12(

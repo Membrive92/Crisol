@@ -37,6 +37,10 @@ export function useCreateAccount() {
     mutationFn: (data) => accountsApi.create(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.accounts.all });
+      // AUDIT-2026-06: crear una cuenta-pasivo cambia los KPIs/charts de
+      // deuda (debt-health, debt-history, category-summary). Sin esto el
+      // módulo /debt quedaba stale hasta el staleTime de 60s.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
     },
   });
 }
@@ -47,6 +51,9 @@ export function useUpdateAccount(id: string) {
     mutationFn: (data) => accountsApi.update(id, data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.accounts.all });
+      // AUDIT-2026-06: editar una cuenta-pasivo (APR, plazo, capital, tipo)
+      // recalcula los KPIs de deuda → refrescar el módulo /debt.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
     },
   });
 }
@@ -57,6 +64,9 @@ export function useDeleteAccount() {
     mutationFn: (id) => accountsApi.remove(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.accounts.all });
+      // AUDIT-2026-06: borrar una cuenta-pasivo elimina su deuda de los
+      // agregados → refrescar el módulo /debt (si no, KPIs inflados 60s).
+      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
     },
   });
 }

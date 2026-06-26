@@ -37,6 +37,7 @@ export function useScanFixedExpenses() {
     onSuccess: () => {
       // Scan puede crear/refrescar todo — invalida el grupo entero.
       void queryClient.invalidateQueries({ queryKey: queryKeys.fixedExpenses.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
     },
   });
 }
@@ -48,6 +49,7 @@ export function useAutopostFixedExpenses() {
     onSuccess: () => {
       // Autopost crea transacciones y avanza next_due — invalida ambos.
       void queryClient.invalidateQueries({ queryKey: queryKeys.fixedExpenses.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
       void queryClient.invalidateQueries({ queryKey: queryKeys.transactions.all });
     },
   });
@@ -63,6 +65,7 @@ export function useUpdateFixedExpense() {
     mutationFn: ({ id, data }) => fixedExpensesApi.update(id, data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.fixedExpenses.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
     },
   });
 }
@@ -73,6 +76,7 @@ export function useConfirmFixedExpense() {
     mutationFn: (id) => fixedExpensesApi.confirm(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.fixedExpenses.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
     },
   });
 }
@@ -83,6 +87,7 @@ export function useDismissFixedExpense() {
     mutationFn: (id) => fixedExpensesApi.dismiss(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.fixedExpenses.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
     },
   });
 }
@@ -93,6 +98,7 @@ export function useDeleteFixedExpense() {
     mutationFn: (id) => fixedExpensesApi.remove(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.fixedExpenses.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
     },
   });
 }
@@ -103,6 +109,7 @@ export function usePauseFixedExpense() {
     mutationFn: (id) => fixedExpensesApi.pause(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.fixedExpenses.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
     },
   });
 }
@@ -113,6 +120,7 @@ export function useResumeFixedExpense() {
     mutationFn: (id) => fixedExpensesApi.resume(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.fixedExpenses.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
     },
   });
 }
@@ -123,6 +131,7 @@ export function useCancelFixedExpense() {
     mutationFn: (id) => fixedExpensesApi.cancel(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.fixedExpenses.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
     },
   });
 }

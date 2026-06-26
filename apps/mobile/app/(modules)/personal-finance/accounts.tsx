@@ -11,23 +11,9 @@ import {
   useUpdateAccount,
 } from '@crisol/services';
 import { toast } from '@crisol/store';
-import type {
-  Account,
-  AccountCreateRequest,
-  AccountUpdateRequest,
-} from '@crisol/types';
-import {
-  AMORTIZABLE_ACCOUNT_TYPES,
-  LIABILITY_ACCOUNT_TYPES,
-} from '@crisol/types';
-import {
-  colors,
-  fontSize,
-  fontWeight,
-  formatAmount,
-  radius,
-  spacing,
-} from '@crisol/ui';
+import type { Account, AccountCreateRequest, AccountUpdateRequest } from '@crisol/types';
+import { AMORTIZABLE_ACCOUNT_TYPES, LIABILITY_ACCOUNT_TYPES } from '@crisol/types';
+import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@crisol/ui';
 
 import {
   AccountFormModal,
@@ -151,11 +137,8 @@ function toUpdatePayload(
   // PHASE-30.5: vinculación contrato↔categoría. Liabilities envían el
   // id seleccionado o `null` (desvincular). Assets fuerzan null para
   // evitar valores residuales tras un cambio de tipo.
-  const isLiabilityForCategory = [
-    'credit_card', 'loan', 'mortgage',
-  ].includes(values.type);
-  payload.category_id =
-    isLiabilityForCategory && values.category_id ? values.category_id : null;
+  const isLiabilityForCategory = ['credit_card', 'loan', 'mortgage'].includes(values.type);
+  payload.category_id = isLiabilityForCategory && values.category_id ? values.category_id : null;
   return payload;
 }
 
@@ -220,8 +203,7 @@ export default function AccountsScreen() {
         toast.success('Cuenta creada.');
         setFormOpen(false);
       },
-      onError: (err) =>
-        toast.error(formatApiError(err, 'No se pudo crear la cuenta.')),
+      onError: (err) => toast.error(formatApiError(err, 'No se pudo crear la cuenta.')),
     });
   }
 
@@ -232,12 +214,7 @@ export default function AccountsScreen() {
     deleteMutation.mutate(target.id, {
       onSuccess: () => toast.success('Cuenta eliminada.'),
       onError: (err) =>
-        toast.error(
-          formatApiError(
-            err,
-            'No se pudo eliminar — archívala si tiene transacciones.',
-          ),
-        ),
+        toast.error(formatApiError(err, 'No se pudo eliminar — archívala si tiene transacciones.')),
     });
   }
 
@@ -246,17 +223,13 @@ export default function AccountsScreen() {
       <Stack.Screen options={{ title: 'Cuentas' }} />
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.intro}>
-          Cada transacción, importación y ticket se imputa a una cuenta. Las
-          cuentas con histórico no se pueden borrar — archívalas para conservar
-          las transacciones.
+          Cada transacción, importación y ticket se imputa a una cuenta. Las cuentas con histórico
+          no se pueden borrar — archívalas para conservar las transacciones.
         </Text>
 
         <Pressable
           onPress={() => setIncludeArchived((v) => !v)}
-          style={({ pressed }) => [
-            styles.secondaryButton,
-            pressed && { opacity: 0.7 },
-          ]}
+          style={({ pressed }) => [styles.secondaryButton, pressed && { opacity: 0.7 }]}
           accessibilityRole="switch"
           accessibilityState={{ checked: includeArchived }}
         >
@@ -268,9 +241,7 @@ export default function AccountsScreen() {
         {list.isLoading ? (
           <Text style={styles.placeholder}>Cargando…</Text>
         ) : list.isError ? (
-          <Text style={styles.error}>
-            {formatApiError(list.error, 'Error cargando cuentas.')}
-          </Text>
+          <Text style={styles.error}>{formatApiError(list.error, 'Error cargando cuentas.')}</Text>
         ) : items.length === 0 ? (
           <View style={styles.emptyCard}>
             <Text style={styles.emptyText}>
@@ -386,8 +357,7 @@ function EditAccountModal({
         toast.success('Cuenta actualizada.');
         onClose();
       },
-      onError: (err) =>
-        toast.error(formatApiError(err, 'No se pudo guardar.')),
+      onError: (err) => toast.error(formatApiError(err, 'No se pudo guardar.')),
     });
   }
 
@@ -419,14 +389,7 @@ interface AccountGroupProps {
   onPayDebt: (a: Account) => void;
 }
 
-function AccountGroup({
-  title,
-  items,
-  balances,
-  onEdit,
-  onDelete,
-  onPayDebt,
-}: AccountGroupProps) {
+function AccountGroup({ title, items, balances, onEdit, onDelete, onPayDebt }: AccountGroupProps) {
   if (items.length === 0) {
     return (
       <View style={styles.section}>
@@ -468,21 +431,30 @@ interface AccountRowProps {
   onPayDebt: (a: Account) => void;
 }
 
-function AccountRow({
-  account,
-  balance,
-  isFirst,
-  onEdit,
-  onDelete,
-  onPayDebt,
-}: AccountRowProps) {
+function AccountRow({ account, balance, isFirst, onEdit, onDelete, onPayDebt }: AccountRowProps) {
   const router = useRouter();
+  // AUDIT LOW#13 — desde mobile también se puede marcar la cuenta principal
+  // (antes sólo existía el badge; la acción vivía sólo en web).
+  const makeDefault = useUpdateAccount(account.id);
   const isLiability = LIABILITY_ACCOUNT_TYPES.includes(account.type);
   const isAmortizable = AMORTIZABLE_ACCOUNT_TYPES.includes(account.type);
   const hasFullAmortization =
     isAmortizable && !!account.apr && !!account.term_months && !!account.start_date;
   const balanceColor = isLiability ? colors.danger : colors.text;
   const balancePrefix = isLiability ? '-' : '';
+  // Sólo cuentas de activo, activas y que no sean ya la principal (HIGH#2:
+  // un pasivo no puede ser principal).
+  const canMakeDefault = !isLiability && !account.is_archived && !account.is_default;
+
+  function handleMakeDefault() {
+    makeDefault.mutate(
+      { is_default: true },
+      {
+        onSuccess: () => toast.success(`"${account.name}" es ahora tu cuenta principal.`),
+        onError: (err) => toast.error(formatApiError(err, 'No se pudo marcar como principal.')),
+      },
+    );
+  }
 
   return (
     <View style={[styles.row, isFirst && { borderTopWidth: 0 }]}>
@@ -492,22 +464,23 @@ function AccountRow({
           <View style={styles.rowNameLine}>
             <Text style={styles.rowName} numberOfLines={1}>
               {account.name}
-              {account.is_archived ? (
-                <Text style={styles.rowMutedSuffix}> (archivada)</Text>
-              ) : null}
+              {account.is_archived ? <Text style={styles.rowMutedSuffix}> (archivada)</Text> : null}
             </Text>
             {isLiability ? (
               <View style={styles.debtBadge}>
                 <Text style={styles.debtBadgeText}>DEUDA</Text>
               </View>
             ) : null}
+            {account.is_default ? (
+              <View style={styles.defaultBadge}>
+                <Text style={styles.defaultBadgeText}>PRINCIPAL</Text>
+              </View>
+            ) : null}
           </View>
           <Text style={styles.rowMeta} numberOfLines={1}>
             {TYPE_LABEL[account.type] ?? account.type} · {account.currency}
             {balance ? (
-              <Text
-                style={[styles.rowBalance, { color: balanceColor }]}
-              >
+              <Text style={[styles.rowBalance, { color: balanceColor }]}>
                 {' · '}
                 {balancePrefix}
                 {formatAmount(balance.current_balance, balance.currency)}
@@ -530,6 +503,15 @@ function AccountRow({
         </View>
       </View>
       <View style={styles.rowActions}>
+        {canMakeDefault ? (
+          <Pressable
+            onPress={handleMakeDefault}
+            style={styles.rowAction}
+            disabled={makeDefault.isPending}
+          >
+            <Text style={styles.rowActionText}>Hacer principal</Text>
+          </Pressable>
+        ) : null}
         {isLiability && !account.is_archived ? (
           <Pressable onPress={() => onPayDebt(account)} style={styles.rowAction}>
             <Text style={styles.rowActionText}>Pagar cuota</Text>
@@ -539,9 +521,7 @@ function AccountRow({
           <Text style={styles.rowActionText}>Editar</Text>
         </Pressable>
         <Pressable onPress={() => onDelete(account)} style={styles.rowAction}>
-          <Text style={[styles.rowActionText, { color: colors.danger }]}>
-            Borrar
-          </Text>
+          <Text style={[styles.rowActionText, { color: colors.danger }]}>Borrar</Text>
         </Pressable>
       </View>
     </View>
@@ -645,6 +625,18 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: fontWeight.semibold,
     color: colors.danger,
+    letterSpacing: 0.4,
+  },
+  defaultBadge: {
+    backgroundColor: colors.primarySoft,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: radius.sm,
+  },
+  defaultBadgeText: {
+    fontSize: 10,
+    fontWeight: fontWeight.semibold,
+    color: colors.primary,
     letterSpacing: 0.4,
   },
   amortLink: {
