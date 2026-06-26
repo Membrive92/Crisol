@@ -238,6 +238,39 @@ async def update_transaction(
     """
     transaction = await get_transaction(db, transaction_id, user_id)
     payload = data.model_dump(exclude_unset=True)
+    # P8 (transfers-ux) — proteger el invariante del par. Un par de
+    # transferencia exige mismo amount+currency y cuentas distintas
+    # (transfers.service.link_manually). Editar el importe/moneda/cuenta de
+    # UNA sola pata dejaría el par descuadrado en silencio (balance roto).
+    # Lo rechazamos con un mensaje que guía a deshacer el enlace primero;
+    # cambiar descripción, fecha o categoría sí se permite (no rompe el par).
+    if transaction.transfer_pair_id is not None:
+        breaks_pair = (
+            (
+                "amount" in payload
+                and payload["amount"] is not None
+                and payload["amount"] != transaction.amount
+            )
+            or (
+                "currency" in payload
+                and payload["currency"] is not None
+                and payload["currency"] != transaction.currency
+            )
+            or (
+                "account_id" in payload
+                and payload["account_id"] is not None
+                and payload["account_id"] != transaction.account_id
+            )
+        )
+        if breaks_pair:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Esta transacción es parte de una transferencia. Deshaz el "
+                    "enlace (en el detalle o en Transferencias) antes de cambiar "
+                    "el importe, la moneda o la cuenta."
+                ),
+            )
     if "account_id" in payload and payload["account_id"] is not None:
         await ensure_account_exists(db, payload["account_id"], user_id)
     if "category_id" in payload and payload["category_id"] is not None:

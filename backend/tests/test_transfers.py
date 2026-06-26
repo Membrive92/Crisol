@@ -796,6 +796,55 @@ async def test_from_source_creates_counterpart_and_pairs(
     assert Decimal(summary.json()["income"]) == Decimal("0.00")
 
 
+async def test_update_paired_tx_protects_invariants(client: AsyncClient) -> None:
+    """P8 (transfers-ux) — editar el importe / moneda / cuenta de una pata
+    emparejada se rechaza con 409 (descuadraría el par). Editar la
+    descripción sí se permite."""
+    token, expense_cat, acc_a, acc_b = await _setup_user_with_two_accounts(
+        client, "p8-edit@example.com"
+    )
+    source_id = await _create_tx(
+        client,
+        token,
+        account_id=acc_a,
+        amount="1000.00",
+        occurred_at="2026-04-15T12:00:00Z",
+        category_id=expense_cat,
+        description="Traspaso",
+    )
+    r = await client.post(
+        "/transfers/from-source",
+        json={
+            "source_transaction_id": source_id,
+            "originating_account_id": acc_a,
+            "beneficiary_account_id": acc_b,
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 201, r.text
+
+    # Cambiar importe → 409.
+    r_amount = await client.put(
+        f"/transactions/{source_id}", json={"amount": "999.00"}, headers=_auth(token)
+    )
+    assert r_amount.status_code == 409
+
+    # Cambiar cuenta → 409.
+    r_acc = await client.put(
+        f"/transactions/{source_id}", json={"account_id": acc_b}, headers=_auth(token)
+    )
+    assert r_acc.status_code == 409
+
+    # Cambiar descripción → 200 (no rompe el par).
+    r_desc = await client.put(
+        f"/transactions/{source_id}",
+        json={"description": "Traspaso (corregido)"},
+        headers=_auth(token),
+    )
+    assert r_desc.status_code == 200, r_desc.text
+    assert r_desc.json()["description"] == "Traspaso (corregido)"
+
+
 async def test_from_source_400_same_account(client: AsyncClient) -> None:
     """No se puede convertir si ordenante y beneficiaria son iguales."""
     token, _cat, acc_a, _acc_b = await _setup_user_with_two_accounts(
