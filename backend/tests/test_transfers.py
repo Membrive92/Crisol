@@ -499,6 +499,52 @@ async def test_suspects_only_returns_unmatched_with_transfer_in_description(
     assert items[0]["description"] == "TRANSFERENCIA REALIZADA"
 
 
+async def test_suspects_detects_spanish_bank_terms(client: AsyncClient) -> None:
+    """P1 (transfers-ux) — el descubrimiento cubre términos de banca
+    española (BIZUM, TRASPASO), no sólo el inglés "transfer". Antes esos
+    movimientos — los más frecuentes — quedaban invisibles a /transfers."""
+    token, cat, acc_a, _acc_b = await _setup_user_with_two_accounts(
+        client, "suspects-es@example.com"
+    )
+    bizum_id = await _create_tx(
+        client,
+        token,
+        account_id=acc_a,
+        amount="20.00",
+        occurred_at="2026-04-15T12:00:00Z",
+        category_id=cat,
+        description="BIZUM A JOSE",
+    )
+    traspaso_id = await _create_tx(
+        client,
+        token,
+        account_id=acc_a,
+        amount="500.00",
+        occurred_at="2026-04-16T12:00:00Z",
+        category_id=cat,
+        description="TRASPASO ENTRE CUENTAS",
+    )
+    # Un gasto normal NO debe aparecer (evita inundar la bandeja).
+    await _create_tx(
+        client,
+        token,
+        account_id=acc_a,
+        amount="9.00",
+        occurred_at="2026-04-17T12:00:00Z",
+        category_id=cat,
+        description="MERCADONA TORRE PACHECO",
+    )
+
+    r = await client.get("/transfers/suspects", headers=_auth(token))
+    assert r.status_code == 200
+    items = r.json()
+    ids = {it["transaction_id"] for it in items}
+    descs = {it["description"] for it in items}
+    assert bizum_id in ids
+    assert traspaso_id in ids
+    assert "MERCADONA TORRE PACHECO" not in descs
+
+
 async def test_mark_uses_seed_transfer_category_with_correct_kind(
     client: AsyncClient,
 ) -> None:

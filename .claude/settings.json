@@ -109,7 +109,9 @@
       "Bash(python -m pytest -q -p no:cacheprovider)",
       "Bash(python -m pytest tests/test_transactions.py -q)",
       "PowerShell($c = Get-NetTCPConnection -LocalPort 8002 -State Listen -ErrorAction SilentlyContinue; if \\($c\\) { $procId=\\($c|Select-Object -First 1\\).OwningProcess; \"8002 still held by pid $procId \\($\\(\\(Get-Process -Id $procId -ErrorAction SilentlyContinue\\).ProcessName\\)\\) - killing\"; Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800 } else { \"8002 free\" })",
-      "Bash(curl -s -o /dev/null -w \"web / status=%{http_code}\\\\n\" http://localhost:3000/personal-finance/transactions)"
+      "Bash(curl -s -o /dev/null -w \"web / status=%{http_code}\\\\n\" http://localhost:3000/personal-finance/transactions)",
+      "Bash(python -m mypy app/modules/personal_finance/transfers)",
+      "Bash(python -m ruff check app/modules/personal_finance/transfers tests/test_transfers.py)"
     ],
     "deny": [
       "Bash(rm -rf /)",

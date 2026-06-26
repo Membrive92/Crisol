@@ -207,12 +207,29 @@ def find_candidate_pairs(
     return pairs
 
 
+# P1 (transfers-ux) — términos que delatan un movimiento entre cuentas en
+# extractos de banca ESPAÑOLA. Antes sólo se buscaba "%transfer%" (inglés),
+# así que BIZUM y TRASPASO — lo más frecuente — nunca salían como
+# "sospechosas". `%TRANSFER%` cubre además "TRANSFERENCIA" (la contiene) y
+# el inglés. Es una bandeja de REVISIÓN: tolera falsos positivos a cambio de
+# no dejar fuera las transferencias reales. ILIKE es case-insensitive.
+_TRANSFER_DISCOVERY_PATTERNS_SQL = (
+    "%TRANSFER%",  # transfer / transferencia (EN + ES)
+    "%TRANSF.%",  # abreviatura "transf." de algunos bancos
+    "%TRASPASO%",
+    "%BIZUM%",
+    "%ENVIO DE DINERO%",
+    "%ENVIO INMEDIATO%",
+)
+
+
 async def list_suspect_transactions(
     db: AsyncSession, user_id: uuid.UUID
 ) -> list[tuple[Transaction, uuid.UUID | None, str | None]]:
-    """PHASE-23.1: lista txs activas, sin pareja, NO marcadas como
+    """PHASE-23.1 / P1: lista txs activas, sin pareja, NO marcadas como
     transfer (categoría con `is_transfer=true`), cuya `description`
-    contiene "transfer" (case insensitive).
+    delata un movimiento entre cuentas (transferencia, traspaso, Bizum…
+    ver `_TRANSFER_DISCOVERY_PATTERNS_SQL`).
 
     Devuelve (tx, current_category_id, current_category_name) para que
     el frontend muestre la categoría actual antes de remarcar.
@@ -224,7 +241,7 @@ async def list_suspect_transactions(
         .where(Transaction.deleted_at.is_(None))
         .where(Transaction.transfer_pair_id.is_(None))
         .where((Category.is_transfer.is_(None)) | (Category.is_transfer.is_(False)))
-        .where(Transaction.description.ilike("%transfer%"))
+        .where(_description_matches_any(_TRANSFER_DISCOVERY_PATTERNS_SQL))
         .order_by(Transaction.occurred_at.desc())
     )
     rows = await db.execute(query)
