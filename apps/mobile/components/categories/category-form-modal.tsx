@@ -157,7 +157,7 @@ export function CategoryFormModal({
                 ) : null}
               </View>
               <Text style={styles.transferToggleLabel}>
-                Es transferencia interna (excluir del cashflow)
+                Es transferencia interna (no cuenta como gasto ni ingreso)
               </Text>
             </Pressable>
 

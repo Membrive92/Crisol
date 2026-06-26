@@ -222,10 +222,9 @@ export function MarkAsTransferModal({
                 lineHeight: 1.4,
               }}
             >
-              Indica la cuenta <strong>ordenante</strong> (de donde sale el
-              dinero) y la <strong>beneficiaria</strong> (donde entra). El
-              sistema ajusta los signos en cada cuenta y crea el otro lado
-              del par automáticamente.
+              Dinos <strong>de qué cuenta sale</strong> el dinero y{' '}
+              <strong>a qué cuenta entra</strong>. Ajustamos el saldo de cada
+              cuenta y creamos el otro lado del movimiento automáticamente.
             </p>
           </div>
           <button
@@ -344,11 +343,11 @@ export function MarkAsTransferModal({
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
             <Select
-              label="Cuenta ordenante (de aquí sale el dinero)"
+              label="¿De qué cuenta sale el dinero?"
               value={originatingId}
               onChange={(e) => setOriginatingId(e.target.value)}
             >
-              <option value="">Selecciona la cuenta ordenante…</option>
+              <option value="">Selecciona la cuenta de origen…</option>
               {/* La cuenta de la tx aparece como opción explícita +
                   marcada para que sea obvio que es elegible. El resto
                   son las otras cuentas del usuario. */}
@@ -367,11 +366,11 @@ export function MarkAsTransferModal({
             </Select>
 
             <Select
-              label="Cuenta beneficiaria (aquí entra el dinero)"
+              label="¿A qué cuenta entra el dinero?"
               value={beneficiaryId}
               onChange={(e) => setBeneficiaryId(e.target.value)}
             >
-              <option value="">Selecciona la cuenta beneficiaria…</option>
+              <option value="">Selecciona la cuenta de destino…</option>
               {sourceAccount && !sourceAccount.is_archived ? (
                 <option value={sourceAccount.id}>
                   {sourceAccount.icon ? `${sourceAccount.icon} ` : ''}
@@ -396,7 +395,7 @@ export function MarkAsTransferModal({
                   color: colors.danger,
                 }}
               >
-                Ordenante y beneficiaria no pueden ser la misma cuenta.
+                La cuenta de origen y la de destino no pueden ser la misma.
               </p>
             ) : null}
 
@@ -409,7 +408,7 @@ export function MarkAsTransferModal({
                 }}
               >
                 La cuenta de esta transacción ({sourceAccountName}) tiene
-                que ser ordenante o beneficiaria.
+                que ser la de origen o la de destino.
               </p>
             ) : null}
           </div>

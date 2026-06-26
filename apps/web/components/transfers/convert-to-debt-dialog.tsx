@@ -176,9 +176,9 @@ export function ConvertToDebtDialog({
       >
         Si el banco te abonó este importe como compra a plazos o préstamo,
         regístralo como deuda. Se creará la contraparte en la cuenta de
-        deuda y el par quedará fuera del cashflow — pero la deuda crece
-        por {transaction.amount} {transaction.currency} y queda enlazada
-        a esta transacción.
+        deuda y no contará como gasto del mes — pero la deuda crece por{' '}
+        {transaction.amount} {transaction.currency} y queda enlazada a esta
+        transacción.
       </p>
 
       <div

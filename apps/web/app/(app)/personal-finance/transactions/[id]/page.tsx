@@ -90,7 +90,7 @@ export default function EditTransactionPage({ params }: { params: Promise<{ id: 
               }}
             >
               {data.transfer_pair_id === null
-                ? 'Si esta transacción es una transferencia entre cuentas tuyas, márcalo aquí y elige la cuenta contraparte. La app crea el otro lado automáticamente y deja el par fuera del cashflow.'
+                ? 'Si esta transacción es un movimiento entre cuentas tuyas, márcalo aquí y elige la cuenta contraparte. Creamos el otro lado automáticamente y el par deja de contar como gasto o ingreso del mes.'
                 : 'Esta transacción ya forma parte de una transferencia. Puedes reasignarla a otra cuenta si la enlazaste mal — el enlace actual se deshará primero.'}
             </p>
             <Button type="button" onClick={() => setMarkingTransfer(true)}>

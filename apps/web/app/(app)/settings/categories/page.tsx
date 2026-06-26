@@ -222,7 +222,7 @@ export default function CategoriesSettingsPage() {
                 setForm({ ...form, is_transfer: e.target.checked })
               }
             />
-            Es transferencia interna (excluir del cashflow)
+            Es transferencia interna (no cuenta como gasto ni ingreso)
           </label>
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <Button type="submit" disabled={create.isPending}>
@@ -426,7 +426,7 @@ function CategoryRow({ category }: { category: Category }) {
             checked={draftIsTransfer}
             onChange={(e) => setDraftIsTransfer(e.target.checked)}
           />
-          Es transferencia interna (excluir del cashflow)
+          Es transferencia interna (no cuenta como gasto ni ingreso)
         </label>
         <div style={{ display: 'flex', gap: spacing.xs, justifyContent: 'flex-end' }}>
           <Button type="button" variant="ghost" onClick={() => setEditing(false)}>
