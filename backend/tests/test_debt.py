@@ -428,6 +428,45 @@ async def test_debt_history_returns_historical_and_projected_points(
         assert curr <= prev
 
 
+async def test_debt_history_scheduled_loan_follows_schedule_curve(
+    client: AsyncClient,
+) -> None:
+    """AUDIT-2026-07 (M-02): un préstamo CON cuadro pero SIN pagos registrados
+    muestra el histórico DECRECIENTE (curva del cuadro), no plano en el capital.
+    Antes derivaba de movimientos y, sin movimientos, salía flat en 12000 y no
+    cuadraba con el saldo dirigido por cuadro. La proyección arranca de la misma
+    curva (continua con el histórico)."""
+    token = await _register(client, "m02_sched@example.com")
+    await _create_account(
+        client,
+        token,
+        name="Prestamo",
+        type="loan",
+        currency="EUR",
+        opening_balance="12000",
+        apr="0.05",
+        term_months=24,
+        start_date="2026-01-01",
+    )
+    r = await client.get(
+        "/accounts/debt-history?months_back=5&months_ahead=3",
+        headers=_auth(token),
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    hist = [Decimal(it["total_debt"]) for it in body["items"] if it["kind"] == "historical"]
+    proj = [Decimal(it["total_debt"]) for it in body["items"] if it["kind"] == "projected"]
+    assert len(hist) == 5
+    assert len(proj) == 3
+    # Curva del cuadro: por debajo del capital y estrictamente decreciente
+    # (con la fuente antigua por movimientos habría salido plano en 12000).
+    assert all(b < Decimal("12000") for b in hist)
+    for prev, curr in itertools.pairwise(hist):
+        assert curr < prev
+    # Continuidad histórico → proyección (misma base due-date del cuadro).
+    assert proj[0] <= hist[-1]
+
+
 async def test_debt_history_months_ahead_zero_disables_projection(
     client: AsyncClient,
 ) -> None:

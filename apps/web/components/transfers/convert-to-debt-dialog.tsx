@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   useAccounts,
@@ -67,21 +67,72 @@ export function ConvertToDebtDialog({
     [accountsQuery.data, transaction.currency],
   );
 
+  // PHASE-35 — tarjetas de crédito (no anidadas) bajo las que se puede
+  // registrar la nueva deuda como compra a plazos con su propio cuadro.
+  const parentCards = useMemo(
+    () =>
+      (accountsQuery.data ?? []).filter(
+        (a) =>
+          a.type === 'credit_card' &&
+          a.nature === 'liability' &&
+          a.currency === transaction.currency &&
+          !a.is_archived &&
+          !a.parent_account_id,
+      ),
+    [accountsQuery.data, transaction.currency],
+  );
+
   // Por defecto: si hay liabilities elegibles, modo "existing"; si no,
   // "new" — el usuario suele estar registrando una nueva deuda.
   const [mode, setMode] = useState<Mode>(
     liabilities.length > 0 ? 'existing' : 'new',
   );
+  // AUDIT-2026-07: `liabilities` puede estar vacío en el primer render (las
+  // cuentas aún cargan), así que el inicializador caía a 'new' aunque hubiera
+  // deudas existentes. Ajustamos a 'existing' una vez cargadas, salvo que el
+  // usuario ya haya elegido modo manualmente.
+  const modeTouched = useRef(false);
+  useEffect(() => {
+    if (!modeTouched.current && accountsQuery.isSuccess && liabilities.length > 0) {
+      setMode('existing');
+    }
+  }, [accountsQuery.isSuccess, liabilities.length]);
   const [destinationId, setDestinationId] = useState<string>('');
   // PHASE-24.2: cualquier tipo de deuda acepta plan fijo (incluido
   // credit_card para tarjetas financiadas).
   const [name, setName] = useState<string>('Compra financiada');
   const [type, setType] = useState<LiabilityType>('loan');
+  // PHASE-35 — tarjeta padre elegida (compra a plazos anidada). Al elegirla
+  // el tipo se fuerza a credit_card y TIN + plazo pasan a obligatorios.
+  const [parentCardId, setParentCardId] = useState<string>('');
+  const isNestedPurchase = parentCardId !== '';
   const [aprPercent, setAprPercent] = useState<string>('');
   const [taePercent, setTaePercent] = useState<string>('');
   const [termMonths, setTermMonths] = useState<string>('');
   const [totalToPay, setTotalToPay] = useState<string>('');
   const acceptsAmortization = true;
+
+  // PHASE-35 — si la tarjeta seleccionada desaparece del listado (p. ej. se
+  // archiva en otra pestaña y la query refresca), limpiamos la selección para
+  // no enviar un `parent_account_id` obsoleto que el backend rechazaría.
+  useEffect(() => {
+    if (parentCardId && !parentCards.some((c) => c.id === parentCardId)) {
+      setParentCardId('');
+    }
+  }, [parentCards, parentCardId]);
+
+  // Validez NUMÉRICA de TIN + plazo (no sólo "no vacío"): el payload descarta
+  // valores no finitos, así que el guard debe exigir números reales para no
+  // enviar una compra a plazos sin apr/term y comerse un 400 del backend.
+  const aprNumericValid = (() => {
+    const raw = aprPercent.trim().replace(',', '.');
+    return raw !== '' && Number.isFinite(Number(raw));
+  })();
+  const termNumericValid = (() => {
+    const n = Number(termMonths.trim());
+    return termMonths.trim() !== '' && Number.isFinite(n) && n > 0;
+  })();
+  const nestedPlanIncomplete = isNestedPurchase && (!aprNumericValid || !termNumericValid);
 
   function handleSubmit() {
     if (mode === 'existing') {
@@ -96,11 +147,16 @@ export function ConvertToDebtDialog({
       return;
     }
     if (!name.trim()) return;
+    // PHASE-35: una compra a plazos anidada exige TIN + plazo NUMÉRICOS (el
+    // importe sale de la tx). Guardarraíl en cliente; el backend lo revalida.
+    if (nestedPlanIncomplete) return;
     const newLiability: NewLiabilityForDebt = {
       name: name.trim(),
-      type,
+      // Una compra a plazos anidada bajo una tarjeta debe ser credit_card.
+      type: isNestedPurchase ? 'credit_card' : type,
       currency: transaction.currency,
     };
+    if (isNestedPurchase) newLiability.parent_account_id = parentCardId;
     if (acceptsAmortization) {
       const aprTrimmed = aprPercent.trim().replace(',', '.');
       if (aprTrimmed) {
@@ -192,12 +248,18 @@ export function ConvertToDebtDialog({
         <ModeTab
           active={mode === 'existing'}
           disabled={liabilities.length === 0}
-          onClick={() => setMode('existing')}
+          onClick={() => {
+            modeTouched.current = true;
+            setMode('existing');
+          }}
           label="Usar deuda existente"
         />
         <ModeTab
           active={mode === 'new'}
-          onClick={() => setMode('new')}
+          onClick={() => {
+            modeTouched.current = true;
+            setMode('new');
+          }}
           label="Crear nueva"
         />
       </div>
@@ -249,6 +311,22 @@ export function ConvertToDebtDialog({
         )
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
+          {parentCards.length > 0 ? (
+            <div style={{ flex: '1 1 100%', minWidth: 0 }}>
+              <Select
+                label="¿Compra a plazos dentro de una tarjeta? (opcional)"
+                value={parentCardId}
+                onChange={(e) => setParentCardId(e.target.value)}
+              >
+                <option value="">No — deuda independiente</option>
+                {parentCards.map((card) => (
+                  <option key={card.id} value={card.id}>
+                    Dentro de {card.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          ) : null}
           <div style={{ display: 'flex', gap: spacing.sm, flexWrap: 'wrap' }}>
             <div style={{ flex: '2 1 240px', minWidth: 0 }}>
               <TextInput
@@ -262,8 +340,9 @@ export function ConvertToDebtDialog({
             <div style={{ flex: '1 1 160px', minWidth: 0 }}>
               <Select
                 label="Tipo"
-                value={type}
+                value={isNestedPurchase ? 'credit_card' : type}
                 onChange={(e) => setType(e.target.value as LiabilityType)}
+                disabled={isNestedPurchase}
               >
                 <option value="loan">Préstamo / Compra financiada</option>
                 <option value="mortgage">Hipoteca</option>
@@ -311,10 +390,25 @@ export function ConvertToDebtDialog({
               </div>
             </div>
           ) : null}
+          {isNestedPurchase ? (
+            <p
+              style={{
+                margin: 0,
+                fontSize: fontSize.xs,
+                color: colors.textSubtle,
+                lineHeight: 1.4,
+              }}
+            >
+              Se creará como compra a plazos dentro de la tarjeta, con su
+              propio cuadro. TIN y plazo son obligatorios; el importe (
+              {transaction.amount} {transaction.currency}) se toma de esta
+              transacción.
+            </p>
+          ) : null}
           <Button
             type="button"
             onClick={handleSubmit}
-            disabled={!name.trim() || mutation.isPending}
+            disabled={!name.trim() || nestedPlanIncomplete || mutation.isPending}
             style={{ alignSelf: 'flex-start' }}
           >
             {mutation.isPending ? 'Creando…' : 'Crear deuda y registrar'}

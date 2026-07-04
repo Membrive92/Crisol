@@ -5,13 +5,40 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import case, func, select, update
+from sqlalchemy import ColumnElement, case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.modules.personal_finance.accounts.models import Account, AccountNature
 from app.modules.personal_finance.categories.models import Category, CategoryKind
-from app.modules.personal_finance.transactions.models import Transaction
+from app.modules.personal_finance.transactions.models import Transaction, TransactionFlow
+
+
+# PHASE-34 (ADR-0004): la dirección del dinero la manda `transactions.flow`.
+# Durante la transición, las filas sin flow (heredadas / write path aún sin
+# migrar) caen a `category.kind`/`is_transfer` como antes. El fallback —y el
+# join a Category de estas queries— se elimina en 34.6 cuando todo el write
+# path escriba flow. Equivalente por construcción: el backfill de 34.1 hizo
+# flow ≡ derivación por categoría.
+def is_outflow() -> ColumnElement[bool]:
+    """Movimiento de salida (resta del bolsillo del titular en la cuenta)."""
+    return Transaction.flow.in_([TransactionFlow.OUT, TransactionFlow.TRANSFER_OUT]) | (
+        Transaction.flow.is_(None) & (Category.kind == CategoryKind.EXPENSE)
+    )
+
+
+def is_inflow() -> ColumnElement[bool]:
+    """Movimiento de entrada (suma al bolsillo del titular en la cuenta)."""
+    return Transaction.flow.in_([TransactionFlow.IN, TransactionFlow.TRANSFER_IN]) | (
+        Transaction.flow.is_(None) & (Category.kind == CategoryKind.INCOME)
+    )
+
+
+def _is_internal_transfer() -> ColumnElement[bool]:
+    """Transferencia interna entre cuentas propias (neutra para ahorro/cashflow)."""
+    return Transaction.flow.in_(
+        [TransactionFlow.TRANSFER_IN, TransactionFlow.TRANSFER_OUT]
+    ) | (Transaction.flow.is_(None) & Category.is_transfer.is_(True))
 
 
 async def clear_default_accounts(
@@ -87,6 +114,22 @@ async def count_transactions_for_account(
     return int((await db.execute(query)).scalar_one())
 
 
+async def count_child_accounts(
+    db: AsyncSession, parent_account_id: uuid.UUID, user_id: uuid.UUID
+) -> int:
+    """Cuántas cuentas hijas (compras a plazos, PHASE-35) cuelgan de esta
+    cuenta. Se usa antes de borrar: `parent_account_id` es `ON DELETE
+    CASCADE`, así que un DELETE real de la cuenta padre arrastraría sus
+    hijas y la tx de deuda emparejada de cada una — resucitando el activo
+    fantasma y perdiendo la deuda. El service lo valida y fuerza archivar."""
+    query = (
+        select(func.count(Account.id))
+        .where(Account.user_id == user_id)
+        .where(Account.parent_account_id == parent_account_id)
+    )
+    return int((await db.execute(query)).scalar_one())
+
+
 async def create_account(db: AsyncSession, account: Account) -> Account:
     """Persiste una nueva cuenta."""
     db.add(account)
@@ -153,28 +196,30 @@ async def get_balances_for_user(db: AsyncSession, user_id: uuid.UUID) -> dict[uu
         paired_account.nature == AccountNature.LIABILITY
     )
 
+    # PHASE-34: la dirección la manda `flow` (con fallback a category.kind
+    # para filas heredadas — ver helpers arriba). `account.nature` decide el
+    # signo final: en ASSET la entrada suma; en LIABILITY se invierte (una
+    # salida/cargo aumenta la deuda, una entrada/pago la reduce).
     signed_amount = case(
-        # Pata-activo de una conversión a deuda (activo↔pasivo): dinero
-        # prestado, no ahorro. Va PRIMERO para ganar a las ramas por kind.
-        (asset_leg_of_debt_pair, Decimal("0")),
+        # Pata-activo de una conversión a deuda (activo↔pasivo): SÓLO la
+        # ENTRADA de dinero prestado en el activo aporta 0 (no es ahorro).
+        # AUDIT-2026-07 (H-02): antes la condición era agnóstica a la
+        # dirección y también anulaba la SALIDA (amortizar deuda desde el
+        # activo), lo que INFLABA el patrimonio neto — pagar deuda dejaba el
+        # saldo del activo intacto mientras la deuda bajaba. Con `& is_inflow()`
+        # una salida de activo que paga deuda cae a la rama `is_outflow` →
+        # -amount, y el activo baja como debe. Va PRIMERO para ganar a las
+        # ramas por flujo en el caso de entrada.
+        (asset_leg_of_debt_pair & is_inflow(), Decimal("0")),
         # Liability: signos invertidos respecto a asset.
-        (
-            (Account.nature == AccountNature.LIABILITY) & (Category.kind == CategoryKind.EXPENSE),
-            Transaction.amount,
-        ),
-        (
-            (Account.nature == AccountNature.LIABILITY) & (Category.kind == CategoryKind.INCOME),
-            -Transaction.amount,
-        ),
+        ((Account.nature == AccountNature.LIABILITY) & is_outflow(), Transaction.amount),
+        ((Account.nature == AccountNature.LIABILITY) & is_inflow(), -Transaction.amount),
         # Asset (default).
-        (Category.kind == CategoryKind.EXPENSE, -Transaction.amount),
-        (Category.kind == CategoryKind.INCOME, Transaction.amount),
-        # PHASE-31.3 — tx sin categoría (kind=NULL tras outerjoin) o con
-        # categoría sin kind no contribuye al saldo. Antes era
-        # `else_=Transaction.amount`, que producía un cargo / abono
-        # arbitrario en función del importe firmado en la BD — ruido
-        # silencioso cuando un import fallaba y la tx quedaba sin
-        # categorizar. El banner UX educa al usuario para categorizar.
+        (is_outflow(), -Transaction.amount),
+        (is_inflow(), Transaction.amount),
+        # PHASE-31.3 — tx sin flujo ni categoría (kind=NULL) no contribuye
+        # al saldo. Antes `else_=Transaction.amount` producía un cargo/abono
+        # arbitrario; el banner UX educa al usuario para categorizar.
         else_=Decimal("0"),
     )
     query = (
@@ -217,25 +262,24 @@ async def get_net_savings_movement_for_account(
     """
     paired_tx = aliased(Transaction)
     paired_account = aliased(Account)
+    # PHASE-34: transferencias internas (flow TRANSFER_*; fallback is_transfer)
+    # aportan 0 — mover dinero entre cuentas propias no es ahorrar ni gastar.
     signed_amount = case(
-        (Category.is_transfer.is_(True), Decimal("0")),
-        # Pata-activo de una conversión a deuda (activo↔pasivo): dinero
-        # prestado, no ahorro (consistente con get_balances_for_user).
+        (_is_internal_transfer(), Decimal("0")),
+        # Pata-activo de una conversión a deuda (activo↔pasivo): SÓLO la
+        # entrada de dinero prestado aporta 0 (consistente con
+        # get_balances_for_user, AUDIT-2026-07 H-02). Una salida de activo
+        # que amortiza deuda cae a la rama `is_outflow` → -amount.
         (
             (Account.nature == AccountNature.ASSET)
-            & (paired_account.nature == AccountNature.LIABILITY),
+            & (paired_account.nature == AccountNature.LIABILITY)
+            & is_inflow(),
             Decimal("0"),
         ),
-        (
-            (Account.nature == AccountNature.LIABILITY) & (Category.kind == CategoryKind.EXPENSE),
-            Transaction.amount,
-        ),
-        (
-            (Account.nature == AccountNature.LIABILITY) & (Category.kind == CategoryKind.INCOME),
-            -Transaction.amount,
-        ),
-        (Category.kind == CategoryKind.EXPENSE, -Transaction.amount),
-        (Category.kind == CategoryKind.INCOME, Transaction.amount),
+        ((Account.nature == AccountNature.LIABILITY) & is_outflow(), Transaction.amount),
+        ((Account.nature == AccountNature.LIABILITY) & is_inflow(), -Transaction.amount),
+        (is_outflow(), -Transaction.amount),
+        (is_inflow(), Transaction.amount),
         else_=Decimal("0"),
     )
     query = (

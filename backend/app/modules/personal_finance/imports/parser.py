@@ -346,6 +346,27 @@ def parse_stream(
     return parse_file(stream.read(), filename, content_type)
 
 
+def count_pdf_pages(payload: bytes) -> int:
+    """Número total de páginas de un PDF.
+
+    AUDIT-2026-07 (M-04): lo usa el fallback de visión para DETECTAR que un
+    extracto excede el tope de páginas renderizables y avisar en vez de
+    truncar en silencio (importar sólo las primeras N y reportar éxito).
+    """
+    try:
+        import pypdfium2 as pdfium  # type: ignore[import-untyped]
+    except ImportError as e:
+        raise ParseError("pypdfium2 no disponible") from e
+    try:
+        pdf = pdfium.PdfDocument(payload)
+    except Exception as e:
+        raise ParseError(f"PDF inválido para render: {e}") from e
+    try:
+        return len(pdf)
+    finally:
+        pdf.close()
+
+
 def render_pdf_pages_to_png(payload: bytes, *, max_pages: int, dpi: int = 150) -> list[bytes]:
     """Renderiza las primeras `max_pages` páginas del PDF a PNG.
 
@@ -356,7 +377,7 @@ def render_pdf_pages_to_png(payload: bytes, *, max_pages: int, dpi: int = 150) -
     if max_pages <= 0:
         return []
     try:
-        import pypdfium2 as pdfium  # type: ignore[import-untyped]
+        import pypdfium2 as pdfium
     except ImportError as e:
         raise ParseError("pypdfium2 no disponible") from e
 

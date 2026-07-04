@@ -30,6 +30,28 @@ export interface InstallmentPayRequest {
   paid_transaction_id?: string;
 }
 
+/**
+ * AUDIT-2026-07 (H-05): marca las cuotas que un pago de principal cubre.
+ * Lo usa el asistente "Pagar cuota" para que el saldo dirigido por el cuadro
+ * (PHASE-36) baje al pagar. `principal_amount` es un string decimal.
+ */
+export interface InstallmentBulkPayRequest {
+  principal_amount: string;
+  paid_at?: string;
+  paid_transaction_id?: string;
+}
+
+export interface InstallmentBulkPayResponse {
+  /** Cuántas cuotas se marcaron como pagadas. */
+  marked_count: number;
+  /** Σ del principal de las cuotas marcadas. */
+  covered_principal: string;
+  /** Principal pagado que no cubrió una cuota completa (0 si cuadró). */
+  uncovered_principal: string;
+  /** Saldo de la liability dirigido por el cuadro tras marcar. */
+  schedule_outstanding: string | null;
+}
+
 export interface AmortizationSchedule {
   account_id: string;
   principal: string;

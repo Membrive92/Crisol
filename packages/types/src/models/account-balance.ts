@@ -25,6 +25,11 @@ export interface AccountBalance {
    * de transferencias.
    */
   is_unvalued?: boolean;
+  /**
+   * PHASE-35 — Tarjeta padre si esta cuenta es una compra a plazos. NULL en
+   * cuentas normales. La vista de deuda agrupa las hijas bajo su tarjeta.
+   */
+  parent_account_id?: string | null;
 }
 
 export interface AccountBalancesResponse {

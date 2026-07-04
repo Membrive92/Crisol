@@ -1,7 +1,9 @@
 'use client';
 
+import { useState } from 'react';
+
 import { useCategories } from '@crisol/services';
-import type { AccountType } from '@crisol/types';
+import type { Account, AccountType } from '@crisol/types';
 import {
   AMORTIZABLE_ACCOUNT_TYPES,
   ASSET_ACCOUNT_TYPES,
@@ -54,6 +56,11 @@ export interface AccountFormValue {
    * liabilities; el wizard la envía como `category_id` al backend
    * (cadena vacía = sin vincular). */
   category_id: string;
+  /** PHASE-35 — Tarjeta padre cuando esta cuenta es una COMPRA A PLAZOS
+   * dentro de una tarjeta de crédito. Cadena vacía = cuenta normal. Sólo
+   * se ofrece al CREAR una `credit_card`; al elegir padre, el plan de
+   * financiación (capital + TIN + plazo + fecha) pasa a obligatorio. */
+  parent_account_id: string;
 }
 
 export interface AccountFormErrors {
@@ -74,6 +81,11 @@ export interface AccountFormFieldsProps {
   /** Si está vacío, el caller decide qué campos pedir. Por defecto: full. */
   variant?: 'full' | 'minimal';
   errors?: AccountFormErrors | undefined;
+  /** PHASE-35 — Tarjetas de crédito candidatas a padre de una compra a
+   * plazos. Sólo el flujo de CREAR lo pasa (no editar: el backend no
+   * permite re-parentar). Si está y type=credit_card, se muestra el
+   * selector "compra a plazos dentro de…". */
+  parentCardOptions?: Account[] | undefined;
 }
 
 const TYPE_LABEL: Record<AccountType, string> = {
@@ -101,6 +113,7 @@ export const DEFAULT_ACCOUNT_FORM: AccountFormValue = {
   total_to_pay: '',
   interest_only_first_payment: '',
   category_id: '',
+  parent_account_id: '',
 };
 
 function isLiabilityType(type: AccountType): boolean {
@@ -126,6 +139,7 @@ export function AccountFormFields({
   onChange,
   variant = 'full',
   errors,
+  parentCardOptions,
 }: AccountFormFieldsProps) {
   const categoriesQuery = useCategories();
   const debtCategories = (categoriesQuery.data ?? []).filter(
@@ -137,6 +151,10 @@ export function AccountFormFields({
   }
 
   function handleTypeChange(nextType: AccountType) {
+    // PHASE-35: el padre (compra a plazos) sólo aplica a credit_card; al
+    // cambiar a cualquier otro tipo se limpia para no enviar un vínculo
+    // inválido al backend.
+    const nextParent = nextType === 'credit_card' ? value.parent_account_id : '';
     // Al cambiar a un tipo no amortizable, limpiamos los campos
     // específicos para que el caller no envíe valores residuales.
     if (!isAmortizableType(nextType)) {
@@ -152,6 +170,7 @@ export function AccountFormFields({
         // category_id sólo aplica a liabilities. Al cambiar a asset
         // limpiamos para no enviar un vínculo inválido al backend.
         category_id: isLiabilityType(nextType) ? value.category_id : '',
+        parent_account_id: nextParent,
       });
       return;
     }
@@ -159,19 +178,54 @@ export function AccountFormFields({
       ...value,
       type: nextType,
       category_id: isLiabilityType(nextType) ? value.category_id : '',
+      parent_account_id: nextParent,
     });
   }
 
   const isLiability = isLiabilityType(value.type);
   const showAmortization = isAmortizableType(value.type);
+  // PHASE-35: esta cuenta es una COMPRA A PLAZOS dentro de una tarjeta si
+  // tiene padre. Entonces el plan de financiación es obligatorio (capital +
+  // TIN + plazo + fecha generan su cuadro propio).
+  const isInstallmentChild = value.type === 'credit_card' && !!value.parent_account_id;
+  // PHASE-35: el selector de tarjeta padre sólo en el flujo de CREAR
+  // (parentCardOptions presente) y para credit_card.
+  const showParentSelector =
+    value.type === 'credit_card' &&
+    variant === 'full' &&
+    !!parentCardOptions &&
+    parentCardOptions.length > 0;
+  // PHASE-34: en una tarjeta de crédito el cuadro de financiación es
+  // OPCIONAL — sólo aplica si financias compras a plazos. Una tarjeta que
+  // pagas entera cada mes no tiene interés ni plazo y se crea sin nada de
+  // esto. En préstamo/hipoteca sí es el cuadro de amortización esperado.
+  // PHASE-35: una compra a plazos (hija) SÍ exige el plan.
+  const financingOptional = value.type === 'credit_card' && !isInstallmentChild;
+  // En tarjeta, el bloque de financiación arranca PLEGADO tras un botón —
+  // salvo que ya traiga datos (editar una tarjeta financiada): así no se
+  // ocultan valores existentes. En préstamo/hipoteca siempre visible.
+  const [financingExpanded, setFinancingExpanded] = useState(
+    Boolean(
+      value.apr_percent ||
+        value.tae_percent ||
+        value.term_months ||
+        value.start_date ||
+        value.total_to_pay ||
+        value.interest_only_first_payment,
+    ),
+  );
   // Para loan/mortgage el principal es obligatorio (sin él no se genera
   // el cuadro). Para credit_card y assets el saldo inicial es opcional.
-  const capitalRequired = value.type === 'loan' || value.type === 'mortgage';
-  const balanceLabel = isLiability
-    ? capitalRequired
-      ? 'Capital'
-      : 'Capital (opcional)'
-    : 'Saldo inicial (opcional)';
+  // PHASE-35: una compra a plazos exige su importe (es el capital del cuadro).
+  const capitalRequired =
+    value.type === 'loan' || value.type === 'mortgage' || isInstallmentChild;
+  const balanceLabel = isInstallmentChild
+    ? 'Importe de la compra'
+    : isLiability
+      ? capitalRequired
+        ? 'Capital'
+        : 'Capital (opcional)'
+      : 'Saldo inicial (opcional)';
   const balanceColor = isLiability ? colors.danger : undefined;
 
   return (
@@ -218,6 +272,35 @@ export function AccountFormFields({
           </Select>
         </div>
       </div>
+
+      {showParentSelector ? (
+        <div>
+          <Select
+            label="¿Es una compra a plazos dentro de una tarjeta?"
+            value={value.parent_account_id}
+            onChange={(e) => patch('parent_account_id', e.target.value)}
+          >
+            <option value="">No — tarjeta normal</option>
+            {(parentCardOptions ?? []).map((card) => (
+              <option key={card.id} value={card.id}>
+                Sí, dentro de «{card.name}»
+              </option>
+            ))}
+          </Select>
+          <p
+            style={{
+              margin: `${spacing.xs}px 0 0 0`,
+              fontSize: fontSize.xs,
+              color: colors.textMuted,
+              lineHeight: 1.4,
+            }}
+          >
+            Para una compra financiada a plazos con tu tarjeta de crédito. Se
+            agrupa bajo la tarjeta en el módulo de deuda, con su propio plan de
+            pago, y no aparece como cuenta aparte al registrar transacciones.
+          </p>
+        </div>
+      ) : null}
 
       <div
         style={{
@@ -306,7 +389,26 @@ export function AccountFormFields({
         </div>
       ) : null}
 
-      {showAmortization && variant === 'full' ? (
+      {showAmortization && variant === 'full' && financingOptional && !financingExpanded ? (
+        // PHASE-34: tarjeta sin financiación → bloque plegado tras un botón.
+        // Pagas la tarjeta entera cada mes = no necesitas nada de esto.
+        <button
+          type="button"
+          onClick={() => setFinancingExpanded(true)}
+          style={{
+            alignSelf: 'flex-start',
+            padding: `${spacing.sm}px ${spacing.md}px`,
+            border: `1px dashed ${colors.border}`,
+            borderRadius: 8,
+            backgroundColor: 'transparent',
+            color: colors.textMuted,
+            fontSize: fontSize.sm,
+            cursor: 'pointer',
+          }}
+        >
+          + Configurar financiación a plazos (opcional)
+        </button>
+      ) : showAmortization && variant === 'full' ? (
         <fieldset
           style={{
             margin: 0,
@@ -329,7 +431,11 @@ export function AccountFormFields({
               letterSpacing: '0.04em',
             }}
           >
-            Cuadro de amortización (francés)
+            {isInstallmentChild
+              ? 'Plan de pago de la compra a plazos'
+              : financingOptional
+                ? 'Financiación a plazos (opcional)'
+                : 'Cuadro de amortización (francés)'}
           </legend>
           <p
             style={{
@@ -339,10 +445,11 @@ export function AccountFormFields({
               lineHeight: 1.4,
             }}
           >
-            Rellena TIN, plazo y fecha de inicio para que la app calcule
-            la cuota mensual, los intereses y el saldo pendiente. TAE es
-            informativa (la usan los bancos para legal disclosure) y
-            no afecta al cálculo.
+            {isInstallmentChild
+              ? 'Rellena el importe, el TIN, el plazo y la fecha de la primera cuota: generamos el cuadro de esta compra a plazos. Es obligatorio para esta cuenta.'
+              : financingOptional
+                ? 'Sólo si financias compras a plazos. Si pagas la tarjeta entera cada mes, deja esto en blanco: no necesita interés ni plazo.'
+                : 'Rellena TIN, plazo y fecha de inicio para que la app calcule la cuota mensual, los intereses y el saldo pendiente. TAE es informativa (la usan los bancos para legal disclosure) y no afecta al cálculo.'}
           </p>
           <div
             style={{

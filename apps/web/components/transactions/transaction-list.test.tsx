@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 import type { Category, Transaction } from '@crisol/types';
 
@@ -29,6 +29,7 @@ function makeTx(overrides: Partial<Transaction> = {}): Transaction {
     deleted_at: null,
     converted_amount: null,
     converted_currency: null,
+    flow: null,
     is_debt_pair: false,
     ...overrides,
   };
@@ -117,5 +118,47 @@ describe('TransactionList — pata de deuda / transferencia', () => {
     expect(screen.queryByText('Deuda')).toBeNull();
     expect(screen.queryByText('Transferencia')).toBeNull();
     expect(container.textContent).toContain('+');
+  });
+});
+
+describe('TransactionList — selección por checkbox (PHASE-34)', () => {
+  it('sin onToggleSelect NO renderiza la columna de selección', () => {
+    render(<TransactionList items={[makeTx()]} categories={categories} onDelete={vi.fn()} />);
+    expect(screen.queryByLabelText('Seleccionar todo')).toBeNull();
+  });
+
+  it('marca una fila → dispara onToggleSelect con su id', () => {
+    const onToggleSelect = vi.fn();
+    render(
+      <TransactionList
+        items={[makeTx({ id: 'tx-sel', category_id: 'cat-plain-income' })]}
+        categories={categories}
+        onDelete={vi.fn()}
+        selectedIds={new Set()}
+        onToggleSelect={onToggleSelect}
+        onToggleSelectAll={vi.fn()}
+        allSelected={false}
+        someSelected={false}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText('Seleccionar transacción'));
+    expect(onToggleSelect).toHaveBeenCalledWith('tx-sel');
+  });
+
+  it('el checkbox de cabecera refleja allSelected', () => {
+    render(
+      <TransactionList
+        items={[makeTx({ id: 'a' })]}
+        categories={categories}
+        onDelete={vi.fn()}
+        selectedIds={new Set(['a'])}
+        onToggleSelect={vi.fn()}
+        onToggleSelectAll={vi.fn()}
+        allSelected
+        someSelected
+      />,
+    );
+    const selectAll = screen.getByLabelText('Seleccionar todo') as HTMLInputElement;
+    expect(selectAll.checked).toBe(true);
   });
 });

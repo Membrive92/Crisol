@@ -428,17 +428,51 @@ async def test_brokerage_account_excluded_from_net_worth(
     assert len(body["items"]) == 2
 
 
-# ---------------------------------------------------------------------------
-# PHASE-32 — la cuenta principal (is_default) refleja AHORRO NETO.
-# ---------------------------------------------------------------------------
-
-
-async def test_default_account_balance_excludes_internal_transfers(
+async def test_brokerage_excluded_from_debt_health_assets(
     client: AsyncClient,
 ) -> None:
-    """PHASE-32 — La cuenta principal (`is_default`) refleja ahorro neto: las
-    transferencias internas (`is_transfer`) NO cuentan en su saldo. Una
-    cuenta NO principal sí las cuenta (modo cash, PHASE-23.1)."""
+    """AUDIT-2026-06 — `/accounts/debt-health` excluye brokerage/crypto de
+    `total_assets` EXACTAMENTE igual que `/accounts/balances`. Antes
+    debt-health los contaba, así que el KPI "% en deuda"
+    (`debt_to_assets_ratio`) y el patrimonio neto de la MISMA card del
+    hero asumían conjuntos de activos distintos (finding integración #6)."""
+    token = await _setup_user(client, "broker-debt-health@example.com")
+    await client.post(
+        "/accounts",
+        json={"name": "Bank", "type": "bank", "currency": "EUR", "opening_balance": "5000.00"},
+        headers=_auth(token),
+    )
+    await client.post(
+        "/accounts",
+        json={"name": "Broker", "type": "brokerage", "currency": "EUR", "opening_balance": "10000.00"},
+        headers=_auth(token),
+    )
+    await client.post(
+        "/accounts",
+        json={"name": "Wallet", "type": "crypto", "currency": "EUR", "opening_balance": "2000.00"},
+        headers=_auth(token),
+    )
+
+    health = (await client.get("/accounts/debt-health", headers=_auth(token))).json()
+    balances = (await client.get("/accounts/balances", headers=_auth(token))).json()
+    # Sólo el banco (5000) cuenta; brokerage (10000) + crypto (2000) fuera.
+    # debt-health y balances deben coincidir en la base de activos.
+    assert health["total_assets"] == "5000.00"
+    assert health["total_assets"] == balances["total_assets"]
+
+
+# ---------------------------------------------------------------------------
+# PHASE-34 — la lista de cuentas muestra la CAJA REAL de todas (incl. la principal).
+# ---------------------------------------------------------------------------
+
+
+async def test_default_account_balance_shows_real_cash(
+    client: AsyncClient,
+) -> None:
+    """PHASE-34 — La lista muestra la caja real de cada cuenta, incluida la
+    principal: las transferencias internas SÍ cuentan en su saldo mostrado
+    (es lo que de verdad hay en la cuenta). Antes (PHASE-32) la principal
+    mostraba "ahorro neto" y salía un saldo que no coincidía con la caja."""
     token = await _setup_user(client, "default-savings@example.com")
 
     cats = (await client.get("/categories", headers=_auth(token))).json()
@@ -478,20 +512,20 @@ async def test_default_account_balance_excludes_internal_transfers(
         b["account_id"]: b
         for b in (await client.get("/accounts/balances", headers=_auth(token))).json()["items"]
     }
-    # Principal: solo el ingreso real (100); la transferencia NO cuenta.
-    assert Decimal(by_id[main_id]["movements_balance"]) == Decimal("100.00")
-    # Otra: ingreso + transferencia (modo cash).
+    # PHASE-34: la principal muestra caja real (ingreso + transferencia = 600),
+    # igual que cualquier otra cuenta.
+    assert Decimal(by_id[main_id]["movements_balance"]) == Decimal("600.00")
     assert Decimal(by_id[other_id]["movements_balance"]) == Decimal("600.00")
 
 
 async def test_net_worth_unaffected_by_transfer_into_default_account(
     client: AsyncClient,
 ) -> None:
-    """PHASE-32 HIGH#1 — una transferencia interna HACIA la cuenta principal
-    NO debe cambiar el patrimonio neto agregado. La pata entrante está zerada
-    en el DISPLAY de ahorro neto de la principal, pero el agregado usa el
-    saldo CASH, así que se cancela con la pata saliente de la otra cuenta.
-    Antes (bug), el net_worth encogía por el importe de la transferencia."""
+    """PHASE-32 HIGH#1 (sigue válido en PHASE-34) — una transferencia interna
+    HACIA la cuenta principal NO debe cambiar el patrimonio neto agregado. El
+    agregado usa el saldo CASH de cada cuenta, así que la pata entrante en la
+    principal (+500) se cancela con la saliente de la otra (-500). El DISPLAY
+    de la principal ahora muestra su caja real (600); el net_worth sigue 100."""
     token = await _setup_user(client, "networth-transfer@example.com")
 
     cats = (await client.get("/categories", headers=_auth(token))).json()
@@ -535,10 +569,10 @@ async def test_net_worth_unaffected_by_transfer_into_default_account(
     bal = (await client.get("/accounts/balances", headers=_auth(token))).json()
     by_id = {b["account_id"]: b for b in bal["items"]}
 
-    # DISPLAY: la principal muestra ahorro neto (100, sin la transferencia).
-    assert Decimal(by_id[main_id]["movements_balance"]) == Decimal("100.00")
-    # AGREGADO: net_worth = sólo el ahorro real (100). Las dos patas de la
-    # transferencia (+500 principal cash, -500 otra) se cancelan.
+    # DISPLAY (PHASE-34): la principal muestra caja real (100 + 500 = 600).
+    assert Decimal(by_id[main_id]["movements_balance"]) == Decimal("600.00")
+    # AGREGADO: net_worth = 100. Las dos patas de la transferencia
+    # (+500 principal cash, -500 otra) se cancelan — HIGH#1 intacto.
     assert Decimal(bal["net_worth"]) == Decimal("100.00")
     assert Decimal(bal["total_assets"]) == Decimal("100.00")
 
@@ -599,3 +633,232 @@ async def test_archiving_default_account_clears_is_default(client: AsyncClient) 
     assert r.status_code == 200, r.text
     assert r.json()["is_archived"] is True
     assert r.json()["is_default"] is False
+
+
+# ---------------------------------------------------------------------------
+# PHASE-34 — "Cuadrar saldo": anclar el saldo al valor real declarado.
+# ---------------------------------------------------------------------------
+
+
+async def test_reconcile_account_balance_anchors_to_real_value(client: AsyncClient) -> None:
+    """El usuario declara el saldo real y la app ajusta `opening_balance` para
+    que el saldo mostrado coincida — sin reconstruir el histórico. Vale para
+    fijar el inicial y para re-cuadrar (B)."""
+    token = await _setup_user(client, "reconcile@example.com")
+    cats = (await client.get("/categories", headers=_auth(token))).json()
+    income = next(c for c in cats if c["kind"] == "income" and not c["is_transfer"])
+
+    acc = await client.post(
+        "/accounts",
+        json={"name": "BBVA", "type": "bank", "currency": "EUR"},
+        headers=_auth(token),
+    )
+    aid = acc.json()["id"]
+    # Movimiento: +100 de ingreso (saldo computado = 100).
+    await client.post(
+        "/transactions",
+        json={
+            "amount": "100.00",
+            "currency": "EUR",
+            "occurred_at": "2026-01-15T12:00:00Z",
+            "account_id": aid,
+            "category_id": income["id"],
+        },
+        headers=_auth(token),
+    )
+
+    async def _balance() -> Decimal:
+        items = (await client.get("/accounts/balances", headers=_auth(token))).json()["items"]
+        return Decimal(next(b for b in items if b["account_id"] == aid)["current_balance"])
+
+    # Cuadrar a 500 → opening = 500 - 100 → saldo mostrado = 500.
+    r = await client.post(
+        f"/accounts/{aid}/reconcile", json={"current_balance": "500.00"}, headers=_auth(token)
+    )
+    assert r.status_code == 200, r.text
+    assert await _balance() == Decimal("500.00")
+
+    # Re-cuadrar (B): a 1000 → vuelve a coincidir.
+    r = await client.post(
+        f"/accounts/{aid}/reconcile", json={"current_balance": "1000.00"}, headers=_auth(token)
+    )
+    assert r.status_code == 200, r.text
+    assert await _balance() == Decimal("1000.00")
+
+
+async def test_reconcile_rejects_liability(client: AsyncClient) -> None:
+    """La deuda se gestiona en su módulo — cuadrar un pasivo da 400."""
+    token = await _setup_user(client, "reconcile-liab@example.com")
+    acc = await client.post(
+        "/accounts",
+        json={"name": "Prestamo", "type": "loan", "currency": "EUR", "opening_balance": "10000.00"},
+        headers=_auth(token),
+    )
+    aid = acc.json()["id"]
+    r = await client.post(
+        f"/accounts/{aid}/reconcile", json={"current_balance": "5000.00"}, headers=_auth(token)
+    )
+    assert r.status_code == 400, r.text
+
+
+# ---------------------------------------------------------------------------
+# PHASE-35 — Compras a plazos como sub-cuentas de una tarjeta (parent_account_id).
+# ---------------------------------------------------------------------------
+
+
+async def _new_card(client: AsyncClient, token: str, name: str = "Tarjeta BBVA") -> str:
+    r = await client.post(
+        "/accounts",
+        json={"name": name, "type": "credit_card", "currency": "EUR"},
+        headers=_auth(token),
+    )
+    assert r.status_code == 201, r.text
+    return str(r.json()["id"])
+
+
+async def test_card_groups_independent_installment_purchases(client: AsyncClient) -> None:
+    """Una tarjeta agrupa varias compras a plazos, cada una con su propio
+    TIN/plazo y su PROPIO cuadro de amortización (no se suman en uno)."""
+    token = await _setup_user(client, "card-multi@example.com")
+    card_id = await _new_card(client, token)
+
+    async def _purchase(name: str, amount: str, apr: str, term: int) -> dict[str, object]:
+        r = await client.post(
+            "/accounts",
+            json={
+                "name": name,
+                "type": "credit_card",
+                "currency": "EUR",
+                "parent_account_id": card_id,
+                "opening_balance": amount,
+                "apr": apr,
+                "term_months": term,
+                "start_date": "2026-05-01",
+            },
+            headers=_auth(token),
+        )
+        assert r.status_code == 201, r.text
+        return dict(r.json())
+
+    p1 = await _purchase("MediaMarkt", "1200.00", "0.0000", 12)
+    p2 = await _purchase("Viaje", "2400.00", "0.0800", 24)
+    assert p1["parent_account_id"] == card_id
+    assert p2["parent_account_id"] == card_id
+
+    # Cada compra tiene su propio cuadro con su número de cuotas.
+    s1 = await client.get(f"/accounts/{p1['id']}/amortization-schedule", headers=_auth(token))
+    s2 = await client.get(f"/accounts/{p2['id']}/amortization-schedule", headers=_auth(token))
+    assert len(s1.json()["rows"]) == 12
+    assert len(s2.json()["rows"]) == 24
+
+    # Aparecen como hijas en balances (la UI las agrupa bajo la tarjeta).
+    balances = (await client.get("/accounts/balances", headers=_auth(token))).json()["items"]
+    children = [b for b in balances if b.get("parent_account_id") == card_id]
+    assert {c["account_id"] for c in children} == {p1["id"], p2["id"]}
+
+
+async def test_installment_purchase_requires_full_plan(client: AsyncClient) -> None:
+    """Una compra a plazos sin plan completo (falta TIN/plazo/fecha) → 400."""
+    token = await _setup_user(client, "card-plan@example.com")
+    card_id = await _new_card(client, token)
+    r = await client.post(
+        "/accounts",
+        json={
+            "name": "Compra sin plan",
+            "type": "credit_card",
+            "currency": "EUR",
+            "parent_account_id": card_id,
+            "opening_balance": "500.00",
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 400, r.text
+
+
+async def test_installment_purchase_parent_must_be_card(client: AsyncClient) -> None:
+    """El padre de una compra a plazos debe ser una tarjeta (no un banco)."""
+    token = await _setup_user(client, "card-parent@example.com")
+    bank = await client.post(
+        "/accounts",
+        json={"name": "BBVA", "type": "bank", "currency": "EUR"},
+        headers=_auth(token),
+    )
+    r = await client.post(
+        "/accounts",
+        json={
+            "name": "Compra",
+            "type": "credit_card",
+            "currency": "EUR",
+            "parent_account_id": bank.json()["id"],
+            "opening_balance": "500.00",
+            "apr": "0.0000",
+            "term_months": 6,
+            "start_date": "2026-05-01",
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 400, r.text
+
+
+async def test_delete_parent_card_with_children_is_blocked(client: AsyncClient) -> None:
+    """PHASE-35 — borrar una tarjeta con compras a plazos anidadas está
+    prohibido: el CASCADE de `parent_account_id` arrastraría las hijas y su
+    deuda. Devuelve 409 (archivar en su lugar). Protege el invariante de dinero.
+    """
+    token = await _setup_user(client, "del-parent@example.com")
+    card_id = await _new_card(client, token)
+    child = await client.post(
+        "/accounts",
+        json={
+            "name": "Portátil a plazos",
+            "type": "credit_card",
+            "currency": "EUR",
+            "parent_account_id": card_id,
+            "opening_balance": "900.00",
+            "apr": "0.1200",
+            "term_months": 12,
+            "start_date": "2026-05-01",
+        },
+        headers=_auth(token),
+    )
+    assert child.status_code == 201, child.text
+
+    # La tarjeta padre no tiene tx propias, pero tiene una hija → 409.
+    r = await client.delete(f"/accounts/{card_id}", headers=_auth(token))
+    assert r.status_code == 409, r.text
+
+    # La hija sigue viva (el intento fallido no la borró).
+    still = await client.get(f"/accounts/{child.json()['id']}", headers=_auth(token))
+    assert still.status_code == 200
+
+    # Archivar sí está permitido (no arrastra hijas).
+    arch = await client.put(
+        f"/accounts/{card_id}", json={"is_archived": True}, headers=_auth(token)
+    )
+    assert arch.status_code == 200
+
+
+async def test_installment_purchase_parent_cannot_be_archived(client: AsyncClient) -> None:
+    """PHASE-35 — no se puede anidar una compra bajo una tarjeta archivada
+    (`get_account_by_id` no filtra archivadas; se valida explícitamente)."""
+    token = await _setup_user(client, "card-archived-parent@example.com")
+    card_id = await _new_card(client, token)
+    arch = await client.put(
+        f"/accounts/{card_id}", json={"is_archived": True}, headers=_auth(token)
+    )
+    assert arch.status_code == 200
+    r = await client.post(
+        "/accounts",
+        json={
+            "name": "Compra bajo archivada",
+            "type": "credit_card",
+            "currency": "EUR",
+            "parent_account_id": card_id,
+            "opening_balance": "500.00",
+            "apr": "0.0000",
+            "term_months": 6,
+            "start_date": "2026-05-01",
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 400, r.text

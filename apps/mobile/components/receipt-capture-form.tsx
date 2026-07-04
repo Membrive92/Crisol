@@ -65,7 +65,11 @@ export function ReceiptCaptureForm({
   // y desactivamos el submit (el guard de onboarding debería haber evitado
   // llegar aquí, pero defensivo).
   const { data: accounts } = useAccounts();
-  const activeAccounts: Account[] = (accounts ?? []).filter((a) => !a.is_archived);
+  // AUDIT-2026-07 (LOW): PHASE-35 — las compras a plazos hijas
+  // (`parent_account_id`) no son destino de un ticket; se ocultan como en web.
+  const activeAccounts: Account[] = (accounts ?? []).filter(
+    (a) => !a.is_archived && !a.parent_account_id,
+  );
   // PHASE-32: pre-selecciona la cuenta principal; fallback al primer activo.
   const defaultAccountId = pickPreferredAccountId(activeAccounts);
 

@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import type { Category, ImportPreviewResponse, ImportSource } from '@crisol/types';
-import { colors, fontSize, fontWeight, formatCategoryKind, radius, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import { Button } from '../ui/button';
 import { Spinner } from '../ui/spinner';
+import { CategoryCombobox } from '../transactions/category-combobox';
 import { looksLikeFinancedOperation } from '../transfers/convert-to-debt-dialog';
 
 const SOURCE_LABEL: Record<ImportSource, string> = {
@@ -500,30 +501,24 @@ function BankConceptMappingSection({
                   Categoría por fila al confirmar
                 </span>
               ) : (
-                <select
-                  value={value}
-                  onChange={(e) =>
-                    onChange({ ...mapping, [g.concept]: e.target.value })
-                  }
-                  style={{
-                    width: 220,
-                    padding: `${spacing.xs}px ${spacing.sm}px`,
-                    fontSize: fontSize.sm,
-                    borderRadius: radius.sm,
-                    border: `1px solid ${
-                      isSuggestion ? colors.primary : colors.border
-                    }`,
-                    backgroundColor: colors.surface,
-                    color: colors.text,
-                  }}
-                >
-                  <option value="">— Sin categoría —</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({formatCategoryKind(c.kind)})
-                    </option>
-                  ))}
-                </select>
+                // Mismo selector agrupado (Ingresos/Gastos/Transferencias)
+                // que en el alta manual, para que elegir una categoría de
+                // transferencia se lea como "movimiento entre cuentas" y no
+                // como un gasto. `highlight` conserva el aviso de sugerencia
+                // del backend; el concepto es el label accesible (oculto).
+                <div style={{ width: 220 }}>
+                  <CategoryCombobox
+                    label={`Categoría para ${g.concept}`}
+                    hideLabel
+                    dense
+                    highlight={isSuggestion}
+                    categories={categories}
+                    value={value}
+                    onChange={(catId) =>
+                      onChange({ ...mapping, [g.concept]: catId })
+                    }
+                  />
+                </div>
               )}
             </div>
           );

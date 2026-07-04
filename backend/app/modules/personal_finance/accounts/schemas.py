@@ -64,6 +64,11 @@ class AccountCreate(BaseModel):
     """PHASE-30.4 — Categoría de pagos vinculada (sólo liability +
     role DEBT_*). El service valida ambas condiciones; pasa por aquí
     NULL desde formularios donde no se haya escogido."""
+    parent_account_id: uuid.UUID | None = None
+    """PHASE-35 — Tarjeta padre. Si se indica, esta cuenta es una COMPRA A
+    PLAZOS dentro de esa tarjeta: el service valida que el padre es una
+    `credit_card` del usuario y exige plan (capital + TIN + plazo + fecha)
+    para generar su propio cuadro de amortización."""
 
 
 class AccountUpdate(BaseModel):
@@ -94,6 +99,17 @@ class AccountUpdate(BaseModel):
     desvincular, enviar explícitamente `null`."""
 
 
+class ReconcileBalanceRequest(BaseModel):
+    """PHASE-34 — 'Cuadrar saldo'. El usuario declara el saldo REAL actual de
+    una cuenta (lo que dice su banco hoy) y el service ajusta
+    `opening_balance` para que el saldo mostrado coincida, sin reconstruir el
+    histórico ni emparejar transferencias. Vale para fijar el saldo inicial y
+    para re-cuadrar cuando se descuadre. Solo cuentas de activo (la deuda se
+    gestiona en su módulo)."""
+
+    current_balance: Decimal = Field(decimal_places=2)
+
+
 class AccountResponse(BaseModel):
     """Respuesta pública de una cuenta."""
 
@@ -119,6 +135,9 @@ class AccountResponse(BaseModel):
     """PHASE-32 — Cuenta principal del usuario (pre-seleccionada en
     formularios). Única por usuario."""
     category_id: uuid.UUID | None = None
+    parent_account_id: uuid.UUID | None = None
+    """PHASE-35 — Tarjeta padre si esta cuenta es una compra a plazos. NULL
+    en cuentas normales. La UI agrupa las hijas bajo el padre."""
     created_at: datetime
     updated_at: datetime
 
@@ -135,6 +154,8 @@ class AccountBalance(BaseModel):
     currency: str
     color: str | None
     icon: str | None
+    parent_account_id: uuid.UUID | None = None
+    """PHASE-35 — Tarjeta padre si es una compra a plazos (para agrupar)."""
     opening_balance: Decimal
     movements_balance: Decimal
     """Suma neta de movimientos en la moneda nativa de la cuenta
@@ -247,6 +268,68 @@ class InstallmentPayRequest(BaseModel):
     """`None` → `now()`."""
     paid_transaction_id: uuid.UUID | None = None
     """Tx del extracto que liquidó la cuota — opcional, informativo."""
+
+
+class InstallmentBulkPayRequest(BaseModel):
+    """AUDIT-2026-07 (H-05) — Marca las cuotas que un pago de principal cubre.
+
+    Lo usa el asistente "Pagar cuota": tras crear la transferencia del
+    principal, marca la(s) cuota(s) que ese importe cubre (de la más antigua
+    pendiente hacia adelante) para que el saldo dirigido por el cuadro
+    (PHASE-36) baje. `paid_transaction_id` es la pata que movió el dinero.
+    """
+
+    principal_amount: Decimal = Field(gt=0, decimal_places=2)
+    paid_at: datetime | None = None
+    paid_transaction_id: uuid.UUID | None = None
+
+
+class InstallmentBulkPayResponse(BaseModel):
+    """Resultado de marcar cuotas por importe de principal (H-05)."""
+
+    marked_count: int
+    """Cuántas cuotas se marcaron como pagadas."""
+    covered_principal: Decimal
+    """Σ del principal de las cuotas marcadas."""
+    uncovered_principal: Decimal
+    """Principal pagado que NO cubrió una cuota completa (0 si cuadró).
+    Si `marked_count == 0` es el importe total: la UI debe avisar de que el
+    pago no alcanza la cuota más antigua pendiente."""
+    schedule_outstanding: Decimal | None
+    """Saldo de la liability dirigido por el cuadro tras marcar (PHASE-36)."""
+
+
+# AUDIT-2026-07 (LOW): esquema de respuesta tipado del plan de reconciliación
+# (PHASE-36). Antes el endpoint devolvía `dict[str, object]` sin `response_model`
+# — sin contrato en el boundary. Refleja `ReconcilePlan.to_dict()`.
+class ReconcileActionResponse(BaseModel):
+    ix: int
+    due: str
+    principal: str
+    payment: str
+    reason: str
+    tx: str | None = None
+    tx_desc: str | None = None
+    tx_amount: str | None = None
+
+
+class ReconcileLiabilityResponse(BaseModel):
+    name: str
+    type: str
+    generate_schedule: bool
+    schedule_rows: int
+    anchored: int
+    matched: int
+    assumed_unregistered_debt: str
+    outstanding_before: str | None = None
+    outstanding_after: str | None = None
+    actions: list[ReconcileActionResponse]
+
+
+class ReconcilePlanResponse(BaseModel):
+    data_window_start: str | None = None
+    liabilities: list[ReconcileLiabilityResponse]
+    skipped_payments: list[str]
 
 
 class AmortizationScheduleResponse(BaseModel):

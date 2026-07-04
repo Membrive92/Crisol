@@ -117,4 +117,21 @@ describe('CategoryCombobox', () => {
     await user.keyboard('{Enter}');
     expect(onChange).toHaveBeenCalledWith('inc-1');
   });
+
+  it('con hideLabel conserva el nombre accesible (uso inline en imports)', () => {
+    // El preview de import lo usa por fila con el concepto del banco como
+    // label oculto: no debe verse pero sí seguir nombrando al combobox.
+    render(
+      <CategoryCombobox
+        label="Categoría para NÓMINA EMPRESA SL"
+        hideLabel
+        categories={categories}
+        value=""
+        onChange={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole('combobox', { name: 'Categoría para NÓMINA EMPRESA SL' }),
+    ).toBeDefined();
+  });
 });

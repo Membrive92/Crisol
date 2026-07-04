@@ -9,6 +9,7 @@ import {
   useAccounts,
   useCreateAccount,
   useDeleteAccount,
+  useReconcileAccount,
   useUpdateAccount,
 } from '@crisol/services';
 import { toast } from '@crisol/store';
@@ -40,6 +41,7 @@ import { DebtPaymentWizard } from '@/components/accounts/debt-payment-wizard';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { TextInput } from '@/components/ui/field';
 
 /**
  * Convierte el porcentaje del UI (ej. "3.5") a decimal serializado
@@ -96,6 +98,12 @@ function toCreatePayload(form: AccountFormValue): AccountCreateRequest {
   const isLiability = ['credit_card', 'loan', 'mortgage'].includes(form.type);
   if (isLiability && form.category_id) {
     payload.category_id = form.category_id;
+  }
+  // PHASE-35: compra a plazos bajo una tarjeta. Sólo se envía para una
+  // credit_card con padre elegido; el backend valida que el padre es una
+  // tarjeta del usuario y exige plan completo (validado también en `validate`).
+  if (form.type === 'credit_card' && form.parent_account_id) {
+    payload.parent_account_id = form.parent_account_id;
   }
   return payload;
 }
@@ -220,6 +228,24 @@ function validate(form: AccountFormValue): AccountFormErrors | null {
       errors.start_date = 'Fecha en formato YYYY-MM-DD';
     }
   }
+  // PHASE-35: una compra a plazos (credit_card con padre) genera su propio
+  // cuadro, así que exige importe>0 + TIN + plazo + fecha (el backend
+  // rechaza sin ellos; lo validamos antes para dar mensajes por campo).
+  if (form.type === 'credit_card' && form.parent_account_id) {
+    if (!opening || !(Number(opening) > 0)) {
+      errors.opening_balance =
+        'El importe de la compra es obligatorio y debe ser mayor que 0.';
+    }
+    if (!form.apr_percent.trim()) {
+      errors.apr_percent = 'El TIN es obligatorio para una compra a plazos.';
+    }
+    if (!form.term_months.trim()) {
+      errors.term_months = 'El plazo (meses) es obligatorio para una compra a plazos.';
+    }
+    if (!form.start_date.trim()) {
+      errors.start_date = 'La fecha de inicio es obligatoria para una compra a plazos.';
+    }
+  }
   return Object.keys(errors).length > 0 ? errors : null;
 }
 
@@ -259,6 +285,11 @@ export default function AccountsSettingsPage() {
   const items = list.data ?? [];
   const active = items.filter((a) => !a.is_archived);
   const archived = items.filter((a) => a.is_archived);
+  // PHASE-35 — tarjetas activas que pueden ser padre de una compra a plazos
+  // (no las propias compras a plazos: no se anidan).
+  const parentCardOptions = active.filter(
+    (a) => a.type === 'credit_card' && !a.parent_account_id,
+  );
 
   return (
     <div style={{ maxWidth: 760, margin: '0 auto', padding: spacing.lg }}>
@@ -349,6 +380,7 @@ export default function AccountsSettingsPage() {
             value={form}
             onChange={setForm}
             errors={createErrors ?? undefined}
+            parentCardOptions={parentCardOptions}
           />
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <Button type="submit" disabled={create.isPending}>
@@ -482,9 +514,13 @@ function AccountRow({
 }) {
   const update = useUpdateAccount(account.id);
   const remove = useDeleteAccount();
+  const reconcile = useReconcileAccount(account.id);
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [payingDebt, setPayingDebt] = useState(false);
+  // PHASE-34 "Cuadrar saldo": modo inline para fijar el saldo real de la cuenta.
+  const [reconciling, setReconciling] = useState(false);
+  const [balanceInput, setBalanceInput] = useState('');
   const [draft, setDraft] = useState<AccountFormValue>(() =>
     fromAccount(account, balance),
   );
@@ -547,6 +583,30 @@ function AccountRow({
     );
   }
 
+  // PHASE-34 "Cuadrar saldo": el usuario declara el saldo real y la app
+  // ajusta el saldo inicial para que cuadre, sin reconstruir el histórico.
+  function startReconcile() {
+    setRowError(null);
+    setBalanceInput(balance ? balance.current_balance : '');
+    setReconciling(true);
+  }
+
+  function doReconcile() {
+    setRowError(null);
+    const value = balanceInput.trim().replace(',', '.');
+    if (!value || Number.isNaN(Number(value))) {
+      setRowError('Introduce un saldo válido.');
+      return;
+    }
+    reconcile.mutate(value, {
+      onSuccess: () => {
+        setReconciling(false);
+        toast.success(`Saldo de "${account.name}" cuadrado.`);
+      },
+      onError: (err) => setRowError(formatApiError(err, 'No se pudo cuadrar el saldo')),
+    });
+  }
+
   function handleDelete() {
     setRowError(null);
     remove.mutate(account.id, {
@@ -595,6 +655,42 @@ function AccountRow({
         </div>
         {rowError ? (
           <div style={{ color: colors.danger, fontSize: fontSize.sm }}>
+            {rowError}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (reconciling) {
+    return (
+      <div
+        style={{
+          padding: `${spacing.sm}px ${spacing.md}px`,
+          display: 'flex',
+          alignItems: 'flex-end',
+          gap: spacing.sm,
+          flexWrap: 'wrap',
+        }}
+      >
+        <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+          <TextInput
+            label={`Saldo real de "${account.name}" (${account.currency})`}
+            type="text"
+            inputMode="decimal"
+            placeholder="0.00"
+            value={balanceInput}
+            onChange={(e) => setBalanceInput(e.target.value)}
+          />
+        </div>
+        <Button type="button" variant="ghost" onClick={() => setReconciling(false)}>
+          Cancelar
+        </Button>
+        <Button type="button" onClick={doReconcile} disabled={reconcile.isPending}>
+          {reconcile.isPending ? 'Cuadrando…' : 'Cuadrar'}
+        </Button>
+        {rowError ? (
+          <div style={{ color: colors.danger, fontSize: fontSize.sm, flexBasis: '100%' }}>
             {rowError}
           </div>
         ) : null}
@@ -729,6 +825,11 @@ function AccountRow({
             Hacer principal
           </Button>
         ) : null}
+        {!account.is_archived && !isLiability ? (
+          <Button type="button" variant="secondary" onClick={startReconcile}>
+            Cuadrar saldo
+          </Button>
+        ) : null}
         <Button type="button" variant="ghost" onClick={startEdit}>
           Editar
         </Button>
@@ -812,5 +913,8 @@ function fromAccount(
     total_to_pay: account.total_to_pay ?? '',
     interest_only_first_payment: account.interest_only_first_payment ?? '',
     category_id: account.category_id ?? '',
+    // PHASE-35: se conserva para no perderlo en el draft de edición, aunque
+    // el backend no permite re-parentar (toUpdatePayload no lo envía).
+    parent_account_id: account.parent_account_id ?? '',
   };
 }

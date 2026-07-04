@@ -1,4 +1,4 @@
-import type { Transaction, TransactionSource } from '../models/transaction';
+import type { Transaction, TransactionFlow, TransactionSource } from '../models/transaction';
 
 export interface TransactionCreateRequest {
   account_id: string;
@@ -8,6 +8,9 @@ export interface TransactionCreateRequest {
   occurred_at: string;
   description?: string | null;
   source?: TransactionSource;
+  /** PHASE-34: dirección/transfer-ness explícita. Si se omite, el backend la
+   * deriva de la categoría (puente de transición). */
+  flow?: TransactionFlow | null;
 }
 
 export interface TransactionUpdateRequest {
@@ -17,6 +20,7 @@ export interface TransactionUpdateRequest {
   currency?: string;
   occurred_at?: string;
   description?: string | null;
+  flow?: TransactionFlow | null;
 }
 
 export interface TransactionListQuery {

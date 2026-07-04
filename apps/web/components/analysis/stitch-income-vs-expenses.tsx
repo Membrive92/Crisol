@@ -4,6 +4,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   Legend,
   ResponsiveContainer,
   Tooltip,
@@ -15,13 +16,39 @@ import type { MonthlyBucket } from '@crisol/types';
 import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@crisol/ui';
 
 import { Card } from '@/components/ui/card';
+import type { PeriodKey } from './stitch-period-toggle';
 
 const SHORT_MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
+const PERIOD_NAMES: Record<PeriodKey, string> = {
+  month: 'Mes',
+  quarter: 'Trimestre',
+  year: 'Año',
+};
 
 export interface StitchIncomeVsExpensesProps {
   data: MonthlyBucket[];
   currency: string;
   isLoading: boolean;
+  /**
+   * AUDIT-2026-07 — período y mes ancla navegados. El chart siempre pinta los
+   * 12 meses del año (para dar contexto anual), pero RESALTA los meses del
+   * período activo y atenúa el resto, de modo que togglear Mes/Trimestre
+   * produzca un cambio visible. Sin estas props (o con `year`) no atenúa nada.
+   */
+  period?: PeriodKey;
+  anchorMonth?: string;
+}
+
+/** Meses (1-12) que caen dentro del período que contiene `anchorMonth`. */
+function activeMonthsFor(period: PeriodKey, anchorMonth: string): Set<number> {
+  const month = Number(anchorMonth.split('-')[1]); // 1-12
+  if (period === 'month') return new Set([month]);
+  if (period === 'quarter') {
+    const start = Math.floor((month - 1) / 3) * 3 + 1;
+    return new Set([start, start + 1, start + 2]);
+  }
+  return new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
 }
 
 interface ChartRow {
@@ -29,6 +56,7 @@ interface ChartRow {
   monthLabel: string;
   income: number;
   expenses: number;
+  active: boolean;
 }
 
 /**
@@ -40,17 +68,29 @@ export function StitchIncomeVsExpenses({
   data,
   currency,
   isLoading,
+  period,
+  anchorMonth,
 }: StitchIncomeVsExpensesProps) {
+  // Sólo atenuamos cuando el período es Mes/Trimestre (Año resalta los 12).
+  const highlight = period != null && anchorMonth != null && period !== 'year';
+  const activeMonths =
+    period != null && anchorMonth != null
+      ? activeMonthsFor(period, anchorMonth)
+      : null;
   const chartData: ChartRow[] = data.map((b) => {
-    const monthIdx = parseInt(b.month.slice(5, 7), 10) - 1;
+    const monthNum = parseInt(b.month.slice(5, 7), 10); // 1-12
     return {
       month: b.month,
-      monthLabel: SHORT_MONTHS[monthIdx] ?? b.month,
+      monthLabel: SHORT_MONTHS[monthNum - 1] ?? b.month,
       income: Number(b.income),
       expenses: Number(b.expenses),
+      active: activeMonths == null || activeMonths.has(monthNum),
     };
   });
   const empty = !isLoading && chartData.every((b) => b.income === 0 && b.expenses === 0);
+  const dim = (row: ChartRow) => (highlight && !row.active ? 0.22 : 1);
+  const periodCaption =
+    highlight && period != null ? `Resaltado: ${PERIOD_NAMES[period]} navegado` : null;
 
   return (
     <Card style={{ padding: spacing.lg }}>
@@ -72,6 +112,17 @@ export function StitchIncomeVsExpenses({
         >
           Ingresos vs Gastos
         </h3>
+        {periodCaption ? (
+          <span
+            style={{
+              fontSize: fontSize.xs,
+              color: colors.textMuted,
+              fontWeight: fontWeight.medium,
+            }}
+          >
+            {periodCaption}
+          </span>
+        ) : null}
       </header>
 
       {empty ? (
@@ -137,14 +188,22 @@ export function StitchIncomeVsExpenses({
               fill={colors.success}
               radius={[3, 3, 0, 0]}
               animationDuration={400}
-            />
+            >
+              {chartData.map((row) => (
+                <Cell key={`inc-${row.month}`} fillOpacity={dim(row)} />
+              ))}
+            </Bar>
             <Bar
               dataKey="expenses"
               name="Gastos"
               fill={colors.danger}
               radius={[3, 3, 0, 0]}
               animationDuration={400}
-            />
+            >
+              {chartData.map((row) => (
+                <Cell key={`exp-${row.month}`} fillOpacity={dim(row)} />
+              ))}
+            </Bar>
           </BarChart>
         </ResponsiveContainer>
       )}

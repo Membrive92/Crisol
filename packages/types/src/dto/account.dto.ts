@@ -25,6 +25,10 @@ export interface AccountCreateRequest {
   /** PHASE-30.4 — Categoría de pagos vinculada. Sólo válida para
    * liabilities con role DEBT_PAYMENT o DEBT_INTEREST. */
   category_id?: string | null;
+  /** PHASE-35 — Tarjeta padre. Si se indica, esta cuenta es una COMPRA A
+   * PLAZOS dentro de esa tarjeta: el backend exige tipo `credit_card` y
+   * plan completo (capital + TIN + plazo + fecha) para su cuadro propio. */
+  parent_account_id?: string | null;
 }
 
 export interface AccountUpdateRequest {

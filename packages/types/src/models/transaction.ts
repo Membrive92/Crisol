@@ -1,6 +1,17 @@
 export type TransactionSource = 'manual' | 'import' | 'receipt' | 'expected';
 
 /**
+ * PHASE-34 (ADR-0004): dirección + naturaleza del movimiento — fuente de
+ * verdad del dinero a nivel de transacción.
+ * - `IN` / `OUT`: entra / sale → ingreso / gasto del mes.
+ * - `TRANSFER_IN` / `TRANSFER_OUT`: movimiento interno entre cuentas propias
+ *   (incluye pago de tarjeta) → neutro, fuera del cashflow.
+ * El saldo se deriva de `flow` + naturaleza de la cuenta; la categoría es
+ * descriptiva. `null` = sin clasificar (contribuye 0).
+ */
+export type TransactionFlow = 'IN' | 'OUT' | 'TRANSFER_IN' | 'TRANSFER_OUT';
+
+/**
  * Alert proactiva de presupuesto que viene en la respuesta del POST
  * /transactions cuando la nueva tx empuja la categoría afectada (o
  * el budget global) a `warning|over` (PHASE-14.5).
@@ -38,6 +49,12 @@ export interface Transaction {
   occurred_at: string;
   description: string | null;
   source: TransactionSource;
+  /**
+   * PHASE-34: fuente de verdad de la dirección del dinero. La UI pinta el
+   * signo/color y clasifica gasto/ingreso/transferencia desde aquí (no desde
+   * `category.kind`). `null` en datos heredados sin migrar.
+   */
+  flow: TransactionFlow | null;
   receipt_id: string | null;
   created_at: string;
   updated_at: string;

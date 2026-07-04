@@ -589,3 +589,205 @@ async def test_bulk_trash_endpoints_isolate_by_user(client: AsyncClient) -> None
     # B sigue teniendo sus 2 en papelera.
     trash_b = await client.get("/transactions/trash", headers=_auth(token_b))
     assert trash_b.json()["total"] == 2
+
+
+# ---------------------------------------------------------------------------
+# PHASE-34 — bulk categorizar por selección (checkbox).
+# ---------------------------------------------------------------------------
+
+
+async def _post_tx(
+    client: AsyncClient,
+    token: str,
+    *,
+    account_id: str,
+    amount: str,
+    category_id: str | None = None,
+) -> str:
+    payload: dict[str, object] = {
+        "account_id": account_id,
+        "amount": amount,
+        "currency": "EUR",
+        "occurred_at": "2026-05-20T12:00:00Z",
+    }
+    if category_id is not None:
+        payload["category_id"] = category_id
+    r = await client.post("/transactions", json=payload, headers=_auth(token))
+    assert r.status_code == 201, r.text
+    return str(r.json()["id"])
+
+
+async def test_bulk_categorize_relabels_only_selected(client: AsyncClient) -> None:
+    """Cambia la categoría de las tx pasadas por ID; las no pasadas se quedan."""
+    token, cat_id, account_id = await _setup_user(client, "bulkcat@example.com")
+    subs = await client.post(
+        "/categories", json={"name": "Suscripciones", "kind": "expense"}, headers=_auth(token)
+    )
+    subs_id = subs.json()["id"]
+
+    ids = [
+        await _post_tx(client, token, account_id=account_id, amount=a, category_id=cat_id)
+        for a in ("11.99", "16.99", "2.99")
+    ]
+
+    # Recategoriza sólo las dos primeras.
+    r = await client.post(
+        "/transactions/bulk-categorize",
+        json={"transaction_ids": ids[:2], "category_id": subs_id},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["updated"] == 2
+
+    by_id = {
+        t["id"]: t
+        for t in (await client.get("/transactions", headers=_auth(token))).json()["items"]
+    }
+    assert by_id[ids[0]]["category_id"] == subs_id
+    assert by_id[ids[1]]["category_id"] == subs_id
+    assert by_id[ids[2]]["category_id"] == cat_id  # no tocada
+
+
+async def test_bulk_categorize_clear_category(client: AsyncClient) -> None:
+    """`category_id=None` quita la categoría de las seleccionadas."""
+    token, cat_id, account_id = await _setup_user(client, "bulkcat-clear@example.com")
+    tx_id = await _post_tx(client, token, account_id=account_id, amount="10.00", category_id=cat_id)
+
+    r = await client.post(
+        "/transactions/bulk-categorize",
+        json={"transaction_ids": [tx_id], "category_id": None},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["updated"] == 1
+    listed = (await client.get("/transactions", headers=_auth(token))).json()["items"]
+    assert next(t for t in listed if t["id"] == tx_id)["category_id"] is None
+
+
+async def test_bulk_categorize_rejects_foreign_category(client: AsyncClient) -> None:
+    """La categoría destino debe ser del usuario (400 si es de otro)."""
+    token, _cat, account_id = await _setup_user(client, "bulkcat-fc@example.com")
+    _other_token, other_cat, _other_acc = await _setup_user(client, "bulkcat-fc-other@example.com")
+    tx_id = await _post_tx(client, token, account_id=account_id, amount="10.00")
+
+    r = await client.post(
+        "/transactions/bulk-categorize",
+        json={"transaction_ids": [tx_id], "category_id": other_cat},
+        headers=_auth(token),
+    )
+    assert r.status_code == 400, r.text
+
+
+async def test_bulk_categorize_isolation(client: AsyncClient) -> None:
+    """No se puede recategorizar la tx de OTRO usuario (filtra por user_id)."""
+    token_a, cat_a, _acc_a = await _setup_user(client, "bulkcat-a@example.com")
+    token_b, cat_b, acc_b = await _setup_user(client, "bulkcat-b@example.com")
+    tx_b = await _post_tx(client, token_b, account_id=acc_b, amount="10.00", category_id=cat_b)
+
+    # A intenta recategorizar la tx de B con SU propia categoría → 0 afectadas.
+    r = await client.post(
+        "/transactions/bulk-categorize",
+        json={"transaction_ids": [tx_b], "category_id": cat_a},
+        headers=_auth(token_a),
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["updated"] == 0
+
+    listed_b = (await client.get("/transactions", headers=_auth(token_b))).json()["items"]
+    assert next(t for t in listed_b if t["id"] == tx_b)["category_id"] == cat_b
+
+
+# ---------------------------------------------------------------------------
+# PHASE-34 — derivación de `flow` al crear/editar (AUDIT-2026-07, LOW).
+# ---------------------------------------------------------------------------
+
+
+async def test_create_derives_flow_from_category_kind(client: AsyncClient) -> None:
+    """Sin `flow` en el payload, el backend lo deriva de la categoría:
+    income→IN, expense→OUT (puente PHASE-34)."""
+    token, expense_cat, account_id = await _setup_user(client, "flowderive@example.com")
+    income = await client.post(
+        "/categories", json={"name": "Nómina", "kind": "income"}, headers=_auth(token)
+    )
+    income_id = income.json()["id"]
+
+    r_in = await client.post(
+        "/transactions",
+        json={
+            "account_id": account_id,
+            "category_id": income_id,
+            "amount": "1000.00",
+            "currency": "EUR",
+            "occurred_at": "2026-05-20T12:00:00Z",
+        },
+        headers=_auth(token),
+    )
+    assert r_in.status_code == 201, r_in.text
+    assert r_in.json()["flow"] == "IN"
+
+    r_out = await client.post(
+        "/transactions",
+        json={
+            "account_id": account_id,
+            "category_id": expense_cat,
+            "amount": "40.00",
+            "currency": "EUR",
+            "occurred_at": "2026-05-20T12:00:00Z",
+        },
+        headers=_auth(token),
+    )
+    assert r_out.status_code == 201, r_out.text
+    assert r_out.json()["flow"] == "OUT"
+
+
+async def test_explicit_flow_overrides_category_derivation(client: AsyncClient) -> None:
+    """Si el cliente envía `flow`, manda sobre la categoría (ADR-0004): un
+    abono archivado en una categoría de gasto entra como IN."""
+    token, expense_cat, account_id = await _setup_user(client, "flowexplicit@example.com")
+    r = await client.post(
+        "/transactions",
+        json={
+            "account_id": account_id,
+            "category_id": expense_cat,  # kind=expense
+            "amount": "25.00",
+            "currency": "EUR",
+            "occurred_at": "2026-05-20T12:00:00Z",
+            "flow": "IN",
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["flow"] == "IN"
+
+
+async def test_update_rederives_flow_when_category_changes(client: AsyncClient) -> None:
+    """Cambiar la categoría (income→expense) SIN enviar flow re-deriva el flow
+    a la nueva categoría (puente PHASE-34)."""
+    token, expense_cat, account_id = await _setup_user(client, "flowupdate@example.com")
+    income = await client.post(
+        "/categories", json={"name": "Ingreso", "kind": "income"}, headers=_auth(token)
+    )
+    income_id = income.json()["id"]
+
+    created = await client.post(
+        "/transactions",
+        json={
+            "account_id": account_id,
+            "category_id": income_id,
+            "amount": "300.00",
+            "currency": "EUR",
+            "occurred_at": "2026-05-20T12:00:00Z",
+        },
+        headers=_auth(token),
+    )
+    assert created.status_code == 201, created.text
+    tx_id = created.json()["id"]
+    assert created.json()["flow"] == "IN"
+
+    updated = await client.put(
+        f"/transactions/{tx_id}",
+        json={"category_id": expense_cat},
+        headers=_auth(token),
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["flow"] == "OUT"

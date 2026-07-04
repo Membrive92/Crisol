@@ -36,6 +36,12 @@ class SummaryResponse(BaseModel):
     previous_period_income: Decimal | None = None
     previous_period_expenses: Decimal | None = None
     previous_period_balance: Decimal | None = None
+    available_from: str | None = None
+    """PHASE-34 — Mes (`YYYY-MM`) más antiguo con transacciones del usuario,
+    global (ignora el filtro de período). Acota el navegador de período del
+    Análisis. `None` si no hay transacciones."""
+    available_to: str | None = None
+    """PHASE-34 — Mes (`YYYY-MM`) más reciente con transacciones del usuario."""
 
 
 class CategoryBreakdownItem(BaseModel):

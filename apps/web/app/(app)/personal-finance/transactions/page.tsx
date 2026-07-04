@@ -8,6 +8,7 @@ import {
   formatApiError,
   pickPreferredAccountId,
   useAccounts,
+  useBulkCategorizeTransactions,
   useBulkDeleteTransactions,
   useCategories,
   useDeleteTransaction,
@@ -47,6 +48,10 @@ export default function TransactionsPage() {
 
   function setFilters(next: TransactionListQuery) {
     setFiltersState(next);
+    // La selección por checkbox es por página/filtro: al cambiar cualquiera,
+    // los ids seleccionados pueden dejar de estar visibles → la vaciamos.
+    setSelectedIds(new Set());
+    setBulkCategoryId('');
     const qs = filtersToSearchParams(next).toString();
     // `replace` (no `push`) para no inflar el historial con un entry
     // por cada cambio de filtro o cambio de página — el botón
@@ -75,8 +80,12 @@ export default function TransactionsPage() {
   const deleteMutation = useDeleteTransaction();
   const restoreMutation = useRestoreTransaction();
   const bulkDeleteMutation = useBulkDeleteTransactions();
+  const bulkCategorizeMutation = useBulkCategorizeTransactions();
   const reassignMutation = useReassignAccount();
   const unlinkTransferMutation = useUnlinkTransfer();
+  // PHASE-34 — selección por checkbox para recategorizar en bloque.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkCategoryId, setBulkCategoryId] = useState('');
   // Conteo de papelera para mostrar badge cuando hay items.
   const trashCountQuery = useTrashedTransactions({ limit: 1 });
   const trashCount = trashCountQuery.data?.total ?? 0;
@@ -111,11 +120,56 @@ export default function TransactionsPage() {
   // categorizar" es clasificar una a una, no en bloque).
   const bulkDisabledByUncategorized = Boolean(filters.uncategorized);
 
+  // PHASE-34 — selección por checkbox (sobre los items visibles de la página).
+  const allSelected = items.length > 0 && items.every((t) => selectedIds.has(t.id));
+  const someSelected = items.some((t) => selectedIds.has(t.id));
+  // Categorías ofrecidas para recategorizar en bloque: excluimos las de
+  // transferencia (asignarlas a un gasto normal lo dejaría como "sin pareja").
+  const bulkCategoryOptions = (categories ?? []).filter((c) => !c.is_transfer);
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function toggleSelectAll() {
+    setSelectedIds((prev) => {
+      const allOnPage = items.length > 0 && items.every((t) => prev.has(t.id));
+      return allOnPage ? new Set<string>() : new Set(items.map((t) => t.id));
+    });
+  }
+  function applyBulkCategory() {
+    if (selectedIds.size === 0 || !bulkCategoryId) return;
+    bulkCategorizeMutation.mutate(
+      { transactionIds: [...selectedIds], categoryId: bulkCategoryId },
+      {
+        onSuccess: ({ updated }) => {
+          const catName =
+            bulkCategoryOptions.find((c) => c.id === bulkCategoryId)?.name ?? 'la categoría';
+          toast.success(
+            `${updated} ${
+              updated === 1 ? 'transacción recategorizada' : 'transacciones recategorizadas'
+            } a "${catName}".`,
+          );
+          setSelectedIds(new Set());
+          setBulkCategoryId('');
+        },
+        onError: (err) => toast.error(formatApiError(err, 'No se pudo recategorizar')),
+      },
+    );
+  }
+
   // Periodo para los KPIs: el rango activo del filtro o todo el año
-  // actual si no hay rango.
+  // actual si no hay rango. AUDIT-2026-07 (LOW): límites por defecto en UTC
+  // (`Date.UTC`), igual que el TimeSelector, para no desplazar la frontera del
+  // año en Europe/Madrid.
   const now = new Date();
-  const dateFrom = filters.date_from ?? new Date(now.getFullYear(), 0, 1).toISOString();
-  const dateTo = filters.date_to ?? new Date(now.getFullYear(), 11, 31, 23, 59, 59).toISOString();
+  const dateFrom = filters.date_from ?? new Date(Date.UTC(now.getFullYear(), 0, 1)).toISOString();
+  const dateTo =
+    filters.date_to ?? new Date(Date.UTC(now.getFullYear(), 11, 31, 23, 59, 59)).toISOString();
 
   function handleDelete(id: string) {
     setPendingDeleteId(id);
@@ -455,6 +509,72 @@ export default function TransactionsPage() {
               </div>
             </div>
 
+            {/* PHASE-34 — barra de selección: aparece al marcar checkboxes y
+                permite recategorizar TODAS las marcadas de una vez. */}
+            {selectedIds.size > 0 ? (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: spacing.sm,
+                  flexWrap: 'wrap',
+                  padding: `${spacing.sm}px ${spacing.md}px`,
+                  backgroundColor: colors.primarySoft,
+                  border: `1px solid ${colors.primary}`,
+                  borderRadius: radius.md,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: fontSize.sm,
+                    fontWeight: fontWeight.semibold,
+                    color: colors.text,
+                  }}
+                >
+                  {selectedIds.size}{' '}
+                  {selectedIds.size === 1 ? 'seleccionada' : 'seleccionadas'}
+                </span>
+                <span style={{ flex: 1 }} />
+                <select
+                  value={bulkCategoryId}
+                  onChange={(e) => setBulkCategoryId(e.target.value)}
+                  aria-label="Categoría para aplicar en bloque"
+                  style={{
+                    padding: `${spacing.xs}px ${spacing.sm}px`,
+                    borderRadius: radius.sm,
+                    border: `1px solid ${colors.border}`,
+                    backgroundColor: colors.surface,
+                    color: colors.text,
+                    fontSize: fontSize.sm,
+                  }}
+                >
+                  <option value="">Cambiar categoría a…</option>
+                  {bulkCategoryOptions.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.icon ? `${c.icon} ` : ''}
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  variant="secondary"
+                  onClick={applyBulkCategory}
+                  disabled={!bulkCategoryId || bulkCategorizeMutation.isPending}
+                >
+                  {bulkCategorizeMutation.isPending ? 'Aplicando…' : 'Cambiar categoría'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setSelectedIds(new Set());
+                    setBulkCategoryId('');
+                  }}
+                >
+                  Quitar selección
+                </Button>
+              </div>
+            ) : null}
+
             <TransactionList
               items={items}
               categories={categories ?? []}
@@ -464,6 +584,11 @@ export default function TransactionsPage() {
               unlinkingId={
                 unlinkTransferMutation.isPending ? (unlinkTransferMutation.variables ?? null) : null
               }
+              selectedIds={selectedIds}
+              onToggleSelect={toggleSelect}
+              onToggleSelectAll={toggleSelectAll}
+              allSelected={allSelected}
+              someSelected={someSelected}
             />
 
             <Pagination

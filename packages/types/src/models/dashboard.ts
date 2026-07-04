@@ -20,6 +20,13 @@ export interface DashboardSummary {
   previous_period_income: string | null;
   previous_period_expenses: string | null;
   previous_period_balance: string | null;
+  /**
+   * PHASE-34 — Mes (`YYYY-MM`) más antiguo / más reciente con transacciones
+   * del usuario, global (ignora el filtro de período). Acotan las flechas del
+   * navegador de período en Análisis. `null` si no hay transacciones.
+   */
+  available_from: string | null;
+  available_to: string | null;
 }
 
 export interface CategoryBreakdownItem {

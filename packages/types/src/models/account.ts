@@ -79,6 +79,11 @@ export interface Account {
   /** PHASE-30.4 — Categoría de pagos vinculada (chip en Capa 2 de
    * /debt). NULL = sin vincular. Sólo significativo en liabilities. */
   category_id?: string | null;
+  /** PHASE-35 — Tarjeta padre cuando esta cuenta es una COMPRA A PLAZOS
+   * dentro de una tarjeta de crédito. NULL = cuenta normal. La vista de
+   * deuda agrupa las hijas bajo el padre; los selectores de transacción
+   * las ocultan. */
+  parent_account_id?: string | null;
   created_at: string;
   updated_at: string;
 }

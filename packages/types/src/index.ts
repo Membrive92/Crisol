@@ -36,6 +36,8 @@ export type {
   DebtTypeBucket,
   DtiStatus,
   EffortStatus,
+  InstallmentBulkPayRequest,
+  InstallmentBulkPayResponse,
   InstallmentPayRequest,
   InstallmentUpdateRequest,
   MonthlyDebtPoint,
@@ -59,7 +61,12 @@ export type {
   RuleMatchType,
   SeedResult,
 } from './models/category-rule';
-export type { BudgetAlert, Transaction, TransactionSource } from './models/transaction';
+export type {
+  BudgetAlert,
+  Transaction,
+  TransactionFlow,
+  TransactionSource,
+} from './models/transaction';
 export type {
   CategoryBreakdownItem,
   CategoryDetail,

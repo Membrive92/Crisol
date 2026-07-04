@@ -66,6 +66,22 @@ export const transactionsApi = {
     return response.data;
   },
 
+  /**
+   * PHASE-34 — Cambia en bloque la categoría de las tx seleccionadas (por ID),
+   * para no recategorizar una a una. `categoryId=null` quita la categoría.
+   * Relabel puro: no toca el dinero (flow / par de transferencia).
+   */
+  async bulkCategorize(
+    transactionIds: string[],
+    categoryId: string | null,
+  ): Promise<{ updated: number }> {
+    const response = await apiClient.post<{ updated: number }>(
+      '/transactions/bulk-categorize',
+      { transaction_ids: transactionIds, category_id: categoryId },
+    );
+    return response.data;
+  },
+
   // PHASE-10.1 — papelera (soft-delete).
   async listTrash(
     query: { limit?: number; offset?: number } = {},

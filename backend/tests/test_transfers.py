@@ -1115,6 +1115,197 @@ async def test_from_source_debt_uses_existing_liability(
     assert Decimal(body["net_worth"]) == Decimal("-500.00")
 
 
+async def test_from_source_debt_nests_purchase_under_parent_card(
+    client: AsyncClient,
+) -> None:
+    """PHASE-35 — `new_liability.parent_account_id` crea la deuda como
+    compra a plazos anidada bajo una tarjeta de crédito (con su propio
+    cuadro). El importe sale de la tx; TIN + plazo obligatorios."""
+    token, _expense_cat, acc_a, _acc_b = await _setup_user_with_two_accounts(
+        client, "debt-nested@example.com"
+    )
+    headers = _auth(token)
+    # Tarjeta padre (credit_card de nivel superior).
+    parent = await client.post(
+        "/accounts",
+        json={"name": "Tarjeta BBVA", "type": "credit_card", "currency": "EUR"},
+        headers=headers,
+    )
+    parent_id = parent.json()["id"]
+    source_id = await _create_tx(
+        client,
+        token,
+        account_id=acc_a,
+        amount="239.00",
+        occurred_at="2026-03-24T12:00:00Z",
+        category_id=_expense_cat,
+        description="OPERACION FINANCIADA",
+    )
+    r = await client.post(
+        "/transfers/from-source-debt",
+        json={
+            "source_transaction_id": source_id,
+            "new_liability": {
+                "name": "Portátil a plazos",
+                "type": "credit_card",
+                "currency": "EUR",
+                "parent_account_id": parent_id,
+                "apr": "0.2412",
+                "term_months": 9,
+            },
+        },
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+
+    accs = await client.get("/accounts?include_archived=false", headers=headers)
+    child = next(a for a in accs.json() if a["name"] == "Portátil a plazos")
+    assert child["nature"] == "liability"
+    assert child["type"] == "credit_card"
+    assert child["parent_account_id"] == parent_id
+    assert child["term_months"] == 9
+
+    # La deuda vive en la hija (+239); el activo no se infla (pata fantasma);
+    # la tarjeta padre no tiene movimientos propios (0).
+    balances = await client.get("/accounts/balances", headers=headers)
+    by_id = {b["account_id"]: b for b in balances.json()["items"]}
+    assert Decimal(by_id[acc_a]["movements_balance"]) == Decimal("0.00")
+    assert Decimal(by_id[child["id"]]["movements_balance"]) == Decimal("239.00")
+    assert Decimal(by_id[parent_id]["movements_balance"]) == Decimal("0.00")
+
+
+async def test_from_source_debt_400_when_nested_purchase_missing_plan(
+    client: AsyncClient,
+) -> None:
+    """PHASE-35 — anidar bajo una tarjeta exige TIN + plazo; sin ellos, 400."""
+    token, expense_cat, acc_a, _acc_b = await _setup_user_with_two_accounts(
+        client, "debt-nested-noplan@example.com"
+    )
+    headers = _auth(token)
+    parent = await client.post(
+        "/accounts",
+        json={"name": "Tarjeta", "type": "credit_card", "currency": "EUR"},
+        headers=headers,
+    )
+    source_id = await _create_tx(
+        client,
+        token,
+        account_id=acc_a,
+        amount="239.00",
+        occurred_at="2026-03-24T12:00:00Z",
+        category_id=expense_cat,
+        description="OPERACION FINANCIADA",
+    )
+    r = await client.post(
+        "/transfers/from-source-debt",
+        json={
+            "source_transaction_id": source_id,
+            "new_liability": {
+                "name": "Compra sin plan",
+                "type": "credit_card",
+                "currency": "EUR",
+                "parent_account_id": parent.json()["id"],
+            },
+        },
+        headers=headers,
+    )
+    assert r.status_code == 400, r.text
+
+
+async def test_from_source_debt_400_when_parent_not_credit_card(
+    client: AsyncClient,
+) -> None:
+    """PHASE-35 — el padre debe ser una tarjeta de crédito; un préstamo → 400."""
+    token, expense_cat, acc_a, _acc_b = await _setup_user_with_two_accounts(
+        client, "debt-nested-badparent@example.com"
+    )
+    headers = _auth(token)
+    loan = await client.post(
+        "/accounts",
+        json={
+            "name": "Préstamo coche",
+            "type": "loan",
+            "currency": "EUR",
+            "opening_balance": "10000.00",
+            "apr": "0.0561",
+            "term_months": 60,
+            "start_date": "2026-01-01",
+        },
+        headers=headers,
+    )
+    assert loan.status_code == 201, loan.text
+    source_id = await _create_tx(
+        client,
+        token,
+        account_id=acc_a,
+        amount="239.00",
+        occurred_at="2026-03-24T12:00:00Z",
+        category_id=expense_cat,
+        description="OPERACION FINANCIADA",
+    )
+    r = await client.post(
+        "/transfers/from-source-debt",
+        json={
+            "source_transaction_id": source_id,
+            "new_liability": {
+                "name": "Compra bajo préstamo",
+                "type": "credit_card",
+                "currency": "EUR",
+                "parent_account_id": loan.json()["id"],
+                "apr": "0.2412",
+                "term_months": 9,
+            },
+        },
+        headers=headers,
+    )
+    assert r.status_code == 400, r.text
+
+
+async def test_from_source_debt_400_when_parent_card_archived(
+    client: AsyncClient,
+) -> None:
+    """PHASE-35 — no se puede anidar bajo una tarjeta archivada; 400."""
+    token, expense_cat, acc_a, _acc_b = await _setup_user_with_two_accounts(
+        client, "debt-nested-archived@example.com"
+    )
+    headers = _auth(token)
+    parent = await client.post(
+        "/accounts",
+        json={"name": "Tarjeta vieja", "type": "credit_card", "currency": "EUR"},
+        headers=headers,
+    )
+    parent_id = parent.json()["id"]
+    arch = await client.put(
+        f"/accounts/{parent_id}", json={"is_archived": True}, headers=headers
+    )
+    assert arch.status_code == 200
+    source_id = await _create_tx(
+        client,
+        token,
+        account_id=acc_a,
+        amount="239.00",
+        occurred_at="2026-03-24T12:00:00Z",
+        category_id=expense_cat,
+        description="OPERACION FINANCIADA",
+    )
+    r = await client.post(
+        "/transfers/from-source-debt",
+        json={
+            "source_transaction_id": source_id,
+            "new_liability": {
+                "name": "Compra bajo tarjeta archivada",
+                "type": "credit_card",
+                "currency": "EUR",
+                "parent_account_id": parent_id,
+                "apr": "0.2412",
+                "term_months": 9,
+            },
+        },
+        headers=headers,
+    )
+    assert r.status_code == 400, r.text
+
+
 async def test_list_transactions_flags_is_debt_pair(client: AsyncClient) -> None:
     """El listado expone `is_debt_pair=True` en AMBAS patas de un par de
     conversión a deuda (activo↔pasivo) y `False` en transferencias

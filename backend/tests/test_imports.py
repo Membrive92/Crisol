@@ -90,6 +90,36 @@ async def test_import_csv_creates_transactions(client: AsyncClient) -> None:
     assert all(t["source"] == "import" for t in body["items"])
 
 
+async def test_import_persists_flow_from_statement_sign(client: AsyncClient) -> None:
+    """AUDIT-2026-07 (LOW): el import escribe `flow` (fuente de verdad del
+    dinero, ADR-0004) desde el SIGNO del extracto: + → IN, − → OUT, y una
+    'TRANSFERENCIA REALIZADA' (−) → TRANSFER_OUT (fuera del cashflow)."""
+    token, account_id = await _setup_user(client, "impflow@example.com")
+    # El signo del extracto manda: `+` explícito → entrada; `−` → salida. (Un
+    # importe sin signo y sin categoría queda sin clasificar → flow None, que
+    # es el comportamiento correcto; aquí probamos el camino del SIGNO.)
+    csv_text = (
+        "Fecha,Importe,Concepto\n"
+        "2026-04-15,+1800.00,NOMINA ABRIL\n"
+        "2026-04-16,-40.00,COMPRA SUPERMERCADO\n"
+        "2026-04-17,-500.00,TRANSFERENCIA REALIZADA A AHORRO\n"
+    )
+    job = await _post_csv(
+        client,
+        token,
+        account_id,
+        csv_text,
+        mapping={"amount": "Importe", "occurred_at": "Fecha", "description": "Concepto"},
+    )
+    assert job["rows_ok"] == 3, job
+
+    items = (await client.get("/transactions", headers=_auth(token))).json()["items"]
+    flow_by_desc = {t["description"]: t["flow"] for t in items}
+    assert flow_by_desc["NOMINA ABRIL"] == "IN"
+    assert flow_by_desc["COMPRA SUPERMERCADO"] == "OUT"
+    assert flow_by_desc["TRANSFERENCIA REALIZADA A AHORRO"] == "TRANSFER_OUT"
+
+
 async def test_import_keeps_distinct_identical_rows_within_batch(client: AsyncClient) -> None:
     """AUDIT-FIX (dedup-hash-colapsa-tx-mismo-dia): dos líneas IDÉNTICAS del
     mismo extracto (mismo importe+fecha+descripción) son dos movimientos

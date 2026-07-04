@@ -6,6 +6,8 @@ categoría", aislamiento multi-usuario, top-expenses.
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from httpx import AsyncClient
 
 
@@ -47,6 +49,7 @@ async def _make_tx(
     category_id: str | None = None,
     currency: str = "USD",
     description: str | None = None,
+    flow: str | None = None,
 ) -> None:
     payload: dict[str, object] = {
         "account_id": account_id,
@@ -58,6 +61,8 @@ async def _make_tx(
         payload["category_id"] = category_id
     if description is not None:
         payload["description"] = description
+    if flow is not None:
+        payload["flow"] = flow
     r = await client.post("/transactions", json=payload, headers=_auth(token))
     assert r.status_code == 201, r.text
 
@@ -114,6 +119,45 @@ async def test_summary_aggregates_income_expenses_and_balance(client: AsyncClien
     assert body["expenses"] == "200.00"
     assert body["balance"] == "800.00"
     assert body["transaction_count"] == 3
+
+
+async def test_summary_reports_global_month_bounds(client: AsyncClient) -> None:
+    """PHASE-34 — `available_from/to` son el mes min/max GLOBAL con datos,
+    independientes del filtro de período (acotan el navegador del Análisis)."""
+    token, account_id = await _register(client, "dash-bounds@example.com")
+    cat = await _make_category(client, token, name="Comida", kind="expense")
+    await _make_tx(
+        client, token, account_id, amount="10.00",
+        occurred_at="2025-02-15T10:00:00Z", category_id=cat,
+    )
+    await _make_tx(
+        client, token, account_id, amount="20.00",
+        occurred_at="2026-05-20T10:00:00Z", category_id=cat,
+    )
+
+    # Sin filtro: bounds globales.
+    r = await client.get("/dashboard/summary", headers=_auth(token))
+    body = r.json()
+    assert body["available_from"] == "2025-02"
+    assert body["available_to"] == "2026-05"
+
+    # Con filtro de período (solo abril 2026) los bounds NO cambian: son globales.
+    r2 = await client.get(
+        "/dashboard/summary",
+        params={"date_from": "2026-04-01T00:00:00Z", "date_to": "2026-04-30T23:59:59Z"},
+        headers=_auth(token),
+    )
+    body2 = r2.json()
+    assert body2["available_from"] == "2025-02"
+    assert body2["available_to"] == "2026-05"
+
+
+async def test_summary_bounds_null_when_no_transactions(client: AsyncClient) -> None:
+    token, _account_id = await _register(client, "dash-bounds-empty@example.com")
+    r = await client.get("/dashboard/summary", headers=_auth(token))
+    body = r.json()
+    assert body["available_from"] is None
+    assert body["available_to"] is None
 
 
 async def test_summary_filters_by_currency(client: AsyncClient) -> None:
@@ -298,6 +342,62 @@ async def test_by_category_filter_by_kind_excludes_uncategorized(
     items = r.json()
     assert len(items) == 1
     assert items[0]["category_name"] == "Gasto"
+
+
+async def test_by_category_kind_classifies_by_flow_not_category(
+    client: AsyncClient,
+) -> None:
+    """AUDIT-2026-06 — El donut (by-category con `kind`) decide
+    income/expense por `flow`, NO por `Category.kind`. Cuando flow y la
+    categoría discrepan (lo que PHASE-34/ADR-0004 permite a propósito),
+    el donut debe sumar igual que el KPI "Gastos" y la barra roja: un
+    OUT aparcado en categoría de ingreso ES gasto; un IN aparcado en
+    categoría de gasto ES ingreso. Antes filtraba por `Category.kind` y
+    el donut no cuadraba con el resto de la pantalla."""
+    token, account_id = await _register(client, "dash-flow-donut@example.com")
+    income_cat = await _make_category(client, token, name="Nómina", kind="income")
+    expense_cat = await _make_category(client, token, name="Compras", kind="expense")
+
+    # OUT real en categoría de INGRESO → es gasto (gana flow).
+    await _make_tx(
+        client,
+        token,
+        account_id,
+        amount="30.00",
+        occurred_at="2026-04-01T10:00:00Z",
+        category_id=income_cat,
+        flow="OUT",
+    )
+    # IN real en categoría de GASTO → es ingreso (gana flow).
+    await _make_tx(
+        client,
+        token,
+        account_id,
+        amount="80.00",
+        occurred_at="2026-04-02T10:00:00Z",
+        category_id=expense_cat,
+        flow="IN",
+    )
+
+    expense_donut = (
+        await client.get(
+            "/dashboard/by-category", params={"kind": "expense"}, headers=_auth(token)
+        )
+    ).json()
+    # El único gasto es el OUT, que vive en la categoría de ingreso "Nómina".
+    assert len(expense_donut) == 1
+    assert expense_donut[0]["category_name"] == "Nómina"
+    assert Decimal(expense_donut[0]["total"]) == Decimal("30.00")
+
+    income_donut = (
+        await client.get(
+            "/dashboard/by-category", params={"kind": "income"}, headers=_auth(token)
+        )
+    ).json()
+    # El único ingreso es el IN, que vive en la categoría de gasto "Compras".
+    assert len(income_donut) == 1
+    assert income_donut[0]["category_name"] == "Compras"
+    assert Decimal(income_donut[0]["total"]) == Decimal("80.00")
 
 
 # ---------- /dashboard/by-month ----------

@@ -139,6 +139,27 @@ export function useReassignAccount() {
   });
 }
 
+/**
+ * PHASE-34 — Cambia en bloque la categoría de las tx seleccionadas (por ID).
+ * Afecta los desgloses por categoría del dashboard → invalida tx + dashboard
+ * (vía el helper). No cambia saldos (es relabel puro), pero el helper
+ * compartido cubre todo el blast radius sin coste perceptible.
+ */
+export function useBulkCategorizeTransactions() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    { updated: number },
+    Error,
+    { transactionIds: string[]; categoryId: string | null }
+  >({
+    mutationFn: ({ transactionIds, categoryId }) =>
+      transactionsApi.bulkCategorize(transactionIds, categoryId),
+    onSuccess: () => {
+      invalidateTransactionSideEffects(queryClient);
+    },
+  });
+}
+
 export function useTrashedTransactions(query: { limit?: number; offset?: number } = {}) {
   return useQuery({
     queryKey: queryKeys.transactions.trash(query),

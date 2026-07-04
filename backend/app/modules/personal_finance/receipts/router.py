@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import storage
 from app.core.database import get_db
 from app.core.deps import CurrentUser
+from app.core.uploads import read_upload_capped
 from app.modules.ai.schemas import ReceiptExtraction
 from app.modules.personal_finance.receipts.repository import get_receipt_by_id, list_receipts
 from app.modules.personal_finance.receipts.schemas import (
@@ -42,14 +43,15 @@ async def extract_receipt_endpoint(
     file: Annotated[UploadFile, File(...)],
 ) -> ReceiptExtractResponse:
     """Sube una imagen de ticket, ejecuta extracción IA y devuelve el job."""
-    payload = await file.read()
+    # AUDIT-2026-07 (LOW): lee con tope acumulado (aborta 413 en cuanto se
+    # supera el límite) en vez de cargar la imagen entera antes de medirla.
+    payload = await read_upload_capped(
+        file,
+        MAX_RECEIPT_BYTES,
+        detail=f"La imagen supera {MAX_RECEIPT_BYTES // (1024 * 1024)} MB",
+    )
     if not payload:
         raise HTTPException(status_code=400, detail="La imagen está vacía")
-    if len(payload) > MAX_RECEIPT_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"La imagen supera {MAX_RECEIPT_BYTES // (1024 * 1024)} MB",
-        )
 
     content_type = (file.content_type or "").lower() or "application/octet-stream"
 

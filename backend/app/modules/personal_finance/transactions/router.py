@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -26,6 +26,7 @@ from app.modules.personal_finance.transactions.schemas import (
     TransactionUpdate,
 )
 from app.modules.personal_finance.transactions.service import (
+    bulk_categorize_transactions,
     bulk_delete_transactions,
     bulk_purge_trashed_transactions,
     bulk_reassign_transactions,
@@ -82,6 +83,19 @@ class ReassignAccountResponse(BaseModel):
     # divisa distinta a la de la cuenta destino (se las dejó donde estaban
     # para no sacarlas del saldo). La UI lo informa.
     skipped_other_currency: int = 0
+
+
+class BulkCategorizeRequest(BaseModel):
+    """PHASE-34 — Cambia en bloque la categoría de un conjunto EXPLÍCITO de tx
+    (selección por checkbox en la lista), para no recategorizar una a una.
+    `category_id=None` quita la categoría."""
+
+    transaction_ids: list[uuid.UUID] = Field(min_length=1, max_length=1000)
+    category_id: uuid.UUID | None = None
+
+
+class BulkCategorizeResponse(BaseModel):
+    updated: int
 
 
 class AvailablePeriodItem(BaseModel):
@@ -350,6 +364,7 @@ async def update_endpoint(
 async def bulk_delete_endpoint(
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
+    account_id: uuid.UUID | None = None,
     category_id: uuid.UUID | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
@@ -368,6 +383,7 @@ async def bulk_delete_endpoint(
     count = await bulk_delete_transactions(
         db,
         user.id,
+        account_id=account_id,
         category_id=category_id,
         date_from=date_from,
         date_to=date_to,
@@ -407,6 +423,25 @@ async def reassign_account_endpoint(
     )
     await db.commit()
     return ReassignAccountResponse(reassigned_count=count, skipped_other_currency=skipped)
+
+
+@router.post("/bulk-categorize", response_model=BulkCategorizeResponse)
+async def bulk_categorize_endpoint(
+    body: BulkCategorizeRequest,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> BulkCategorizeResponse:
+    """PHASE-34 — Cambia la categoría de las tx seleccionadas (checkbox) de una
+    vez. Relabel puro: no toca el dinero (flow / par de transferencia), sólo la
+    etiqueta. 400 si `category_id` no es del usuario."""
+    updated = await bulk_categorize_transactions(
+        db,
+        user.id,
+        transaction_ids=body.transaction_ids,
+        category_id=body.category_id,
+    )
+    await db.commit()
+    return BulkCategorizeResponse(updated=updated)
 
 
 @router.delete("/{transaction_id}", status_code=204, response_class=Response)

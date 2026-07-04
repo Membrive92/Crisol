@@ -164,6 +164,10 @@ async def get_summary(
         prev_expenses = prev_totals.get(CategoryKind.EXPENSE, Decimal("0"))
         prev_balance = prev_income - prev_expenses
 
+    # PHASE-34 — límites globales (mes min/max con datos), independientes del
+    # filtro de período, para acotar el navegador de período del Análisis.
+    available_from, available_to = await repository.get_transaction_month_bounds(db, user_id)
+
     return SummaryResponse(
         income=income,
         expenses=expenses,
@@ -174,6 +178,8 @@ async def get_summary(
         previous_period_income=prev_income,
         previous_period_expenses=prev_expenses,
         previous_period_balance=prev_balance,
+        available_from=available_from,
+        available_to=available_to,
     )
 
 

@@ -63,6 +63,11 @@ class TransferPairResponse(BaseModel):
     out_occurred_at: datetime
     in_occurred_at: datetime
     delta_days: int
+    # PHASE-34: importe del "cargo espejo" anulado al registrar la operación
+    # financiada (el ADEUDO del mismo importe que en el banco la compensa,
+    # neto 0). `None` si no se encontró espejo. La UI lo usa para avisar en
+    # el toast que ese cargo se ha movido a la papelera.
+    absorbed_mirror_amount: Decimal | None = None
 
 
 class TransferSuspect(BaseModel):
@@ -171,6 +176,10 @@ class NewLiabilityForDebt(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     type: str  # AccountType StrEnum value (credit_card | loan | mortgage)
     currency: str = Field(default="EUR", min_length=3, max_length=3)
+    parent_account_id: uuid.UUID | None = None
+    """PHASE-35 — si se indica, la nueva deuda se crea como compra a plazos
+    anidada bajo esa tarjeta de crédito (con su propio cuadro). Fuerza
+    `type=credit_card` y exige TIN + plazo."""
     color: str | None = Field(default=None, max_length=7)
     icon: str | None = Field(default=None, max_length=50)
     apr: Decimal | None = Field(default=None, ge=Decimal("0"), le=Decimal("1"), decimal_places=4)

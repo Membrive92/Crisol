@@ -36,6 +36,12 @@ export interface NewLiabilityForDebt {
   name: string;
   type: 'credit_card' | 'loan' | 'mortgage';
   currency?: string;
+  /**
+   * PHASE-35 — si se indica, la nueva deuda se registra como compra a
+   * plazos anidada bajo esa tarjeta de crédito (con su propio cuadro).
+   * Fuerza `type=credit_card` y exige TIN + plazo.
+   */
+  parent_account_id?: string | null;
   color?: string | null;
   icon?: string | null;
   /** TIN anual como decimal (0.0590 = 5.90%). 4 decimales máximo. */

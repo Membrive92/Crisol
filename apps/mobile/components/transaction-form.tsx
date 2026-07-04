@@ -7,6 +7,7 @@ import type {
   Category,
   Transaction,
   TransactionCreateRequest,
+  TransactionFlow,
   TransactionUpdateRequest,
 } from '@crisol/types';
 import {
@@ -21,6 +22,15 @@ import {
 
 import { DateInput } from './ui/date-input';
 
+// PHASE-34 (paridad con web) — dirección que el usuario declara con el
+// segmento [Gasto]/[Ingreso]. Es la fuente de verdad del signo del saldo
+// (ADR-0004); NO se deriva de la categoría.
+type Direction = 'OUT' | 'IN';
+
+function directionFromFlow(flow: TransactionFlow | null | undefined): Direction {
+  return flow === 'IN' || flow === 'TRANSFER_IN' ? 'IN' : 'OUT';
+}
+
 interface TransactionFormValues {
   account_id: string;
   amount: string;
@@ -28,6 +38,7 @@ interface TransactionFormValues {
   occurred_at: string;
   category_id: string;
   description: string;
+  direction: Direction;
 }
 
 export interface TransactionFormProps {
@@ -49,6 +60,8 @@ function buildInitialValues(
     occurred_at: toDateInputValue(initial?.occurred_at ?? new Date().toISOString()),
     category_id: initial?.category_id ?? '',
     description: initial?.description ?? '',
+    // PHASE-34: por defecto Gasto; en edición se toma del flow existente.
+    direction: directionFromFlow(initial?.flow),
   };
 }
 
@@ -66,7 +79,14 @@ export function TransactionForm({
   // no perder el binding), pero el usuario no puede pasarse a otra
   // archivada desde el form.
   const { data: accounts } = useAccounts();
-  const activeAccounts: Account[] = (accounts ?? []).filter((a) => !a.is_archived);
+  // AUDIT-2026-07 (LOW): PHASE-35 — las compras a plazos hijas
+  // (`parent_account_id`) no son destino de transacciones manuales; se ocultan
+  // del selector como en web. Se conserva la cuenta ya asignada al editar para
+  // no perder el binding.
+  const activeAccounts: Account[] = (accounts ?? []).filter(
+    (a) =>
+      !a.is_archived && (!a.parent_account_id || a.id === initial?.account_id),
+  );
   // PHASE-32: pre-selecciona la cuenta principal; fallback al primer activo.
   const defaultAccountId = pickPreferredAccountId(activeAccounts);
 
@@ -74,6 +94,15 @@ export function TransactionForm({
     buildInitialValues(initial, defaultAccountId),
   );
   const [error, setError] = useState<string | null>(null);
+
+  // PHASE-34 (paridad con web): una transferencia emparejada no usa el
+  // segmento Gasto/Ingreso — su dirección la fija el par y el backend la
+  // protege (409). El segmento sólo aplica a movimientos normales y altas.
+  const isTransfer =
+    initial != null &&
+    (initial.transfer_pair_id != null ||
+      initial.flow === 'TRANSFER_IN' ||
+      initial.flow === 'TRANSFER_OUT');
 
   // Sincroniza account_id si las cuentas cargan después del montaje del
   // form (p.ej. crear desde un FAB sin pre-fetch). Sólo aplica si el
@@ -99,14 +128,24 @@ export function TransactionForm({
       setError('Importe debe ser un número positivo');
       return;
     }
-    onSubmit({
+    const payload: TransactionCreateRequest = {
       account_id: values.account_id,
       amount,
       currency: values.currency.trim().toUpperCase() || 'EUR',
       occurred_at: fromDateInputValue(values.occurred_at),
       category_id: values.category_id || null,
       description: values.description.trim() || null,
-    });
+    };
+    // PHASE-34 (H-06): enviamos `flow` explícito desde el segmento. En una
+    // transferencia emparejada NO lo tocamos (lo fija el par; el backend
+    // rechaza romperlo). Antes el móvil nunca mandaba flow, así que toda
+    // edición re-derivaba el flow desde la categoría en el backend y podía
+    // invertir el signo del saldo en silencio (y una tx sin categoría
+    // quedaba con flow=null, invisible para el saldo).
+    if (!isTransfer) {
+      payload.flow = values.direction;
+    }
+    onSubmit(payload);
   }
 
   const noAccounts = activeAccounts.length === 0;
@@ -142,6 +181,30 @@ export function TransactionForm({
           })}
         </View>
       )}
+
+      {!isTransfer ? (
+        <>
+          <Text style={styles.label}>Tipo</Text>
+          <View style={styles.segment}>
+            {(['OUT', 'IN'] as Direction[]).map((d) => {
+              const selected = values.direction === d;
+              return (
+                <TouchableOpacity
+                  key={d}
+                  style={[styles.segmentBtn, selected && styles.segmentBtnActive]}
+                  onPress={() => setValues((prev) => ({ ...prev, direction: d }))}
+                >
+                  <Text
+                    style={[styles.segmentText, selected && styles.segmentTextActive]}
+                  >
+                    {d === 'OUT' ? 'Gasto' : 'Ingreso'}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </>
+      ) : null}
 
       <Text style={styles.label}>Importe</Text>
       <TextInput
@@ -265,6 +328,23 @@ const styles = StyleSheet.create({
   categoryChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   categoryChipText: { color: colors.text, fontSize: fontSize.sm },
   categoryChipTextActive: { color: colors.surface },
+  segment: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  segmentBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+  },
+  segmentBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  segmentText: { color: colors.text, fontSize: fontSize.sm, fontWeight: fontWeight.medium as '500' },
+  segmentTextActive: { color: colors.surface, fontWeight: fontWeight.semibold as '600' },
   warning: {
     color: colors.warning,
     fontSize: fontSize.sm,

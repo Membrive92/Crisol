@@ -70,6 +70,27 @@ async def generate_installments_for_account(
     return persisted
 
 
+def schedule_outstanding(installments: list[LiabilityInstallment]) -> Decimal | None:
+    """PHASE-36 — Saldo pendiente de una liability DIRIGIDO POR EL CUADRO.
+
+    "El cuadro manda": la deuda viva = Σ del `principal` de las cuotas
+    NO pagadas (`paid_at IS NULL`). Cada aportación que marca una cuota
+    como pagada reduce este saldo exactamente por el principal francés de
+    esa cuota; las cuotas previas a la ventana de datos se marcan pagadas
+    (ancla) y por tanto no inflan el saldo.
+
+    Devuelve `None` si la cuenta no tiene cuadro (no es una liability con
+    plan): el caller cae entonces al saldo por movimientos
+    (`opening_balance + Σ movimientos`), comportamiento previo.
+    """
+    if not installments:
+        return None
+    return sum(
+        (i.principal for i in installments if i.paid_at is None),
+        Decimal("0"),
+    )
+
+
 async def list_installments(
     db: AsyncSession, account_id: uuid.UUID, user_id: uuid.UUID
 ) -> list[LiabilityInstallment]:
@@ -84,6 +105,31 @@ async def list_installments(
     )
     result = await db.execute(query)
     return list(result.scalars().all())
+
+
+async def installments_by_account(
+    db: AsyncSession, user_id: uuid.UUID, account_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[LiabilityInstallment]]:
+    """Carga las cuotas de varias cuentas de una vez, ordenadas por índice
+    y agrupadas por `account_id`. Una sola query (PHASE-36, reutilizado por
+    saldos dirigidos por cuadro, debt-health y reconciliación)."""
+    if not account_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(LiabilityInstallment)
+            .where(LiabilityInstallment.user_id == user_id)
+            .where(LiabilityInstallment.account_id.in_(account_ids))
+            .order_by(
+                LiabilityInstallment.account_id,
+                LiabilityInstallment.installment_index.asc(),
+            )
+        )
+    ).scalars().all()
+    by_account: dict[uuid.UUID, list[LiabilityInstallment]] = {}
+    for inst in rows:
+        by_account.setdefault(inst.account_id, []).append(inst)
+    return by_account
 
 
 async def get_installment(

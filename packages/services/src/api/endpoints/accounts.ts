@@ -5,6 +5,8 @@ import type {
   AccountUpdateRequest,
   AmortizationRow,
   AmortizationSchedule,
+  InstallmentBulkPayRequest,
+  InstallmentBulkPayResponse,
   InstallmentPayRequest,
   InstallmentUpdateRequest,
 } from '@crisol/types';
@@ -14,6 +16,17 @@ import { apiClient } from '../client';
 export interface AccountListQuery {
   /** Si `true`, incluye cuentas archivadas. Default `false`. */
   include_archived?: boolean;
+}
+
+export interface AccountBalancesQuery {
+  /**
+   * AUDIT-2026-06 — Convierte todos los saldos a esta divisa (tasa de
+   * hoy), igual que `/accounts/debt-health`. Sin ella, `/balances`
+   * devuelve saldos en su divisa nativa. Imprescindible para que la
+   * DebtList y el patrimonio neto del hero respeten el selector del
+   * header (PHASE-30.6).
+   */
+  target_currency?: string;
 }
 
 // AUDIT-2026-05: `debtHealth`/`debtHistory` (+ sus query types) se
@@ -27,9 +40,14 @@ export const accountsApi = {
     return response.data;
   },
 
-  async balances(): Promise<AccountBalancesResponse> {
+  async balances(
+    query: AccountBalancesQuery = {},
+  ): Promise<AccountBalancesResponse> {
+    const params: Record<string, string> = {};
+    if (query.target_currency) params['target_currency'] = query.target_currency;
     const response = await apiClient.get<AccountBalancesResponse>(
       '/accounts/balances',
+      { params },
     );
     return response.data;
   },
@@ -77,6 +95,22 @@ export const accountsApi = {
     return response.data;
   },
 
+  /**
+   * AUDIT-2026-07 (H-05): marca las cuotas que un pago de principal cubre.
+   * Lo llama el asistente "Pagar cuota" tras crear la transferencia del
+   * principal, para que el saldo dirigido por el cuadro (PHASE-36) baje.
+   */
+  async payInstallments(
+    accountId: string,
+    payload: InstallmentBulkPayRequest,
+  ): Promise<InstallmentBulkPayResponse> {
+    const response = await apiClient.post<InstallmentBulkPayResponse>(
+      `/accounts/${accountId}/pay-installments`,
+      payload,
+    );
+    return response.data;
+  },
+
   async get(id: string): Promise<Account> {
     const response = await apiClient.get<Account>(`/accounts/${id}`);
     return response.data;
@@ -89,6 +123,18 @@ export const accountsApi = {
 
   async update(id: string, data: AccountUpdateRequest): Promise<Account> {
     const response = await apiClient.put<Account>(`/accounts/${id}`, data);
+    return response.data;
+  },
+
+  /**
+   * PHASE-34 "Cuadrar saldo": fija el saldo real de una cuenta de activo;
+   * el backend ajusta `opening_balance` para que cuadre. `currentBalance` es
+   * un string decimal (misma convención que los importes en la API).
+   */
+  async reconcile(id: string, currentBalance: string): Promise<Account> {
+    const response = await apiClient.post<Account>(`/accounts/${id}/reconcile`, {
+      current_balance: currentBalance,
+    });
     return response.data;
   },
 

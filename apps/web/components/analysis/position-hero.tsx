@@ -48,7 +48,12 @@ export function PositionHero() {
   const storeCurrency = useCurrencyStore((s) => s.currency);
   const convertAll = useCurrencyStore((s) => s.convertAll);
   const targetCurrency = convertAll ? storeCurrency : undefined;
-  const balancesQuery = useAccountBalances();
+  // AUDIT-2026-06 — balances respeta el mismo selector que debt-health,
+  // si no la mitad de patrimonio neto (saldos) y la mitad de salud de
+  // deuda (convertida) salían en divisas distintas en la misma card.
+  const balancesQuery = useAccountBalances(
+    targetCurrency ? { targetCurrency } : {},
+  );
   const accountsQuery = useAccounts({ includeArchived: true });
   const debtQuery = useDebtHealth(targetCurrency ? { targetCurrency } : {});
 
@@ -418,10 +423,18 @@ function DebtHealthSection({ debt }: { debt: ReturnType<typeof useDebtHealth>['d
   const dtiPct = debt.dti_ratio !== null ? debt.dti_ratio * 100 : null;
   const dtiWidth = Math.max(2, Math.min(100, dtiPct ?? 0));
   const aprPct = debt.weighted_apr !== null ? (debt.weighted_apr * 100).toFixed(2) : null;
+  // Cuando los activos son minúsculos frente a la deuda (p. ej. un préstamo
+  // grande sin un activo que lo respalde + poca caja), el ratio se dispara y
+  // un "16881 %" no informa de nada. Lo acotamos a ">999 %": por encima de
+  // eso el mensaje es simplemente "debes mucho más de lo que tienes".
+  const debtToAssetsRaw =
+    debt.debt_to_assets_ratio !== null ? debt.debt_to_assets_ratio * 100 : null;
   const debtToAssetsPct =
-    debt.debt_to_assets_ratio !== null
-      ? (debt.debt_to_assets_ratio * 100).toFixed(1)
-      : null;
+    debtToAssetsRaw === null
+      ? null
+      : debtToAssetsRaw > 999
+        ? '>999'
+        : debtToAssetsRaw.toFixed(1);
 
   return (
     <section
@@ -545,12 +558,17 @@ function DtiGauge({ widthPct, status }: { widthPct: number; status: DtiStatus })
             transition: 'width 200ms ease',
           }}
         />
-        {/* Threshold markers a 35% (warning) y 60% (danger). */}
+        {/* AUDIT-2026-06 — Bandas BdE: 30% (saludable→precaución, warning) y
+            35% (precaución→sobreendeudamiento, danger). Antes pintaba 35% y
+            60%: el 60% no tiene significado en backend (`classify_effort`
+            usa 30/35) y el límite saludable (30%) no se dibujaba. Mismas
+            bandas que el EffortGauge de /debt. La escala del bar es DTI%
+            directo (0–100), así que el marcador va en su mismo %. */}
         <span
           aria-hidden
           style={{
             position: 'absolute',
-            left: '35%',
+            left: '30%',
             top: 0,
             bottom: 0,
             width: 1,
@@ -561,7 +579,7 @@ function DtiGauge({ widthPct, status }: { widthPct: number; status: DtiStatus })
           aria-hidden
           style={{
             position: 'absolute',
-            left: '60%',
+            left: '35%',
             top: 0,
             bottom: 0,
             width: 1,
@@ -569,21 +587,31 @@ function DtiGauge({ widthPct, status }: { widthPct: number; status: DtiStatus })
           }}
         />
       </div>
+      {/* AUDIT-2026-07 — etiquetas alineadas con las bandas BdE reales
+          (30/35), no evenly-spaced con un 60% sin significado. La banda
+          30–35% se rotula centrada sobre sus marcadores. */}
       <div
         style={{
           marginTop: 4,
-          display: 'grid',
-          gridTemplateColumns: 'auto auto auto auto',
-          justifyContent: 'space-between',
+          position: 'relative',
+          height: 12,
           fontSize: 10,
           color: colors.textSubtle,
           fontVariantNumeric: 'tabular-nums',
         }}
       >
-        <span>0 %</span>
-        <span>35 %</span>
-        <span>60 %</span>
-        <span>100 %</span>
+        <span style={{ position: 'absolute', left: 0 }}>0 %</span>
+        <span
+          style={{
+            position: 'absolute',
+            left: '32%',
+            transform: 'translateX(-50%)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          30–35 %
+        </span>
+        <span style={{ position: 'absolute', right: 0 }}>100 %</span>
       </div>
     </div>
   );

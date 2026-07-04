@@ -47,7 +47,7 @@ from app.modules.personal_finance.categories.models import (
     CategoryKind,
     CategoryRole,
 )
-from app.modules.personal_finance.transactions.models import Transaction
+from app.modules.personal_finance.transactions.models import Transaction, TransactionFlow
 from app.modules.users.models import User
 
 # ─────────────────────────────────────────────────────────────────────
@@ -160,6 +160,7 @@ async def _seed_tx(
     category_id: uuid.UUID | None = None,
     transfer_pair_id: uuid.UUID | None = None,
     currency: str = "EUR",
+    flow: TransactionFlow | None = None,
 ) -> uuid.UUID:
     tid = uuid.uuid4()
     async with session_factory() as db:
@@ -172,6 +173,7 @@ async def _seed_tx(
             currency=currency,
             occurred_at=occurred_at,
             transfer_pair_id=None,
+            flow=flow,
         )
         db.add(tx)
         await db.flush()
@@ -414,6 +416,102 @@ async def test_history_signed_else_zero_for_uncategorized(
     point = next(p for p in resp.items if p.month == key)
     # Saldo = opening 1000 (la tx sin categoría no suma).
     assert point.total_debt == Decimal("1000.00")
+
+
+# ─────────────────────────────────────────────────────────────────────
+# AUDIT-2026-06 (alineación PHASE-34) — el saldo histórico de deuda sigue
+# `flow`, no `Category.kind`. Cuando ambos discrepan (lo que ADR-0004
+# permite), la línea cuadra con get_balances_for_user / la DebtList.
+# ─────────────────────────────────────────────────────────────────────
+
+
+async def test_history_signed_follows_flow_not_category(
+    session_factory,  # type: ignore[no-untyped-def]
+) -> None:
+    """Una tx en una cuenta-pasivo con `flow=OUT` pero categoría de INGRESO:
+    el saldo histórico la cuenta como cargo que SUBE la deuda (gana flow),
+    igual que get_balances_for_user. Antes (por `Category.kind`) la habría
+    restado, desplazando la línea respecto al saldo real."""
+    from app.modules.personal_finance.accounts.debt_history import (
+        compute_debt_history,
+    )
+
+    uid = await _seed_user(session_factory)
+    card = await _seed_account(
+        session_factory,
+        uid,
+        name="Visa",
+        nature=AccountNature.LIABILITY,
+        type_=AccountType.CREDIT_CARD,
+        opening_balance=Decimal("1000"),
+    )
+    income_cat = await _seed_category(
+        session_factory, uid, name="Abono mal categorizado", kind=CategoryKind.INCOME
+    )
+    target_month = _closed_month_first(1)
+    # amount 500, categoría INCOME (restaría → 500) pero flow=OUT (sube → 1500).
+    await _seed_tx(
+        session_factory,
+        uid,
+        card,
+        amount=Decimal("500"),
+        occurred_at=_dt(target_month),
+        category_id=income_cat,
+        flow=TransactionFlow.OUT,
+    )
+
+    async with session_factory() as db:
+        resp = await compute_debt_history(db, uid, months_back=3, months_ahead=0)
+    key = f"{target_month.year:04d}-{target_month.month:02d}"
+    point = next(p for p in resp.items if p.month == key)
+    # Gana flow=OUT: 1000 + 500 = 1500 (no 1000 − 500 = 500).
+    assert point.total_debt == Decimal("1500.00")
+
+
+async def test_daily_flows_follow_flow_not_category(
+    session_factory,  # type: ignore[no-untyped-def]
+) -> None:
+    """`daily_liability_flows`: una tx `flow=IN` en categoría de GASTO se
+    cuenta como amortizado (gana flow), no como emitida."""
+    from app.modules.personal_finance.debt.repository import (
+        daily_liability_flows,
+    )
+
+    uid = await _seed_user(session_factory)
+    card = await _seed_account(
+        session_factory,
+        uid,
+        name="Visa",
+        nature=AccountNature.LIABILITY,
+        type_=AccountType.CREDIT_CARD,
+    )
+    expense_cat = await _seed_category(
+        session_factory, uid, name="Cargo mal categorizado", kind=CategoryKind.EXPENSE
+    )
+    month = _closed_month_first(1)
+    day7 = datetime(month.year, month.month, 7, 12, 0, 0, tzinfo=UTC)
+    # categoría EXPENSE (sería emitida) pero flow=IN → amortizado.
+    await _seed_tx(
+        session_factory,
+        uid,
+        card,
+        amount=Decimal("250"),
+        occurred_at=day7,
+        category_id=expense_cat,
+        flow=TransactionFlow.IN,
+    )
+
+    import calendar
+
+    start = datetime(month.year, month.month, 1, tzinfo=UTC)
+    last = calendar.monthrange(month.year, month.month)[1]
+    end = datetime(month.year, month.month, last, 23, 59, 59, tzinfo=UTC)
+    async with session_factory() as db:
+        flows = await daily_liability_flows(
+            db, uid, liability_ids=[card], start=start, end=end, reference_currency="EUR"
+        )
+    # Gana flow=IN: (emitida=0, amortizado=250), no (250, 0).
+    assert flows.get(7) == (Decimal("0"), Decimal("250"))
 
 
 # ─────────────────────────────────────────────────────────────────────

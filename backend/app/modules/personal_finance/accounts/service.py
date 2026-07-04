@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from fastapi import HTTPException, status
@@ -15,6 +15,8 @@ from app.modules.personal_finance.accounts.installments_model import (
 )
 from app.modules.personal_finance.accounts.installments_repository import (
     generate_installments_for_account,
+    installments_by_account,
+    schedule_outstanding,
 )
 from app.modules.personal_finance.accounts.installments_repository import (
     get_installment as repo_get_installment,
@@ -32,17 +34,18 @@ from app.modules.personal_finance.accounts.installments_repository import (
     update_installment_amount_and_date as repo_update_installment,
 )
 from app.modules.personal_finance.accounts.models import (
+    UNVALUED_ACCOUNT_TYPES,
     Account,
     AccountNature,
     AccountType,
 )
 from app.modules.personal_finance.accounts.repository import (
     clear_default_accounts,
+    count_child_accounts,
     count_transactions_for_account,
     get_account_by_id,
     get_account_by_name,
     get_balances_for_user,
-    get_net_savings_movement_for_account,
 )
 from app.modules.personal_finance.accounts.repository import (
     create_account as persist_account,
@@ -125,15 +128,6 @@ async def _validate_debt_category_link(
 
 DEFAULT_REFERENCE_CURRENCY = "EUR"
 
-# PHASE-31.4 — tipos de cuenta cuya valoración real no se computa por
-# `Σ(movimientos)` mientras no exista un módulo de inversión propio.
-# Quedan visibles en `items` (display + destino de transferencias) pero
-# fuera del agregado de patrimonio neto. Se reincorporarán cuando el
-# módulo de inversiones (locked en el registry) llegue con valoración
-# real (precio de mercado × cantidad).
-_UNVALUED_ACCOUNT_TYPES = frozenset({AccountType.BROKERAGE, AccountType.CRYPTO})
-
-
 async def list_accounts(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -214,6 +208,50 @@ async def create_account(db: AsyncSession, user_id: uuid.UUID, data: AccountCrea
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Una cuenta de pasivo no puede ser la cuenta principal.",
         )
+    # PHASE-35 — compra a plazos dentro de una tarjeta: la cuenta se cuelga de
+    # una tarjeta padre y necesita su PROPIO plan (capital + TIN + plazo +
+    # fecha) para generar su cuadro de amortización independiente.
+    if data.parent_account_id is not None:
+        parent = await get_account_by_id(db, data.parent_account_id, user_id)
+        if parent is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="La tarjeta a la que asociar la compra no existe.",
+            )
+        if parent.is_archived:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La tarjeta indicada está archivada; no puedes anidar compras en ella.",
+            )
+        if parent.type != AccountType.CREDIT_CARD:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Solo se pueden añadir compras a plazos a una tarjeta de crédito.",
+            )
+        if parent.parent_account_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No se puede anidar: la tarjeta indicada ya es una compra a plazos.",
+            )
+        if data.type != AccountType.CREDIT_CARD:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Una compra a plazos debe ser de tipo tarjeta de crédito.",
+            )
+        if (
+            data.opening_balance is None
+            or data.opening_balance <= 0
+            or data.apr is None
+            or data.term_months is None
+            or data.start_date is None
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Una compra a plazos necesita su importe, TIN, plazo (meses) "
+                    "y fecha de inicio para generar el cuadro."
+                ),
+            )
     account = Account(
         user_id=user_id,
         name=data.name,
@@ -235,6 +273,7 @@ async def create_account(db: AsyncSession, user_id: uuid.UUID, data: AccountCrea
         display_order=data.display_order,
         is_default=data.is_default,
         category_id=data.category_id,
+        parent_account_id=data.parent_account_id,
     )
     persisted = await persist_account(db, account)
     # PHASE-32: si se crea como principal, desmarcar cualquier otra.
@@ -317,6 +356,50 @@ async def update_account(
     return account
 
 
+async def reconcile_account_balance(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    account_id: uuid.UUID,
+    current_balance: Decimal,
+) -> Account:
+    """PHASE-34 — 'Cuadrar saldo'. Ancla el saldo de una cuenta de ACTIVO al
+    valor real que declara el usuario (lo que dice su banco hoy), ajustando
+    `opening_balance = saldo_real − Σmovimientos`. Así el saldo mostrado pasa
+    a ser exactamente el declarado, SIN reconstruir el histórico ni emparejar
+    transferencias.
+
+    Sirve para dos cosas con el mismo gesto:
+    - Fijar el saldo inicial de una cuenta recién creada (no hay que recordar
+      el saldo de hace meses).
+    - Re-cuadrar cuando el saldo se desvía de la realidad (catch de
+      descuadres por un movimiento olvidado o mal categorizado).
+
+    Solo activos: la deuda (loan/mortgage/credit_card) tiene su saldo dirigido
+    por el cuadro de amortización / las tx de deuda → 400 si no es ASSET.
+    """
+    account = await get_account_by_id(db, account_id, user_id)
+    if account is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cuenta no encontrada")
+    if account.nature != AccountNature.ASSET:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Solo se puede cuadrar el saldo de cuentas de activo. La deuda "
+                "se gestiona en su módulo (cuadro de amortización / operaciones)."
+            ),
+        )
+    # Σmovimientos de ESTA cuenta, en su moneda nativa (mismo cálculo que el
+    # saldo mostrado). `get_balances_for_user` devuelve el movimiento por
+    # cuenta sin el opening; el saldo es `opening + movimiento`.
+    movements = await get_balances_for_user(db, user_id)
+    movement = movements.get(account_id, Decimal("0"))
+    account.opening_balance = (current_balance - movement).quantize(Decimal("0.01"))
+    account.opening_balance_date = datetime.now(UTC).date()
+    await db.flush()
+    await db.refresh(account)
+    return account
+
+
 async def delete_account(db: AsyncSession, account_id: uuid.UUID, user_id: uuid.UUID) -> None:
     """Borra una cuenta sin transacciones; si tiene, fuerza al caller
     a archivarla en su lugar.
@@ -334,6 +417,19 @@ async def delete_account(db: AsyncSession, account_id: uuid.UUID, user_id: uuid.
             detail=(
                 f"La cuenta tiene {tx_count} transacciones. "
                 "Archívala en lugar de borrarla para conservar el histórico."
+            ),
+        )
+    # PHASE-35 — `parent_account_id` es ON DELETE CASCADE: borrar una tarjeta
+    # con compras a plazos anidadas arrastraría cada hija Y su tx de deuda
+    # emparejada (via CASCADE en transactions.account_id), resucitando el
+    # activo fantasma en la cuenta origen y perdiendo la deuda. Se archiva.
+    child_count = await count_child_accounts(db, account_id, user_id)
+    if child_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"La cuenta tiene {child_count} compra(s) a plazos asociada(s). "
+                "Archívala en lugar de borrarla para no perder su deuda."
             ),
         )
     await remove_account(db, account)
@@ -393,40 +489,34 @@ async def get_balances(
       convierte a `target_currency` con la tasa de HOY (snapshot
       simple, igual que `/debt-health` y `/debt-history`). Las cuentas
       cuya moneda no tiene tasa quedan EXCLUIDAS del agregado (mismo
-      contrato que el modo crudo con `mixed_currencies`); `items`
-      sigue mostrando su saldo nativo. En este modo `net_worth` ya es
-      una cifra con sentido y `mixed_currencies` se reporta `False`
-      (todo viene homogeneizado a `reference_currency`).
+      contrato que el modo crudo con `mixed_currencies`) pero siguen en
+      `items` con su saldo nativo. En este modo `net_worth` ya es una
+      cifra con sentido y `mixed_currencies` se reporta `False` (todo
+      viene homogeneizado a `reference_currency`).
 
-    `items[*].current_balance` SIEMPRE va en la moneda nativa de la
-    cuenta — la conversión sólo afecta a los agregados, para no romper
-    la UI por-cuenta.
+    AUDIT-2026-06 — En modo convertido, `items[*]` también se reexpresa
+    en `target_currency` (no sólo los agregados). Antes los items se
+    quedaban nativos, así que la DebtList y los tiles del hero salían en
+    divisa distinta a los KPIs/charts de la misma pantalla. La cuenta
+    sin tasa es la única excepción: se queda nativa (y fuera del
+    agregado). Se preserva `opening + movements == current`.
     """
     accounts = await list_all(db, user_id, include_archived=True)
     movements = await get_balances_for_user(db, user_id)
+    # PHASE-36 — "el cuadro manda": para las liabilities CON cuadro, la deuda
+    # viva sale de las cuotas no pagadas (no de los movimientos). Así las
+    # aportaciones (que marcan cuotas pagadas) bajan la deuda, y el saldo
+    # cuadra con el cuadro de amortización mostrado en /schedule.
+    liability_ids = [a.id for a in accounts if a.nature == AccountNature.LIABILITY]
+    insts_by_account = await installments_by_account(db, user_id, liability_ids)
 
-    # PHASE-32 (HIGH#1) — la cuenta principal MUESTRA ahorro neto (excluye
-    # transferencias internas), pero AGREGA al patrimonio por su saldo cash,
-    # de modo que las dos patas de una transferencia interna se cancelan en
-    # el agregado. Sin esto, transferir a la principal encogía el net_worth.
-    # `nature == ASSET` es defensa en profundidad: el ahorro neto sólo tiene
-    # sentido sobre un activo (HIGH#2 ya impide marcar principal un pasivo);
-    # si por cualquier vía existiera un pasivo principal, NO se le aplica el
-    # carve-out de display (mostraría su deuda real, no ahorro neto).
-    default_account_id = next(
-        (
-            a.id
-            for a in accounts
-            if a.is_default and not a.is_archived and a.nature == AccountNature.ASSET
-        ),
-        None,
-    )
-    net_savings_movement = (
-        await get_net_savings_movement_for_account(db, user_id, default_account_id)
-        if default_account_id is not None
-        else None
-    )
-
+    # PHASE-34 — La lista de cuentas muestra la CAJA REAL de cada cuenta (lo
+    # que de verdad hay en ella), incluida la principal. Antes (PHASE-32) la
+    # principal mostraba "ahorro neto" (excluía transferencias internas), lo
+    # que daba un saldo que NO coincidía con la caja real y confundía (la
+    # principal salía igual que el cashflow del mes). El ahorro neto / tasa de
+    # ahorro siguen en el dashboard como métricas propias. El agregado de
+    # patrimonio ya usaba caja, así que esto no cambia el net_worth (HIGH#1).
     effective_target = target_currency.upper() if target_currency else None
 
     items: list[AccountBalance] = []
@@ -437,26 +527,86 @@ async def get_balances(
     for account in accounts:
         cash_movement = movements.get(account.id, Decimal("0"))
         cash_balance = account.opening_balance + cash_movement
-        # Display: la cuenta principal muestra ahorro neto; el resto, cash.
-        if account.id == default_account_id and net_savings_movement is not None:
-            display_movement = net_savings_movement
-        else:
-            display_movement = cash_movement
-        display_balance = account.opening_balance + display_movement
-        is_unvalued = account.type in _UNVALUED_ACCOUNT_TYPES
+        # PHASE-34: la caja real, igual para todas las cuentas (ver nota arriba).
+        display_movement = cash_movement
+        display_balance = cash_balance
+        # PHASE-36: liability con cuadro → la deuda viva la manda el cuadro
+        # (Σ principal de cuotas no pagadas), no los movimientos. El
+        # `movements_balance` se reexpresa para conservar la invariante
+        # `opening + movements == current`.
+        sched_outstanding = (
+            schedule_outstanding(insts_by_account.get(account.id, []))
+            if account.nature == AccountNature.LIABILITY
+            else None
+        )
+        if sched_outstanding is not None:
+            display_balance = sched_outstanding
+            cash_balance = sched_outstanding
+            display_movement = sched_outstanding - account.opening_balance
+        is_unvalued = account.type in UNVALUED_ACCOUNT_TYPES
+
+        # AUDIT-2026-06 — Modo convertido: además del agregado, cada item
+        # se reexpresa en la divisa destino (tasa de hoy) para que la
+        # DebtList y los tiles del hero cuadren con los agregados y con el
+        # resto de la pantalla. Sin tasa, el item se queda nativo y la
+        # cuenta queda fuera del agregado (mismo contrato que el modo
+        # crudo). `cash_balance == display_balance` siempre, así que una
+        # sola conversión sirve para item y agregado; `opening + movements
+        # == current` se conserva reconstruyendo movements del converted.
+        item_currency = account.currency
+        item_opening = account.opening_balance
+        item_movements = display_movement
+        item_balance = display_balance
+        aggregable_balance: Decimal | None = cash_balance
+        if effective_target is not None and account.currency.upper() != effective_target:
+            conv_balance = await _convert_at_today(
+                db,
+                display_balance,
+                from_currency=account.currency,
+                target_currency=effective_target,
+            )
+            # AUDIT-2026-07 (LOW): el opening convertido se DERIVA del mismo
+            # ratio en lugar de una segunda conversión (evita duplicar el N+1
+            # de tasas). La conversión es lineal, así que
+            # `conv_opening = opening · conv_balance / display_balance`. Con
+            # `display_balance == 0` no hay ratio: caemos a la segunda conversión.
+            conv_opening: Decimal | None
+            if conv_balance is None:
+                conv_opening = None
+            elif display_balance != 0:
+                conv_opening = (
+                    account.opening_balance * conv_balance / display_balance
+                ).quantize(Decimal("0.01"))
+            else:
+                conv_opening = await _convert_at_today(
+                    db,
+                    account.opening_balance,
+                    from_currency=account.currency,
+                    target_currency=effective_target,
+                )
+            if conv_balance is None or conv_opening is None:
+                aggregable_balance = None  # sin tasa → fuera del agregado
+            else:
+                item_currency = effective_target
+                item_opening = conv_opening
+                item_balance = conv_balance
+                item_movements = conv_balance - conv_opening
+                aggregable_balance = conv_balance
+
         items.append(
             AccountBalance(
                 account_id=account.id,
                 name=account.name,
                 type=account.type,
                 nature=account.nature,
-                currency=account.currency,
+                currency=item_currency,
                 color=account.color,
                 icon=account.icon,
-                opening_balance=account.opening_balance,
-                movements_balance=display_movement,
-                current_balance=display_balance,
+                opening_balance=item_opening,
+                movements_balance=item_movements,
+                current_balance=item_balance,
                 is_unvalued=is_unvalued,
+                parent_account_id=account.parent_account_id,
             )
         )
         if account.is_archived:
@@ -468,24 +618,12 @@ async def get_balances(
         # válido de transferencias.
         if is_unvalued:
             continue
-        # Decidir el saldo "agregable":
-        # - Sin target: saldo nativo (suma cruda; el flag avisa).
-        # - Con target: convertir a la moneda destino con la tasa de hoy;
-        #   excluir la cuenta del agregado si no hay tasa.
-        # Agregado SIEMPRE por saldo cash (no display) para que las dos
-        # patas de una transferencia interna se cancelen entre cuentas (HIGH#1).
-        if effective_target is None or account.currency.upper() == effective_target:
-            aggregable_balance = cash_balance
-        else:
-            converted = await _convert_at_today(
-                db,
-                cash_balance,
-                from_currency=account.currency,
-                target_currency=effective_target,
-            )
-            if converted is None:
-                continue
-            aggregable_balance = converted
+        # Sin tasa para convertir → fuera del agregado (mismo contrato que
+        # el modo crudo con `mixed_currencies`). El agregado se calcula con
+        # el saldo cash convertido para que las dos patas de una
+        # transferencia interna se cancelen entre cuentas (HIGH#1).
+        if aggregable_balance is None:
+            continue
         if account.nature == AccountNature.LIABILITY:
             total_liabilities += aggregable_balance
         else:
@@ -850,3 +988,84 @@ async def unmark_installment_paid(
     """Revierte a pendiente."""
     inst = await _get_installment_or_404(db, installment_id, user_id)
     return await repo_unmark_paid(db, inst)
+
+
+async def pay_installments_by_principal(
+    db: AsyncSession,
+    account_id: uuid.UUID,
+    user_id: uuid.UUID,
+    *,
+    principal_amount: Decimal,
+    paid_at: datetime | None,
+    paid_transaction_id: uuid.UUID | None,
+) -> tuple[int, Decimal, Decimal, Decimal | None]:
+    """AUDIT-2026-07 (H-05) — Marca las cuotas que un pago de principal cubre.
+
+    Con PHASE-36 el saldo de una liability con cuadro lo manda
+    `schedule_outstanding` (Σ principal de cuotas NO pagadas). El asistente
+    "Pagar cuota" mueve el dinero como transferencia, pero sin marcar cuotas
+    el saldo mostrado no bajaba (H-05). Aquí marcamos, de la cuota más antigua
+    pendiente hacia adelante, tantas como el principal cubra (greedy: se marca
+    la cuota k mientras el principal acumulado ≤ importe pagado + 1 cts de
+    holgura), enlazándolas a la transacción del pago.
+
+    Un pago menor que la cuota más antigua pendiente no marca ninguna: el
+    caller lo detecta por `uncovered_principal == principal_amount` para avisar.
+    Asume que el cuadro está anclado (las cuotas ya vencidas y pagadas están
+    marcadas — lo hace la reconciliación), así que la cuota más antigua
+    pendiente es la del pago en curso.
+
+    NO crea transacciones (eso lo hace el asistente aparte). Devuelve
+    (marcadas, principal_cubierto, principal_no_cubierto, saldo_del_cuadro).
+    """
+    account = await get_account(db, account_id, user_id)
+    if account.nature != AccountNature.LIABILITY:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sólo las cuentas de deuda tienen cuotas que marcar.",
+        )
+    # Misma defensa que mark_installment_paid: la tx del pago debe ser del
+    # usuario para no enlazar una cuota propia a una tx ajena.
+    if paid_transaction_id is not None:
+        from sqlalchemy import select
+
+        from app.modules.personal_finance.transactions.models import Transaction
+
+        owned = await db.execute(
+            select(Transaction.id).where(
+                Transaction.id == paid_transaction_id,
+                Transaction.user_id == user_id,
+            )
+        )
+        if owned.scalar_one_or_none() is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La transacción indicada no existe o no es tuya.",
+            )
+
+    installments = await repo_list_installments(db, account_id, user_id)
+    when = paid_at if paid_at is not None else datetime.now(UTC)
+    tolerance = Decimal("0.01")
+    remaining = principal_amount
+    covered = Decimal("0")
+    marked = 0
+    for inst in installments:  # repo_list_installments ordena por índice asc
+        if inst.paid_at is not None:
+            continue
+        if inst.principal <= remaining + tolerance:
+            await repo_mark_paid(
+                db, inst, paid_at=when, paid_transaction_id=paid_transaction_id
+            )
+            remaining -= inst.principal
+            covered += inst.principal
+            marked += 1
+        else:
+            break
+
+    outstanding = schedule_outstanding(
+        await repo_list_installments(db, account_id, user_id)
+    )
+    uncovered = principal_amount - covered
+    if uncovered < 0:
+        uncovered = Decimal("0")
+    return marked, covered, uncovered, outstanding

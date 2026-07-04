@@ -42,6 +42,7 @@ function makeTx(overrides: Partial<Transaction> = {}): Transaction {
     deleted_at: null,
     converted_amount: null,
     converted_currency: null,
+    flow: null,
     is_debt_pair: false,
     ...overrides,
   };

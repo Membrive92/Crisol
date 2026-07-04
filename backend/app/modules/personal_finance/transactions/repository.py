@@ -7,13 +7,14 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Literal
 
-from sqlalchemy import Delete, Select, Update, case, func, null, select, update
+from sqlalchemy import Delete, Select, Update, case, cast, func, null, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.modules.personal_finance.accounts.models import Account, AccountNature
+from app.modules.personal_finance.categories.models import Category, CategoryKind
 from app.modules.personal_finance.dashboard.conversion import converted_amount_expr
-from app.modules.personal_finance.transactions.models import Transaction
+from app.modules.personal_finance.transactions.models import Transaction, TransactionFlow
 
 # `active`  → `deleted_at IS NULL`  (default — listado normal, dashboard).
 # `trashed` → `deleted_at IS NOT NULL` (endpoint /trash, restore, purge).
@@ -289,6 +290,7 @@ async def bulk_soft_delete_transactions(
     db: AsyncSession,
     user_id: uuid.UUID,
     *,
+    account_id: uuid.UUID | None = None,
     category_id: uuid.UUID | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
@@ -300,6 +302,11 @@ async def bulk_soft_delete_transactions(
     Usa los mismos filtros que `list_transactions` para que "borrar todo
     lo que veo en pantalla con este filtro" sea exacto. Si no se pasa
     ningún filtro, mueve todas las transacciones activas del usuario.
+
+    AUDIT-2026-07 (H-01): `account_id` se propaga a `_scope` como los demás
+    filtros. Antes el endpoint no lo declaraba y FastAPI lo descartaba, así
+    que "borrar todo" con el listado filtrado por una cuenta trasheaba TODAS
+    las cuentas — el alcance real no coincidía con el prometido en el diálogo.
     """
     # AUDIT-2026-05: capturamos los ids que ESTE bulk va a trashear ANTES
     # de hacerlo, para desvincular sólo las parejas de las filas que
@@ -309,6 +316,7 @@ async def bulk_soft_delete_transactions(
     select_ids = _scope(
         select(Transaction.id),
         user_id,
+        account_id=account_id,
         category_id=category_id,
         date_from=date_from,
         date_to=date_to,
@@ -321,6 +329,7 @@ async def bulk_soft_delete_transactions(
     stmt = _scope(
         stmt,
         user_id,
+        account_id=account_id,
         category_id=category_id,
         date_from=date_from,
         date_to=date_to,
@@ -340,6 +349,66 @@ async def bulk_soft_delete_transactions(
             .values(transfer_pair_id=None)
         )
         await db.execute(orphan_unlink)
+    await db.flush()
+    return result.rowcount or 0
+
+
+async def bulk_update_category(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    transaction_ids: list[uuid.UUID],
+    category_id: uuid.UUID | None,
+) -> int:
+    """PHASE-34 — Asigna `category_id` a un conjunto EXPLÍCITO de tx activas
+    (selección por checkbox en la lista). Relabel money-neutral: el dinero
+    (signo del saldo, cashflow) lo manda `flow` y NO cambia al mover la
+    etiqueta. `category_id=None` quita la categoría. Filtra por `user_id`
+    (aislamiento) y excluye soft-deleted. Devuelve filas afectadas.
+
+    AUDIT-2026-07 (LOW): antes de relabelar, FIJAMOS `flow` para las filas SIN
+    flow (heredadas) derivándolo de su categoría ACTUAL (mismo mapeo que
+    `_flow_from_category`/backfill 34.1). Sin esto, una fila sin flow dependía
+    del fallback por categoría, así que recategorizarla PODÍA invertir su
+    dirección en silencio — el "relabel puro" no era money-neutral para esas
+    filas. Al pinchar el flow primero, el dinero queda anclado y no se mueve.
+    """
+    if not transaction_ids:
+        return 0
+    pin_flow = (
+        update(Transaction)
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.id.in_(transaction_ids))
+        .where(Transaction.deleted_at.is_(None))
+        .where(Transaction.flow.is_(None))
+        .where(Transaction.category_id == Category.id)
+        .values(
+            # `cast` al tipo enum de la columna: sin él SQLAlchemy renderiza el
+            # CASE como `text` y Postgres rechaza asignarlo a `transactionflow`.
+            flow=cast(
+                case(
+                    (
+                        Category.is_transfer.is_(True) & (Category.kind == CategoryKind.INCOME),
+                        TransactionFlow.TRANSFER_IN,
+                    ),
+                    (Category.is_transfer.is_(True), TransactionFlow.TRANSFER_OUT),
+                    (Category.kind == CategoryKind.INCOME, TransactionFlow.IN),
+                    (Category.kind == CategoryKind.EXPENSE, TransactionFlow.OUT),
+                    else_=None,
+                ),
+                Transaction.flow.type,
+            )
+        )
+    )
+    await db.execute(pin_flow)
+    stmt = (
+        update(Transaction)
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.id.in_(transaction_ids))
+        .where(Transaction.deleted_at.is_(None))
+        .values(category_id=category_id)
+    )
+    result = await db.execute(stmt)
     await db.flush()
     return result.rowcount or 0
 

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
+from app.core.uploads import read_upload_capped
 from app.modules.personal_finance.bank_mappings.repository import (
     get_mappings_for_concepts,
     normalize_concept,
@@ -104,12 +105,13 @@ async def create_import_endpoint(
                 detail="default_category_id no es un UUID válido",
             ) from e
 
-    payload = await file.read()
-    if len(payload) > MAX_UPLOAD_SIZE:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"Fichero demasiado grande (máx {MAX_UPLOAD_SIZE} bytes)",
-        )
+    # AUDIT-2026-07 (LOW): lee con tope acumulado (aborta 413 en cuanto se
+    # supera el límite) en vez de cargar el fichero entero antes de medirlo.
+    payload = await read_upload_capped(
+        file,
+        MAX_UPLOAD_SIZE,
+        detail=f"Fichero demasiado grande (máx {MAX_UPLOAD_SIZE} bytes)",
+    )
     if not payload:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -208,12 +210,13 @@ async def preview_import_endpoint(
                 detail="default_category_id no es un UUID válido",
             ) from e
 
-    payload = await file.read()
-    if len(payload) > MAX_UPLOAD_SIZE:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"Fichero demasiado grande (máx {MAX_UPLOAD_SIZE} bytes)",
-        )
+    # AUDIT-2026-07 (LOW): lee con tope acumulado (aborta 413 en cuanto se
+    # supera el límite) en vez de cargar el fichero entero antes de medirlo.
+    payload = await read_upload_capped(
+        file,
+        MAX_UPLOAD_SIZE,
+        detail=f"Fichero demasiado grande (máx {MAX_UPLOAD_SIZE} bytes)",
+    )
     if not payload:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

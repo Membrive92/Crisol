@@ -42,7 +42,8 @@ export function UploadStep({ onContinue }: UploadStepProps) {
     if (!accounts || accounts.length === 0) return;
     if (!accountId) {
       // PHASE-32: la cuenta principal por defecto; fallback al primer activo.
-      const preferred = pickPreferredAccount(accounts);
+      // PHASE-35: nunca una compra a plazos (cuenta hija).
+      const preferred = pickPreferredAccount(accounts.filter((a) => !a.parent_account_id));
       if (preferred) {
         setAccountId(preferred.id);
         // Si no han tocado la moneda, sincronizamos con la cuenta — es
@@ -52,7 +53,8 @@ export function UploadStep({ onContinue }: UploadStepProps) {
     }
   }, [accounts, accountId]);
 
-  const accountList = accounts ?? [];
+  // PHASE-35: las compras a plazos (cuentas hijas) no son destino de import.
+  const accountList = (accounts ?? []).filter((a) => !a.parent_account_id);
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     setError(null);

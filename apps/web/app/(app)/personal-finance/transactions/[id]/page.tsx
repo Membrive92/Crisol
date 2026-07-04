@@ -105,8 +105,13 @@ export default function EditTransactionPage({ params }: { params: Promise<{ id: 
               transaction={data}
               suggested={looksLikeFinancedOperation(data.description)}
               onConverted={(pair) => {
+                // PHASE-34: si se anuló el cargo espejo (el ADEUDO del mismo
+                // importe que en el banco compensa la financiación), avísalo.
+                const mirrorNote = pair.absorbed_mirror_amount
+                  ? ` Anulado el cargo espejo de ${pair.absorbed_mirror_amount} ${pair.currency} (movido a la papelera).`
+                  : '';
                 toast.success(
-                  `Deuda registrada (${pair.amount} ${pair.currency}). Revisa el cuadro de amortización en la cuenta.`,
+                  `Deuda registrada (${pair.amount} ${pair.currency}). Revisa el cuadro de amortización en la cuenta.${mirrorNote}`,
                 );
                 // La lista de cuentas en web vive en /settings/accounts
                 // (bajo /personal-finance/accounts sólo existe la ruta

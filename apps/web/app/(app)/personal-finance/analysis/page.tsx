@@ -14,11 +14,13 @@ import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
 import { PositionHero } from '@/components/analysis/position-hero';
 import { StitchKeyMetrics } from '@/components/analysis/stitch-key-metrics';
 import {
-  StitchPeriodToggle,
-  rangeForPeriod,
+  boundsForAnchor,
   type PeriodKey,
 } from '@/components/analysis/stitch-period-toggle';
 import { StitchSmartInsights } from '@/components/analysis/stitch-smart-insights';
+// PHASE-34 — navegador de período (granularidad + flechas ◀▶ acotadas a
+// datos). Widget genérico reutilizado del módulo de deuda (PHASE-30.8).
+import { PeriodNavigator } from '@/components/debt/period-navigator';
 import { Card } from '@/components/ui/card';
 import { ErrorState } from '@/components/ui/error-state';
 import { ListIcon } from '@/components/ui/icons';
@@ -44,11 +46,23 @@ const StitchExpenseBreakdown = dynamic(
 
 export default function AnalysisPage() {
   const [period, setPeriod] = useState<PeriodKey>('year');
+  // PHASE-34 — mes ancla `YYYY-MM` del período mostrado. Por defecto el mes
+  // en curso → período actual (comportamiento previo). El `PeriodNavigator`
+  // lo mueve, acotado a los meses con datos.
+  const [anchorMonth, setAnchorMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
   const currency = useCurrencyStore((s) => s.currency);
   const convertAll = useCurrencyStore((s) => s.convertAll);
 
-  const { dateFrom, dateTo } = useMemo(() => rangeForPeriod(period), [period]);
-  const currentYear = new Date().getFullYear();
+  const { dateFrom, dateTo } = useMemo(
+    () => boundsForAnchor(period, anchorMonth),
+    [period, anchorMonth],
+  );
+  // La gráfica Ingresos vs Gastos muestra los 12 meses del AÑO del período
+  // navegado (no siempre el año en curso).
+  const anchorYear = Number(anchorMonth.split('-')[0]);
 
   // PHASE-8.3: una petición por endpoint con `target_currency` cuando el
   // toggle global está ON; el backend convierte cada transacción con la
@@ -58,8 +72,8 @@ export default function AnalysisPage() {
     ? { target_currency: currency, date_from: dateFrom, date_to: dateTo }
     : { currency, date_from: dateFrom, date_to: dateTo };
   const monthlyParams = convertAll
-    ? { target_currency: currency, year: currentYear }
-    : { currency, year: currentYear };
+    ? { target_currency: currency, year: anchorYear }
+    : { currency, year: anchorYear };
   const byCategoryParams = convertAll
     ? {
         target_currency: currency,
@@ -86,6 +100,13 @@ export default function AnalysisPage() {
     summaryQuery.isFetching ||
     monthlyQuery.isFetching ||
     expensesByCategoryQuery.isFetching;
+  // AUDIT-2026-07 — `placeholderData: previous` mantiene visibles las cifras
+  // del período anterior mientras el nuevo fetch está en curso (o si falla).
+  // Señalamos ese estado para que un fetch lento/fallido no se lea como "no
+  // cambió nada" al navegar el período (los widgets period-scoped son summary
+  // + desglose por categoría).
+  const isShowingStale =
+    summaryQuery.isPlaceholderData || expensesByCategoryQuery.isPlaceholderData;
   function retryAll() {
     void summaryQuery.refetch();
     void monthlyQuery.refetch();
@@ -154,8 +175,40 @@ export default function AnalysisPage() {
             </p>
           ) : null}
         </div>
-        <StitchPeriodToggle value={period} onChange={setPeriod} />
       </header>
+
+      {/* PHASE-34 — navegador de período: granularidad (Mes / Trimestre /
+          Año) + flechas ◀▶ acotadas a los meses con datos. Gobierna las
+          cifras del Análisis (summary + desglose por categoría). */}
+      <div
+        style={{
+          marginBottom: spacing.md,
+          display: 'flex',
+          alignItems: 'center',
+          gap: spacing.md,
+          flexWrap: 'wrap',
+        }}
+      >
+        <PeriodNavigator
+          range={period}
+          onRangeChange={setPeriod}
+          anchor={anchorMonth}
+          onAnchorChange={setAnchorMonth}
+          availableFrom={summary?.available_from ?? null}
+          availableTo={summary?.available_to ?? null}
+        />
+        {isShowingStale ? (
+          <span
+            style={{
+              fontSize: fontSize.xs,
+              color: colors.textMuted,
+              fontWeight: fontWeight.medium,
+            }}
+          >
+            Actualizando cifras del período…
+          </span>
+        ) : null}
+      </div>
 
       {hasError ? (
         <div style={{ marginBottom: spacing.md }}>
@@ -173,6 +226,22 @@ export default function AnalysisPage() {
           deuda, cuentas activas). Independiente del periodo (snapshot
           actual). Las cards legacy siguen vivas en /dashboard. */}
       <div style={{ marginBottom: spacing.md }}>
+        {/* AUDIT-2026-07 — rótulo explícito: este bloque es un snapshot y NO
+            reacciona al navegador de período (a diferencia del resto de la
+            pantalla), para eliminar la expectativa de que cambie al togglear. */}
+        <span
+          style={{
+            display: 'block',
+            fontSize: 11,
+            fontWeight: fontWeight.semibold,
+            color: colors.textSubtle,
+            textTransform: 'uppercase',
+            letterSpacing: '0.04em',
+            marginBottom: spacing.xs,
+          }}
+        >
+          Posición actual · no depende del período
+        </span>
         <PositionHero />
       </div>
 
@@ -189,6 +258,8 @@ export default function AnalysisPage() {
           data={monthly}
           currency={currency}
           isLoading={monthlyQuery.isLoading}
+          period={period}
+          anchorMonth={anchorMonth}
         />
         <StitchKeyMetrics summary={summary} currency={currency} monthly={monthly} />
       </div>

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 
 import sqlalchemy as sa
@@ -10,7 +11,74 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.personal_finance.categories.models import Category, CategoryKind
-from app.modules.personal_finance.transactions.models import Transaction
+from app.modules.personal_finance.transactions.models import Transaction, TransactionFlow
+
+# PHASE-34 — Patrones de descripción de una LIQUIDACIÓN / cargo de tarjeta
+# (el "cargo espejo" que compensa el abono de una operación financiada). Se
+# exige ESTE patrón además de importe+cuenta exactos para no anular un gasto
+# cualquiera del mismo importe por accidente.
+_CARD_SETTLEMENT_LIKE = (
+    "%adeudo%tarjeta%",
+    "%liquidacion%tarjeta%",
+    "%liquidación%tarjeta%",
+)
+# Ventana de fechas alrededor del abono donde buscar el espejo (mismo ciclo).
+_MIRROR_WINDOW = timedelta(days=31)
+
+
+async def find_mirror_charge(
+    db: AsyncSession, user_id: uuid.UUID, source: Transaction
+) -> Transaction | None:
+    """Busca el 'cargo espejo' de una operación financiada (PHASE-34).
+
+    Cuando el banco financia una compra, muestra DOS líneas que se anulan
+    (neto 0) y dejan la deuda: el abono `OPERACIÓN FINANCIADA` (+X) y un
+    cargo `ADEUDO / LIQUIDACIÓN DE TARJETA` (−X) del MISMO importe. Al
+    registrar el abono como deuda, ese cargo queda suelto restando del
+    saldo. Esta query lo localiza para anularlo.
+
+    Estricto, para no pillar un gasto cualquiera del mismo importe: misma
+    cuenta + MISMO importe exacto + descripción de liquidación/adeudo de
+    tarjeta + es un CARGO (salida) + sin emparejar + activa + distinta del
+    abono + dentro de ±31 días. Devuelve el más cercano en fecha, o `None`.
+
+    AUDIT-2026-07 (LOW): el espejo es por definición un CARGO, así que se exige
+    `flow` de salida (`OUT`/`TRANSFER_OUT`; NULL para filas heredadas), lo que
+    descarta un ingreso del mismo importe que casara con la descripción. Riesgo
+    residual (aceptado): si el usuario tuviera DOS liquidaciones de tarjeta del
+    MISMO importe exacto en ±31 días, se absorbería la más cercana en fecha —
+    reversible desde papelera. Un match por comercio/referencia no es viable
+    porque la línea ADEUDO no lo trae.
+    """
+    desc_match = sa.or_(*[Transaction.description.ilike(p) for p in _CARD_SETTLEMENT_LIKE])
+    # El espejo es una SALIDA (cargo). `adeudo/liquidacion de tarjeta` cae en
+    # los patrones de movimiento interno, así que suele quedar TRANSFER_OUT;
+    # aceptamos también OUT y NULL (heredadas) para no perder ningún espejo.
+    is_charge = sa.or_(
+        Transaction.flow.in_([TransactionFlow.OUT, TransactionFlow.TRANSFER_OUT]),
+        Transaction.flow.is_(None),
+    )
+    distance = sa.func.abs(
+        sa.func.extract("epoch", Transaction.occurred_at - source.occurred_at)
+    )
+    query = (
+        select(Transaction)
+        .where(
+            Transaction.user_id == user_id,
+            Transaction.account_id == source.account_id,
+            Transaction.amount == source.amount,
+            Transaction.id != source.id,
+            Transaction.transfer_pair_id.is_(None),
+            Transaction.deleted_at.is_(None),
+            Transaction.occurred_at >= source.occurred_at - _MIRROR_WINDOW,
+            Transaction.occurred_at <= source.occurred_at + _MIRROR_WINDOW,
+            desc_match,
+            is_charge,
+        )
+        .order_by(distance.asc())
+        .limit(1)
+    )
+    return (await db.execute(query)).scalar_one_or_none()
 
 
 async def get_transaction(

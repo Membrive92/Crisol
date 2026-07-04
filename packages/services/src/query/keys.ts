@@ -21,7 +21,8 @@ export const queryKeys = {
     list: (includeArchived = false) =>
       [...queryKeys.accounts.all, 'list', includeArchived] as const,
     detail: (id: string) => [...queryKeys.accounts.all, 'detail', id] as const,
-    balances: () => [...queryKeys.accounts.all, 'balances'] as const,
+    balances: (targetCurrency?: string) =>
+      [...queryKeys.accounts.all, 'balances', targetCurrency ?? 'native'] as const,
     amortization: (id: string) =>
       [...queryKeys.accounts.all, 'amortization', id] as const,
   },

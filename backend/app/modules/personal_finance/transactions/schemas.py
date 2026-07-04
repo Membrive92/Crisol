@@ -9,7 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.modules.personal_finance.transactions.models import TransactionSource
+from app.modules.personal_finance.transactions.models import TransactionFlow, TransactionSource
 
 
 class BudgetAlertSchema(BaseModel):
@@ -42,6 +42,10 @@ class TransactionCreate(BaseModel):
     occurred_at: datetime
     description: str | None = Field(default=None, max_length=500)
     source: TransactionSource = TransactionSource.MANUAL
+    # PHASE-34: dirección + transfer-ness del movimiento. Si el form la
+    # envía ([Gasto]/[Ingreso]/[Entre mis cuentas]), manda; si no, el
+    # service la deriva de la categoría (puente de transición).
+    flow: TransactionFlow | None = None
 
     @field_validator("currency")
     @classmethod
@@ -62,6 +66,7 @@ class TransactionUpdate(BaseModel):
     currency: str | None = Field(default=None, max_length=3)
     occurred_at: datetime | None = None
     description: str | None = None
+    flow: TransactionFlow | None = None
 
     @field_validator("currency")
     @classmethod
@@ -89,6 +94,9 @@ class TransactionResponse(BaseModel):
     occurred_at: datetime
     description: str | None
     source: TransactionSource
+    # PHASE-34: fuente de verdad de la dirección del dinero. La UI pinta
+    # el signo/color y clasifica gasto/ingreso/transferencia desde aquí.
+    flow: TransactionFlow | None = None
     receipt_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime

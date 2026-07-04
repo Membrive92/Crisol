@@ -43,11 +43,18 @@ from app.modules.personal_finance.accounts.amortization import (
 from app.modules.personal_finance.accounts.debt_health import (
     DEFAULT_REFERENCE_CURRENCY,
 )
+from app.modules.personal_finance.accounts.installments_model import (
+    LiabilityInstallment,
+)
+from app.modules.personal_finance.accounts.installments_repository import (
+    installments_by_account,
+)
 from app.modules.personal_finance.accounts.models import (
     Account,
     AccountNature,
     AccountType,
 )
+from app.modules.personal_finance.accounts.repository import is_inflow, is_outflow
 from app.modules.personal_finance.accounts.schemas import (
     DebtHistoryPoint,
     DebtHistoryResponse,
@@ -87,6 +94,41 @@ def _format_month(d: date) -> str:
     return f"{d.year:04d}-{d.month:02d}"
 
 
+# ── M-02 (AUDIT-2026-07): saldo de deuda dirigido por CUADRO ────────────────
+# Para un pasivo CON cuadro (loan/mortgage con apr+plazo+fecha), el saldo vivo
+# lo manda el cuadro (Σ principal de cuotas no pagadas, PHASE-36), no los
+# movimientos. Antes la serie temporal derivaba de movimientos y un préstamo
+# sin pagos registrados salía PLANO en el histórico y arrancaba la proyección
+# desde un saldo distinto al de /balances y /debt-health. Estos helpers derivan
+# el saldo y la amortización de la CURVA del cuadro (remaining_balance por mes),
+# de modo que histórico + proyección + KPI cuadren.
+
+
+def _scheduled_remaining_at(insts: list[LiabilityInstallment], month: date) -> Decimal:
+    """Saldo pendiente (NATIVO) al cierre de `month` según la curva del cuadro:
+    el `remaining_balance` de la última cuota con vencimiento en o antes de
+    `month`. Antes de la primera cuota = capital completo (Σ principal)."""
+    ym = (month.year, month.month)
+    remaining: Decimal | None = None
+    principal_total = Decimal("0")
+    for inst in insts:  # ordenadas por índice ascendente
+        principal_total += inst.principal
+        if (inst.due_date.year, inst.due_date.month) <= ym:
+            remaining = inst.remaining_balance
+    return remaining if remaining is not None else principal_total
+
+
+def _scheduled_flow_in_month(
+    insts: list[LiabilityInstallment], month: date
+) -> tuple[Decimal, Decimal]:
+    """(principal, interés) NATIVOS de la cuota que vence EN `month` (0,0 si
+    ninguna) — alimenta las barras de amortización/interés del período."""
+    for inst in insts:
+        if inst.due_date.year == month.year and inst.due_date.month == month.month:
+            return inst.principal, inst.interest
+    return Decimal("0"), Decimal("0")
+
+
 async def _compute_historical_points(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -95,16 +137,25 @@ async def _compute_historical_points(
     months_back: int,
     *,
     target_currency: str | None = None,
-    sum_opening_target: Decimal | None = None,
+    insts_by_account: dict[uuid.UUID, list[LiabilityInstallment]],
+    fx_factor: dict[uuid.UUID, Decimal],
 ) -> list[DebtHistoryPoint]:
     """Histórico mes a mes para los últimos `months_back` meses cerrados.
 
     No incluye el mes en curso (sería incompleto). Si el usuario no
     tiene liabilities, devuelve lista vacía.
 
-    PHASE-30.6 — Con `target_currency`, intereses y principal se
-    convierten per-tx y el saldo agregado usa la opening_balance
-    pre-convertida que pasa el caller (`sum_opening_target`).
+    AUDIT-2026-07 (M-02) — FUENTE DEL SALDO, unificada con el cuadro:
+    - Pasivos CON cuadro (loan/mortgage con cuotas persistidas): el saldo lo
+      manda el CUADRO — la curva `remaining_balance` por mes (PHASE-36 "el
+      cuadro manda"), igual que `/balances`, `/debt-health` y la proyección.
+      Antes derivaba de movimientos, así que un préstamo sin pagos registrados
+      salía PLANO y no cuadraba con el KPI.
+    - Pasivos SIN cuadro (tarjetas sin plan): siguen derivando de MOVIMIENTOS
+      (`opening + Σ signed_amount`).
+    Las queries de movimientos se restringen a los pasivos SIN cuadro para no
+    doble-contar. `fx_factor[id]` convierte a la divisa efectiva (1 en modo
+    nativo); `insts_by_account` trae las cuotas por cuenta.
     """
     if not liabilities or months_back <= 0:
         return []
@@ -118,11 +169,19 @@ async def _compute_historical_points(
         first_month = _start_of_month(first_month) - timedelta(days=1)
         first_month = _start_of_month(first_month)
 
-    liability_ids = [liab.id for liab in liabilities]
-    sum_opening = (
-        sum_opening_target
-        if sum_opening_target is not None
-        else sum((liab.opening_balance for liab in liabilities), Decimal("0"))
+    # AUDIT-2026-07 (M-02): separa pasivos CON cuadro de los que NO. El saldo
+    # de los primeros lo manda la curva del cuadro; el de los segundos, los
+    # movimientos. Las queries de movimientos operan SÓLO sobre los sin cuadro.
+    scheduled_liabs = [liab for liab in liabilities if insts_by_account.get(liab.id)]
+    nonsched_liabs = [liab for liab in liabilities if not insts_by_account.get(liab.id)]
+    liability_ids = [liab.id for liab in nonsched_liabs]
+    # Opening (en divisa efectiva) sólo de los pasivos SIN cuadro.
+    sum_opening = sum(
+        (
+            liab.opening_balance * fx_factor.get(liab.id, Decimal("1"))
+            for liab in nonsched_liabs
+        ),
+        Decimal("0"),
     )
 
     amount_expr = (
@@ -132,15 +191,23 @@ async def _compute_historical_points(
     )
 
     # Inversión de signo en SQL idéntica a la rama liability de
-    # get_balances_for_user: expense sube la deuda, income la baja.
+    # get_balances_for_user: una salida/cargo sube la deuda, una
+    # entrada/pago la baja.
     # AUDIT-2026-06 (fix #8) — tx SIN categoría NO contribuye (`else_=0`,
     # PHASE-31.3). Antes era `else_=amount_expr`, lo que contradecía el
     # propio docstring del módulo ("misma inversión de signo que
     # get_balances_for_user") y metía cargos sin categoría en el saldo
     # histórico de deuda, divergiendo del saldo real de `/balances`.
+    # AUDIT-2026-06 (alineación PHASE-34) — la dirección la manda `flow`
+    # (`is_outflow`/`is_inflow`, los MISMOS predicados que
+    # get_balances_for_user), no `Category.kind`. Antes, si flow y la
+    # categoría discrepaban (lo que ADR-0004 permite), el último punto de
+    # la línea no coincidía con el total de la DebtList. Por el backfill
+    # 34.1 (flow ≡ derivación por categoría) es equivalente para los datos
+    # heredados; sólo cambia las filas con flow puesto a mano.
     signed_amount = case(
-        (Category.kind == CategoryKind.EXPENSE, amount_expr),
-        (Category.kind == CategoryKind.INCOME, -amount_expr),
+        (is_outflow(), amount_expr),
+        (is_inflow(), -amount_expr),
         else_=Decimal("0"),
     )
 
@@ -190,13 +257,15 @@ async def _compute_historical_points(
     # liabilities), dentro de la ventana.
     # AUDIT-2026-06 (fix #1) — "principal amortizado" es SÓLO la pata que
     # REDUCE la deuda: por la convención de signo (rama liability de
-    # get_balances_for_user) eso es `Category.kind == INCOME`. Antes esta
+    # get_balances_for_user) eso es la entrada (`is_inflow`). Antes esta
     # query sumaba TODA tx con `transfer_pair_id` en una cuenta-pasivo,
     # incluyendo la pata de gasto que SUBE la deuda (p.ej. la contraparte
     # de una operación financiada o un cargo pareado), inflando el
-    # "principal amortizado" del histórico. El join a Category es interno
-    # a propósito: una pata que reduce deuda es INCOME y por tanto tiene
-    # categoría; las tx sin categoría nunca son la pata amortizadora.
+    # "principal amortizado" del histórico.
+    # AUDIT-2026-06 (alineación PHASE-34) — la dirección la manda `flow`
+    # (`is_inflow`), no `Category.kind == INCOME`. El join a Category sigue
+    # siendo interno porque el fallback de `is_inflow` (filas sin flow) lee
+    # `Category.kind`; una pata amortizadora siempre tiene categoría.
     principal_q = (
         select(month_bucket.label("bucket"), func.coalesce(func.sum(amount_expr), 0))
         .select_from(Transaction)
@@ -205,7 +274,7 @@ async def _compute_historical_points(
         .where(Transaction.account_id.in_(liability_ids))
         .where(Transaction.deleted_at.is_(None))
         .where(Transaction.transfer_pair_id.is_not(None))
-        .where(Category.kind == CategoryKind.INCOME)
+        .where(is_inflow())
         .where(Transaction.occurred_at >= first_month_start)
         .where(Transaction.occurred_at <= last_month_end)
         .group_by(month_bucket)
@@ -256,14 +325,25 @@ async def _compute_historical_points(
                 cumulative = cumulative_at[key]
             else:
                 break
-        total_debt = sum_opening + cumulative
+        # Movimientos (pasivos SIN cuadro).
+        movement_debt = sum_opening + cumulative
+        # Curva del cuadro (pasivos CON cuadro): saldo pendiente + amortización
+        # del mes, en divisa efectiva.
+        scheduled_debt = Decimal("0")
+        scheduled_principal = Decimal("0")
+        for liab in scheduled_liabs:
+            insts = insts_by_account[liab.id]
+            factor = fx_factor.get(liab.id, Decimal("1"))
+            scheduled_debt += _scheduled_remaining_at(insts, month) * factor
+            sched_principal, _sched_interest = _scheduled_flow_in_month(insts, month)
+            scheduled_principal += sched_principal * factor
+        total_debt = movement_debt + scheduled_debt
+        principal_paid = principal_by_month.get(month_key, Decimal("0")) + scheduled_principal
         points.append(
             DebtHistoryPoint(
                 month=month_key,
                 total_debt=max(total_debt, Decimal("0")).quantize(Decimal("0.01")),
-                principal_paid=principal_by_month.get(month_key, Decimal("0")).quantize(
-                    Decimal("0.01")
-                ),
+                principal_paid=principal_paid.quantize(Decimal("0.01")),
                 interest_paid=interest_by_month.get(month_key, Decimal("0")).quantize(
                     Decimal("0.01")
                 ),
@@ -497,40 +577,46 @@ async def compute_debt_history(
             months_projected=0,
         )
 
-    # 2. Saldos actuales por cuenta (nativos) + opening pre-convertida
-    #    en modo target para que `_compute_historical_points` no tenga
-    #    que tocar conversiones de saldo iniciales.
+    # 2. Cuotas por cuenta (saldo dirigido por cuadro, M-02) + saldos actuales
+    #    + factores de conversión a la divisa efectiva.
     from app.modules.personal_finance.accounts.repository import get_balances_for_user
 
+    insts_by_account = await installments_by_account(
+        db, user_id, [liab.id for liab in liabilities]
+    )
     movements = await get_balances_for_user(db, user_id)
-    current_balances: dict[uuid.UUID, Decimal] = {}
-    sum_opening_target = Decimal("0") if target_currency else None
+
+    # fx_factor: 1 en modo nativo o misma divisa; tasa de HOY si convertimos;
+    # 0 si no hay tasa (la liability queda fuera del agregado, igual que antes).
+    fx_factor: dict[uuid.UUID, Decimal] = {}
     for liab in liabilities:
-        native_balance = liab.opening_balance + movements.get(liab.id, Decimal("0"))
         if target_currency is None or liab.currency.upper() == effective_currency:
-            current_balances[liab.id] = native_balance
-            if sum_opening_target is not None:
-                sum_opening_target += liab.opening_balance
+            fx_factor[liab.id] = Decimal("1")
             continue
-        # Convertir saldo actual y opening con la tasa de hoy.
-        converted_balance = await _convert_at_today(
-            db,
-            native_balance,
-            from_currency=liab.currency,
-            target_currency=effective_currency,
+        one = await _convert_at_today(
+            db, Decimal("1"), from_currency=liab.currency, target_currency=effective_currency
         )
-        converted_opening = await _convert_at_today(
-            db,
-            liab.opening_balance,
-            from_currency=liab.currency,
-            target_currency=effective_currency,
-        )
-        if converted_balance is None or converted_opening is None:
-            # Sin tasa → liability excluida del agregado proyectado.
-            continue
-        current_balances[liab.id] = converted_balance
-        if sum_opening_target is not None:
-            sum_opening_target += converted_opening
+        fx_factor[liab.id] = one if one is not None else Decimal("0")
+
+    # Saldo actual por cuenta (divisa efectiva), arranque de la proyección:
+    # CON cuadro lo manda la CURVA del cuadro al mes en curso
+    # (`_scheduled_remaining_at`), de modo que histórico → arranque → proyección
+    # sean CONTINUOS y precisos (misma base due-date que la proyección, que ya
+    # usa build_schedule). Coincide con schedule_outstanding —y por tanto con
+    # /balances y /debt-health— una vez la deuda está reconciliada (cuotas
+    # vencidas marcadas pagadas). SIN cuadro: opening + movimientos.
+    current_month = _start_of_month(_today_utc())
+    current_balances: dict[uuid.UUID, Decimal] = {}
+    for liab in liabilities:
+        factor = fx_factor.get(liab.id, Decimal("1"))
+        if factor == 0:
+            continue  # sin tasa → fuera del agregado proyectado
+        insts = insts_by_account.get(liab.id)
+        if insts:
+            native_balance = _scheduled_remaining_at(insts, current_month)
+        else:
+            native_balance = liab.opening_balance + movements.get(liab.id, Decimal("0"))
+        current_balances[liab.id] = (native_balance * factor).quantize(Decimal("0.01"))
 
     # 3. Histórico + proyección.
     historical = await _compute_historical_points(
@@ -540,7 +626,8 @@ async def compute_debt_history(
         native_currency,
         months_back,
         target_currency=target_currency,
-        sum_opening_target=sum_opening_target,
+        insts_by_account=insts_by_account,
+        fx_factor=fx_factor,
     )
 
     # La proyección usa los cuadros teóricos. Para modo target, las

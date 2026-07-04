@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 
 import { useAccounts, useCategories } from '@crisol/services';
 import type { Account, AccountBalance, AccountType, Category } from '@crisol/types';
@@ -67,6 +67,33 @@ function estimateMonthlyPayment(account: Account): number | null {
 }
 
 /**
+ * PHASE-35 — Total de deuda de una tarjeta incluyendo sus compras a plazos.
+ * Suma el saldo de la tarjeta padre con el de cada hija. En céntimos para
+ * evitar el artefacto de float al sumar strings decimales.
+ *
+ * AUDIT-2026-06 — Devuelve `null` si alguna hija está en OTRA divisa: no se
+ * pueden sumar divisas distintas sin convertir, y antes se descartaban en
+ * silencio (el total combinado quedaba incompleto sin avisar). Con
+ * `convertAll` el backend ya homogeneiza todas las cuentas al target, así
+ * que esto sólo salta en modo nativo con una compra a plazos en divisa
+ * distinta a su tarjeta (anómalo). En ese caso el caller no pinta el total
+ * combinado; cada hija sigue visible en su propia fila con su saldo.
+ */
+function groupTotalForCard(
+  parent: AccountBalance,
+  children: readonly AccountBalance[],
+): string | null {
+  if (children.some((child) => child.currency !== parent.currency)) {
+    return null;
+  }
+  let cents = Math.round(Number(parent.current_balance) * 100);
+  for (const child of children) {
+    cents += Math.round(Number(child.current_balance) * 100);
+  }
+  return (cents / 100).toFixed(2);
+}
+
+/**
  * Lista de pasivos con KPIs por fila (PHASE-22+). Cada fila resume:
  *
  * - Icono + nombre + tipo legible de la cuenta.
@@ -91,6 +118,25 @@ export function DebtList({ liabilities, loading }: DebtListProps) {
   const categoriesQuery = useCategories();
   const categoriesById = new Map<string, Category>(
     (categoriesQuery.data ?? []).map((c) => [c.id, c]),
+  );
+
+  // PHASE-35 — agrupar las compras a plazos (hijas) bajo su tarjeta padre.
+  // Las hijas salen de la lista de nivel superior y se anidan bajo el padre.
+  // Una hija cuyo padre no esté presente (p. ej. archivado) cae a nivel
+  // superior para no perderse.
+  const childrenByParent = new Map<string, AccountBalance[]>();
+  for (const item of liabilities) {
+    if (item.parent_account_id) {
+      const siblings = childrenByParent.get(item.parent_account_id) ?? [];
+      siblings.push(item);
+      childrenByParent.set(item.parent_account_id, siblings);
+    }
+  }
+  const topLevelIds = new Set(
+    liabilities.filter((i) => !i.parent_account_id).map((i) => i.account_id),
+  );
+  const topLevel = liabilities.filter(
+    (i) => !i.parent_account_id || !topLevelIds.has(i.parent_account_id),
   );
 
   if (loading) {
@@ -203,19 +249,48 @@ export function DebtList({ liabilities, loading }: DebtListProps) {
           gap: spacing.sm,
         }}
       >
-        {liabilities.map((item) => {
+        {topLevel.map((item) => {
           const account = accounts.find((a) => a.id === item.account_id);
           const category =
             account?.category_id != null
               ? categoriesById.get(account.category_id) ?? null
               : null;
+          const children = childrenByParent.get(item.account_id) ?? [];
+          const combinedTotal =
+            children.length > 0 ? groupTotalForCard(item, children) : null;
+          const groupTotal =
+            combinedTotal !== null
+              ? {
+                  total: combinedTotal,
+                  currency: item.currency,
+                  count: children.length,
+                }
+              : undefined;
           return (
-            <DebtRow
-              key={item.account_id}
-              balance={item}
-              {...(account ? { account } : {})}
-              {...(category ? { category } : {})}
-            />
+            <Fragment key={item.account_id}>
+              <DebtRow
+                balance={item}
+                {...(account ? { account } : {})}
+                {...(category ? { category } : {})}
+                {...(groupTotal ? { groupTotal } : {})}
+              />
+              {children.map((child) => {
+                const childAccount = accounts.find((a) => a.id === child.account_id);
+                const childCategory =
+                  childAccount?.category_id != null
+                    ? categoriesById.get(childAccount.category_id) ?? null
+                    : null;
+                return (
+                  <DebtRow
+                    key={child.account_id}
+                    balance={child}
+                    isChild
+                    {...(childAccount ? { account: childAccount } : {})}
+                    {...(childCategory ? { category: childCategory } : {})}
+                  />
+                );
+              })}
+            </Fragment>
           );
         })}
       </ul>
@@ -227,9 +302,14 @@ interface DebtRowProps {
   balance: AccountBalance;
   account?: Account;
   category?: Category;
+  /** PHASE-35 — fila anidada: compra a plazos bajo una tarjeta padre. */
+  isChild?: boolean;
+  /** PHASE-35 — en una tarjeta CON compras a plazos, su total combinado
+   * (tarjeta + hijas de su misma moneda) y cuántas compras agrupa. */
+  groupTotal?: { total: string; currency: string; count: number } | undefined;
 }
 
-function DebtRow({ balance, account, category }: DebtRowProps) {
+function DebtRow({ balance, account, category, isChild = false, groupTotal }: DebtRowProps) {
   const [payingDebt, setPayingDebt] = useState(false);
 
   const isAmortizable =
@@ -238,7 +318,9 @@ function DebtRow({ balance, account, category }: DebtRowProps) {
   const aprValue = account?.apr ?? null;
   const aprPercent =
     aprValue !== null ? (Number(aprValue) * 100).toFixed(2) : null;
-  const typeLabel = TYPE_LABEL[balance.type] ?? balance.type;
+  // PHASE-35: una hija es una "compra a plazos"; su tipo real (credit_card)
+  // confundiría, así que se etiqueta como tal.
+  const typeLabel = isChild ? 'Compra a plazos' : TYPE_LABEL[balance.type] ?? balance.type;
 
   return (
     <li
@@ -247,13 +329,15 @@ function DebtRow({ balance, account, category }: DebtRowProps) {
         alignItems: 'center',
         gap: spacing.md,
         padding: `${spacing.sm}px ${spacing.md}px`,
-        backgroundColor: colors.surfaceMuted,
+        backgroundColor: isChild ? colors.surface : colors.surfaceMuted,
         border: `1px solid ${colors.border}`,
+        borderLeft: isChild ? `3px solid ${colors.primary}` : `1px solid ${colors.border}`,
         borderRadius: radius.md,
         flexWrap: 'wrap',
+        ...(isChild ? { marginLeft: spacing.lg } : {}),
       }}
     >
-      <AccountSwatch color={balance.color} icon={balance.icon} size={36} />
+      <AccountSwatch color={balance.color} icon={balance.icon} size={isChild ? 28 : 36} />
 
       <div style={{ flex: 1, minWidth: 160 }}>
         <div
@@ -341,20 +425,41 @@ function DebtRow({ balance, account, category }: DebtRowProps) {
           {account?.term_months ? (
             <span>{account.term_months} cuotas totales</span>
           ) : null}
+          {groupTotal ? (
+            <span>
+              {groupTotal.count}{' '}
+              {groupTotal.count === 1 ? 'compra a plazos' : 'compras a plazos'}
+            </span>
+          ) : null}
         </div>
       </div>
 
-      <div
-        style={{
-          textAlign: 'right',
-          fontSize: fontSize.lg,
-          fontWeight: fontWeight.bold,
-          color: colors.danger,
-          fontVariantNumeric: 'tabular-nums',
-          minWidth: 120,
-        }}
-      >
-        {formatAmount(balance.current_balance, balance.currency)}
+      <div style={{ textAlign: 'right', minWidth: 120 }}>
+        <div
+          style={{
+            fontSize: fontSize.lg,
+            fontWeight: fontWeight.bold,
+            color: colors.danger,
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          {formatAmount(balance.current_balance, balance.currency)}
+        </div>
+        {groupTotal ? (
+          // PHASE-35: total de la tarjeta incluyendo sus compras a plazos.
+          <div
+            style={{
+              marginTop: 2,
+              fontSize: fontSize.xs,
+              color: colors.textMuted,
+            }}
+          >
+            Con plazos:{' '}
+            <strong style={{ color: colors.text, fontVariantNumeric: 'tabular-nums' }}>
+              {formatAmount(groupTotal.total, groupTotal.currency)}
+            </strong>
+          </div>
+        ) : null}
       </div>
 
       <div

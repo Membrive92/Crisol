@@ -66,7 +66,12 @@ export default function DebtScreen() {
   const healthQuery = useDebtHealth(
     targetCurrency ? { targetCurrency } : {},
   );
-  const balancesQuery = useAccountBalances();
+  // AUDIT-2026-07 (M-05): pasar `targetCurrency` como el resto de la pantalla.
+  // Sin él, la DebtList quedaba en divisa nativa mientras esfuerzo/pagos/donut
+  // ya estaban convertidos → dos divisas distintas en la misma pantalla.
+  const balancesQuery = useAccountBalances(
+    targetCurrency ? { targetCurrency } : {},
+  );
   const accountsQuery = useAccounts({ includeArchived: false });
   const historyQuery = useDebtHistory({
     monthsBack: 12,

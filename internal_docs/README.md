@@ -302,6 +302,38 @@ y [`design-explorations/debt-redesign-30/wireframe.md`](design-explorations/debt
 > Código completo y verde (FE + 445 tests BE); pendiente prueba manual del
 > usuario y commit.
 
+### Fase 33 — Transferencias internas: overhaul de UX e integridad
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 33   | Overhaul transversal (web + móvil) en 8 entregas: detección ES (BIZUM/TRASPASO) en sospechosas + badge de 3 estados (par/huérfana/deuda) + grupo "Transferencias" en el combobox + canal "A revisar" separado de "Errores" en imports + lenguaje cotidiano + dirección explícita en móvil + guard 409 al editar una pata emparejada | 🚧 | — |
+
+> Detalle en [`phases/phase-33-transfers-ux.md`](phases/phase-33-transfers-ux.md).
+> Código completo y verde (FE: 67 web + 18 móvil · BE: 560 tests · ruff +
+> mypy); pendiente prueba manual del usuario y PR.
+
+### Fase 34 — La verdad del dinero vive en la transacción (`flow`)
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 34   | Columna `transactions.flow` (IN/OUT/TRANSFER_*) como fuente de verdad del dinero (ADR-0004): saldo + cashflow derivan de `flow`+`account.nature`, no de la categoría. Import y forms escriben `flow` (signo del extracto = invariante duro); `classify_import_flow` detecta transferencias y pago/liquidación de tarjeta; absorción del "cargo espejo" del `ADEUDO`; "Cuadrar saldo" + recategorización en bloque; saldo = caja real | 🚧 | — |
+
+> Detalle en [`phases/phase-34-transaction-flow.md`](phases/phase-34-transaction-flow.md)
+> y [`decisions/0004-transaction-level-money-truth.md`](decisions/0004-transaction-level-money-truth.md).
+> Código completo y verde (BE: 589 tests · ruff · mypy · FE: 71 web + 18
+> móvil · typecheck · lint); migraciones aplicadas a dev. Cierra la familia
+> de lecciones PHASE-23.1/28/32. Pendiente prueba manual del usuario y PR.
+
+### Fase 35 — Compras a plazos bajo una tarjeta (`parent_account_id`)
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 35   | `accounts.parent_account_id`: una tarjeta agrupa varias compras financiadas a plazos, cada una con su cuadro propio. FE: alta de compra a plazos bajo una tarjeta + agrupación padre→hijas con total combinado en `/debt` + ocultar hijas de los selectores de transacción/import | 🚧 | — |
+
+> Detalle en [`phases/phase-35-installment-cards.md`](phases/phase-35-installment-cards.md).
+> Convive con PHASE-34 en la misma rama. Backend + frontend completos y
+> verdes. Pendiente prueba manual del usuario y PR.
+
 ---
 
 ## Estructura de este directorio

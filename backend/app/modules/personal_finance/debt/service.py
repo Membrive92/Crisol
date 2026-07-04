@@ -15,6 +15,10 @@ from app.modules.personal_finance.accounts.debt_health import (
     classify_effort,
     windowed_income_total,
 )
+from app.modules.personal_finance.accounts.debt_history import _scheduled_remaining_at
+from app.modules.personal_finance.accounts.installments_repository import (
+    installments_by_account,
+)
 from app.modules.personal_finance.accounts.models import Account, AccountNature
 from app.modules.personal_finance.categories.models import Category, CategoryRole
 from app.modules.personal_finance.debt.repository import (
@@ -397,6 +401,15 @@ async def _build_daily_series(
     cae a barras de pagos categorizados (capital DEBT_PAYMENT) + interés,
     sin línea de saldo (`balance=None`) — así el chart diario sigue
     siendo útil aunque el usuario no haya declarado contratos.
+
+    AUDIT-2026-07 (M-02) — FUENTE DEL SALDO, unificada con el cuadro (igual
+    que `debt_history`): los pasivos CON cuadro aportan su
+    `schedule_outstanding` (PHASE-36 "el cuadro manda"); los SIN cuadro,
+    apertura + carry + Σ flujos diarios. Así el NIVEL de la línea cuadra con
+    /balances y /debt-health. La contribución del cuadro es constante en el mes
+    (la amortización de un préstamo es mensual, no diaria); las barras
+    emitida/amortizado siguen reflejando los movimientos de los pasivos sin
+    cuadro.
     """
     q = Decimal("0.01")
     acc_q = select(Account).where(Account.user_id == user_id).where(Account.is_archived.is_(False))
@@ -432,26 +445,56 @@ async def _build_daily_series(
             )
         return points
 
-    flows = await daily_liability_flows(
-        db,
-        user_id,
-        liability_ids=liability_ids,
-        start=start_dt,
-        end=end_dt,
-        reference_currency=native_currency,
-        target_currency=target_currency,
-    )
-    carry = await liability_signed_before(
-        db,
-        user_id,
-        liability_ids=liability_ids,
-        before=start_dt,
-        reference_currency=native_currency,
-        target_currency=target_currency,
-    )
-    # Apertura agregada de los pasivos (convertida a hoy en modo target).
+    # AUDIT-2026-07 (M-02): el NIVEL de la línea de saldo de los pasivos CON
+    # cuadro lo manda `schedule_outstanding` (PHASE-36), no su apertura +
+    # movimientos. Restringimos flujos/carry/apertura a los pasivos SIN cuadro
+    # y añadimos el saldo del cuadro como base (constante en el mes: la
+    # amortización de un préstamo es mensual, no diaria). Así el nivel diario
+    # cuadra con /balances y /debt-health.
+    insts_by_account = await installments_by_account(db, user_id, liability_ids)
+    nonsched = [a for a in liabilities if not insts_by_account.get(a.id)]
+    scheduled = [a for a in liabilities if insts_by_account.get(a.id)]
+    nonsched_ids = [a.id for a in nonsched]
+
+    # Saldo del cuadro para el MES mostrado (misma base due-date que
+    # debt_history, para que las dos vistas temporales cuadren entre sí).
+    displayed_month = date(range_end.year, range_end.month, 1)
+    scheduled_base = Decimal("0")
+    for a in scheduled:
+        native = _scheduled_remaining_at(insts_by_account[a.id], displayed_month)
+        if target_currency is None or a.currency.upper() == effective_currency:
+            scheduled_base += native
+        else:
+            converted = await _convert_at_today(
+                db, native, from_currency=a.currency, target_currency=effective_currency
+            )
+            if converted is not None:
+                scheduled_base += converted
+
+    if nonsched_ids:
+        flows = await daily_liability_flows(
+            db,
+            user_id,
+            liability_ids=nonsched_ids,
+            start=start_dt,
+            end=end_dt,
+            reference_currency=native_currency,
+            target_currency=target_currency,
+        )
+        carry = await liability_signed_before(
+            db,
+            user_id,
+            liability_ids=nonsched_ids,
+            before=start_dt,
+            reference_currency=native_currency,
+            target_currency=target_currency,
+        )
+    else:
+        flows = {}
+        carry = Decimal("0")
+    # Apertura agregada de los pasivos SIN cuadro (convertida a hoy en target).
     opening = Decimal("0")
-    for a in liabilities:
+    for a in nonsched:
         if target_currency is None or a.currency.upper() == effective_currency:
             opening += a.opening_balance
             continue
@@ -461,7 +504,7 @@ async def _build_daily_series(
         if converted is not None:
             opening += converted
 
-    balance = opening + carry
+    balance = opening + carry + scheduled_base
     for d in range(1, last_day + 1):
         emitida, amortizado = flows.get(d, (Decimal("0"), Decimal("0")))
         _capital, interest = cat_flows.get(d, (Decimal("0"), Decimal("0")))

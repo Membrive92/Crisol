@@ -23,7 +23,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Select, case, extract, func, literal, or_, select
+from sqlalchemy import ColumnElement, Select, case, extract, func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.personal_finance.categories.models import Category, CategoryKind
@@ -31,7 +31,42 @@ from app.modules.personal_finance.dashboard.conversion import (
     amount_is_convertible_expr,
     converted_amount_expr,
 )
-from app.modules.personal_finance.transactions.models import Transaction
+from app.modules.personal_finance.transactions.models import Transaction, TransactionFlow
+
+
+# PHASE-34 (ADR-0004): la clasificación gasto/ingreso/transferencia la manda
+# `transactions.flow`. Durante la transición, las filas sin flow (heredadas /
+# write path aún sin migrar) caen a `category.kind`/`is_transfer` como antes.
+# Los tres helpers son NULL-safe: un row sin flow ni categoría no rompe el
+# WHERE. Se elimina el fallback (y el join a Category de la clasificación) en
+# 34.6. Equivalente por construcción al backfill de 34.1.
+def _is_income() -> ColumnElement[bool]:
+    return case(
+        (Transaction.flow.is_not(None), Transaction.flow == TransactionFlow.IN),
+        else_=(Category.kind == CategoryKind.INCOME),
+    )
+
+
+def _is_expense() -> ColumnElement[bool]:
+    return case(
+        (Transaction.flow.is_not(None), Transaction.flow == TransactionFlow.OUT),
+        else_=(Category.kind == CategoryKind.EXPENSE),
+    )
+
+
+def _is_internal_transfer() -> ColumnElement[bool]:
+    """True sólo si la fila es una transferencia interna (excluir del cashflow).
+
+    NULL-safe: cuando `flow` es NULL cae a `coalesce(is_transfer, false)`, así
+    que una tx normal sin flow NO se descarta por error.
+    """
+    return case(
+        (
+            Transaction.flow.is_not(None),
+            Transaction.flow.in_([TransactionFlow.TRANSFER_IN, TransactionFlow.TRANSFER_OUT]),
+        ),
+        else_=func.coalesce(Category.is_transfer, literal(False)),
+    )
 
 
 async def list_user_currencies(
@@ -52,12 +87,43 @@ async def list_user_currencies(
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
         .where(Transaction.transfer_pair_id.is_(None))
-        .where(or_(Category.is_transfer.is_(None), Category.is_transfer.is_(False)))
+        .where(_is_internal_transfer().is_(False))
         .distinct()
         .order_by(Transaction.currency)
     )
     result = await db.execute(query)
     return [row[0] for row in result.all()]
+
+
+async def get_transaction_month_bounds(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+) -> tuple[str | None, str | None]:
+    """PHASE-34 — Mes mínimo y máximo (`YYYY-MM`) con transacciones activas
+    del usuario, INDEPENDIENTE de cualquier filtro de período.
+
+    Lo usa el navegador de período del Análisis para acotar las flechas ◀▶ a
+    los meses con datos (mismo papel que `available_from/to` en deuda).
+    Devuelve `(None, None)` si el usuario aún no tiene transacciones.
+    """
+    result = await db.execute(
+        select(
+            # AUDIT-2026-07 (LOW): truncar en UTC (`func.timezone`) para que el
+            # mes no dependa de la TZ de la sesión de PostgreSQL, igual que
+            # debt_history/debt_health. Sin esto, min/max cerca de frontera de
+            # mes podían caer en el mes contiguo según la TZ del servidor.
+            func.to_char(
+                func.min(func.timezone("UTC", Transaction.occurred_at)), "YYYY-MM"
+            ),
+            func.to_char(
+                func.max(func.timezone("UTC", Transaction.occurred_at)), "YYYY-MM"
+            ),
+        )
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.deleted_at.is_(None))
+    )
+    row = result.one()
+    return row[0], row[1]
 
 
 def _apply_scope[Q: Select[Any]](
@@ -92,21 +158,16 @@ def _apply_scope[Q: Select[Any]](
 
 
 def _exclude_transfer_kind(query: Any, *, outer_join: bool) -> Any:
-    """Excluye transacciones cuya categoría tenga `is_transfer = TRUE`.
+    """Excluye transferencias internas del cashflow agregado.
 
-    PHASE-23.1: complementa la exclusión por pareja
-    (`transfer_pair_id`) para el caso "una sola pata importada".
-    Sustituye el filtro por kind=TRANSFER de PHASE-23, que rompía el
-    cálculo de saldos (el flag está en una columna separada para que
-    `kind` siga determinando el signo del balance).
-
-    `outer_join`: si la query hace `outerjoin(Category, ...)` hay que
-    permitir explícitamente NULL (tx sin categoría); con join inner
-    eso es imposible y basta `is_transfer = false`.
+    PHASE-34: la exclusión la manda `flow` (TRANSFER_*), con fallback a
+    `category.is_transfer` para filas sin flow vía `_is_internal_transfer()`
+    (NULL-safe, así que `outer_join` ya no altera la lógica — se conserva por
+    compatibilidad de firma y se retira en 34.6). La exclusión por
+    `transfer_pair_id` (pares emparejados, señal ortogonal) sigue viva en
+    `_apply_scope`.
     """
-    if outer_join:
-        return query.where(or_(Category.is_transfer.is_(None), Category.is_transfer.is_(False)))
-    return query.where(Category.is_transfer.is_(False))
+    return query.where(_is_internal_transfer().is_(False))
 
 
 def _amount_expr(target_currency: str | None) -> Any:
@@ -125,16 +186,21 @@ async def get_totals_by_kind(
     date_from: datetime | None = None,
     date_to: datetime | None = None,
 ) -> dict[CategoryKind, Decimal]:
-    """Suma `amount` agrupando por `category.kind` (income/expense).
+    """Suma `amount` clasificando income/expense por `flow` (PHASE-34).
 
-    Las transacciones sin categoría quedan fuera. En modo
-    `target_currency`, las que no tienen tasa disponible también.
+    Devuelve siempre ambas claves (0 si no hay). En modo `target_currency`,
+    las transacciones sin tasa disponible quedan fuera.
     """
     amount = _amount_expr(target_currency)
+    income_amount = case((_is_income(), amount), else_=Decimal("0"))
+    expense_amount = case((_is_expense(), amount), else_=Decimal("0"))
     query = (
-        select(Category.kind, func.coalesce(func.sum(amount), 0))
-        .join(Category, Category.id == Transaction.category_id)
-        .group_by(Category.kind)
+        select(
+            func.coalesce(func.sum(income_amount), Decimal("0")),
+            func.coalesce(func.sum(expense_amount), Decimal("0")),
+        )
+        .select_from(Transaction)
+        .outerjoin(Category, Category.id == Transaction.category_id)
     )
     query = _apply_scope(
         query,
@@ -143,10 +209,10 @@ async def get_totals_by_kind(
         date_from=date_from,
         date_to=date_to,
     )
-    query = _exclude_transfer_kind(query, outer_join=False)
+    query = _exclude_transfer_kind(query, outer_join=True)
 
-    result = await db.execute(query)
-    return {kind: Decimal(total) for kind, total in result.all()}
+    row = (await db.execute(query)).one()
+    return {CategoryKind.INCOME: Decimal(row[0]), CategoryKind.EXPENSE: Decimal(row[1])}
 
 
 async def get_summary_aggregates(
@@ -169,8 +235,8 @@ async def get_summary_aggregates(
     en modo legacy es literal `0`.
     """
     amount = _amount_expr(target_currency)
-    income_amount = case((Category.kind == CategoryKind.INCOME, amount), else_=Decimal("0"))
-    expense_amount = case((Category.kind == CategoryKind.EXPENSE, amount), else_=Decimal("0"))
+    income_amount = case((_is_income(), amount), else_=Decimal("0"))
+    expense_amount = case((_is_expense(), amount), else_=Decimal("0"))
 
     if target_currency is not None:
         unconv_subq = (
@@ -273,8 +339,19 @@ async def get_breakdown_by_category(
         date_to=date_to,
     )
     query = _exclude_transfer_kind(query, outer_join=True)
-    if kind is not None:
-        query = query.where(Category.kind == kind)
+    # AUDIT-2026-06 — La cara income/expense del donut se decide por `flow`
+    # (igual que el KPI "Gastos" y la barra roja), NO por `Category.kind`.
+    # Antes filtraba `Category.kind == kind`, así que cuando flow y la
+    # categoría discrepaban (lo que PHASE-34/ADR-0004 permite a propósito)
+    # el donut sumaba distinto que el resto de la pantalla: un OUT aparcado
+    # en categoría de ingreso se le escapaba, y un TRANSFER_OUT en categoría
+    # de gasto lo inflaba. Con `_is_expense()/_is_income()` el donut
+    # reconcilia con summary + barras. Bonus: los OUT sin categoría caen al
+    # bucket `category_id=None` en vez de desaparecer.
+    if kind == CategoryKind.EXPENSE:
+        query = query.where(_is_expense())
+    elif kind == CategoryKind.INCOME:
+        query = query.where(_is_income())
 
     result = await db.execute(query)
     return [
@@ -291,29 +368,39 @@ async def get_totals_by_month(
     currency: str | None = None,
     target_currency: str | None = None,
 ) -> list[tuple[int, CategoryKind, Decimal]]:
-    """Totales por mes y `category.kind` para el año pedido."""
-    month_col = extract("month", Transaction.occurred_at)
-    year_col = extract("year", Transaction.occurred_at)
+    """Totales income/expense por mes para el año pedido (PHASE-34: por flow)."""
+    # AUDIT-2026-07 (LOW): extraer mes/año en UTC para no depender de la TZ de
+    # la sesión de PostgreSQL (consistente con debt_history/debt_health).
+    _occurred_utc = func.timezone("UTC", Transaction.occurred_at)
+    month_col = extract("month", _occurred_utc)
+    year_col = extract("year", _occurred_utc)
     amount = _amount_expr(target_currency)
+    # Etiqueta income/expense por flow (fallback kind). Transferencias y
+    # movimientos sin clasificar quedan en NULL y se descartan.
+    kind_label = case(
+        (_is_income(), literal(CategoryKind.INCOME.value)),
+        (_is_expense(), literal(CategoryKind.EXPENSE.value)),
+    )
 
     query = (
-        select(month_col, Category.kind, func.coalesce(func.sum(amount), 0))
-        .join(Category, Category.id == Transaction.category_id)
+        select(month_col, kind_label.label("kind"), func.coalesce(func.sum(amount), 0))
+        .select_from(Transaction)
+        .outerjoin(Category, Category.id == Transaction.category_id)
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
-        # PHASE-19.3 (pares emparejados) + PHASE-23.1 (flag is_transfer
-        # en la categoría) — ambos excluyen del cashflow agregado pero
+        # PHASE-19.3 (pares emparejados) excluye del cashflow agregado pero
         # las txs siguen impactando al saldo individual de su cuenta.
         .where(Transaction.transfer_pair_id.is_(None))
-        .where(Category.is_transfer.is_(False))
+        .where(_is_internal_transfer().is_(False))
         .where(year_col == year)
-        .group_by(month_col, Category.kind)
+        .where(kind_label.is_not(None))
+        .group_by(month_col, kind_label)
     )
     if currency is not None:
         query = query.where(Transaction.currency == currency)
 
     result = await db.execute(query)
-    return [(int(month), kind, Decimal(total)) for month, kind, total in result.all()]
+    return [(int(month), CategoryKind(kind), Decimal(total)) for month, kind, total in result.all()]
 
 
 async def get_top_expenses(
@@ -336,8 +423,8 @@ async def get_top_expenses(
     amount = _amount_expr(target_currency)
     query = (
         select(Transaction, Category.name, amount.label("converted_amount"))
-        .join(Category, Category.id == Transaction.category_id)
-        .where(Category.kind == CategoryKind.EXPENSE)
+        .outerjoin(Category, Category.id == Transaction.category_id)
+        .where(_is_expense())
     )
     query = _apply_scope(
         query,
@@ -409,7 +496,10 @@ async def get_category_monthly_evolution(
     cerrados + el mes en curso (inclusivo). Devuelve `(YYYY-MM, total)`
     ordenado cronológicamente. Meses sin actividad se omiten — el
     frontend rellena gaps si lo necesita."""
-    month_col = func.to_char(Transaction.occurred_at, "YYYY-MM").label("month")
+    # AUDIT-2026-07 (LOW): bucket de mes en UTC (consistente con el resto).
+    month_col = func.to_char(
+        func.timezone("UTC", Transaction.occurred_at), "YYYY-MM"
+    ).label("month")
     amount = _amount_expr(target_currency)
     query = (
         select(month_col, func.coalesce(func.sum(amount), Decimal("0")))
@@ -419,7 +509,7 @@ async def get_category_monthly_evolution(
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
         .where(Transaction.transfer_pair_id.is_(None))
-        .where(or_(Category.is_transfer.is_(None), Category.is_transfer.is_(False)))
+        .where(_is_internal_transfer().is_(False))
         .group_by(month_col)
         .order_by(month_col)
     )

@@ -13,6 +13,19 @@ export interface CategoryComboboxProps {
   onChange: (categoryId: string) => void;
   disabled?: boolean;
   error?: string | undefined;
+  /**
+   * Oculta el label visualmente pero lo conserva en el árbol de
+   * accesibilidad. Para usos inline donde el contexto ya da el nombre
+   * (p.ej. una fila de "concepto del banco" en el preview de import).
+   */
+  hideLabel?: boolean;
+  /**
+   * Resalta el control con borde primary — p.ej. cuando el valor viene de
+   * una sugerencia del backend. `error` tiene prioridad sobre `highlight`.
+   */
+  highlight?: boolean;
+  /** Sin margen inferior, para alinear el control en una fila inline. */
+  dense?: boolean;
 }
 
 interface Option {
@@ -56,6 +69,9 @@ export function CategoryCombobox({
   onChange,
   disabled,
   error,
+  hideLabel,
+  highlight,
+  dense,
 }: CategoryComboboxProps) {
   const baseId = useId();
   const listId = `${baseId}-list`;
@@ -184,8 +200,8 @@ export function CategoryCombobox({
   let runningIndex = 0;
 
   return (
-    <div ref={containerRef} style={{ marginBottom: spacing.md, position: 'relative' }}>
-      <label htmlFor={baseId} style={labelStyle}>
+    <div ref={containerRef} style={{ marginBottom: dense ? 0 : spacing.md, position: 'relative' }}>
+      <label htmlFor={baseId} style={hideLabel ? visuallyHiddenLabelStyle : labelStyle}>
         {label}
       </label>
       <input
@@ -211,7 +227,11 @@ export function CategoryCombobox({
         onKeyDown={handleKeyDown}
         style={{
           ...controlStyle,
-          ...(error ? { borderColor: colors.danger } : {}),
+          ...(error
+            ? { borderColor: colors.danger }
+            : highlight
+              ? { borderColor: colors.primary }
+              : {}),
           cursor: disabled ? 'not-allowed' : 'text',
         }}
       />
@@ -394,6 +414,20 @@ const labelStyle = {
   fontSize: fontSize.sm,
   fontWeight: fontWeight.medium,
   color: colors.text,
+} as const;
+
+// Oculto visualmente pero presente para lectores de pantalla (técnica
+// "clip"): conserva el nombre accesible del combobox cuando `hideLabel`.
+const visuallyHiddenLabelStyle = {
+  position: 'absolute',
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: 'hidden',
+  clip: 'rect(0, 0, 0, 0)',
+  whiteSpace: 'nowrap',
+  border: 0,
 } as const;
 
 const controlStyle = {

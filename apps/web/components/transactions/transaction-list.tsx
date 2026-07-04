@@ -4,7 +4,7 @@ import { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { useCurrencyStore } from '@crisol/store';
-import type { Category, CategoryKind, Transaction } from '@crisol/types';
+import type { Category, CategoryKind, Transaction, TransactionFlow } from '@crisol/types';
 import {
   colors,
   fontSize,
@@ -33,11 +33,36 @@ export interface TransactionListProps {
   onUnlinkTransfer?: ((id: string) => void) | undefined;
   deletingId?: string | null;
   unlinkingId?: string | null | undefined;
+  /**
+   * PHASE-34 — selección por checkbox para acciones en bloque. Si se pasa
+   * `onToggleSelect`, se muestra una columna de checkboxes (cabecera =
+   * "seleccionar todo"). Sin él, la tabla se comporta como antes.
+   */
+  selectedIds?: ReadonlySet<string> | undefined;
+  onToggleSelect?: ((id: string) => void) | undefined;
+  onToggleSelectAll?: (() => void) | undefined;
+  allSelected?: boolean | undefined;
+  someSelected?: boolean | undefined;
 }
 
 interface TransactionRow {
   tx: Transaction;
   category: Category | undefined;
+}
+
+/**
+ * ADR-0004: el signo/color del importe lo manda `tx.flow`, no la categoría.
+ * IN→income, OUT→expense, TRANSFER_*→neutro (fuera del cashflow). Devuelve
+ * `undefined` si no hay flow, para que el caller use el fallback por categoría
+ * (filas heredadas sin flow — el puente que 34.6 retira).
+ */
+function kindFromFlow(
+  flow: TransactionFlow | null | undefined,
+): CategoryKind | null | undefined {
+  if (flow === 'IN') return 'income';
+  if (flow === 'OUT') return 'expense';
+  if (flow === 'TRANSFER_IN' || flow === 'TRANSFER_OUT') return null;
+  return undefined;
 }
 
 function amountColorFor(kind: CategoryKind | null | undefined): string {
@@ -59,6 +84,11 @@ export function TransactionList({
   onUnlinkTransfer,
   deletingId,
   unlinkingId,
+  selectedIds,
+  onToggleSelect,
+  onToggleSelectAll,
+  allSelected,
+  someSelected,
 }: TransactionListProps) {
   const router = useRouter();
   const activeCurrency = useCurrencyStore((s) => s.currency);
@@ -79,6 +109,34 @@ export function TransactionList({
       })),
     [items, categoryById],
   );
+
+  const selectionColumn: DataTableColumn<TransactionRow> = {
+    key: 'select',
+    header: (
+      <input
+        type="checkbox"
+        aria-label="Seleccionar todo"
+        checked={allSelected ?? false}
+        ref={(el) => {
+          if (el) el.indeterminate = !(allSelected ?? false) && (someSelected ?? false);
+        }}
+        onChange={() => onToggleSelectAll?.()}
+        onClick={(e) => e.stopPropagation()}
+        style={{ cursor: 'pointer', accentColor: colors.primary, width: 16, height: 16 }}
+      />
+    ),
+    width: 44,
+    render: ({ tx }) => (
+      <input
+        type="checkbox"
+        aria-label="Seleccionar transacción"
+        checked={selectedIds?.has(tx.id) ?? false}
+        onChange={() => onToggleSelect?.(tx.id)}
+        onClick={(e) => e.stopPropagation()}
+        style={{ cursor: 'pointer', accentColor: colors.primary, width: 16, height: 16 }}
+      />
+    ),
+  };
 
   const columns: DataTableColumn<TransactionRow>[] = [
     {
@@ -151,13 +209,20 @@ export function TransactionList({
       align: 'right',
       width: 160,
       render: ({ tx, category }) => {
-        // Una pata de transferencia/deuda no es ingreso ni gasto: está
-        // fuera del cashflow y (en deuda) aporta 0 al patrimonio. Se
-        // pinta en neutro, sin signo ni color income/expense — el badge
-        // "Deuda"/"Transferencia" ya explica de qué fila se trata.
+        // ADR-0004 (AUDIT-2026-07): el signo/color lo manda `tx.flow`. Una
+        // pata de transferencia/deuda (TRANSFER_*) es neutra: fuera del
+        // cashflow y (en deuda) aporta 0 al patrimonio — el badge
+        // "Deuda"/"Transferencia" ya explica la fila. Sólo cae al fallback por
+        // categoría cuando la fila no tiene flow (heredada).
+        const flowKind = kindFromFlow(tx.flow);
         const isTransferLike =
           tx.transfer_pair_id !== null || category?.is_transfer === true;
-        const displayKind = isTransferLike ? null : (category?.kind ?? null);
+        const displayKind =
+          flowKind !== undefined
+            ? flowKind
+            : isTransferLike
+              ? null
+              : (category?.kind ?? null);
         // PHASE-8.4: el backend convierte per-row cuando el toggle
         // está ON (la página pasa `target_currency`). La fila trae
         // `converted_amount` listo, o `null` si no hay tasa para esa
@@ -254,7 +319,7 @@ export function TransactionList({
 
   return (
     <DataTable
-      columns={columns}
+      columns={onToggleSelect ? [selectionColumn, ...columns] : columns}
       rows={rows}
       rowKey={(row) => row.tx.id}
       onRowClick={(row) =>

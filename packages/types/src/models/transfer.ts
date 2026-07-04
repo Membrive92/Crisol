@@ -18,6 +18,13 @@ export interface TransferPair {
   out_occurred_at: string;
   in_occurred_at: string;
   delta_days: number;
+  /**
+   * PHASE-34: importe del "cargo espejo" anulado al registrar una operación
+   * financiada (el ADEUDO del mismo importe que en el banco la compensa,
+   * neto 0). `null`/ausente si no se encontró espejo. La UI lo usa para
+   * avisar en el toast que ese cargo se movió a la papelera.
+   */
+  absorbed_mirror_amount?: string | null;
 }
 
 /**

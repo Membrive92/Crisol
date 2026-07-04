@@ -7,6 +7,8 @@ import type {
   AccountUpdateRequest,
   AmortizationRow,
   AmortizationSchedule,
+  InstallmentBulkPayRequest,
+  InstallmentBulkPayResponse,
   InstallmentPayRequest,
   InstallmentUpdateRequest,
 } from '@crisol/types';
@@ -58,6 +60,21 @@ export function useUpdateAccount(id: string) {
   });
 }
 
+/**
+ * PHASE-34 "Cuadrar saldo": fija el saldo real de una cuenta de activo.
+ * `mutate(currentBalance)` con el saldo declarado (string decimal).
+ */
+export function useReconcileAccount(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation<Account, Error, string>({
+    mutationFn: (currentBalance) => accountsApi.reconcile(id, currentBalance),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.accounts.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
+    },
+  });
+}
+
 export function useDeleteAccount() {
   const queryClient = useQueryClient();
   return useMutation<void, Error, string>({
@@ -71,10 +88,23 @@ export function useDeleteAccount() {
   });
 }
 
-export function useAccountBalances() {
+/**
+ * Saldos por cuenta + agregados (patrimonio neto, total pasivos).
+ *
+ * AUDIT-2026-06 — Acepta `targetCurrency` para convertir todos los
+ * saldos a esa divisa (igual que `useDebtHealth`/`useDebtHistory`).
+ * Sin ella, la DebtList y la mitad de patrimonio neto del PositionHero
+ * se quedaban en divisa nativa mientras el resto de la pantalla estaba
+ * convertido, así que dos importes de la misma card no cuadraban.
+ */
+export function useAccountBalances(options: { targetCurrency?: string } = {}) {
+  const targetCurrency = options.targetCurrency;
   return useQuery<AccountBalancesResponse, Error>({
-    queryKey: queryKeys.accounts.balances(),
-    queryFn: () => accountsApi.balances(),
+    queryKey: queryKeys.accounts.balances(targetCurrency),
+    queryFn: () =>
+      accountsApi.balances(
+        targetCurrency ? { target_currency: targetCurrency } : {},
+      ),
     staleTime: 1000 * 60,
   });
 }
@@ -153,6 +183,25 @@ export function useUnpayInstallment() {
   const queryClient = useQueryClient();
   return useMutation<AmortizationRow, Error, string>({
     mutationFn: (installmentId) => accountsApi.unpayInstallment(installmentId),
+    onSuccess: () => invalidateAmortization(queryClient),
+  });
+}
+
+/**
+ * AUDIT-2026-07 (H-05): marca las cuotas que un pago de principal cubre.
+ * Lo usa el asistente "Pagar cuota" para que el saldo dirigido por el cuadro
+ * (PHASE-36) baje. Invalida amortización + accounts + debt como el resto de
+ * mutaciones de cuota.
+ */
+export function usePayInstallments() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    InstallmentBulkPayResponse,
+    Error,
+    { accountId: string; payload: InstallmentBulkPayRequest }
+  >({
+    mutationFn: ({ accountId, payload }) =>
+      accountsApi.payInstallments(accountId, payload),
     onSuccess: () => invalidateAmortization(queryClient),
   });
 }

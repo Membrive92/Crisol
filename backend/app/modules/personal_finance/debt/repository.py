@@ -27,7 +27,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.modules.personal_finance.accounts.models import Account
-from app.modules.personal_finance.categories.models import Category, CategoryKind, CategoryRole
+from app.modules.personal_finance.accounts.repository import is_inflow, is_outflow
+from app.modules.personal_finance.categories.models import Category, CategoryRole
 from app.modules.personal_finance.dashboard.conversion import (
     converted_amount_expr,
 )
@@ -246,10 +247,13 @@ async def daily_liability_flows(
         return {}
     amount = _amount_expr(target_currency)
     day_expr = func.extract("day", func.timezone("UTC", Transaction.occurred_at))
-    # Sólo gasto categorizado sube la deuda; income e sin-categoría → 0.
-    emitida_expr = case((Category.kind == CategoryKind.EXPENSE, amount), else_=Decimal("0"))
-    # Sólo income categorizado amortiza; gasto e sin-categoría → 0.
-    amortizado_expr = case((Category.kind == CategoryKind.INCOME, amount), else_=Decimal("0"))
+    # AUDIT-2026-06 (alineación PHASE-34) — la dirección la manda `flow`
+    # (`is_outflow`/`is_inflow`, MISMOS predicados que get_balances_for_user),
+    # no `Category.kind`. Sólo la salida/cargo sube la deuda; la entrada/pago
+    # amortiza; sin flujo ni categoría → 0. Equivalente al criterio por
+    # categoría para datos backfilled (34.1); sólo cambia filas con flow a mano.
+    emitida_expr = case((is_outflow(), amount), else_=Decimal("0"))
+    amortizado_expr = case((is_inflow(), amount), else_=Decimal("0"))
     query = (
         select(
             day_expr.label("d"),
@@ -284,17 +288,21 @@ async def liability_signed_before(
     el "carry" para anclar la línea de saldo del mes.
 
     AUDIT-2026-06 (fix #7) — Signo IDÉNTICO al de la rama liability de
-    `get_balances_for_user`: expense suma (sube la deuda), income resta
-    (la amortiza) y **tx SIN categoría NO contribuye** (PHASE-31.3,
-    `else_=0`). Antes usaba `else_=amount`, contando cargos sin categoría
-    como deuda emitida → el carry divergía del saldo real del pasivo y
-    desanclaba la línea de saldo respecto a `/balances`."""
+    `get_balances_for_user`: la salida/cargo suma (sube la deuda), la
+    entrada/pago resta (la amortiza) y **tx SIN categoría NO contribuye**
+    (PHASE-31.3, `else_=0`). Antes usaba `else_=amount`, contando cargos sin
+    categoría como deuda emitida → el carry divergía del saldo real del
+    pasivo y desanclaba la línea de saldo respecto a `/balances`.
+
+    AUDIT-2026-06 (alineación PHASE-34) — la dirección la manda `flow`
+    (`is_outflow`/`is_inflow`), no `Category.kind`, para que el carry case
+    con get_balances_for_user incluso cuando flow y categoría discrepan."""
     if not liability_ids:
         return Decimal("0")
     amount = _amount_expr(target_currency)
     signed = case(
-        (Category.kind == CategoryKind.EXPENSE, amount),
-        (Category.kind == CategoryKind.INCOME, -amount),
+        (is_outflow(), amount),
+        (is_inflow(), -amount),
         else_=Decimal("0"),
     )
     query = (

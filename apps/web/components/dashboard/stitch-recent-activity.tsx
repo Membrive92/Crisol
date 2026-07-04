@@ -3,7 +3,7 @@
 import Link from 'next/link';
 
 import { useCategories, useTransactions } from '@crisol/services';
-import type { Category, Transaction } from '@crisol/types';
+import type { Category, CategoryKind, Transaction, TransactionFlow } from '@crisol/types';
 import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
 import { formatAmount } from '@crisol/ui';
 
@@ -129,15 +129,33 @@ export function StitchRecentActivity() {
   );
 }
 
+// ADR-0004 (AUDIT-2026-07): el signo/color lo manda `tx.flow`, no la
+// categoría. IN→income, OUT→expense, TRANSFER_*→neutro. `undefined` → sin
+// flow, usar fallback por categoría (fila heredada).
+function kindFromFlow(
+  flow: TransactionFlow | null | undefined,
+): CategoryKind | null | undefined {
+  if (flow === 'IN') return 'income';
+  if (flow === 'OUT') return 'expense';
+  if (flow === 'TRANSFER_IN' || flow === 'TRANSFER_OUT') return null;
+  return undefined;
+}
+
 function ActivityRow({ tx, category }: { tx: Transaction; category: Category | undefined }) {
   const Icon = iconForTransaction(tx.description, category?.name);
-  // Una pata de transferencia/deuda no es ingreso ni gasto: se pinta en
-  // neutro, sin signo — igual que en la lista de transacciones. Sin esto,
-  // la pata-activo de una operación financiada (categoría income) saldría
-  // como "+824,77 €" verde en el dashboard, justo tras convertirla.
+  // ADR-0004: el signo/color lo manda `tx.flow`. Una pata de
+  // transferencia/deuda (TRANSFER_*) es neutra — sin esto, la pata-activo de
+  // una operación financiada (categoría income) saldría como "+824,77 €"
+  // verde en el dashboard. Fallback por categoría sólo si la fila no tiene flow.
+  const flowKind = kindFromFlow(tx.flow);
   const isTransferLike =
     tx.transfer_pair_id !== null || category?.is_transfer === true;
-  const displayKind = isTransferLike ? null : (category?.kind ?? null);
+  const displayKind =
+    flowKind !== undefined
+      ? flowKind
+      : isTransferLike
+        ? null
+        : (category?.kind ?? null);
   const amountColor = displayKind === 'income' ? colors.success : colors.text;
   const sign =
     displayKind === 'income' ? '+' : displayKind === 'expense' ? '-' : '';

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   periodLabel,
@@ -76,7 +76,12 @@ export default function DebtPage() {
   const healthQuery = useDebtHealth(
     targetCurrency ? { targetCurrency } : {},
   );
-  const balancesQuery = useAccountBalances();
+  // AUDIT-2026-06 — la DebtList y el total "Con plazos" deben respetar
+  // el selector de divisa igual que el resto de la página; antes se
+  // quedaban en divisa nativa mientras KPIs/charts se convertían.
+  const balancesQuery = useAccountBalances(
+    targetCurrency ? { targetCurrency } : {},
+  );
   const historyQuery = useDebtHistory({
     monthsBack: 12,
     monthsAhead: 12,
@@ -294,6 +299,14 @@ function Layer2Section({
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(hasLiabilities);
+  // AUDIT-2026-07: `hasLiabilities` suele ser false en el primer render (los
+  // balances aún cargan), así que el estado inicial no auto-expandía nunca.
+  // Nos auto-abrimos cuando pasa a true, salvo que el usuario ya lo haya
+  // tocado (respeta un cierre manual posterior).
+  const userToggled = useRef(false);
+  useEffect(() => {
+    if (!userToggled.current && hasLiabilities) setOpen(true);
+  }, [hasLiabilities]);
 
   return (
     <section
@@ -305,7 +318,10 @@ function Layer2Section({
     >
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          userToggled.current = true;
+          setOpen((o) => !o);
+        }}
         style={{
           width: '100%',
           background: 'transparent',

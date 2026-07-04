@@ -13,7 +13,9 @@ import { queryKeys } from './keys';
  * - los KPIs y gráficas del dashboard (`dashboard.all`),
  * - el estado de los presupuestos por categoría (`budgets.all`),
  * - los saldos y la lista de cuentas (`accounts.all`, engloba `balances`),
- * - la salud y el resumen de deuda — Capa 1 + Capa 2 (`debt.all`).
+ * - la salud y el resumen de deuda — Capa 1 + Capa 2 (`debt.all`),
+ * - las listas de transferencias (`transfers.all`): un import crea patas
+ *   `TRANSFER_*` y confirmar/editar tx cambia qué es par/huérfana.
  *
  * Se invalida por prefijo de grupo, así que engloba cualquier
  * invalidación específica (p. ej. `accounts.balances()`) que algún
@@ -31,4 +33,7 @@ export function invalidateTransactionSideEffects(queryClient: QueryClient): void
   void queryClient.invalidateQueries({ queryKey: queryKeys.budgets.all });
   void queryClient.invalidateQueries({ queryKey: queryKeys.accounts.all });
   void queryClient.invalidateQueries({ queryKey: queryKeys.debt.all });
+  // AUDIT-2026-07: importar crea patas TRANSFER_* y editar/mover tx cambia
+  // qué es par/huérfana → refrescar también las listas de /transfers.
+  void queryClient.invalidateQueries({ queryKey: queryKeys.transfers.all });
 }

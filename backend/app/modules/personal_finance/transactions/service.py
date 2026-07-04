@@ -11,9 +11,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.personal_finance.accounts.service import ensure_account_exists
+from app.modules.personal_finance.categories.models import Category, CategoryKind
 from app.modules.personal_finance.categories.repository import get_category_by_id
 from app.modules.personal_finance.dashboard.service import ensure_rates_for_user_scope
-from app.modules.personal_finance.transactions.models import Transaction
+from app.modules.personal_finance.transactions.models import Transaction, TransactionFlow
 from app.modules.personal_finance.transactions.repository import (
     bulk_purge_trashed as bulk_purge_trashed_in_db,
 )
@@ -25,6 +26,9 @@ from app.modules.personal_finance.transactions.repository import (
 )
 from app.modules.personal_finance.transactions.repository import (
     bulk_soft_delete_transactions as bulk_soft_delete_in_db,
+)
+from app.modules.personal_finance.transactions.repository import (
+    bulk_update_category as bulk_categorize_in_db,
 )
 from app.modules.personal_finance.transactions.repository import (
     count_reassignable_skipped_by_currency as count_reassign_skipped_in_db,
@@ -194,6 +198,23 @@ async def _ensure_category_owned(
         )
 
 
+def _flow_from_category(category: Category | None) -> TransactionFlow | None:
+    """PHASE-34 — puente de transición: deriva `flow` de la categoría
+    cuando el cliente no lo envía (hasta que el form mande
+    [Gasto]/[Ingreso]/[Entre mis cuentas] en 34.5). Mismo mapeo que el
+    backfill: is_transfer → TRANSFER_*, si no IN/OUT por kind. Sin
+    categoría → None (neutro)."""
+    if category is None:
+        return None
+    if category.is_transfer:
+        return (
+            TransactionFlow.TRANSFER_IN
+            if category.kind == CategoryKind.INCOME
+            else TransactionFlow.TRANSFER_OUT
+        )
+    return TransactionFlow.IN if category.kind == CategoryKind.INCOME else TransactionFlow.OUT
+
+
 async def create_transaction(
     db: AsyncSession, user_id: uuid.UUID, data: TransactionCreate
 ) -> Transaction:
@@ -206,10 +227,20 @@ async def create_transaction(
 
     AUDIT: si se pasa `category_id`, se valida que sea del usuario antes
     de asociarla (cierre de fuga multi-tenant — ver `_ensure_category_owned`).
+
+    PHASE-34: `flow` lo manda el cliente; si no viene, se deriva de la
+    categoría (puente de transición).
     """
     await ensure_account_exists(db, data.account_id, user_id)
+    category: Category | None = None
     if data.category_id is not None:
-        await _ensure_category_owned(db, user_id, data.category_id)
+        category = await get_category_by_id(db, data.category_id, user_id)
+        if category is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="category_id no pertenece al usuario",
+            )
+    flow = data.flow if data.flow is not None else _flow_from_category(category)
     transaction = Transaction(
         user_id=user_id,
         account_id=data.account_id,
@@ -219,6 +250,7 @@ async def create_transaction(
         occurred_at=data.occurred_at,
         description=data.description,
         source=data.source,
+        flow=flow,
     )
     return await persist_transaction(db, transaction)
 
@@ -261,6 +293,16 @@ async def update_transaction(
                 and payload["account_id"] is not None
                 and payload["account_id"] != transaction.account_id
             )
+            or (
+                # AUDIT-2026-07 (M-03): `flow` fija el signo con que la tx
+                # afecta al saldo (PHASE-34). Cambiarlo en UNA sola pata
+                # invierte su signo y el par deja de netear a 0 → infla el
+                # patrimonio neto sin romper ninguna otra validación. Se
+                # rechaza igual que importe/moneda/cuenta.
+                "flow" in payload
+                and payload["flow"] is not None
+                and payload["flow"] != transaction.flow
+            )
         )
         if breaks_pair:
             raise HTTPException(
@@ -268,7 +310,7 @@ async def update_transaction(
                 detail=(
                     "Esta transacción es parte de una transferencia. Deshaz el "
                     "enlace (en el detalle o en Transferencias) antes de cambiar "
-                    "el importe, la moneda o la cuenta."
+                    "el importe, la moneda, la cuenta o la dirección."
                 ),
             )
     if "account_id" in payload and payload["account_id"] is not None:
@@ -277,6 +319,25 @@ async def update_transaction(
         await _ensure_category_owned(db, user_id, payload["category_id"])
     for field, value in payload.items():
         setattr(transaction, field, value)
+    # PHASE-34 — si cambió la categoría y el cliente NO envió `flow`
+    # explícito, re-derivamos el flow de la nueva categoría para no dejar
+    # una dirección obsoleta (puente de transición; el form mandará flow
+    # en 34.5). Si `flow` viene en el payload, manda y no se toca.
+    # AUDIT-2026-07 (M-03): NUNCA re-derivamos en una pata emparejada — su
+    # flow (TRANSFER_IN/OUT) lo fija el par; relabelar la categoría de una
+    # pata NO debe invertir el signo de su saldo. Cambiar la categoría de una
+    # pata sigue permitido (no rompe el par), pero deja el flow intacto.
+    if (
+        "category_id" in payload
+        and "flow" not in payload
+        and transaction.transfer_pair_id is None
+    ):
+        new_cat = (
+            await get_category_by_id(db, transaction.category_id, user_id)
+            if transaction.category_id is not None
+            else None
+        )
+        transaction.flow = _flow_from_category(new_cat)
     await db.flush()
     await db.refresh(transaction)
     return transaction
@@ -305,6 +366,7 @@ async def bulk_delete_transactions(
     db: AsyncSession,
     user_id: uuid.UUID,
     *,
+    account_id: uuid.UUID | None = None,
     category_id: uuid.UUID | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
@@ -319,10 +381,36 @@ async def bulk_delete_transactions(
     return await bulk_soft_delete_in_db(
         db,
         user_id,
+        account_id=account_id,
         category_id=category_id,
         date_from=date_from,
         date_to=date_to,
         search=search,
+    )
+
+
+async def bulk_categorize_transactions(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    transaction_ids: list[uuid.UUID],
+    category_id: uuid.UUID | None,
+) -> int:
+    """PHASE-34 — Cambia en bloque la categoría de las tx seleccionadas por el
+    usuario (checkbox en la lista), para no recategorizar una a una.
+
+    Relabel money-neutral: el dinero (signo del saldo, cashflow) lo manda
+    `flow` y no cambia — sólo la etiqueta. AUDIT-2026-07 (LOW): para las filas
+    heredadas SIN flow, el repositorio ancla primero el flow desde su categoría
+    ACTUAL, de modo que recategorizarlas no invierte su dirección vía el
+    fallback por categoría (bug previo). No toca el par de transferencia. Si
+    `category_id` no es None, valida que la categoría pertenece al usuario (400
+    si no). Sólo afecta tx activas del usuario. Devuelve cuántas se actualizaron.
+    """
+    if category_id is not None:
+        await _ensure_category_owned(db, user_id, category_id)
+    return await bulk_categorize_in_db(
+        db, user_id, transaction_ids=transaction_ids, category_id=category_id
     )
 
 

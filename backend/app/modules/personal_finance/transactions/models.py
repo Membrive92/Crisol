@@ -7,10 +7,37 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String, Text, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Numeric, String, Text, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+
+
+class TransactionFlow(enum.StrEnum):
+    """Dirección y naturaleza del movimiento — fuente de verdad del dinero.
+
+    PHASE-34 (ADR-0004). Sustituye la derivación del signo y la
+    clasificación desde `category.kind` / `category.is_transfer`:
+
+    - **Saldo**: se deriva de `flow` + `account.nature` (nunca de la
+      categoría). `IN`/`TRANSFER_IN` entran, `OUT`/`TRANSFER_OUT` salen;
+      `account.nature` decide el signo final (ASSET suma lo que entra,
+      LIABILITY lo invierte).
+    - **Cashflow del mes**: `gasto = Σ(flow=OUT)`, `ingreso = Σ(flow=IN)`.
+      Los `TRANSFER_*` se excluyen por el propio movimiento, no por la
+      categoría.
+
+    La columna es NULLABLE: `NULL` = movimiento sin clasificar todavía
+    (p. ej. tx heredada sin categoría). Contribuye 0 al saldo y queda
+    fuera del cashflow, igual que el `else_=0` previo. El pipeline de
+    import y los formularios escriben `flow` explícitamente (PHASE-34.3+);
+    la categoría pasa a ser puramente descriptiva.
+    """
+
+    IN = "IN"
+    OUT = "OUT"
+    TRANSFER_IN = "TRANSFER_IN"
+    TRANSFER_OUT = "TRANSFER_OUT"
 
 
 class TransactionSource(enum.StrEnum):
@@ -74,6 +101,15 @@ class Transaction(Base):
         ForeignKey("transactions.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # PHASE-34 (ADR-0004): fuente de verdad del dinero a nivel de
+    # transacción. NULLABLE durante la transición — `NULL` = sin
+    # clasificar (contribuye 0 al saldo, fuera del cashflow). El saldo y
+    # el cashflow se derivan de aquí + `account.nature`, no de la
+    # categoría. Lo escribe el import (signo del extracto) y los forms.
+    flow: Mapped[TransactionFlow | None] = mapped_column(
+        Enum(TransactionFlow, name="transactionflow", native_enum=True),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -85,6 +121,15 @@ class Transaction(Base):
     # `deleted_at IS NULL`; los endpoints `/trash`/restore/purge son los
     # únicos que ven o tocan filas con valor.
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # AUDIT-2026-07 (H-04): TRUE marca un "cargo espejo" (ADEUDO/LIQUIDACIÓN
+    # de tarjeta) que el SISTEMA absorbió al convertir una compra en deuda.
+    # Se soft-borra (`deleted_at`) para que desaparezca del ledger, pero a
+    # diferencia de un borrado de USUARIO no debe reimportarse: si el usuario
+    # reimporta el mismo extracto, `find_existing_hashes` lo trata como
+    # existente para no resucitar el −X y volver a descuadrar el saldo.
+    absorbed_as_mirror: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     __table_args__ = (
         # Partial unique para dedup de imports — incluye `AND deleted_at
@@ -125,5 +170,15 @@ class Transaction(Base):
             "ix_transactions_transfer_pair_id",
             "transfer_pair_id",
             postgresql_where="transfer_pair_id IS NOT NULL AND deleted_at IS NULL",
+        ),
+        # PHASE-34.1 — los agregados de cashflow del dashboard filtran por
+        # `flow` sobre filas activas (gasto = Σ flow=OUT, ingreso = Σ flow=IN,
+        # transferencias excluidas). Índice parcial alineado con la migración
+        # `z3p58r0on2q1p7` (declarado aquí para la paridad `alembic check`).
+        Index(
+            "ix_transactions_user_flow_active",
+            "user_id",
+            "flow",
+            postgresql_where="deleted_at IS NULL",
         ),
     )

@@ -12,6 +12,7 @@ from app.core.database import get_db
 from app.core.deps import CurrentUser
 from app.modules.personal_finance.accounts.debt_health import compute_debt_health
 from app.modules.personal_finance.accounts.debt_history import compute_debt_history
+from app.modules.personal_finance.accounts.debt_reconciliation import reconcile_debt_payments
 from app.modules.personal_finance.accounts.schemas import (
     AccountBalancesResponse,
     AccountCreate,
@@ -21,8 +22,12 @@ from app.modules.personal_finance.accounts.schemas import (
     AmortizationScheduleResponse,
     DebtHealthKpis,
     DebtHistoryResponse,
+    InstallmentBulkPayRequest,
+    InstallmentBulkPayResponse,
     InstallmentPayRequest,
     InstallmentUpdateRequest,
+    ReconcileBalanceRequest,
+    ReconcilePlanResponse,
 )
 from app.modules.personal_finance.accounts.service import (
     create_account,
@@ -32,6 +37,8 @@ from app.modules.personal_finance.accounts.service import (
     get_balances,
     list_accounts,
     mark_installment_paid,
+    pay_installments_by_principal,
+    reconcile_account_balance,
     regenerate_amortization_schedule,
     unmark_installment_paid,
     update_account,
@@ -119,6 +126,27 @@ async def debt_history_endpoint(
         months_ahead=months_ahead,
         target_currency=target_currency,
     )
+
+
+@router.post("/reconcile-debt", response_model=ReconcilePlanResponse)
+async def reconcile_debt_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    dry_run: Annotated[bool, Query()] = True,
+) -> ReconcilePlanResponse:
+    """PHASE-36 — Reconcilia las aportaciones (amortización de préstamo,
+    cuotas de operación financiada con tarjeta) contra el cuadro de cada
+    deuda: genera el cuadro que falte, ancla las cuotas previas a los datos
+    y marca pagada la cuota que cada aportación liquida, de modo que la
+    deuda baje de forma realista ("el cuadro manda").
+
+    `dry_run=true` (por defecto) sólo devuelve el plan sin escribir nada.
+    `dry_run=false` lo aplica (idempotente). Devuelve el plan/serializado.
+    """
+    plan = await reconcile_debt_payments(db, user.id, dry_run=dry_run)
+    if not dry_run:
+        await db.commit()
+    return ReconcilePlanResponse.model_validate(plan)
 
 
 @router.get(
@@ -245,6 +273,38 @@ async def unpay_installment_endpoint(
     )
 
 
+@router.post(
+    "/{account_id}/pay-installments",
+    response_model=InstallmentBulkPayResponse,
+)
+async def pay_installments_endpoint(
+    account_id: uuid.UUID,
+    body: InstallmentBulkPayRequest,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> InstallmentBulkPayResponse:
+    """AUDIT-2026-07 (H-05): marca las cuotas que un pago de principal cubre.
+
+    Lo llama el asistente "Pagar cuota" tras crear la transferencia del
+    principal, para que el saldo dirigido por el cuadro (PHASE-36) baje.
+    """
+    marked, covered, uncovered, outstanding = await pay_installments_by_principal(
+        db,
+        account_id,
+        user.id,
+        principal_amount=body.principal_amount,
+        paid_at=body.paid_at,
+        paid_transaction_id=body.paid_transaction_id,
+    )
+    await db.commit()
+    return InstallmentBulkPayResponse(
+        marked_count=marked,
+        covered_principal=covered,
+        uncovered_principal=uncovered,
+        schedule_outstanding=outstanding,
+    )
+
+
 @router.get("/{account_id}", response_model=AccountResponse)
 async def get_endpoint(
     account_id: uuid.UUID,
@@ -277,6 +337,21 @@ async def update_endpoint(
 ) -> AccountResponse:
     """Actualiza una cuenta (parcial). Permite archivar via `is_archived=true`."""
     account = await update_account(db, account_id, user.id, body)
+    await db.commit()
+    return AccountResponse.model_validate(account)
+
+
+@router.post("/{account_id}/reconcile", response_model=AccountResponse)
+async def reconcile_endpoint(
+    account_id: uuid.UUID,
+    body: ReconcileBalanceRequest,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AccountResponse:
+    """PHASE-34 'Cuadrar saldo' — fija el saldo de la cuenta (de activo) al
+    valor real que declara el usuario, ajustando `opening_balance`. Sirve para
+    el saldo inicial y para re-cuadrar. 400 si la cuenta no es de activo."""
+    account = await reconcile_account_balance(db, user.id, account_id, body.current_balance)
     await db.commit()
     return AccountResponse.model_validate(account)
 

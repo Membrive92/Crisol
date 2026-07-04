@@ -252,9 +252,11 @@ export default function TransactionsScreen() {
         onCancel={() => setPendingDelete(null)}
       />
 
+      {/* AUDIT-2026-07 (LOW): PHASE-35 — no ofrecer las compras a plazos hijas
+          como filtro (coherente con web); sus tx se ven bajo la tarjeta padre. */}
       <AccountPickerModal
         visible={accountPickerOpen}
-        accounts={accounts}
+        accounts={accounts.filter((a) => !a.parent_account_id)}
         selectedId={accountFilter}
         onSelect={(id) => {
           setAccountFilter(id);

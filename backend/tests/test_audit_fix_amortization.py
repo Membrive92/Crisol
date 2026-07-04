@@ -32,9 +32,13 @@ Sí se mantienen y se cubren aquí:
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from app.modules.currency import repository as rates_repository
 
 # ---------------------------------------------------------------------------
 # Helpers HTTP (mismo patrón que test_accounts.py)
@@ -223,5 +227,55 @@ async def test_balances_target_currency_homogenizes_and_excludes_unrated(
     assert body["mixed_currencies"] is False
     # Sólo las dos cuentas EUR (100+50) entran; la USD sin tasa se excluye.
     assert Decimal(body["total_assets"]) == Decimal("150.00")
-    # `items` sigue mostrando las 3 cuentas en su moneda nativa.
+    # `items` muestra las 3 cuentas; la USD (sin tasa) se queda nativa.
     assert len(body["items"]) == 3
+
+
+async def _seed_rates(test_engine, rows: list[tuple[date, str, str, str]]) -> None:  # type: ignore[no-untyped-def]
+    """rows: (rate_date, base, quote, rate_string). Siembra directo en
+    `exchange_rates` para no depender de frankfurter en CI."""
+    factory = async_sessionmaker(bind=test_engine, expire_on_commit=False, autoflush=False)
+    async with factory() as db:
+        await rates_repository.upsert_rates(
+            db,
+            [(d, base, quote, Decimal(rate), "test") for d, base, quote, rate in rows],
+        )
+        await db.commit()
+
+
+async def test_balances_target_currency_converts_each_item(
+    client: AsyncClient,
+    test_engine,  # type: ignore[no-untyped-def]
+) -> None:
+    """AUDIT-2026-06 — En modo convertido, CADA item de
+    `/accounts/balances` se reexpresa en la divisa destino (no sólo los
+    agregados). Antes los items se quedaban nativos, así que la DebtList
+    y los tiles del hero salían en divisa distinta a los KPIs/charts de la
+    misma pantalla (findings deuda #2 / integración #7)."""
+    token = await _setup_user(client, "bal-item-convert@example.com")
+    await client.post(
+        "/accounts",
+        json={"name": "EUR", "type": "bank", "currency": "EUR", "opening_balance": "100.00"},
+        headers=_auth(token),
+    )
+    await client.post(
+        "/accounts",
+        json={"name": "USD", "type": "bank", "currency": "USD", "opening_balance": "110.00"},
+        headers=_auth(token),
+    )
+    # 1 EUR = 1.10 USD (hoy) → 110 USD = 100 EUR.
+    await _seed_rates(test_engine, [(date.today(), "EUR", "USD", "1.10")])
+
+    r = await client.get("/accounts/balances?target_currency=EUR", headers=_auth(token))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    items = {it["name"]: it for it in body["items"]}
+    # El item USD ahora se reporta en EUR con el saldo convertido.
+    assert items["USD"]["currency"] == "EUR"
+    assert Decimal(items["USD"]["current_balance"]) == Decimal("100.00")
+    # El item EUR (== target) no cambia.
+    assert items["EUR"]["currency"] == "EUR"
+    assert Decimal(items["EUR"]["current_balance"]) == Decimal("100.00")
+    # Agregado homogéneo: 100 (EUR) + 100 (USD→EUR) = 200.
+    assert Decimal(body["total_assets"]) == Decimal("200.00")
+    assert body["mixed_currencies"] is False

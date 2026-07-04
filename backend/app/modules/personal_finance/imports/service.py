@@ -49,6 +49,7 @@ from app.modules.personal_finance.imports.parser import (
     NoTablesInPdfError,
     ParseError,
     SmartParseAmbiguousError,
+    count_pdf_pages,
     detect_format,
     parse_file,
     parse_pdf_smart,
@@ -64,8 +65,15 @@ from app.modules.personal_finance.imports.schemas import (
     ImportColumnMappings,
     ImportSource,
 )
-from app.modules.personal_finance.transactions.models import Transaction, TransactionSource
-from app.modules.personal_finance.transfers.service import infer_transfer_kind
+from app.modules.personal_finance.transactions.models import (
+    Transaction,
+    TransactionFlow,
+    TransactionSource,
+)
+from app.modules.personal_finance.transfers.service import (
+    classify_import_flow,
+    infer_transfer_kind,
+)
 
 MAX_ERROR_LOG = 100
 DEFAULT_CURRENCY = "EUR"
@@ -109,6 +117,10 @@ class ParsedRow:
     description: str | None
     category_id: uuid.UUID | None
     import_hash: str
+    # PHASE-34: dirección + transfer-ness derivadas del signo del extracto
+    # y la descripción. `None` = no se pudo determinar (extracto sin signo)
+    # → la fila se marca para revisión.
+    flow: TransactionFlow | None = None
 
 
 async def run_import(
@@ -449,6 +461,11 @@ async def _process_and_persist(
 
     parsed: list[ParsedRow] = []
     errors: list[dict[str, object]] = []
+    # AUDIT-2026-07 (LOW): contador de fallos INDEPENDIENTE del log topado a
+    # MAX_ERROR_LOG. Antes `rows_failed = len(errors)` reportaba como mucho 100
+    # aunque hubiera más filas erróneas, y los contadores del job no cuadraban
+    # con rows_total. El detalle se sigue topando; el recuento no.
+    failed_count = 0
     # AUDIT finding #1: filas cuyo signo de extracto contradice el kind
     # de la categoría resuelta y NO tienen categoría hermana del kind
     # correcto. Se persisten igual (no perdemos datos), pero se marcan en
@@ -473,6 +490,7 @@ async def _process_and_persist(
                 sibling_by_name_kind=sibling_by_name_kind,
             )
         except _RowError as e:
+            failed_count += 1
             if len(errors) < MAX_ERROR_LOG:
                 errors.append({"row": idx, "error": str(e)})
             continue
@@ -589,7 +607,7 @@ async def _process_and_persist(
     skipped_existing = len(deduped) - inserted - reconciled
 
     job.rows_ok = inserted + reconciled
-    job.rows_failed = len(errors)
+    job.rows_failed = failed_count
     job.rows_skipped = skipped_in_batch + skipped_existing
     # AUDIT finding #1: adjuntamos las advertencias de revisión (signo de
     # extracto vs. kind sin categoría hermana) al error_log para que el
@@ -637,6 +655,7 @@ async def _flush_inserts(
             description=p.description,
             source=TransactionSource.IMPORT,
             import_hash=p.import_hash,
+            flow=p.flow,
         )
 
     # Camino rápido: añade todo y flush una vez.
@@ -861,7 +880,19 @@ async def _parse_pdf_with_vision(payload: bytes) -> list[dict[str, str]]:
 
     Limita a `MAX_VISION_PDF_PAGES` páginas: la inferencia es cara y los
     extractos típicos rara vez tienen más de 3-4 páginas relevantes.
+
+    AUDIT-2026-07 (M-04): si el PDF excede ese tope, se ABORTA con un mensaje
+    accionable en lugar de importar sólo las primeras páginas y reportar éxito
+    (pérdida silenciosa de las transacciones de las páginas posteriores).
     """
+    total_pages = count_pdf_pages(payload)
+    if total_pages > MAX_VISION_PDF_PAGES:
+        raise ParseError(
+            f"El PDF tiene {total_pages} páginas y el reconocimiento por visión "
+            f"local está limitado a {MAX_VISION_PDF_PAGES}. Para no perder "
+            f"transacciones, divide el extracto en partes de {MAX_VISION_PDF_PAGES} "
+            f"páginas o menos y vuelve a importarlas."
+        )
     images = render_pdf_pages_to_png(payload, max_pages=MAX_VISION_PDF_PAGES)
     if not images:
         raise ParseError("PDF sin páginas renderizables")
@@ -1058,6 +1089,20 @@ def _parse_row(
                     f"{resolved_label}. Revisa la categoría antes de confirmar."
                 )
 
+    # PHASE-34 (modelo de dinero + tarjeta): el `flow` lo manda el SIGNO del
+    # extracto + la detección de movimiento interno (transferencia / pago de
+    # tarjeta) por categoría o descripción. La compra "PAGO CON TARJETA" no
+    # matchea los patrones internos → queda como gasto (OUT). Sin signo en el
+    # extracto, la dirección cae al texto y luego al kind de la categoría
+    # resuelta (extractos sólo-magnitud); sin ninguna señal queda sin
+    # clasificar (None) — neutro, como una tx sin categoría.
+    flow = classify_import_flow(
+        bank_sign=bank_sign,
+        text=f"{category_name_raw} {description or ''}".strip(),
+        category_is_transfer=bool(transfer_cat_ids and category_id in transfer_cat_ids),
+        category_kind=(category_kinds or {}).get(category_id) if category_id else None,
+    )
+
     import_hash = _compute_hash(
         user_id=user_id,
         amount=amount,
@@ -1073,6 +1118,7 @@ def _parse_row(
             description=description,
             category_id=category_id,
             import_hash=import_hash,
+            flow=flow,
         ),
         review_note,
     )
@@ -1115,14 +1161,21 @@ def _parse_amount_signed(value: str) -> tuple[Decimal, int]:
     símbolos de moneda (€/$/£), códigos ISO al final ("3310,00 EUR")
     y cualquier otro adorno que el banco añada al PDF.
     """
+    # AUDIT-2026-07 (LOW): un negativo puede venir entre paréntesis
+    # "(1.234,56)" (formato contable) o con el signo AL FINAL "1.234,56-"
+    # (algunos bancos españoles). `re.sub` elimina los paréntesis y el
+    # `startswith("-")` no veía el signo final, así que ambos se colaban como
+    # positivos → un cargo entraba con signo +. Los normalizamos a negativo.
+    raw = value.strip()
+    negative_paren = raw.startswith("(") and raw.endswith(")")
     cleaned = re.sub(r"[^\d.,+-]", "", value)
     sign = 0
-    if cleaned.startswith("-"):
+    if negative_paren or cleaned.startswith("-") or cleaned.endswith("-"):
         sign = -1
-        cleaned = cleaned[1:]
-    elif cleaned.startswith("+"):
+    elif cleaned.startswith("+") or cleaned.endswith("+"):
         sign = 1
-        cleaned = cleaned[1:]
+    # Quita cualquier signo (inicial o final) antes de parsear los dígitos.
+    cleaned = cleaned.strip("+-")
     has_comma = "," in cleaned
     has_dot = "." in cleaned
     if has_comma and has_dot:

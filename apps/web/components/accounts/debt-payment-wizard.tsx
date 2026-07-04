@@ -9,6 +9,7 @@ import {
   useCategories,
   useCreateTransaction,
   useLinkTransfer,
+  usePayInstallments,
 } from '@crisol/services';
 import { toast } from '@crisol/store';
 import type { Account, AccountType, AmortizationRow } from '@crisol/types';
@@ -90,6 +91,7 @@ export function DebtPaymentWizard({
   const liabilityTxMutation = useCreateTransaction();
   const interestTxMutation = useCreateTransaction();
   const linkMutation = useLinkTransfer();
+  const payInstallmentsMutation = usePayInstallments();
 
   const accounts = accountsQuery.data ?? [];
   const categories = categoriesQuery.data ?? [];
@@ -111,6 +113,12 @@ export function DebtPaymentWizard({
     if (!scheduleQuery.data) return undefined;
     return findCurrentMonthRow(scheduleQuery.data.rows);
   }, [scheduleQuery.data]);
+
+  // AUDIT-2026-07 (H-05): sólo las liabilities CON cuadro derivan el saldo del
+  // schedule (PHASE-36), así que sólo entonces marcamos cuotas al pagar. Sin
+  // cuadro (p.ej. tarjeta sin plan), el saldo lo mueven los movimientos y la
+  // transferencia ya lo reduce.
+  const hasSchedule = (scheduleQuery.data?.rows.length ?? 0) > 0;
 
   const [sourceAccountId, setSourceAccountId] = useState<string>('');
   const [totalAmount, setTotalAmount] = useState<string>('');
@@ -253,6 +261,7 @@ export function DebtPaymentWizard({
       // 1. Crear la transferencia: expense en cuenta origen +
       //    income en liability (sin categoría), luego enlazar.
       // Las dos transacciones del par usan exactamente `principalNum`.
+      let partialInstallment = false;
       if (principalNum > 0) {
         const outTx = await principalTxMutation.mutateAsync({
           account_id: sourceAccountId,
@@ -274,6 +283,23 @@ export function DebtPaymentWizard({
           out_transaction_id: outTx.id,
           in_transaction_id: inTx.id,
         });
+
+        // AUDIT-2026-07 (H-05): con PHASE-36 el saldo de una liability con
+        // cuadro lo manda el schedule (Σ principal de cuotas no pagadas), no
+        // los movimientos. Marcamos la(s) cuota(s) que este principal cubre
+        // (enlazadas a la pata de amortización) para que el saldo baje; sin
+        // esto el pago movía el dinero pero el saldo del préstamo no cambiaba.
+        if (hasSchedule) {
+          const payResult = await payInstallmentsMutation.mutateAsync({
+            accountId: liabilityAccount.id,
+            payload: {
+              principal_amount: principalNum.toFixed(2),
+              paid_at: occurredAtIso,
+              paid_transaction_id: inTx.id,
+            },
+          });
+          partialInstallment = payResult.marked_count === 0;
+        }
       }
 
       // 2. Crear la expense de intereses sobre la cuenta origen.
@@ -288,7 +314,14 @@ export function DebtPaymentWizard({
         });
       }
 
-      toast.success('Cuota registrada.');
+      if (partialInstallment) {
+        toast.warning(
+          'Pago registrado, pero el principal no cubre una cuota completa: ' +
+            'el saldo del préstamo no baja hasta completar la cuota más antigua pendiente.',
+        );
+      } else {
+        toast.success('Cuota registrada.');
+      }
       reset();
       onClose();
     } catch (err) {

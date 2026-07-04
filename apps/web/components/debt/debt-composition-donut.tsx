@@ -36,9 +36,11 @@ export interface DebtCompositionDonutProps {
 }
 
 /**
- * PHASE-30.3 — Donut de composición de la deuda por tipo (hipoteca,
- * préstamo, tarjeta, otros). Centro muestra el total cuando no hay
- * hover; al pasar por encima muestra el tipo activo + su importe.
+ * PHASE-30.3 — Donut con los PAGOS a deuda del periodo desglosados por
+ * tipo (hipoteca, préstamo, tarjeta, otros). Ojo: NO es el saldo vivo de
+ * la deuda — el total del centro es `total_payments` del rango, igual que
+ * la card "Pagos a deuda" de al lado. Centro muestra el total cuando no
+ * hay hover; al pasar por encima muestra el tipo activo + su importe.
  */
 export function DebtCompositionDonut({
   items,
@@ -72,7 +74,7 @@ export function DebtCompositionDonut({
             letterSpacing: '-0.01em',
           }}
         >
-          Composición de la deuda
+          Pagos por tipo de deuda
         </h2>
       </header>
 

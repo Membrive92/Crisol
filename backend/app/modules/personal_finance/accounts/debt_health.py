@@ -51,11 +51,22 @@ from app.modules.personal_finance.accounts.amortization import (
 from app.modules.personal_finance.accounts.installments_model import (
     LiabilityInstallment,
 )
-from app.modules.personal_finance.accounts.models import Account, AccountNature, AccountType
+from app.modules.personal_finance.accounts.installments_repository import schedule_outstanding
+from app.modules.personal_finance.accounts.models import (
+    UNVALUED_ACCOUNT_TYPES,
+    Account,
+    AccountNature,
+    AccountType,
+)
+from app.modules.personal_finance.accounts.repository import is_inflow
 from app.modules.personal_finance.accounts.schemas import DebtHealthKpis
 from app.modules.personal_finance.categories.models import Category, CategoryKind, CategoryRole
 from app.modules.personal_finance.dashboard.conversion import (
     converted_amount_expr,
+)
+from app.modules.personal_finance.dashboard.repository import (
+    _is_income,
+    _is_internal_transfer,
 )
 from app.modules.personal_finance.transactions.models import Transaction
 
@@ -177,7 +188,15 @@ async def monthly_income_avg(
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
         .where(Transaction.transfer_pair_id.is_(None))
-        .where(Category.kind == CategoryKind.INCOME)
+        # AUDIT-2026-07 (H-03): el ingreso lo decide `flow` (con fallback a
+        # categoría para filas heredadas) y se EXCLUYEN transferencias
+        # internas — mismos helpers que el dashboard, para que el "ingreso
+        # medio" de deuda/DTI no cuente un traspaso entre cuentas propias como
+        # ingreso e infle el denominador del ratio de esfuerzo. Antes filtraba
+        # sólo `Category.kind == INCOME`, que una transferencia is_transfer
+        # INCOME (sin pareja) atravesaba.
+        .where(_is_income())
+        .where(_is_internal_transfer().is_(False))
         .where(Transaction.occurred_at >= window_start)
         .where(Transaction.occurred_at <= window_end)
         .group_by(month_bucket)
@@ -227,7 +246,11 @@ async def windowed_income_total(
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
         .where(Transaction.transfer_pair_id.is_(None))
-        .where(Category.kind == CategoryKind.INCOME)
+        # AUDIT-2026-07 (H-03): ingreso por `flow` + exclusión de
+        # transferencias internas, reconciliado con el dashboard (ver
+        # `monthly_income_avg`).
+        .where(_is_income())
+        .where(_is_internal_transfer().is_(False))
         .where(Transaction.occurred_at >= window_start)
         .where(Transaction.occurred_at <= window_end)
     )
@@ -573,7 +596,12 @@ async def _principal_paid_last_n_months(
         .where(Transaction.account_id.in_(liability_ids))
         .where(Transaction.deleted_at.is_(None))
         .where(Transaction.transfer_pair_id.is_not(None))
-        .where(Category.kind == CategoryKind.INCOME)
+        # AUDIT-2026-07 (LOW): la pata que amortiza (reduce la deuda) es la
+        # ENTRADA (`is_inflow`, flow-based), el MISMO predicado que
+        # debt_history.principal_q y la rama liability de get_balances_for_user.
+        # Antes usaba `Category.kind == INCOME`, que discrepaba cuando flow y
+        # categoría no coinciden (lo que ADR-0004 permite).
+        .where(is_inflow())
         .where(Transaction.occurred_at >= window_start)
         .where(Transaction.occurred_at <= window_end)
     )
@@ -659,14 +687,32 @@ async def compute_debt_health(
     from app.modules.personal_finance.accounts.repository import get_balances_for_user
 
     movements = await get_balances_for_user(db, user_id)
+    # PHASE-36 — "el cuadro manda": las liabilities CON cuadro derivan su
+    # deuda viva de las cuotas no pagadas (igual que /balances), no de los
+    # movimientos. Cargamos las cuotas UNA vez y reusamos abajo (cuota
+    # francesa, time-to-payoff). Antes esto se cargaba más abajo (línea ~710).
+    liability_ids_all = [a.id for a in accounts if a.nature == AccountNature.LIABILITY]
+    installments_by_account = await _load_installments_by_account(db, user_id, liability_ids_all)
     total_assets = Decimal("0")
     total_liabilities = Decimal("0")
     liabilities: list[Account] = []
     liability_balances: dict[uuid.UUID, Decimal] = {}
     for account in accounts:
+        # AUDIT-2026-06 — brokerage/crypto NO entran en `total_assets`,
+        # exactamente igual que `get_balances` (PHASE-31.4). Antes
+        # debt-health los contaba aquí pero net-worth no, así que el KPI
+        # "% en deuda" (debt_to_assets) y el patrimonio neto de la misma
+        # card asumían conjuntos de activos distintos. Las liabilities
+        # nunca son de estos tipos, así que sólo afecta a activos.
+        if account.nature == AccountNature.ASSET and account.type in UNVALUED_ACCOUNT_TYPES:
+            continue
         # Saldo nativo de la cuenta (siempre en su propia divisa, igual
         # que en /balances).
         native_balance = account.opening_balance + movements.get(account.id, Decimal("0"))
+        if account.nature == AccountNature.LIABILITY:
+            sched_outstanding = schedule_outstanding(installments_by_account.get(account.id, []))
+            if sched_outstanding is not None:
+                native_balance = sched_outstanding
 
         # Decidir el balance "agregable" según el modo:
         # - Sin target: como antes, sólo cuentas en reference_currency.
@@ -701,13 +747,11 @@ async def compute_debt_health(
     net_worth = total_assets - total_liabilities
     debt_to_assets = float(total_liabilities / total_assets) if total_assets > 0 else None
 
-    # AUDIT-2026-06 (fix #3) — Cargamos las cuotas persistidas y el
-    # principal real de cada liability UNA vez. Son la fuente de verdad
+    # AUDIT-2026-06 (fix #3) — Las cuotas persistidas son la fuente de verdad
     # para la cuota francesa y los meses restantes (igual que el endpoint
-    # `/accounts/{id}/schedule`), e incluyen las liabilities de
-    # convert-to-debt cuyo `opening_balance` es 0.
-    liability_ids = [liab.id for liab in liabilities]
-    installments_by_account = await _load_installments_by_account(db, user_id, liability_ids)
+    # `/accounts/{id}/schedule`), e incluyen las liabilities de convert-to-debt
+    # cuyo `opening_balance` es 0. PHASE-36: ya cargadas arriba
+    # (`installments_by_account`), reusadas aquí.
     effective_principals: dict[uuid.UUID, Decimal | None] = {}
     for liab in liabilities:
         effective_principals[liab.id] = await _effective_principal(
@@ -750,11 +794,18 @@ async def compute_debt_health(
                     weighted_apr_num += liab.apr * balance
                     weighted_apr_den += balance
         elif liab.type == AccountType.CREDIT_CARD:
-            # Tarjeta: estimar la cuota mensual como `saldo / 12` si
-            # tiene APR (financiación a un año típica), o el mínimo
-            # común (3% del saldo). Si tiene APR declarado, también
-            # contribuye al weighted_apr.
-            if liab.apr is not None:
+            installments = installments_by_account.get(liab.id, [])
+            if installments:
+                # PHASE-36 — Tarjeta con compra a plazos (cuadro persistido):
+                # la cuota real es la del cuadro, no una estimación.
+                native_cuota = Decimal(installments[0].payment)
+                if liab.apr is not None:
+                    weighted_apr_num += liab.apr * balance
+                    weighted_apr_den += balance
+            # Tarjeta sin cuadro: estimar la cuota mensual como `saldo / 12`
+            # si tiene APR (financiación a un año típica), o el mínimo común
+            # (3% del saldo). Si tiene APR declarado, contribuye al weighted_apr.
+            elif liab.apr is not None:
                 weighted_apr_num += liab.apr * balance
                 weighted_apr_den += balance
                 # Cuota teórica de 12 meses con apr — sobre el saldo

@@ -56,6 +56,17 @@ class AccountNature(enum.StrEnum):
     LIABILITY = "liability"
 
 
+# PHASE-31.4 — Cuentas de activo cuyo valor NO entra en el agregado de
+# patrimonio: su valor real depende del mercado y `Σ(movimientos)` no lo
+# representa. Siguen visibles y son destino válido de transferencias.
+# Vive aquí (capa de modelos) para que `service.get_balances` y
+# `debt_health.compute_debt_health` apliquen EXACTAMENTE el mismo criterio
+# de exclusión (AUDIT-2026-06: antes debt-health los contaba en
+# `total_assets` y net-worth no, así que "% en deuda" y patrimonio neto de
+# la misma card asumían conjuntos de activos distintos).
+UNVALUED_ACCOUNT_TYPES = frozenset({AccountType.BROKERAGE, AccountType.CRYPTO})
+
+
 class Account(Base):
     """Cuenta del usuario.
 
@@ -126,6 +137,16 @@ class Account(Base):
     contrato no arranca en una fecha de cuota (ej. financias el 15 y
     las cuotas son día 5 → mes 1 sólo paga intereses del medio mes).
     NULL = no aplica."""
+    parent_account_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    """PHASE-35 — Tarjeta padre cuando esta cuenta es una COMPRA A PLAZOS
+    dentro de una tarjeta de crédito. NULL para cuentas normales. Permite
+    que una tarjeta agrupe varias compras financiadas, cada una con su
+    propio TIN/TAE/plazo/cuadro de amortización (el modelo previo sólo
+    admitía UN plan por cuenta). La vista de deuda agrupa las hijas bajo el
+    padre y muestra el total; los selectores de transacciones las ocultan."""
     display_order: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
@@ -176,5 +197,11 @@ class Account(Base):
             "user_id",
             unique=True,
             postgresql_where=text("is_default"),
+        ),
+        # PHASE-35 — agrupar compras a plazos por su tarjeta padre.
+        Index(
+            "ix_accounts_parent_account_id",
+            "parent_account_id",
+            postgresql_where=text("parent_account_id IS NOT NULL"),
         ),
     )

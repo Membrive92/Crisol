@@ -312,6 +312,43 @@ producción detrás de un reverse proxy (Caddy/Traefik/Nginx) el timeout se conf
 Si una petición "muere" exactamente a los 30s sin trazas en uvicorn, el sospechoso es
 casi siempre el dev server.
 
+### [PHASE-34] Cuando parcheas la misma raíz ≥2 veces, mueve la fuente de verdad
+**Error:** PHASE-23.1, 28 y 32 arreglaron tres veces el MISMO defecto —la
+dirección/clasificación del dinero se derivaba de la **categoría**, así que un
+solo fallo de categoría (regla, bank-mapping, import) rompía saldo y cashflow
+en silencio—. Cada fase añadió otro guardarraíl (separar `is_transfer` del
+`kind`, dirección explícita en el modal, corrección de dirección en el import)
+sin tocar la raíz.
+**Causa:** Acoplar el dinero (signo + gasto/ingreso/transferencia) a una
+columna **descriptiva** (la categoría) que cualquier mecanismo puede
+equivocar. Mientras la categoría fuera la verdad del dinero, el bug era
+estructural y reaparecía por otra vía.
+**Solución:** Mover la verdad a la transacción con `transactions.flow`
+(`IN|OUT|TRANSFER_*`). Saldo = `flow`+`account.nature`; cashflow = Σ por
+`flow`. La categoría pasa a ser 100 % descriptiva. ADR-0004.
+**Regla:** Si arreglas el mismo TIPO de bug en sitios distintos dos o más
+veces, deja de parchear síntomas: el bug es estructural. Cambia DÓNDE vive la
+fuente de verdad (o qué columna la define), no añadas otro guardarraíl sobre
+la fuente equivocada.
+
+### [PHASE-34] El backfill de una migración debe REPRODUCIR los datos (bugs incluidos), no corregirlos
+**Error:** Tentación de "aprovechar" la migración que añade `flow` para
+corregir de paso las filas rotas (transferencias-como-gasto, `ADEUDO`
+contado como gasto).
+**Causa:** Si el backfill corrige Y la query nueva cambia de fuente a la vez,
+no hay forma de probar que la nueva matemática es **equivalente** a la vieja:
+un test verde podría estar tapando un cambio de query con un cambio de datos.
+**Solución:** El backfill (34.1) derivó `flow` de la interpretación actual por
+categoría **tal cual**, reproduciendo los bugs. Eso permitió un golden test de
+EQUIVALENCIA viejo↔nuevo en 34.2. La corrección de datos llega después, por
+**reimportación** con el pipeline nuevo (el signo del extracto manda) — no en
+la migración. Auditoría posterior confirmó que reimportar dejó los dos
+doble-conteos ya resueltos sin tocar la BD a mano.
+**Regla:** Una migración que cambia la fuente de verdad de un cálculo backfilea
+para ser **idéntica** al comportamiento previo; la corrección de datos es un
+paso separado y auditado (reimport o data-fix), nunca un efecto colateral de
+la migración. Así el test prueba la query, no el parche de datos.
+
 ---
 
 ## Ejemplos de referencia (no son lecciones reales)

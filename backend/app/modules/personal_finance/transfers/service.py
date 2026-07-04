@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime
+from decimal import Decimal
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +30,7 @@ from app.modules.personal_finance.categories.repository import (
 )
 from app.modules.personal_finance.transactions.models import (
     Transaction,
+    TransactionFlow,
     TransactionSource,
 )
 from app.modules.personal_finance.transfers.repository import (
@@ -37,6 +39,7 @@ from app.modules.personal_finance.transfers.repository import (
 from app.modules.personal_finance.transfers.repository import (
     filter_unambiguous,
     find_candidate_pairs,
+    find_mirror_charge,
     get_or_create_default_transfer_category,
     list_misclassified_transfers,
     list_suspect_transactions,
@@ -87,7 +90,12 @@ def _candidate_to_schema(out_tx: Transaction, in_tx: Transaction, delta: int) ->
     )
 
 
-def _pair_to_schema(out_tx: Transaction, in_tx: Transaction) -> TransferPairResponse:
+def _pair_to_schema(
+    out_tx: Transaction,
+    in_tx: Transaction,
+    *,
+    absorbed_mirror_amount: Decimal | None = None,
+) -> TransferPairResponse:
     return TransferPairResponse(
         out_transaction_id=out_tx.id,
         in_transaction_id=in_tx.id,
@@ -98,6 +106,7 @@ def _pair_to_schema(out_tx: Transaction, in_tx: Transaction) -> TransferPairResp
         out_occurred_at=out_tx.occurred_at,
         in_occurred_at=in_tx.occurred_at,
         delta_days=_delta_days(out_tx, in_tx),
+        absorbed_mirror_amount=absorbed_mirror_amount,
     )
 
 
@@ -136,6 +145,9 @@ async def auto_match(
     unambiguous, ambiguous = filter_unambiguous(pairs)
 
     for out_tx, in_tx, _ in unambiguous:
+        # PHASE-34: al emparejar, ambas patas son transferencia interna.
+        out_tx.flow = TransactionFlow.TRANSFER_OUT
+        in_tx.flow = TransactionFlow.TRANSFER_IN
         await repo_link_pair(db, out_tx, in_tx)
 
     return TransferMatchResponse(
@@ -194,6 +206,9 @@ async def link_manually(
                 "El importe y la moneda deben coincidir entre las dos " "transacciones del par."
             ),
         )
+    # PHASE-34: al emparejar, ambas patas son transferencia interna.
+    out_tx.flow = TransactionFlow.TRANSFER_OUT
+    in_tx.flow = TransactionFlow.TRANSFER_IN
     await repo_link_pair(db, out_tx, in_tx)
     return _pair_to_schema(out_tx, in_tx)
 
@@ -305,8 +320,10 @@ async def reclassify_bulk(
             errors.append(f"{tx_id}: ya está en un par, no se toca")
             continue
         chosen_cat_id: uuid.UUID
+        chosen_kind: CategoryKind
         if target_category_id is not None:
             chosen_cat_id = target_category_id
+            chosen_kind = target_cat.kind  # type: ignore[union-attr]
         else:
             current_cat = (
                 await get_category_by_id(db, tx.category_id, user_id) if tx.category_id else None
@@ -324,6 +341,13 @@ async def reclassify_bulk(
             )
             opposite_cat = await get_or_create_default_transfer_category(db, user_id, kind=opposite)
             chosen_cat_id = opposite_cat.id
+            chosen_kind = opposite
+        # PHASE-34: la dirección la fija el flow según el kind elegido.
+        tx.flow = (
+            TransactionFlow.TRANSFER_IN
+            if chosen_kind == CategoryKind.INCOME
+            else TransactionFlow.TRANSFER_OUT
+        )
         await repo_assign_category(db, tx, chosen_cat_id)
         reclassified += 1
 
@@ -411,6 +435,110 @@ def infer_transfer_kind(
 _infer_transfer_kind = infer_transfer_kind
 
 
+# ─────────────────────────────────────────────────────────────────────
+# PHASE-34 — Clasificación de `flow` (modelo de dinero + tarjeta, ADR-0004)
+# ─────────────────────────────────────────────────────────────────────
+
+# Patrones de descripción que marcan un MOVIMIENTO INTERNO (no gasto ni
+# ingreso real del mes): transferencias entre cuentas propias y pagos /
+# liquidaciones de tarjeta de crédito.
+#
+# Modelo de tarjeta (cuentas exactas, vista unificada): las COMPRAS con
+# tarjeta ya cuentan como gasto en el extracto de la tarjeta; el ADEUDO /
+# liquidación / cuota financiada que las salda desde el banco es PAGO DE
+# DEUDA (traspaso a la tarjeta), no gasto nuevo → se marca TRANSFER_* para
+# no duplicar. BIZUM se EXCLUYE a propósito (suele ser pago a comercio →
+# gasto real). OJO: estos patrones NO matchean "pago con tarjeta" (la
+# compra de débito), que sí es gasto.
+_INTERNAL_MOVEMENT_PATTERNS = (
+    "transferencia",
+    "transf.",
+    "traspaso",
+    "envio de dinero",
+    "envío de dinero",
+    "envio inmediato",
+    "envío inmediato",
+    "adeudo mensual de tarjeta",
+    "liquidacion de tarjeta",
+    "liquidación de tarjeta",
+    "operacion financiada",
+    "operación financiada",
+    "cuota de tarjeta",
+)
+
+
+def is_internal_movement_text(text: str | None) -> bool:
+    """True si la descripción indica un movimiento interno (transferencia o
+    pago/liquidación de tarjeta) que NO debe contar como gasto/ingreso."""
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(pattern in lowered for pattern in _INTERNAL_MOVEMENT_PATTERNS)
+
+
+# AUDIT-2026-07 (W-01): marcadores de ingreso EXTERNO inequívoco. Una nómina o
+# pensión pagada por transferencia es ingreso real, NUNCA un movimiento interno
+# entre cuentas propias — sin esto, "TRANSFERENCIA ... NÓMINA" caía en el patrón
+# "transferencia" y se excluía del cashflow, infravalorando el ingreso (y con
+# él la tasa de ahorro y el DTI). No resuelve TODA la ambigüedad (una
+# transferencia recibida de un tercero sigue siendo indistinguible por texto de
+# un traspaso propio), pero corrige el caso de mayor impacto sin regresar la
+# detección ES de traspasos/BIZUM.
+_EXTERNAL_INCOME_MARKERS = ("nomina", "nómina", "pension", "pensión")
+
+
+def _has_external_income_marker(text: str | None) -> bool:
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(marker in lowered for marker in _EXTERNAL_INCOME_MARKERS)
+
+
+def classify_import_flow(
+    *,
+    bank_sign: int,
+    text: str | None,
+    category_is_transfer: bool,
+    category_kind: CategoryKind | None = None,
+) -> TransactionFlow | None:
+    """Decide el `flow` de una fila importada (PHASE-34, ADR-0004).
+
+    Dirección (entra/sale), por orden de fiabilidad:
+    1. SIGNO DEL EXTRACTO (`bank_sign`) — invariante duro cuando existe.
+    2. Si el extracto no trae signo (`bank_sign == 0`): el TEXTO
+       (`infer_transfer_kind`: recibida/realizada…).
+    3. Si el texto tampoco decide: el `category_kind` de la categoría
+       resuelta (extractos sólo-magnitud, comportamiento histórico).
+    4. Sin ninguna señal → `None`: movimiento sin clasificar (contribuye 0
+       al saldo y queda fuera del cashflow, igual que una tx sin categoría).
+
+    "Transfer-ness": de la categoría resuelta (`is_transfer`) O de la
+    descripción (`is_internal_movement_text` — transferencia o pago de
+    tarjeta). Nunca se infiere la dirección de `category.kind` cuando hay
+    signo de extracto.
+    """
+    # La "transfer-ness" por TEXTO se tempera con el override de ingreso
+    # externo (W-01): una nómina/pensión por transferencia es ingreso real. El
+    # override NO pisa un `category_is_transfer` explícito (señal más fuerte que
+    # el heurístico de descripción).
+    text_says_internal = is_internal_movement_text(text) and not _has_external_income_marker(
+        text
+    )
+    is_transfer = category_is_transfer or text_says_internal
+    if bank_sign > 0:
+        income = True
+    elif bank_sign < 0:
+        income = False
+    else:
+        kind = infer_transfer_kind(text) or category_kind
+        if kind is None:
+            return None
+        income = kind == CategoryKind.INCOME
+    if is_transfer:
+        return TransactionFlow.TRANSFER_IN if income else TransactionFlow.TRANSFER_OUT
+    return TransactionFlow.IN if income else TransactionFlow.OUT
+
+
 async def mark_as_transfer(
     db: AsyncSession, user_id: uuid.UUID, *, transaction_id: uuid.UUID
 ) -> TransferMarkResponse:
@@ -459,6 +587,13 @@ async def mark_as_transfer(
             ),
         )
     category = await get_or_create_default_transfer_category(db, user_id, kind=target_kind)
+    # PHASE-34: marcar como transferencia fija el flow (la dirección la
+    # da el kind inferido) — ya no depende sólo de la categoría.
+    tx.flow = (
+        TransactionFlow.TRANSFER_IN
+        if target_kind == CategoryKind.INCOME
+        else TransactionFlow.TRANSFER_OUT
+    )
     await repo_assign_category(db, tx, category.id)
     return TransferMarkResponse(
         transaction_id=tx.id,
@@ -566,6 +701,12 @@ async def convert_to_internal_transfer(
     )
     if source.category_id != canonical_source_category.id:
         await repo_assign_category(db, source, canonical_source_category.id)
+    # PHASE-34: la dirección la fija el flow según el rol del origen.
+    source.flow = (
+        TransactionFlow.TRANSFER_OUT
+        if source_kind == CategoryKind.EXPENSE
+        else TransactionFlow.TRANSFER_IN
+    )
 
     counterpart_category = await get_or_create_default_transfer_category(
         db, user_id, kind=counterpart_kind
@@ -585,6 +726,11 @@ async def convert_to_internal_transfer(
         occurred_at=source.occurred_at,
         description=f"Transferencia {label} {source_account_name}",
         source=TransactionSource.MANUAL,
+        flow=(
+            TransactionFlow.TRANSFER_OUT
+            if counterpart_kind == CategoryKind.EXPENSE
+            else TransactionFlow.TRANSFER_IN
+        ),
     )
     _ = other_account  # explicitamente ignorado; se computó arriba para validación de scope
     db.add(counterpart)
@@ -721,16 +867,38 @@ async def convert_to_debt_operation(
         occurred_at=source.occurred_at,
         description=f"Deuda contraída desde {source_name}",
         source=TransactionSource.MANUAL,
+        # La contraparte en la liability sube la deuda (salida de valor).
+        flow=TransactionFlow.TRANSFER_OUT,
     )
     db.add(counterpart)
     await db.flush()
 
+    # PHASE-34: la pata origen (dinero PRESTADO entrando en el activo) es
+    # TRANSFER_IN; el carve-out pata-activo del saldo la sigue dejando en 0.
+    source.flow = TransactionFlow.TRANSFER_IN
     await repo_link_pair(db, source, counterpart)
+
+    # PHASE-34 — Anular el "cargo espejo": cuando el banco financia una
+    # compra muestra el abono (esta tx, +X) y un cargo `ADEUDO/LIQUIDACIÓN
+    # DE TARJETA` del MISMO importe (−X) que lo compensa (neto 0). Si lo
+    # dejáramos suelto restaría del saldo sin contraparte. Lo movemos a la
+    # papelera (reversible) — el saldo queda en neto 0 + la deuda creada.
+    absorbed_mirror_amount: Decimal | None = None
+    mirror = await find_mirror_charge(db, user_id, source)
+    if mirror is not None:
+        mirror.deleted_at = datetime.now(UTC)
+        # AUDIT-2026-07 (H-04): marca el borrado como "absorbido por el
+        # sistema" (no papelera de usuario) para que reimportar el extracto
+        # no resucite este −X — `find_existing_hashes` lo tratará como
+        # existente.
+        mirror.absorbed_as_mirror = True
+        await db.flush()
+        absorbed_mirror_amount = mirror.amount
 
     # Para el response, presentamos el par con el origen como "in"
     # (entró dinero en BBVA) y la contraparte como "out" (deuda creada
     # en la liability).
-    return _pair_to_schema(counterpart, source)
+    return _pair_to_schema(counterpart, source, absorbed_mirror_amount=absorbed_mirror_amount)
 
 
 async def _create_liability_for_debt(
@@ -770,6 +938,46 @@ async def _create_liability_for_debt(
         )
     accepts_amortization = account_type in _LIABILITY_TYPES_AMORT
     currency = (spec.currency or default_currency).upper()
+    # PHASE-35 — compra a plazos anidada bajo una tarjeta: valida el padre y
+    # exige plan propio. Mismos invariantes que `accounts.service.create_account`,
+    # con una diferencia: el capital NO viene de `opening_balance` (queda 0) sino
+    # del importe de la tx origen (via `principal_override`); la fecha por defecto
+    # es la de la tx. Por eso aquí sólo exigimos TIN + plazo.
+    if spec.parent_account_id is not None:
+        parent = await get_account_by_id(db, spec.parent_account_id, user_id)
+        if parent is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="La tarjeta a la que asociar la compra no existe.",
+            )
+        if parent.is_archived:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La tarjeta indicada está archivada; no puedes anidar compras en ella.",
+            )
+        if parent.type != AccountType.CREDIT_CARD:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Solo se pueden añadir compras a plazos a una tarjeta de crédito.",
+            )
+        if parent.parent_account_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No se puede anidar: la tarjeta indicada ya es una compra a plazos.",
+            )
+        if account_type != AccountType.CREDIT_CARD:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Una compra a plazos debe ser de tipo tarjeta de crédito.",
+            )
+        if spec.apr is None or spec.term_months is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Una compra a plazos necesita TIN y plazo (meses) para generar "
+                    "su cuadro; el importe se toma de la transacción."
+                ),
+            )
     account = Account(
         user_id=user_id,
         name=spec.name,
@@ -786,5 +994,6 @@ async def _create_liability_for_debt(
         interest_only_first_payment=(
             spec.interest_only_first_payment if accepts_amortization else None
         ),
+        parent_account_id=spec.parent_account_id,
     )
     return await repo_create_account(db, account)

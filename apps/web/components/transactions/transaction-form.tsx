@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 
-import { colors, fromDateInputValue, toDateInputValue } from '@crisol/ui';
+import { colors, fontSize, fontWeight, fromDateInputValue, radius, spacing, toDateInputValue } from '@crisol/ui';
 import {
   pickPreferredAccount,
   useAccounts,
@@ -13,6 +13,7 @@ import { useCurrencyStore } from '@crisol/store';
 import type {
   Transaction,
   TransactionCreateRequest,
+  TransactionFlow,
   TransactionUpdateRequest,
 } from '@crisol/types';
 
@@ -24,6 +25,14 @@ import { CategoryCombobox } from './category-combobox';
 // Mantener sincronizado con `currency-menu.tsx` cuando se amplíe.
 const BASE_CURRENCIES = ['EUR', 'USD'] as const;
 
+/** PHASE-34: dirección que el usuario declara con el segmento [Gasto]/[Ingreso].
+ * La transfer-ness se gestiona en el flujo de transferencias, no aquí. */
+type Direction = 'OUT' | 'IN';
+
+function directionFromFlow(flow: TransactionFlow | null | undefined): Direction {
+  return flow === 'IN' || flow === 'TRANSFER_IN' ? 'IN' : 'OUT';
+}
+
 export interface TransactionFormValues {
   amount: string;
   currency: string;
@@ -31,6 +40,7 @@ export interface TransactionFormValues {
   category_id: string;
   account_id: string;
   description: string;
+  direction: Direction;
 }
 
 export interface TransactionFormProps {
@@ -55,6 +65,8 @@ function buildInitialValues(
     // migración), queda vacío y se rellena con la primera cuenta.
     account_id: initial?.account_id ?? '',
     description: initial?.description ?? '',
+    // PHASE-34: por defecto Gasto (la mayoría de altas manuales lo son).
+    direction: directionFromFlow(initial?.flow),
   };
 }
 
@@ -90,7 +102,8 @@ export function TransactionForm({
     if (!accounts || accounts.length === 0) return;
     setValues((prev) => {
       if (prev.account_id) return prev;
-      const preferred = pickPreferredAccount(accounts);
+      // PHASE-35: nunca pre-seleccionar una compra a plazos (cuenta hija).
+      const preferred = pickPreferredAccount(accounts.filter((a) => !a.parent_account_id));
       if (!preferred) return prev;
       return { ...prev, account_id: preferred.id };
     });
@@ -103,8 +116,26 @@ export function TransactionForm({
     new Set([...BASE_CURRENCIES, ...(userCurrencies ?? []), values.currency].filter(Boolean)),
   );
 
-  const accountList = accounts ?? [];
+  // PHASE-35: las compras a plazos (cuentas hijas de una tarjeta) no son
+  // destino de transacciones → fuera del selector. Al editar una tx ya
+  // asignada a una (heredada), se conserva su cuenta para no perderla.
+  const selectableAccounts = (accounts ?? []).filter((a) => !a.parent_account_id);
+  const accountList =
+    values.account_id && !selectableAccounts.some((a) => a.id === values.account_id)
+      ? [
+          ...selectableAccounts,
+          ...(accounts ?? []).filter((a) => a.id === values.account_id),
+        ]
+      : selectableAccounts;
   const noAccounts = !loadingAccounts && accountList.length === 0;
+  // PHASE-34: editar una transferencia no usa el toggle Gasto/Ingreso — su
+  // dirección la fija el par y el backend protege el invariante (409). El
+  // segmento sólo aplica a movimientos normales y a altas nuevas.
+  const isTransfer =
+    initial != null &&
+    (initial.transfer_pair_id != null ||
+      initial.flow === 'TRANSFER_IN' ||
+      initial.flow === 'TRANSFER_OUT');
 
   function handleChange<K extends keyof TransactionFormValues>(field: K, value: string) {
     setValues((prev) => ({ ...prev, [field]: value }));
@@ -143,6 +174,13 @@ export function TransactionForm({
       category_id: values.category_id || null,
       description: values.description.trim() || null,
     };
+    // PHASE-34: enviamos `flow` explícito desde el segmento Gasto/Ingreso.
+    // En una transferencia editada NO lo tocamos (lo fija el par; el
+    // backend rechaza romperlo). El backend deriva flow de la categoría si
+    // no llega, así que omitirlo en transferencias es seguro.
+    if (!isTransfer) {
+      payload.flow = values.direction;
+    }
 
     onSubmit(payload);
   }
@@ -178,6 +216,29 @@ export function TransactionForm({
         aria-invalid={fieldErrors.amount ? true : undefined}
         required
       />
+      {isTransfer ? (
+        <div style={transferBadgeStyle}>↔ Movimiento interno (transferencia)</div>
+      ) : (
+        <div style={{ marginBottom: spacing.md }}>
+          <span style={segmentLabelStyle}>Tipo</span>
+          <div style={segmentGroupStyle} role="group" aria-label="Tipo de movimiento">
+            {(['OUT', 'IN'] as const).map((d) => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => setValues((prev) => ({ ...prev, direction: d }))}
+                aria-pressed={values.direction === d}
+                style={{
+                  ...segmentBtnStyle,
+                  ...(values.direction === d ? segmentBtnActiveStyle : {}),
+                }}
+              >
+                {d === 'OUT' ? 'Gasto' : 'Ingreso'}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <Select
         label="Moneda"
         value={values.currency}
@@ -239,3 +300,44 @@ export function TransactionForm({
     </form>
   );
 }
+
+const segmentLabelStyle = {
+  display: 'block',
+  marginBottom: spacing.xs,
+  fontSize: fontSize.sm,
+  fontWeight: fontWeight.medium,
+  color: colors.text,
+} as const;
+
+const segmentGroupStyle = {
+  display: 'flex',
+  gap: spacing.xs,
+} as const;
+
+const segmentBtnStyle = {
+  flex: 1,
+  padding: `${spacing.sm}px ${spacing.sm}px`,
+  borderRadius: radius.sm,
+  border: `1px solid ${colors.border}`,
+  backgroundColor: colors.surface,
+  color: colors.textMuted,
+  fontSize: fontSize.sm,
+  fontWeight: fontWeight.medium,
+  cursor: 'pointer',
+} as const;
+
+const segmentBtnActiveStyle = {
+  borderColor: colors.primary,
+  backgroundColor: colors.primarySoft,
+  color: colors.text,
+  fontWeight: fontWeight.semibold,
+} as const;
+
+const transferBadgeStyle = {
+  marginBottom: spacing.md,
+  padding: `${spacing.sm}px ${spacing.sm}px`,
+  borderRadius: radius.sm,
+  backgroundColor: colors.surfaceMuted,
+  color: colors.textMuted,
+  fontSize: fontSize.sm,
+} as const;
