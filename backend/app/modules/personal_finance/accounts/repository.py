@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import ColumnElement, case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +40,34 @@ def _is_internal_transfer() -> ColumnElement[bool]:
     return Transaction.flow.in_(
         [TransactionFlow.TRANSFER_IN, TransactionFlow.TRANSFER_OUT]
     ) | (Transaction.flow.is_(None) & Category.is_transfer.is_(True))
+
+
+def signed_amount_expr(account: Any, paired_account: Any) -> ColumnElement[Decimal]:
+    """PHASE-37 — expresión de signo COMPARTIDA: cómo una tx afecta al saldo de
+    SU cuenta según `account.nature` + flow (incluye el carve-out H-02 de la
+    pata-activo de un par de deuda). Un ÚNICO lugar para que
+    `get_balances_for_user` y `position_history` (37.1) no diverjan — el
+    invariante es que el último punto de la serie de patrimonio == los saldos
+    actuales. `account`/`paired_account` son la tabla o el alias de la cuenta y
+    su pareja de transferencia.
+
+    Convención (PHASE-19.4 + PHASE-22 + H-02):
+    - Pata-activo de conversión a deuda que ENTRA → 0 (dinero prestado, no ahorro).
+    - LIABILITY: salida/cargo sube la deuda (+amount), entrada/pago la baja (-amount).
+    - ASSET: entrada suma, salida resta.
+    - Sin flujo ni categoría → 0 (PHASE-31.3).
+    """
+    asset_leg_of_debt_pair = (account.nature == AccountNature.ASSET) & (
+        paired_account.nature == AccountNature.LIABILITY
+    )
+    return case(
+        (asset_leg_of_debt_pair & is_inflow(), Decimal("0")),
+        ((account.nature == AccountNature.LIABILITY) & is_outflow(), Transaction.amount),
+        ((account.nature == AccountNature.LIABILITY) & is_inflow(), -Transaction.amount),
+        (is_outflow(), -Transaction.amount),
+        (is_inflow(), Transaction.amount),
+        else_=Decimal("0"),
+    )
 
 
 async def clear_default_accounts(
@@ -192,36 +221,11 @@ async def get_balances_for_user(db: AsyncSession, user_id: uuid.UUID) -> dict[uu
     # prestado entrando en un activo → no es patrimonio (ver docstring).
     paired_tx = aliased(Transaction)
     paired_account = aliased(Account)
-    asset_leg_of_debt_pair = (Account.nature == AccountNature.ASSET) & (
-        paired_account.nature == AccountNature.LIABILITY
-    )
 
-    # PHASE-34: la dirección la manda `flow` (con fallback a category.kind
-    # para filas heredadas — ver helpers arriba). `account.nature` decide el
-    # signo final: en ASSET la entrada suma; en LIABILITY se invierte (una
-    # salida/cargo aumenta la deuda, una entrada/pago la reduce).
-    signed_amount = case(
-        # Pata-activo de una conversión a deuda (activo↔pasivo): SÓLO la
-        # ENTRADA de dinero prestado en el activo aporta 0 (no es ahorro).
-        # AUDIT-2026-07 (H-02): antes la condición era agnóstica a la
-        # dirección y también anulaba la SALIDA (amortizar deuda desde el
-        # activo), lo que INFLABA el patrimonio neto — pagar deuda dejaba el
-        # saldo del activo intacto mientras la deuda bajaba. Con `& is_inflow()`
-        # una salida de activo que paga deuda cae a la rama `is_outflow` →
-        # -amount, y el activo baja como debe. Va PRIMERO para ganar a las
-        # ramas por flujo en el caso de entrada.
-        (asset_leg_of_debt_pair & is_inflow(), Decimal("0")),
-        # Liability: signos invertidos respecto a asset.
-        ((Account.nature == AccountNature.LIABILITY) & is_outflow(), Transaction.amount),
-        ((Account.nature == AccountNature.LIABILITY) & is_inflow(), -Transaction.amount),
-        # Asset (default).
-        (is_outflow(), -Transaction.amount),
-        (is_inflow(), Transaction.amount),
-        # PHASE-31.3 — tx sin flujo ni categoría (kind=NULL) no contribuye
-        # al saldo. Antes `else_=Transaction.amount` producía un cargo/abono
-        # arbitrario; el banner UX educa al usuario para categorizar.
-        else_=Decimal("0"),
-    )
+    # PHASE-34: la dirección la manda `flow`; `account.nature` decide el signo.
+    # PHASE-37: la expresión vive en `signed_amount_expr` (compartida con
+    # position_history) para no divergir.
+    signed_amount = signed_amount_expr(Account, paired_account)
     query = (
         select(
             Transaction.account_id,

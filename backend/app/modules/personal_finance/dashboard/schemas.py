@@ -36,6 +36,12 @@ class SummaryResponse(BaseModel):
     previous_period_income: Decimal | None = None
     previous_period_expenses: Decimal | None = None
     previous_period_balance: Decimal | None = None
+    cashflow_delta: Decimal | None = None
+    """PHASE-37.1 — `balance − previous_period_balance` (Δ del flujo neto vs
+    periodo anterior equivalente). `None` si no hay periodo previo."""
+    savings_rate_delta_pp: float | None = None
+    """PHASE-37.1 — Variación de la tasa de ahorro en PUNTOS porcentuales vs
+    periodo anterior. `None` si falta ingreso en el periodo actual o previo."""
     available_from: str | None = None
     """PHASE-34 — Mes (`YYYY-MM`) más antiguo con transacciones del usuario,
     global (ignora el filtro de período). Acota el navegador de período del

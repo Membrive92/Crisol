@@ -404,6 +404,38 @@ class DebtHistoryResponse(BaseModel):
     months_projected: int
 
 
+class PositionPoint(BaseModel):
+    """PHASE-37.1 — Un punto de la serie temporal de patrimonio.
+
+    `is_projection=False` para meses cerrados reales; `True` para la
+    proyección (activos planos + deuda por cuadro teórico).
+    """
+
+    month: date
+    """Primer día del mes."""
+    total_assets: Decimal
+    total_liabilities: Decimal
+    """Deuda agregada con signo positivo."""
+    net_worth: Decimal
+    """`total_assets − total_liabilities`."""
+    is_projection: bool = False
+
+
+class PositionHistoryResponse(BaseModel):
+    """PHASE-37.1 — Serie temporal de patrimonio + Δ del periodo pedido.
+
+    Mono-divisa (`reference_currency`), misma limitación que
+    `/accounts/balances`. `delta_period` = neto actual (último punto
+    histórico) − neto al inicio del rango; `None` si no hay ≥2 puntos
+    históricos.
+    """
+
+    reference_currency: str
+    points: list[PositionPoint]
+    delta_period: Decimal | None = None
+    delta_period_pct: float | None = None
+
+
 class AccountBalancesResponse(BaseModel):
     """Snapshot de patrimonio del usuario por cuenta (PHASE-19.4).
 

@@ -164,6 +164,23 @@ async def get_summary(
         prev_expenses = prev_totals.get(CategoryKind.EXPENSE, Decimal("0"))
         prev_balance = prev_income - prev_expenses
 
+    # PHASE-37.1 — Δ vs periodo anterior equivalente (regla común de toda la
+    # app: mes vs mes anterior, custom vs rango precedente de igual longitud).
+    balance = income - expenses
+    cashflow_delta: Decimal | None = None
+    savings_rate_delta_pp: float | None = None
+    if prev_balance is not None:
+        cashflow_delta = balance - prev_balance
+    if (
+        prev_income is not None
+        and prev_income > 0
+        and income > 0
+        and prev_balance is not None
+    ):
+        rate_now = float(balance / income * 100)
+        rate_prev = float(prev_balance / prev_income * 100)
+        savings_rate_delta_pp = rate_now - rate_prev
+
     # PHASE-34 — límites globales (mes min/max con datos), independientes del
     # filtro de período, para acotar el navegador de período del Análisis.
     available_from, available_to = await repository.get_transaction_month_bounds(db, user_id)
@@ -171,13 +188,15 @@ async def get_summary(
     return SummaryResponse(
         income=income,
         expenses=expenses,
-        balance=income - expenses,
+        balance=balance,
         transaction_count=count,
         currency=displayed,
         unconvertible_count=unconvertible,
         previous_period_income=prev_income,
         previous_period_expenses=prev_expenses,
         previous_period_balance=prev_balance,
+        cashflow_delta=cashflow_delta,
+        savings_rate_delta_pp=savings_rate_delta_pp,
         available_from=available_from,
         available_to=available_to,
     )

@@ -13,6 +13,7 @@ from app.core.deps import CurrentUser
 from app.modules.personal_finance.accounts.debt_health import compute_debt_health
 from app.modules.personal_finance.accounts.debt_history import compute_debt_history
 from app.modules.personal_finance.accounts.debt_reconciliation import reconcile_debt_payments
+from app.modules.personal_finance.accounts.position_history import compute_position_history
 from app.modules.personal_finance.accounts.schemas import (
     AccountBalancesResponse,
     AccountCreate,
@@ -26,6 +27,7 @@ from app.modules.personal_finance.accounts.schemas import (
     InstallmentBulkPayResponse,
     InstallmentPayRequest,
     InstallmentUpdateRequest,
+    PositionHistoryResponse,
     ReconcileBalanceRequest,
     ReconcilePlanResponse,
 )
@@ -125,6 +127,27 @@ async def debt_history_endpoint(
         months_back=months_back,
         months_ahead=months_ahead,
         target_currency=target_currency,
+    )
+
+
+@router.get("/position-history", response_model=PositionHistoryResponse)
+async def position_history_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    months_back: Annotated[int, Query(ge=1, le=36)] = 12,
+    months_forward: Annotated[int, Query(ge=0, le=36)] = 0,
+) -> PositionHistoryResponse:
+    """PHASE-37.1 — Serie temporal de patrimonio (activos / pasivos / neto).
+
+    `months_back` puntos históricos (meses cerrados) + `months_forward`
+    proyectados (activos planos + deuda por cuadro teórico). Mono-divisa
+    (divisa de referencia), misma limitación que `/accounts/balances`.
+    """
+    return await compute_position_history(
+        db,
+        user.id,
+        months_back=months_back,
+        months_forward=months_forward,
     )
 
 
