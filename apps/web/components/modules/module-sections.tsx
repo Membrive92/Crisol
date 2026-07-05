@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useState, type ComponentType } from 'react';
 
 import type { AppModule, ModuleSection } from '@crisol/types';
-import { colors, fontWeight, spacing } from '@crisol/ui';
+import { colors, fontWeight, scaleFont, spacing } from '@crisol/ui';
 
 import {
   ArrowLeftRightIcon,
@@ -112,7 +112,7 @@ function SectionTab({
         gap: 8,
         padding: '7px 14px',
         borderRadius: 8,
-        fontSize: 14,
+        fontSize: scaleFont(14),
         fontWeight: active ? fontWeight.semibold : fontWeight.medium,
         color: fg,
         backgroundColor: bg,
@@ -147,7 +147,7 @@ function SectionTab({
             backgroundColor: active ? colors.primarySoft : colors.surface,
             border: `1px solid ${active ? 'transparent' : colors.border}`,
             color: active ? colors.primary : colors.textMuted,
-            fontSize: 10.5,
+            fontSize: scaleFont(10.5),
             fontWeight: fontWeight.semibold,
             fontVariantNumeric: 'tabular-nums',
             flex: '0 0 auto',

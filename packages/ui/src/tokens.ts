@@ -70,13 +70,29 @@ export const radius = {
   lg: 12,
 } as const;
 
+// PHASE-37 — la UI web se veía pequeña en pantallas grandes (2.5K+): con el
+// ancho ya al máximo, la tipografía quedaba diminuta y "alejada". Escalamos la
+// fuente SÓLO en web (isReactNative=false, incluido el SSR de Next, así que no
+// hay mismatch de hidratación) un factor fijo; móvil (RN) mantiene los tamaños
+// nativos pensados para pantalla de teléfono. Ajustable con `WEB_FONT_SCALE`.
+const WEB_FONT_SCALE = 1.15;
+
+/**
+ * PHASE-37 — Escala un tamaño de fuente en px SÓLO en web (el mismo factor que
+ * `fontSize`). Úsalo para tamaños de fuente HARDCODED (sidebar, header, rótulos
+ * sueltos) que no pasan por los tokens, para que crezcan igual que el resto en
+ * pantallas grandes. En móvil (RN) devuelve el valor original.
+ */
+export const scaleFont = (px: number): number =>
+  isReactNative ? px : Math.round(px * WEB_FONT_SCALE);
+
 export const fontSize = {
-  xs: 12,
-  sm: 14,
-  md: 16,
-  lg: 18,
-  xl: 24,
-  xxl: 32,
+  xs: scaleFont(12),
+  sm: scaleFont(14),
+  md: scaleFont(16),
+  lg: scaleFont(18),
+  xl: scaleFont(24),
+  xxl: scaleFont(32),
 } as const;
 
 export const fontWeight = {

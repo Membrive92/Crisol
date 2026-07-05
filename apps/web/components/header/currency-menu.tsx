@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { useUserCurrencies } from '@crisol/services';
 import { useCurrencyStore } from '@crisol/store';
-import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, radius, scaleFont, spacing } from '@crisol/ui';
 
 import { CheckCircleIcon, ChevronDownIcon } from '@/components/ui/icons';
 
@@ -132,7 +132,7 @@ export function CurrencyMenu() {
             style={{
               padding: `${spacing.sm}px ${spacing.md}px`,
               borderBottom: `1px solid ${colors.border}`,
-              fontSize: 11,
+              fontSize: scaleFont(11),
               fontWeight: fontWeight.semibold,
               color: colors.textSubtle,
               textTransform: 'uppercase',
@@ -329,7 +329,7 @@ function CurrencyPillTrigger({
           borderRadius: 6,
           backgroundColor: active ? colors.primary : colors.primarySoft,
           color: active ? colors.onPrimary : colors.primary,
-          fontSize: 14,
+          fontSize: scaleFont(14),
           fontWeight: fontWeight.bold,
           transition: 'background-color 140ms ease, color 140ms ease',
           flex: '0 0 auto',
@@ -339,7 +339,7 @@ function CurrencyPillTrigger({
       </span>
       <span
         style={{
-          fontSize: 13,
+          fontSize: scaleFont(13),
           fontWeight: fontWeight.semibold,
           fontVariantNumeric: 'tabular-nums',
         }}

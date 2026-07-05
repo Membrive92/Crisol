@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 
 import type { User } from '@crisol/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, radius, scaleFont, spacing } from '@crisol/ui';
 
 import {
   ChevronDownIcon,
@@ -181,7 +181,7 @@ function UserChipTrigger({
           borderRadius: '50%',
           background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.primaryDark} 100%)`,
           color: colors.onPrimary,
-          fontSize: 11.5,
+          fontSize: scaleFont(11.5),
           fontWeight: fontWeight.bold,
           letterSpacing: '0.02em',
           flex: '0 0 auto',
@@ -201,7 +201,7 @@ function UserChipTrigger({
       >
         <span
           style={{
-            fontSize: 13,
+            fontSize: scaleFont(13),
             fontWeight: fontWeight.semibold,
             color: colors.text,
             whiteSpace: 'nowrap',
@@ -214,7 +214,7 @@ function UserChipTrigger({
         </span>
         <span
           style={{
-            fontSize: 11,
+            fontSize: scaleFont(11),
             color: colors.textMuted,
             fontWeight: fontWeight.medium,
           }}

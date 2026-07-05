@@ -69,6 +69,10 @@ export default function AnalysisPage() {
   });
   const currency = useCurrencyStore((s) => s.currency);
   const convertAll = useCurrencyStore((s) => s.convertAll);
+  // El toggle "Incluir deuda en el patrimonio neto" (menú de divisa del
+  // header): ON → patrimonio = activos − pasivos; OFF → sólo activos (la deuda
+  // no resta del neto). Es la palanca para ver el patrimonio "de caja".
+  const includeDebt = useCurrencyStore((s) => s.includeDebtInNetWorth);
   const targetCurrency = convertAll ? currency : undefined;
 
   const { dateFrom, dateTo } = useMemo(
@@ -107,9 +111,18 @@ export default function AnalysisPage() {
   const refCurrency = summary?.currency ?? currency;
 
   // ── Tiles del strip ──────────────────────────────────────────────────
-  const netWorth = balances?.net_worth ?? null;
-  const deltaPeriod = position?.delta_period ?? null;
-  const sparkValues = (position?.points ?? []).map((p) => Number(p.net_worth));
+  // El patrimonio (valor + Δ + sparkline) respeta el toggle: `net_worth`
+  // (con deuda) o `total_assets` (sin deuda). La serie trae ambas métricas.
+  const worthKey = includeDebt ? 'net_worth' : 'total_assets';
+  const netWorth = balances ? balances[worthKey] : null;
+  const worthSeries = (position?.points ?? []).map((p) => Number(p[worthKey]));
+  const deltaPeriod =
+    worthSeries.length >= 2 ? worthSeries[worthSeries.length - 1]! - worthSeries[0]! : null;
+  const deltaPeriodPct =
+    deltaPeriod != null && worthSeries[0] !== 0
+      ? (deltaPeriod / Math.abs(worthSeries[0]!)) * 100
+      : null;
+  const sparkValues = worthSeries;
   const effort = debt?.dti_ratio ?? null;
   const effortStatus: KpiStatus = debt ? EFFORT_STATUS[debt.dti_status] : 'neutral';
   const cashflow = summary?.balance ?? null;
@@ -135,7 +148,7 @@ export default function AnalysisPage() {
   }
 
   return (
-    <div style={{ maxWidth: 1520, margin: '0 auto', padding: spacing.lg }}>
+    <div style={{ maxWidth: 2400, margin: '0 auto', padding: spacing.lg }}>
       <header style={{ marginBottom: spacing.lg }}>
         <span
           style={{
@@ -225,10 +238,8 @@ export default function AnalysisPage() {
           <KpiTile
             label="Δ patrimonio"
             value={deltaPeriod != null ? fmtSignedAmount(deltaPeriod, refCurrency) : '—'}
-            delta={deltaPeriod != null ? Number(deltaPeriod) : null}
-            deltaText={
-              position?.delta_period_pct != null ? `${position.delta_period_pct.toFixed(1)} %` : undefined
-            }
+            delta={deltaPeriod}
+            deltaText={deltaPeriodPct != null ? `${deltaPeriodPct.toFixed(1)} %` : undefined}
             subtitle="vs inicio del rango"
           />
           <KpiTile

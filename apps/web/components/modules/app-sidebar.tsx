@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useState, type ComponentType } from 'react';
 
 import { MODULES, type AppModule, type ModuleId } from '@crisol/types';
-import { colors, fontWeight, spacing } from '@crisol/ui';
+import { colors, fontWeight, scaleFont, spacing } from '@crisol/ui';
 
 import {
   BarChart3Icon,
@@ -107,7 +107,7 @@ export function AppSidebar({ active, mobileOpen = false, onCloseMobile }: AppSid
             display: 'inline-flex',
             alignItems: 'center',
             gap: 10,
-            fontSize: 17,
+            fontSize: scaleFont(17),
             fontWeight: fontWeight.semibold,
             color: colors.text,
             letterSpacing: '-0.01em',
@@ -172,7 +172,7 @@ export function AppSidebar({ active, mobileOpen = false, onCloseMobile }: AppSid
         <p
           style={{
             margin: `${spacing.sm}px 0 0`,
-            fontSize: 11,
+            fontSize: scaleFont(11),
             color: colors.textSubtle,
             textAlign: 'center',
             letterSpacing: '0.02em',
@@ -193,7 +193,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       <p
         style={{
           margin: `0 ${spacing.sm + 4}px ${spacing.xs}px`,
-          fontSize: 10.5,
+          fontSize: scaleFont(10.5),
           fontWeight: fontWeight.semibold,
           color: colors.textSubtle,
           letterSpacing: '0.08em',
@@ -308,7 +308,7 @@ function ModuleItem({ module, isActive }: { module: AppModule; isActive: boolean
     borderRadius: 8,
     backgroundColor: itemBg,
     color: itemFg,
-    fontSize: 14,
+    fontSize: scaleFont(14),
     fontWeight: itemWeight,
     textDecoration: 'none',
     transition: 'background-color 140ms ease, color 140ms ease',
@@ -349,7 +349,7 @@ function SoonChip() {
       aria-hidden
       style={{
         marginLeft: 4,
-        fontSize: 9,
+        fontSize: scaleFont(9),
         fontWeight: fontWeight.semibold,
         color: colors.textSubtle,
         backgroundColor: 'transparent',
@@ -433,7 +433,7 @@ function PrimaryCTA() {
         background: `linear-gradient(180deg, ${colors.primary} 0%, ${colors.primaryDark} 100%)`,
         color: colors.onPrimary,
         border: `1px solid ${colors.primaryDark}`,
-        fontSize: 13.5,
+        fontSize: scaleFont(13.5),
         fontWeight: fontWeight.semibold,
         cursor: 'pointer',
         textDecoration: 'none',
@@ -476,7 +476,7 @@ function PrimaryCTA() {
         <span>Añadir transacción</span>
         <small
           style={{
-            fontSize: 10.5,
+            fontSize: scaleFont(10.5),
             fontWeight: fontWeight.medium,
             opacity: 0.72,
             marginTop: 2,
@@ -492,7 +492,7 @@ function PrimaryCTA() {
           padding: '2px 6px',
           borderRadius: 6,
           backgroundColor: 'rgba(0,0,0,.22)',
-          fontSize: 11,
+          fontSize: scaleFont(11),
           fontWeight: fontWeight.bold,
           color: colors.onPrimary,
           textAlign: 'center',
