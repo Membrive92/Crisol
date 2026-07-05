@@ -4,31 +4,36 @@ import { useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 
 import {
+  useAccountBalances,
   useDashboardByCategory,
   useDashboardByMonth,
   useDashboardSummary,
+  useDebtHealth,
+  usePositionHistory,
 } from '@crisol/services';
 import { useCurrencyStore } from '@crisol/store';
-import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
+import type { DtiStatus } from '@crisol/types';
+import { colors, fontSize, fontWeight, formatAmount, spacing } from '@crisol/ui';
 
-import { PositionHero } from '@/components/analysis/position-hero';
-import { StitchKeyMetrics } from '@/components/analysis/stitch-key-metrics';
+import { AccountsSection } from '@/components/analysis/accounts-section';
+import { DebtSummaryCard } from '@/components/analysis/debt-summary-card';
+import {
+  KpiStrip,
+  KpiTile,
+  MiniSparkline,
+  type KpiStatus,
+} from '@/components/analysis/kpi-strip';
+import { NetworthEvolutionCard } from '@/components/analysis/networth-evolution-card';
 import {
   boundsForAnchor,
   type PeriodKey,
 } from '@/components/analysis/stitch-period-toggle';
 import { StitchSmartInsights } from '@/components/analysis/stitch-smart-insights';
-// PHASE-34 — navegador de período (granularidad + flechas ◀▶ acotadas a
-// datos). Widget genérico reutilizado del módulo de deuda (PHASE-30.8).
 import { PeriodNavigator } from '@/components/debt/period-navigator';
 import { Card } from '@/components/ui/card';
 import { ErrorState } from '@/components/ui/error-state';
-import { ListIcon } from '@/components/ui/icons';
 import { Skeleton } from '@/components/ui/skeleton';
 
-// AUDIT-2026-05: las cards con recharts se cargan en un chunk aparte
-// (ssr:false) para no inflar el JS inicial de la ruta. El Skeleton cubre
-// el breve hueco hasta que el chunk hidrata.
 const StitchIncomeVsExpenses = dynamic(
   () =>
     import('@/components/analysis/stitch-income-vs-expenses').then(
@@ -44,30 +49,34 @@ const StitchExpenseBreakdown = dynamic(
   { ssr: false, loading: () => <Skeleton height={340} /> },
 );
 
+const EFFORT_STATUS: Record<DtiStatus, KpiStatus> = {
+  healthy: 'success',
+  caution: 'warning',
+  stressed: 'danger',
+  unknown: 'neutral',
+};
+
+function fmtSignedAmount(value: string | number, currency: string): string {
+  const n = Number(value);
+  return `${n >= 0 ? '+' : ''}${formatAmount(String(n.toFixed(2)), currency)}`;
+}
+
 export default function AnalysisPage() {
   const [period, setPeriod] = useState<PeriodKey>('year');
-  // PHASE-34 — mes ancla `YYYY-MM` del período mostrado. Por defecto el mes
-  // en curso → período actual (comportamiento previo). El `PeriodNavigator`
-  // lo mueve, acotado a los meses con datos.
   const [anchorMonth, setAnchorMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
   const currency = useCurrencyStore((s) => s.currency);
   const convertAll = useCurrencyStore((s) => s.convertAll);
+  const targetCurrency = convertAll ? currency : undefined;
 
   const { dateFrom, dateTo } = useMemo(
     () => boundsForAnchor(period, anchorMonth),
     [period, anchorMonth],
   );
-  // La gráfica Ingresos vs Gastos muestra los 12 meses del AÑO del período
-  // navegado (no siempre el año en curso).
   const anchorYear = Number(anchorMonth.split('-')[0]);
 
-  // PHASE-8.3: una petición por endpoint con `target_currency` cuando el
-  // toggle global está ON; el backend convierte cada transacción con la
-  // tasa de su día. Con toggle OFF, comportamiento legacy filtrado por
-  // moneda activa sin conversión.
   const summaryParams = convertAll
     ? { target_currency: currency, date_from: dateFrom, date_to: dateTo }
     : { currency, date_from: dateFrom, date_to: dateTo };
@@ -75,36 +84,48 @@ export default function AnalysisPage() {
     ? { target_currency: currency, year: anchorYear }
     : { currency, year: anchorYear };
   const byCategoryParams = convertAll
-    ? {
-        target_currency: currency,
-        date_from: dateFrom,
-        date_to: dateTo,
-        kind: 'expense' as const,
-      }
+    ? { target_currency: currency, date_from: dateFrom, date_to: dateTo, kind: 'expense' as const }
     : { currency, date_from: dateFrom, date_to: dateTo, kind: 'expense' as const };
 
   const summaryQuery = useDashboardSummary(summaryParams);
   const monthlyQuery = useDashboardByMonth(monthlyParams);
   const expensesByCategoryQuery = useDashboardByCategory(byCategoryParams);
+  // PHASE-37 — patrimonio (stock): posición actual + serie + salud de deuda.
+  // No dependen del período (son fotos a fecha); su dimensión temporal es la
+  // serie y el Δ, no el filtro de rango.
+  const balancesQuery = useAccountBalances(targetCurrency ? { targetCurrency } : {});
+  const positionQuery = usePositionHistory(12, 0);
+  const debtQuery = useDebtHealth(targetCurrency ? { targetCurrency } : {});
 
   const summary = summaryQuery.data;
   const monthly = monthlyQuery.data ?? [];
   const expensesByCategory = expensesByCategoryQuery.data ?? [];
   const unconvertible = summary?.unconvertible_count ?? 0;
+  const balances = balancesQuery.data;
+  const position = positionQuery.data;
+  const debt = debtQuery.data;
+  const refCurrency = summary?.currency ?? currency;
+
+  // ── Tiles del strip ──────────────────────────────────────────────────
+  const netWorth = balances?.net_worth ?? null;
+  const deltaPeriod = position?.delta_period ?? null;
+  const sparkValues = (position?.points ?? []).map((p) => Number(p.net_worth));
+  const effort = debt?.dti_ratio ?? null;
+  const effortStatus: KpiStatus = debt ? EFFORT_STATUS[debt.dti_status] : 'neutral';
+  const cashflow = summary?.balance ?? null;
+  const cashflowDelta = summary?.cashflow_delta ?? null;
+  const savingsRate =
+    summary && Number(summary.income) > 0
+      ? (Number(summary.balance) / Number(summary.income)) * 100
+      : null;
+  const savingsDeltaPp = summary?.savings_rate_delta_pp ?? null;
+
+  const monthlyNets = monthly.map((m) => Number(m.income) - Number(m.expenses));
 
   const hasError =
-    summaryQuery.isError ||
-    monthlyQuery.isError ||
-    expensesByCategoryQuery.isError;
+    summaryQuery.isError || monthlyQuery.isError || expensesByCategoryQuery.isError;
   const isRefetching =
-    summaryQuery.isFetching ||
-    monthlyQuery.isFetching ||
-    expensesByCategoryQuery.isFetching;
-  // AUDIT-2026-07 — `placeholderData: previous` mantiene visibles las cifras
-  // del período anterior mientras el nuevo fetch está en curso (o si falla).
-  // Señalamos ese estado para que un fetch lento/fallido no se lea como "no
-  // cambió nada" al navegar el período (los widgets period-scoped son summary
-  // + desglose por categoría).
+    summaryQuery.isFetching || monthlyQuery.isFetching || expensesByCategoryQuery.isFetching;
   const isShowingStale =
     summaryQuery.isPlaceholderData || expensesByCategoryQuery.isPlaceholderData;
   function retryAll() {
@@ -114,72 +135,43 @@ export default function AnalysisPage() {
   }
 
   return (
-    <div style={{ maxWidth: 1200, margin: '0 auto', padding: spacing.lg }}>
-      {/* Eyebrow + título + toggle */}
-      <header
-        style={{
-          display: 'flex',
-          alignItems: 'flex-end',
-          justifyContent: 'space-between',
-          gap: spacing.md,
-          flexWrap: 'wrap',
-          marginBottom: spacing.xl,
-        }}
-      >
-        <div>
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: fontWeight.semibold,
-              color: colors.primary,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              display: 'block',
-              marginBottom: spacing.xs,
-            }}
-          >
-            ANALYTICS ENGINE · LOCAL
-          </span>
-          <h1
-            style={{
-              margin: 0,
-              fontSize: fontSize.xxl,
-              fontWeight: fontWeight.bold,
-              color: colors.text,
-              letterSpacing: '-0.02em',
-              lineHeight: 1.1,
-            }}
-          >
-            Análisis financiero
-          </h1>
-          <p
-            style={{
-              margin: `${spacing.xs}px 0 0 0`,
-              color: colors.textMuted,
-              fontSize: fontSize.sm,
-            }}
-          >
-            Patrones detallados de ingresos, gastos y categorías ·
-            cómputos client-side, sin enviar datos fuera de tu equipo.
+    <div style={{ maxWidth: 1520, margin: '0 auto', padding: spacing.lg }}>
+      <header style={{ marginBottom: spacing.lg }}>
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: fontWeight.semibold,
+            color: colors.primary,
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+            display: 'block',
+            marginBottom: spacing.xs,
+          }}
+        >
+          ANALYTICS ENGINE · LOCAL
+        </span>
+        <h1
+          style={{
+            margin: 0,
+            fontSize: fontSize.xxl,
+            fontWeight: fontWeight.bold,
+            color: colors.text,
+            letterSpacing: '-0.02em',
+            lineHeight: 1.1,
+          }}
+        >
+          Análisis financiero
+        </h1>
+        <p style={{ margin: `${spacing.xs}px 0 0 0`, color: colors.textMuted, fontSize: fontSize.sm }}>
+          Patrones de ingresos, gastos y patrimonio · cómputos client-side, sin enviar datos fuera de tu equipo.
+        </p>
+        {convertAll && unconvertible > 0 ? (
+          <p style={{ margin: `${spacing.xs}px 0 0 0`, color: colors.warning, fontSize: fontSize.xs }}>
+            ⚠ {unconvertible} {unconvertible === 1 ? 'transacción' : 'transacciones'} sin tasa disponible — quedan fuera del total.
           </p>
-          {convertAll && unconvertible > 0 ? (
-            <p
-              style={{
-                margin: `${spacing.xs}px 0 0 0`,
-                color: colors.warning,
-                fontSize: fontSize.xs,
-              }}
-            >
-              ⚠ {unconvertible} {unconvertible === 1 ? 'transacción' : 'transacciones'} sin
-              tasa disponible — quedan fuera del total.
-            </p>
-          ) : null}
-        </div>
+        ) : null}
       </header>
 
-      {/* PHASE-34 — navegador de período: granularidad (Mes / Trimestre /
-          Año) + flechas ◀▶ acotadas a los meses con datos. Gobierna las
-          cifras del Análisis (summary + desglose por categoría). */}
       <div
         style={{
           marginBottom: spacing.md,
@@ -198,13 +190,7 @@ export default function AnalysisPage() {
           availableTo={summary?.available_to ?? null}
         />
         {isShowingStale ? (
-          <span
-            style={{
-              fontSize: fontSize.xs,
-              color: colors.textMuted,
-              fontWeight: fontWeight.medium,
-            }}
-          >
+          <span style={{ fontSize: fontSize.xs, color: colors.textMuted, fontWeight: fontWeight.medium }}>
             Actualizando cifras del período…
           </span>
         ) : null}
@@ -221,31 +207,54 @@ export default function AnalysisPage() {
         </div>
       ) : null}
 
-      {/* PHASE-29.5: PositionHero fusiona BalancesCard + DebtHealthCard
-          en una única card con 3 secciones (patrimonio neto, salud de
-          deuda, cuentas activas). Independiente del periodo (snapshot
-          actual). Las cards legacy siguen vivas en /dashboard. */}
+      {/* KPI STRIP — patrimonio (stock + Δ) + esfuerzo + flujo + ahorro. */}
       <div style={{ marginBottom: spacing.md }}>
-        {/* AUDIT-2026-07 — rótulo explícito: este bloque es un snapshot y NO
-            reacciona al navegador de período (a diferencia del resto de la
-            pantalla), para eliminar la expectativa de que cambie al togglear. */}
-        <span
-          style={{
-            display: 'block',
-            fontSize: 11,
-            fontWeight: fontWeight.semibold,
-            color: colors.textSubtle,
-            textTransform: 'uppercase',
-            letterSpacing: '0.04em',
-            marginBottom: spacing.xs,
-          }}
-        >
-          Posición actual · no depende del período
-        </span>
-        <PositionHero />
+        <KpiStrip>
+          <KpiTile
+            label="Patrimonio neto"
+            value={netWorth != null ? formatAmount(netWorth, refCurrency) : '—'}
+            sparkline={
+              sparkValues.length >= 2 ? (
+                <MiniSparkline
+                  values={sparkValues}
+                  up={sparkValues[sparkValues.length - 1]! >= sparkValues[0]!}
+                />
+              ) : undefined
+            }
+          />
+          <KpiTile
+            label="Δ patrimonio"
+            value={deltaPeriod != null ? fmtSignedAmount(deltaPeriod, refCurrency) : '—'}
+            delta={deltaPeriod != null ? Number(deltaPeriod) : null}
+            deltaText={
+              position?.delta_period_pct != null ? `${position.delta_period_pct.toFixed(1)} %` : undefined
+            }
+            subtitle="vs inicio del rango"
+          />
+          <KpiTile
+            label="Tasa de esfuerzo"
+            value={effort != null ? `${(effort * 100).toFixed(1)} %` : '—'}
+            status={effortStatus}
+            subtitle="BdE < 35%"
+          />
+          <KpiTile
+            label="Flujo de caja neto"
+            value={cashflow != null ? fmtSignedAmount(cashflow, refCurrency) : '—'}
+            delta={cashflowDelta != null ? Number(cashflowDelta) : null}
+            deltaText={cashflowDelta != null ? fmtSignedAmount(cashflowDelta, refCurrency) : undefined}
+            subtitle="vs periodo anterior"
+          />
+          <KpiTile
+            label="Tasa de ahorro"
+            value={savingsRate != null ? `${savingsRate.toFixed(1)} %` : '—'}
+            delta={savingsDeltaPp}
+            deltaText={savingsDeltaPp != null ? `${savingsDeltaPp >= 0 ? '+' : ''}${savingsDeltaPp.toFixed(1)} pp` : undefined}
+            subtitle="vs periodo anterior"
+          />
+        </KpiStrip>
       </div>
 
-      {/* Bento principal: chart + métricas */}
+      {/* Fila 1: Ingresos vs Gastos + Evolución del patrimonio. */}
       <div
         style={{
           display: 'grid',
@@ -261,10 +270,14 @@ export default function AnalysisPage() {
           period={period}
           anchorMonth={anchorMonth}
         />
-        <StitchKeyMetrics summary={summary} currency={currency} monthly={monthly} />
+        <NetworthEvolutionCard
+          points={position?.points ?? []}
+          currency={position?.reference_currency ?? refCurrency}
+          isLoading={positionQuery.isLoading}
+        />
       </div>
 
-      {/* Bento secundario: desglose + insights */}
+      {/* Fila 2: Desglose de gastos + Deuda (resumen). */}
       <div
         style={{
           display: 'grid',
@@ -278,6 +291,40 @@ export default function AnalysisPage() {
           currency={currency}
           isLoading={expensesByCategoryQuery.isLoading}
         />
+        <DebtSummaryCard />
+      </div>
+
+      {/* Fila 3: Flujo neto mensual + Smart Insights. */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+          gap: spacing.md,
+          marginBottom: spacing.md,
+        }}
+      >
+        <Card style={{ padding: spacing.lg }}>
+          <h3
+            style={{
+              margin: `0 0 ${spacing.sm}px 0`,
+              fontSize: fontSize.md,
+              fontWeight: fontWeight.semibold,
+              color: colors.text,
+            }}
+          >
+            Flujo neto mensual
+          </h3>
+          {monthlyNets.length >= 2 ? (
+            <MiniSparkline
+              values={monthlyNets}
+              up={(monthlyNets[monthlyNets.length - 1] ?? 0) >= 0}
+            />
+          ) : (
+            <p style={{ margin: 0, fontSize: fontSize.sm, color: colors.textMuted }}>
+              Necesitas al menos 2 meses con datos.
+            </p>
+          )}
+        </Card>
         <StitchSmartInsights
           summary={summary}
           expensesByCategory={expensesByCategory}
@@ -285,63 +332,8 @@ export default function AnalysisPage() {
         />
       </div>
 
-      {/* Comparativa Peer Group — placeholder honesto */}
-      <Card
-        style={{
-          padding: spacing.xl,
-          backgroundColor: colors.surfaceMuted,
-          border: `1px dashed ${colors.border}`,
-          textAlign: 'center',
-        }}
-      >
-        <span
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: spacing.sm,
-            color: colors.textSubtle,
-            marginBottom: spacing.sm,
-          }}
-        >
-          <ListIcon size={16} />
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: fontWeight.semibold,
-              textTransform: 'uppercase',
-              letterSpacing: '0.04em',
-            }}
-          >
-            Próximamente
-          </span>
-        </span>
-        <h3
-          style={{
-            margin: 0,
-            fontSize: fontSize.lg,
-            fontWeight: fontWeight.semibold,
-            color: colors.text,
-            marginBottom: spacing.xs,
-          }}
-        >
-          Comparación con grupos similares
-        </h3>
-        <p
-          style={{
-            margin: 0,
-            fontSize: fontSize.sm,
-            color: colors.textMuted,
-            maxWidth: 540,
-            marginLeft: 'auto',
-            marginRight: 'auto',
-            lineHeight: 1.5,
-          }}
-        >
-          Tu gasto medio comparado con usuarios de perfil parecido.
-          Computado 100% en local — los perfiles agregados no salen del
-          equipo.
-        </p>
-      </Card>
+      {/* Cuentas — sección colapsable a ancho completo. */}
+      <AccountsSection />
     </div>
   );
 }

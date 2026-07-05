@@ -9,6 +9,7 @@ import type {
   InstallmentBulkPayResponse,
   InstallmentPayRequest,
   InstallmentUpdateRequest,
+  PositionHistoryResponse,
 } from '@crisol/types';
 
 import { apiClient } from '../client';
@@ -48,6 +49,20 @@ export const accountsApi = {
     const response = await apiClient.get<AccountBalancesResponse>(
       '/accounts/balances',
       { params },
+    );
+    return response.data;
+  },
+
+  /**
+   * PHASE-37.1 — Serie temporal de patrimonio (activos / pasivos / neto) +
+   * Δ del periodo. Mono-divisa (divisa de referencia).
+   */
+  async positionHistory(
+    query: { months_back?: number; months_forward?: number } = {},
+  ): Promise<PositionHistoryResponse> {
+    const response = await apiClient.get<PositionHistoryResponse>(
+      '/accounts/position-history',
+      { params: query },
     );
     return response.data;
   },

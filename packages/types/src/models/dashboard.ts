@@ -21,6 +21,13 @@ export interface DashboardSummary {
   previous_period_expenses: string | null;
   previous_period_balance: string | null;
   /**
+   * PHASE-37.1 — Δ vs periodo anterior equivalente. `cashflow_delta` =
+   * `balance − previous_period_balance`; `savings_rate_delta_pp` = variación
+   * de la tasa de ahorro en puntos porcentuales. `null` sin periodo previo.
+   */
+  cashflow_delta: string | null;
+  savings_rate_delta_pp: number | null;
+  /**
    * PHASE-34 — Mes (`YYYY-MM`) más antiguo / más reciente con transacciones
    * del usuario, global (ignora el filtro de período). Acotan las flechas del
    * navegador de período en Análisis. `null` si no hay transacciones.

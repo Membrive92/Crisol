@@ -23,6 +23,8 @@ export const queryKeys = {
     detail: (id: string) => [...queryKeys.accounts.all, 'detail', id] as const,
     balances: (targetCurrency?: string) =>
       [...queryKeys.accounts.all, 'balances', targetCurrency ?? 'native'] as const,
+    positionHistory: (monthsBack = 12, monthsForward = 0) =>
+      [...queryKeys.accounts.all, 'position-history', monthsBack, monthsForward] as const,
     amortization: (id: string) =>
       [...queryKeys.accounts.all, 'amortization', id] as const,
   },

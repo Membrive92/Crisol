@@ -22,6 +22,7 @@ export type {
   AccountBalance,
   AccountBalancesResponse,
 } from './models/account-balance';
+export type { PositionHistoryResponse, PositionPoint } from './models/position';
 export type {
   AmortizationRow,
   AmortizationSchedule,

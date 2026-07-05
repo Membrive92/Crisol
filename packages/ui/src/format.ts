@@ -31,10 +31,16 @@ export function formatCategoryKind(kind: string | null | undefined): string {
 export function formatAmount(amount: string, currency = 'EUR', locale = 'es-ES'): string {
   const value = Number(amount);
   if (!Number.isFinite(value)) return amount;
-  return new Intl.NumberFormat(locale, {
+  const fmt = new Intl.NumberFormat(locale, {
     style: 'currency',
     currency,
-  }).format(value);
+  });
+  // PHASE-37 — evita el "-0,00 €" cosmético: si el valor redondea a cero a la
+  // precisión de la divisa (2 en EUR/USD, 0 en JPY), se formatea 0 positivo.
+  const decimals = fmt.resolvedOptions().maximumFractionDigits ?? 2;
+  const factor = 10 ** decimals;
+  const safe = Math.round(value * factor) / factor === 0 ? 0 : value;
+  return fmt.format(safe);
 }
 
 /**

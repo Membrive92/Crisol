@@ -50,7 +50,10 @@ export function StitchExpenseBreakdown({
   items,
   currency,
   isLoading,
-  topN = 5,
+  // PHASE-37.2 — top-6 (antes 5): el "Otros" agrupaba demasiadas categorías
+  // (la queja era "Otros (39%)"). La fila "Otros (n)" sigue siendo clicable
+  // para desplegar la lista completa inline (`otherExpanded`).
+  topN = 6,
 }: StitchExpenseBreakdownProps) {
   const router = useRouter();
   const [activeId, setActiveId] = useState<string | null>(null);

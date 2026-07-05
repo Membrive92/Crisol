@@ -11,6 +11,7 @@ import type {
   InstallmentBulkPayResponse,
   InstallmentPayRequest,
   InstallmentUpdateRequest,
+  PositionHistoryResponse,
 } from '@crisol/types';
 
 import { accountsApi } from '../../api/endpoints/accounts';
@@ -106,6 +107,23 @@ export function useAccountBalances(options: { targetCurrency?: string } = {}) {
         targetCurrency ? { target_currency: targetCurrency } : {},
       ),
     staleTime: 1000 * 60,
+  });
+}
+
+/**
+ * PHASE-37.1 — Serie temporal de patrimonio (activos / pasivos / neto) + Δ del
+ * periodo. Alimenta el sparkline del tile de Patrimonio y la card de evolución.
+ */
+export function usePositionHistory(monthsBack = 12, monthsForward = 0) {
+  return useQuery<PositionHistoryResponse, Error>({
+    queryKey: queryKeys.accounts.positionHistory(monthsBack, monthsForward),
+    queryFn: () =>
+      accountsApi.positionHistory({
+        months_back: monthsBack,
+        months_forward: monthsForward,
+      }),
+    staleTime: 1000 * 60,
+    placeholderData: (previous) => previous,
   });
 }
 

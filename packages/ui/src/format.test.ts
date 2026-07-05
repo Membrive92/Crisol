@@ -38,6 +38,16 @@ describe('formatAmount', () => {
     // EUR conserva 2 decimales con coma decimal es-ES.
     expect(formatAmount('1234.5', 'EUR', 'es-ES')).toMatch(/,50/);
   });
+
+  it('PHASE-37 — normaliza el "-0,00 €" cosmético a 0 sin signo', () => {
+    // Valores que redondean a cero a la precisión de la divisa no deben
+    // pintar un menos delante.
+    expect(formatAmount('-0.004', 'EUR', 'es-ES')).not.toContain('-');
+    expect(formatAmount('-0.004', 'EUR', 'es-ES')).toMatch(/0,00/);
+    expect(formatAmount('-0', 'EUR', 'es-ES')).not.toContain('-');
+    // Un negativo real SÍ conserva el signo.
+    expect(formatAmount('-12.34', 'EUR', 'es-ES')).toContain('-');
+  });
 });
 
 describe('formatDate', () => {

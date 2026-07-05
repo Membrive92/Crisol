@@ -48,6 +48,7 @@ export {
   useDeleteAccount,
   usePayInstallment,
   usePayInstallments,
+  usePositionHistory,
   useReconcileAccount,
   useRegenerateAmortization,
   useUnpayInstallment,
