@@ -77,6 +77,13 @@ export interface AmortizationSchedule {
 
 export type DtiStatus = 'healthy' | 'caution' | 'stressed' | 'unknown';
 
+/** PHASE-37 — Porción de deuda viva por tipo de cuenta (donut de composición). */
+export interface DebtTypeSlice {
+  /** `loan` | `mortgage` | `credit_card`. */
+  type: string;
+  amount: string;
+}
+
 export interface DebtHealthKpis {
   total_liabilities: string;
   total_assets: string;
@@ -86,7 +93,17 @@ export interface DebtHealthKpis {
   dti_status: DtiStatus;
   monthly_debt_payment: string;
   monthly_income_avg: string;
+  /**
+   * PHASE-37 — Composición de la deuda viva por tipo desde el cuadro
+   * (`schedule_outstanding`). STOCK (cuánto debes), no flujo de pagos.
+   */
+  debt_by_type: DebtTypeSlice[];
+  /** PHASE-37 — Intereses pagados YTD desde el cuadro (MUX por pasivo). */
   interest_paid_ytd: string;
+  /** PHASE-37 — Interés contractual total del cuadro (coste total del crédito). */
+  interest_scheduled_total: string;
+  /** PHASE-37 — Interés que queda por pagar (cuotas no pagadas). */
+  interest_remaining: string;
   weighted_apr: number | null;
   time_to_payoff_months: number | null;
   reference_currency: string;

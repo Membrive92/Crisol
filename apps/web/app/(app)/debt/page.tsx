@@ -12,8 +12,13 @@ import {
   useDebtHistory,
 } from '@crisol/services';
 import { useCurrencyStore } from '@crisol/store';
-import type { DebtTimeRange } from '@crisol/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
+import type {
+  DebtHealthKpis,
+  DebtTimeRange,
+  DebtTypeBreakdown,
+  DebtTypeBucket,
+} from '@crisol/types';
+import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@crisol/ui';
 
 import { DebtList } from '@/components/debt/debt-list';
 import { EffortRatioSection } from '@/components/debt/effort-ratio-section';
@@ -119,9 +124,25 @@ export default function DebtPage() {
         ).toFixed(2)
       : monthlyDebtPayment;
 
+  // PHASE-37 — Composición de la DEUDA VIVA por tipo desde debt-health
+  // (`schedule_outstanding`, fuente única). El donut pasa de "pagos por
+  // tipo" (flujo, casi vacío) a "cuánto debes por tipo" (stock real).
+  const debtComposition = useMemo<DebtTypeBreakdown[]>(() => {
+    const slices = health?.debt_by_type ?? [];
+    const total = slices.reduce((s, x) => s + Number(x.amount), 0);
+    const KNOWN: DebtTypeBucket[] = ['mortgage', 'loan', 'credit_card'];
+    return slices.map((s) => ({
+      type: (KNOWN.includes(s.type as DebtTypeBucket) ? s.type : 'other') as DebtTypeBucket,
+      amount: s.amount,
+      percent: total > 0 ? Number(s.amount) / total : 0,
+    }));
+  }, [health?.debt_by_type]);
+
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: spacing.lg }}>
       <PageHeader />
+
+      <DebtKpiStrip health={health} currency={referenceCurrency} isLoading={healthQuery.isLoading} />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
         <PeriodNavigator
@@ -169,10 +190,10 @@ export default function DebtPage() {
           }}
         >
           <DebtCompositionDonut
-            items={summary?.by_type ?? []}
-            total={summary?.total_payments ?? '0'}
+            items={debtComposition}
+            total={health?.total_liabilities ?? '0'}
             currency={referenceCurrency}
-            isLoading={summaryQuery.isLoading}
+            isLoading={healthQuery.isLoading}
           />
           {range === 'month' ? (
             <DebtDailyEvolution
@@ -213,6 +234,103 @@ export default function DebtPage() {
           />
         </Layer2Section>
       </div>
+    </div>
+  );
+}
+
+/**
+ * PHASE-37 — Franja de KPIs de deuda desde debt-health (fuente única
+ * dirigida por el cuadro). Muestra las cifras que antes faltaban o salían a
+ * cero: deuda viva total y los intereses (pagados en el año, contractual
+ * total y restante), todos derivados del cuadro de amortización.
+ */
+function DebtKpiStrip({
+  health,
+  currency,
+  isLoading,
+}: {
+  health: DebtHealthKpis | undefined;
+  currency: string;
+  isLoading: boolean;
+}) {
+  const tiles: { label: string; value: string; hint: string }[] = [
+    {
+      label: 'Deuda viva total',
+      value: health ? formatAmount(health.total_liabilities, currency) : '—',
+      hint: 'Saldo pendiente (cuadro)',
+    },
+    {
+      label: 'Intereses pagados (año)',
+      value: health ? formatAmount(health.interest_paid_ytd, currency) : '—',
+      hint: 'Del cuadro de amortización',
+    },
+    {
+      label: 'Interés contractual total',
+      value: health ? formatAmount(health.interest_scheduled_total, currency) : '—',
+      hint: 'Coste total del crédito',
+    },
+    {
+      label: 'Interés restante',
+      value: health ? formatAmount(health.interest_remaining, currency) : '—',
+      hint: 'Por pagar',
+    },
+  ];
+  return (
+    <div
+      role="group"
+      aria-label="Indicadores de deuda"
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+        backgroundColor: colors.surface,
+        border: `1px solid ${colors.border}`,
+        borderRadius: radius.md,
+        overflow: 'hidden',
+        marginBottom: spacing.md,
+        opacity: isLoading ? 0.6 : 1,
+      }}
+    >
+      {tiles.map((t, i) => (
+        <div
+          key={t.label}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+            padding: `${spacing.sm}px ${spacing.md}px`,
+            borderLeft: i > 0 ? `1px solid ${colors.border}` : 'none',
+            minWidth: 0,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: fontWeight.semibold,
+              letterSpacing: '0.05em',
+              textTransform: 'uppercase',
+              color: colors.textMuted,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {t.label}
+          </span>
+          <span
+            style={{
+              fontSize: fontSize.xl,
+              fontWeight: fontWeight.bold,
+              color: colors.text,
+              letterSpacing: '-0.01em',
+              fontVariantNumeric: 'tabular-nums',
+              lineHeight: 1.1,
+            }}
+          >
+            {t.value}
+          </span>
+          <span style={{ fontSize: 10, color: colors.textSubtle }}>{t.hint}</span>
+        </div>
+      ))}
     </div>
   );
 }

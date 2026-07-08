@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import calendar
 import uuid
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
@@ -18,6 +19,8 @@ from app.modules.personal_finance.accounts.debt_health import (
 from app.modules.personal_finance.accounts.debt_history import _scheduled_remaining_at
 from app.modules.personal_finance.accounts.installments_repository import (
     installments_by_account,
+    interest_paid_in_window,
+    principal_paid_in_window,
 )
 from app.modules.personal_finance.accounts.models import Account, AccountNature
 from app.modules.personal_finance.categories.models import Category, CategoryRole
@@ -424,9 +427,24 @@ async def _build_daily_series(
         liabilities = [a for a in accounts if a.nature == AccountNature.LIABILITY]
     liability_ids = [a.id for a in liabilities]
 
+    # PHASE-37 — cuadro cargado ya aquí: las categorías vinculadas a un pasivo
+    # con cuadro se excluyen del flujo categorizado (MUX) y su interés lo
+    # aporta el cuadro por día (más abajo).
+    insts_by_account = await installments_by_account(db, user_id, liability_ids)
+    scheduled = [a for a in liabilities if insts_by_account.get(a.id)]
+    nonsched = [a for a in liabilities if not insts_by_account.get(a.id)]
+    nonsched_ids = [a.id for a in nonsched]
+    excluded_cat_ids = {a.category_id for a in scheduled if a.category_id is not None} or None
+
     # Interés diario (Capa 1) + capital categorizado (fallback sin pasivos).
     cat_flows = await daily_category_flows(
-        db, user_id, native_currency, start=start_dt, end=end_dt, target_currency=target_currency
+        db,
+        user_id,
+        native_currency,
+        start=start_dt,
+        end=end_dt,
+        target_currency=target_currency,
+        exclude_category_ids=excluded_cat_ids,
     )
     last_day = range_end.day
     points: list[DailyDebtPoint] = []
@@ -451,10 +469,6 @@ async def _build_daily_series(
     # y añadimos el saldo del cuadro como base (constante en el mes: la
     # amortización de un préstamo es mensual, no diaria). Así el nivel diario
     # cuadra con /balances y /debt-health.
-    insts_by_account = await installments_by_account(db, user_id, liability_ids)
-    nonsched = [a for a in liabilities if not insts_by_account.get(a.id)]
-    scheduled = [a for a in liabilities if insts_by_account.get(a.id)]
-    nonsched_ids = [a.id for a in nonsched]
 
     # Saldo del cuadro para el MES mostrado (misma base due-date que
     # debt_history, para que las dos vistas temporales cuadren entre sí).
@@ -470,6 +484,30 @@ async def _build_daily_series(
             )
             if converted is not None:
                 scheduled_base += converted
+
+    # PHASE-37 — interés del cuadro por día: la cuota pagada este mes aporta
+    # su interés al día de su `paid_at`. Las cuotas son mensuales, así que a
+    # lo sumo una por pasivo cae en el mes mostrado.
+    sched_interest_by_day: dict[int, Decimal] = {}
+    for a in scheduled:
+        for inst in insts_by_account[a.id]:
+            paid = inst.paid_at
+            if (
+                paid is None
+                or paid.year != displayed_month.year
+                or paid.month != displayed_month.month
+            ):
+                continue
+            if target_currency is None or a.currency.upper() == effective_currency:
+                val = inst.interest
+            else:
+                converted = await _convert_at_today(
+                    db, inst.interest, from_currency=a.currency, target_currency=effective_currency
+                )
+                val = converted if converted is not None else Decimal("0")
+            sched_interest_by_day[paid.day] = (
+                sched_interest_by_day.get(paid.day, Decimal("0")) + val
+            )
 
     if nonsched_ids:
         flows = await daily_liability_flows(
@@ -507,7 +545,8 @@ async def _build_daily_series(
     balance = opening + carry + scheduled_base
     for d in range(1, last_day + 1):
         emitida, amortizado = flows.get(d, (Decimal("0"), Decimal("0")))
-        _capital, interest = cat_flows.get(d, (Decimal("0"), Decimal("0")))
+        _capital, cat_interest = cat_flows.get(d, (Decimal("0"), Decimal("0")))
+        interest = cat_interest + sched_interest_by_day.get(d, Decimal("0"))
         balance = balance + emitida - amortizado
         points.append(
             DailyDebtPoint(
@@ -551,7 +590,45 @@ async def compute_category_summary(
     start_dt = _month_start_utc(range_start)
     end_dt = _range_end_utc(range_end)
 
-    # ── 1. Pagos por role en el rango ────────────────────────────────
+    # ── 0. Pasivos con cuadro (PHASE-37) ─────────────────────────────
+    # El interés/capital de una deuda CON cuadro lo aporta el cuadro de
+    # amortización, no sus transacciones (el banco no desglosa el interés,
+    # va dentro de la cuota). MUX por pasivo: se excluyen del flujo
+    # categorizado las categorías VINCULADAS a un pasivo con cuadro para
+    # no contar dos veces, y se suma el interés/capital del cuadro.
+    acc_q = select(Account).where(Account.user_id == user_id).where(Account.is_archived.is_(False))
+    all_accounts = list((await db.execute(acc_q)).scalars().all())
+    if target_currency is None:
+        liabs = [
+            a
+            for a in all_accounts
+            if a.nature == AccountNature.LIABILITY and a.currency == native_currency
+        ]
+    else:
+        liabs = [a for a in all_accounts if a.nature == AccountNature.LIABILITY]
+    insts_by_acc = await installments_by_account(db, user_id, [a.id for a in liabs])
+    scheduled = [a for a in liabs if insts_by_acc.get(a.id)]
+    excluded_cat_ids = {a.category_id for a in scheduled if a.category_id is not None} or None
+
+    async def _sched_paid(fn: Callable[..., Decimal], *, start: date, end: date) -> Decimal:
+        """Σ (interés|principal) pagado en `[start, end]` sobre los pasivos
+        con cuadro, convertido al effective (tasa de hoy, como los saldos)."""
+        total = Decimal("0")
+        for a in scheduled:
+            native = fn(insts_by_acc[a.id], start=start, end=end)
+            if native == 0:
+                continue
+            if target_currency is None or a.currency.upper() == effective_currency:
+                total += native
+            else:
+                converted = await _convert_at_today(
+                    db, native, from_currency=a.currency, target_currency=effective_currency
+                )
+                if converted is not None:
+                    total += converted
+        return total
+
+    # ── 1. Pagos por role en el rango (categoría MUX + cuadro) ───────
     totals = await aggregate_debt_payments_by_role(
         db,
         user_id,
@@ -559,9 +636,16 @@ async def compute_category_summary(
         start=start_dt,
         end=end_dt,
         target_currency=target_currency,
+        exclude_category_ids=excluded_cat_ids,
     )
-    interests_and_fees = totals[CategoryRole.DEBT_INTEREST]
-    capital_amortized = totals[CategoryRole.DEBT_PAYMENT]
+    sched_interest_range = await _sched_paid(
+        interest_paid_in_window, start=range_start, end=range_end
+    )
+    sched_principal_range = await _sched_paid(
+        principal_paid_in_window, start=range_start, end=range_end
+    )
+    interests_and_fees = totals[CategoryRole.DEBT_INTEREST] + sched_interest_range
+    capital_amortized = totals[CategoryRole.DEBT_PAYMENT] + sched_principal_range
     total_payments = interests_and_fees + capital_amortized
 
     # ── 2. Composición por tipo ──────────────────────────────────────
@@ -582,16 +666,27 @@ async def compute_category_summary(
         native_currency,
         months=monthly_buckets,
         target_currency=target_currency,
+        exclude_category_ids=excluded_cat_ids,
     )
-    monthly_series = [
-        MonthlyDebtPoint(
-            month=_format_month(month_start),
-            payments=payments.quantize(Decimal("0.01")),
-            interests=interests.quantize(Decimal("0.01")),
-            capital=(payments - interests).quantize(Decimal("0.01")),
+    monthly_series: list[MonthlyDebtPoint] = []
+    for month_start, payments, interests in series_rows:
+        month_end = date(
+            month_start.year,
+            month_start.month,
+            calendar.monthrange(month_start.year, month_start.month)[1],
         )
-        for month_start, payments, interests in series_rows
-    ]
+        m_sched_i = await _sched_paid(interest_paid_in_window, start=month_start, end=month_end)
+        m_sched_p = await _sched_paid(principal_paid_in_window, start=month_start, end=month_end)
+        m_interest = interests + m_sched_i
+        m_payments = payments + m_sched_i + m_sched_p
+        monthly_series.append(
+            MonthlyDebtPoint(
+                month=_format_month(month_start),
+                payments=m_payments.quantize(Decimal("0.01")),
+                interests=m_interest.quantize(Decimal("0.01")),
+                capital=(m_payments - m_interest).quantize(Decimal("0.01")),
+            )
+        )
 
     # ── 3b. Serie diaria (sólo range='month'): evolución del saldo ───
     daily_series = (

@@ -66,12 +66,18 @@ async def aggregate_debt_payments_by_role(
     start: datetime,
     end: datetime,
     target_currency: str | None = None,
+    exclude_category_ids: set[uuid.UUID] | None = None,
 ) -> dict[CategoryRole, Decimal]:
     """Σ amount agrupado por `Category.role` para categorías de deuda.
 
     Excluye papelera y txs de transferencia interna. Devuelve `Decimal('0')`
     en ambos roles cuando no hay datos para que el caller no tenga que
     distinguir entre "no hay key" y "hay key con 0".
+
+    PHASE-37 — `exclude_category_ids` deja fuera las categorías VINCULADAS a
+    un pasivo con cuadro (`accounts.category_id`): el interés/capital de esas
+    deudas sale del cuadro, no de sus transacciones, así que sumarlos aquí
+    los contaría dos veces (MUX por pasivo).
     """
     amount = _amount_expr(target_currency)
     query = (
@@ -86,6 +92,8 @@ async def aggregate_debt_payments_by_role(
         .where(Transaction.occurred_at <= end)
         .group_by(Category.role)
     )
+    if exclude_category_ids:
+        query = query.where(Category.id.notin_(exclude_category_ids))
     if target_currency is None:
         query = query.where(Transaction.currency == currency)
     result = await db.execute(query)
@@ -162,12 +170,17 @@ async def monthly_debt_series(
     *,
     months: list[date],
     target_currency: str | None = None,
+    exclude_category_ids: set[uuid.UUID] | None = None,
 ) -> list[tuple[date, Decimal, Decimal]]:
     """Para cada mes de `months` (primer día de cada uno) devuelve
     `(month, total_payments, interests)`.
 
     Hace una sola query agrupada por `(año, mes, role)` y rellena los
     huecos con 0 en el service — más barato que iterar mes a mes.
+
+    PHASE-37 — `exclude_category_ids`: idéntico a `aggregate_debt_payments_by_role`
+    (categorías vinculadas a pasivos con cuadro se excluyen; su interés/capital
+    lo aporta el cuadro para no doblar).
     """
     if not months:
         return []
@@ -199,6 +212,8 @@ async def monthly_debt_series(
         .where(Transaction.occurred_at <= end)
         .group_by("y", "m")
     )
+    if exclude_category_ids:
+        query = query.where(Category.id.notin_(exclude_category_ids))
     if target_currency is None:
         query = query.where(Transaction.currency == currency)
     rows = (await db.execute(query)).all()
@@ -327,11 +342,15 @@ async def daily_category_flows(
     start: datetime,
     end: datetime,
     target_currency: str | None = None,
+    exclude_category_ids: set[uuid.UUID] | None = None,
 ) -> dict[int, tuple[Decimal, Decimal]]:
     """Por día del mes, flujo de categorías de deuda (Capa 1):
     `{día: (capital, interest)}` donde capital=Σ DEBT_PAYMENT e
     interest=Σ DEBT_INTEREST. Sirve para el interés (barra informativa)
-    y como fallback de "amortizado" cuando no hay cuentas-pasivo."""
+    y como fallback de "amortizado" cuando no hay cuentas-pasivo.
+
+    PHASE-37 — `exclude_category_ids`: mismo MUX (categorías vinculadas a
+    pasivos con cuadro fuera; su interés lo aporta el cuadro)."""
     amount = _amount_expr(target_currency)
     day_expr = func.extract("day", func.timezone("UTC", Transaction.occurred_at))
     capital_expr = case((Category.role == CategoryRole.DEBT_PAYMENT, amount), else_=Decimal("0"))
@@ -352,6 +371,8 @@ async def daily_category_flows(
         .where(Transaction.occurred_at <= end)
         .group_by("d")
     )
+    if exclude_category_ids:
+        query = query.where(Category.id.notin_(exclude_category_ids))
     if target_currency is None:
         query = query.where(Transaction.currency == reference_currency)
     rows = (await db.execute(query)).all()

@@ -593,6 +593,13 @@ async def get_balances(
                 item_movements = conv_balance - conv_opening
                 aggregable_balance = conv_balance
 
+        # PHASE-37 — cuota del cuadro (para la "Cuota est." de la lista de
+        # deuda). Las tarjetas financiadas tienen `opening_balance=0`, así que
+        # la cuota francesa no se puede recomputar en el cliente: la servimos
+        # persistida. Nativa (misma aproximación que la estimación previa).
+        _insts = insts_by_account.get(account.id, [])
+        item_monthly_payment = Decimal(_insts[0].payment) if _insts else None
+
         items.append(
             AccountBalance(
                 account_id=account.id,
@@ -605,6 +612,7 @@ async def get_balances(
                 opening_balance=item_opening,
                 movements_balance=item_movements,
                 current_balance=item_balance,
+                monthly_payment=item_monthly_payment,
                 is_unvalued=is_unvalued,
                 parent_account_id=account.parent_account_id,
             )

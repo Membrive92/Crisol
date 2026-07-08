@@ -51,7 +51,11 @@ from app.modules.personal_finance.accounts.amortization import (
 from app.modules.personal_finance.accounts.installments_model import (
     LiabilityInstallment,
 )
-from app.modules.personal_finance.accounts.installments_repository import schedule_outstanding
+from app.modules.personal_finance.accounts.installments_repository import (
+    interest_paid_in_window,
+    interest_total,
+    schedule_outstanding,
+)
 from app.modules.personal_finance.accounts.models import (
     UNVALUED_ACCOUNT_TYPES,
     Account,
@@ -59,7 +63,7 @@ from app.modules.personal_finance.accounts.models import (
     AccountType,
 )
 from app.modules.personal_finance.accounts.repository import is_inflow
-from app.modules.personal_finance.accounts.schemas import DebtHealthKpis
+from app.modules.personal_finance.accounts.schemas import DebtHealthKpis, DebtTypeSlice
 from app.modules.personal_finance.categories.models import Category, CategoryKind, CategoryRole
 from app.modules.personal_finance.dashboard.conversion import (
     converted_amount_expr,
@@ -266,10 +270,17 @@ async def _interest_paid_ytd(
     currency: str,
     *,
     target_currency: str | None = None,
+    exclude_account_ids: set[uuid.UUID] | None = None,
 ) -> Decimal:
     """Suma de expenses en categorías de intereses desde 1-enero hasta hoy.
 
     PHASE-30.6 — Mismo modo dual que `monthly_income_avg`.
+
+    PHASE-37 (fix) — `exclude_account_ids` deja fuera las transacciones de
+    las cuentas cuyo interés YA sale del cuadro de amortización (MUX por
+    pasivo). Sin esta exclusión, un usuario que además registrase el
+    interés como transacción lo contaría dos veces (el bug de "dos fuentes
+    de verdad" que mató PHASE-34).
 
     AUDIT-2026-06 (fix #4) — Se acota `occurred_at <= fin del día de hoy
     (UTC)`. Sin la cota superior, las cuotas de interés autopostadas a
@@ -297,6 +308,8 @@ async def _interest_paid_ytd(
         .where(Transaction.occurred_at >= year_start)
         .where(Transaction.occurred_at <= today_end)
     )
+    if exclude_account_ids:
+        query = query.where(Transaction.account_id.notin_(exclude_account_ids))
     if target_currency is None:
         query = query.where(Transaction.currency == currency)
     return Decimal((await db.execute(query)).scalar_one())
@@ -848,10 +861,69 @@ async def compute_debt_health(
     )
     dti_status = classify_effort(dti_ratio)
 
-    # 5. Intereses YTD.
-    interest_ytd = await _interest_paid_ytd(
-        db, user_id, native_currency, target_currency=target_currency
+    # 5. Intereses YTD + totales del cuadro (PHASE-37: MUX por pasivo).
+    #    El interés no se registra como movimiento aparte (va dentro de la
+    #    cuota), así que las liabilities CON cuadro derivan su interés del
+    #    cuadro; las que no tienen cuadro, de sus transacciones DEBT_INTEREST.
+    #    Se excluyen las cuentas con cuadro del término transaccional para no
+    #    contar el mismo interés dos veces (XOR, no aditivo — lección PHASE-34).
+    today = _today_utc()
+    year_start = date(today.year, 1, 1)
+    scheduled_liab_ids = {liab.id for liab in liabilities if installments_by_account.get(liab.id)}
+    tx_interest = await _interest_paid_ytd(
+        db,
+        user_id,
+        native_currency,
+        target_currency=target_currency,
+        exclude_account_ids=scheduled_liab_ids,
     )
+
+    async def _to_effective(native_val: Decimal, liab_currency: str) -> Decimal:
+        """Convierte un importe nativo del cuadro al effective_currency (tasa
+        de hoy, igual que los saldos). Identidad en modo nativo / misma divisa."""
+        if native_val == 0:
+            return Decimal("0")
+        if target_currency is None or liab_currency.upper() == effective_currency:
+            return native_val
+        converted = await _convert_at_today(
+            db, native_val, from_currency=liab_currency, target_currency=effective_currency
+        )
+        return converted if converted is not None else Decimal("0")
+
+    sched_interest_ytd = Decimal("0")
+    sched_interest_total = Decimal("0")
+    sched_interest_remaining = Decimal("0")
+    for liab in liabilities:
+        insts = installments_by_account.get(liab.id, [])
+        if not insts:
+            continue
+        sched_interest_ytd += await _to_effective(
+            interest_paid_in_window(insts, start=year_start, end=today), liab.currency
+        )
+        sched_interest_total += await _to_effective(
+            interest_total(insts), liab.currency
+        )
+        sched_interest_remaining += await _to_effective(
+            interest_total(insts, unpaid_only=True), liab.currency
+        )
+
+    interest_ytd = tx_interest + sched_interest_ytd
+
+    # 5b. Composición de la deuda viva por tipo (PHASE-37) — reutiliza los
+    #     saldos ya dirigidos por cuadro/convertidos. Fuente ÚNICA de la
+    #     deuda viva (misma que total_liabilities), sin recomputar aparte.
+    debt_by_type_map: dict[str, Decimal] = {}
+    for liab in liabilities:
+        bal = liability_balances.get(liab.id, Decimal("0"))
+        if bal <= 0:
+            continue
+        debt_by_type_map[liab.type.value] = (
+            debt_by_type_map.get(liab.type.value, Decimal("0")) + bal
+        )
+    debt_by_type = [
+        DebtTypeSlice(type=t, amount=amt.quantize(Decimal("0.01")))
+        for t, amt in sorted(debt_by_type_map.items(), key=lambda kv: kv[1], reverse=True)
+    ]
 
     # 6. Time-to-payoff (PHASE-30.2): prefer schedule over linear projection.
     time_to_payoff = await _time_to_payoff_months(
@@ -875,7 +947,10 @@ async def compute_debt_health(
         dti_status=dti_status,
         monthly_debt_payment=monthly_payment_total.quantize(Decimal("0.01")),
         monthly_income_avg=monthly_income,
-        interest_paid_ytd=interest_ytd,
+        debt_by_type=debt_by_type,
+        interest_paid_ytd=interest_ytd.quantize(Decimal("0.01")),
+        interest_scheduled_total=sched_interest_total.quantize(Decimal("0.01")),
+        interest_remaining=sched_interest_remaining.quantize(Decimal("0.01")),
         weighted_apr=weighted_apr,
         time_to_payoff_months=time_to_payoff,
         reference_currency=effective_currency,

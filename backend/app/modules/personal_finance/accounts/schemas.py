@@ -164,6 +164,12 @@ class AccountBalance(BaseModel):
     cuenta."""
     current_balance: Decimal
     """`opening_balance + movements_balance`."""
+    monthly_payment: Decimal | None = None
+    """PHASE-37 — Cuota mensual del cuadro de amortización
+    (`installments[0].payment`) para liabilities CON cuadro. `None` para
+    activos y liabilities sin cuadro. La lista de deuda pinta la "Cuota est."
+    real de las tarjetas financiadas (cuyo `opening_balance` es 0 y no se
+    puede recomputar la cuota francesa)."""
     is_unvalued: bool = False
     """PHASE-31.4 — `True` para cuentas cuyo saldo NO entra al agregado
     de patrimonio neto porque su valoración real depende del mercado y
@@ -172,6 +178,15 @@ class AccountBalance(BaseModel):
     que sigan siendo destino válido de transferencias. Cuando exista
     un módulo de inversión real con valoración propia, se
     reincorporarán al patrimonio."""
+
+
+class DebtTypeSlice(BaseModel):
+    """PHASE-37 — Porción de la deuda viva por tipo de cuenta (para el donut
+    de composición). `amount` en `reference_currency`."""
+
+    type: str
+    """`loan` | `mortgage` | `credit_card`."""
+    amount: Decimal
 
 
 class DebtHealthKpis(BaseModel):
@@ -218,9 +233,27 @@ class DebtHealthKpis(BaseModel):
     monthly_income_avg: Decimal
     """Ingreso mensual medio de los últimos 6 meses (excluye
     transferencias internas)."""
+    debt_by_type: list[DebtTypeSlice] = []
+    """PHASE-37 — Composición de la DEUDA VIVA por tipo de cuenta
+    (loan/mortgage/credit_card), desde `schedule_outstanding` (la MISMA
+    fuente que `total_liabilities` y el patrimonio neto). Alimenta el donut
+    de composición de `/debt`; es un STOCK (cuánto debes), no un flujo de
+    pagos. Parent cards sin cuadro aportan 0; las compras-hijas cuentan una
+    vez por su propio cuadro (sin doble conteo padre/hija, PHASE-35)."""
     interest_paid_ytd: Decimal
-    """Intereses pagados desde el 1 de enero hasta hoy
-    (categorías con `role=DEBT_INTEREST`)."""
+    """Intereses pagados desde el 1 de enero hasta hoy. PHASE-37 (fix):
+    MUX por pasivo — para las liabilities CON cuadro sale del cuadro
+    (`liability_installments.interest` de cuotas con `paid_at` en el año);
+    para las que no tienen cuadro, de sus transacciones `role=DEBT_INTEREST`
+    (excluidas las cuentas con cuadro para no doblar). El banco no desglosa
+    el interés como movimiento aparte, así que sin esto salía 0 pese a
+    tener TIN/TAE configurados."""
+    interest_scheduled_total: Decimal = Decimal("0")
+    """PHASE-37 — Interés contractual total del cuadro (Σ interés de TODAS
+    las cuotas de las liabilities con cuadro). El coste total del crédito."""
+    interest_remaining: Decimal = Decimal("0")
+    """PHASE-37 — Interés que queda por pagar (Σ interés de cuotas con
+    `paid_at IS NULL`). `interest_scheduled_total − interés ya pagado`."""
     weighted_apr: float | None
     """APR medio ponderado por saldo entre liabilities con apr
     declarado. `null` si ninguna lo tiene."""

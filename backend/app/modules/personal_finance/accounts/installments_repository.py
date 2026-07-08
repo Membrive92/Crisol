@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import delete, select
@@ -87,6 +87,51 @@ def schedule_outstanding(installments: list[LiabilityInstallment]) -> Decimal | 
         return None
     return sum(
         (i.principal for i in installments if i.paid_at is None),
+        Decimal("0"),
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# PHASE-37 — Agregación de interés/capital DIRIGIDA POR EL CUADRO.
+# El interés no se registra como movimiento aparte (va dentro de la cuota),
+# así que estas funciones puras son la fuente ÚNICA del interés/capital
+# "real" para debt-health y para la Capa 1 (/debt/category-summary). Se
+# comparan fechas por `.date()` para no depender de la tz del `paid_at`
+# (las cuotas-ancla llevan año 2000 y quedan fuera de cualquier ventana).
+# ─────────────────────────────────────────────────────────────────────
+
+
+def _paid_in_window(inst: LiabilityInstallment, start: date, end: date) -> bool:
+    return inst.paid_at is not None and start <= inst.paid_at.date() <= end
+
+
+def interest_paid_in_window(
+    installments: list[LiabilityInstallment], *, start: date, end: date
+) -> Decimal:
+    """Σ interés de las cuotas cuyo `paid_at` cae en `[start, end]`."""
+    return sum(
+        (i.interest for i in installments if _paid_in_window(i, start, end)),
+        Decimal("0"),
+    )
+
+
+def principal_paid_in_window(
+    installments: list[LiabilityInstallment], *, start: date, end: date
+) -> Decimal:
+    """Σ principal amortizado de las cuotas pagadas en `[start, end]`."""
+    return sum(
+        (i.principal for i in installments if _paid_in_window(i, start, end)),
+        Decimal("0"),
+    )
+
+
+def interest_total(
+    installments: list[LiabilityInstallment], *, unpaid_only: bool = False
+) -> Decimal:
+    """Σ interés del cuadro: contractual total, o el que queda por pagar
+    (`unpaid_only=True`, cuotas con `paid_at IS NULL`)."""
+    return sum(
+        (i.interest for i in installments if not unpaid_only or i.paid_at is None),
         Decimal("0"),
     )
 

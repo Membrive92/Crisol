@@ -19,6 +19,13 @@ export interface AccountBalance {
   /** `opening_balance + movements_balance`. */
   current_balance: string;
   /**
+   * PHASE-37 — Cuota mensual del cuadro (`installments[0].payment`) para
+   * liabilities CON cuadro; `null` para activos y liabilities sin cuadro.
+   * La lista de deuda la usa para la "Cuota est." de tarjetas financiadas
+   * (cuyo `opening_balance` es 0 y no se puede recomputar en cliente).
+   */
+  monthly_payment?: string | null;
+  /**
    * PHASE-31.4 — `true` para cuentas que NO entran al agregado de
    * patrimonio (brokerage / crypto, hasta que exista módulo de
    * inversión real). Siguen visibles y siguen siendo destino válido

@@ -174,6 +174,13 @@ async def _compute_historical_points(
     # movimientos. Las queries de movimientos operan SÓLO sobre los sin cuadro.
     scheduled_liabs = [liab for liab in liabilities if insts_by_account.get(liab.id)]
     nonsched_liabs = [liab for liab in liabilities if not insts_by_account.get(liab.id)]
+    # PHASE-37 — el interés histórico de un pasivo CON cuadro sale del cuadro
+    # (la cuota que vence el mes), no de transacciones (el banco no lo
+    # desglosa). Sus categorías vinculadas se excluyen del término
+    # transaccional del interés para no contar dos veces (MUX por pasivo).
+    scheduled_excluded_cats = {
+        liab.category_id for liab in scheduled_liabs if liab.category_id is not None
+    }
     liability_ids = [liab.id for liab in nonsched_liabs]
     # Opening (en divisa efectiva) sólo de los pasivos SIN cuadro.
     sum_opening = sum(
@@ -299,6 +306,8 @@ async def _compute_historical_points(
         .where(Transaction.occurred_at <= last_month_end)
         .group_by(month_bucket)
     )
+    if scheduled_excluded_cats:
+        interest_q = interest_q.where(Category.id.notin_(scheduled_excluded_cats))
     if target_currency is None:
         interest_q = interest_q.where(Transaction.currency == reference_currency)
     interest_by_month: dict[str, Decimal] = {
@@ -331,22 +340,26 @@ async def _compute_historical_points(
         # del mes, en divisa efectiva.
         scheduled_debt = Decimal("0")
         scheduled_principal = Decimal("0")
+        scheduled_interest = Decimal("0")
         for liab in scheduled_liabs:
             insts = insts_by_account[liab.id]
             factor = fx_factor.get(liab.id, Decimal("1"))
             scheduled_debt += _scheduled_remaining_at(insts, month) * factor
-            sched_principal, _sched_interest = _scheduled_flow_in_month(insts, month)
+            sched_principal, sched_interest = _scheduled_flow_in_month(insts, month)
             scheduled_principal += sched_principal * factor
+            scheduled_interest += sched_interest * factor
         total_debt = movement_debt + scheduled_debt
         principal_paid = principal_by_month.get(month_key, Decimal("0")) + scheduled_principal
+        # PHASE-37 — interés histórico = transacciones (pasivos sin cuadro) +
+        # interés del cuadro (pasivos con cuadro). Antes se descartaba el del
+        # cuadro y el histórico salía plano a 0 frente a la proyección.
+        interest_paid = interest_by_month.get(month_key, Decimal("0")) + scheduled_interest
         points.append(
             DebtHistoryPoint(
                 month=month_key,
                 total_debt=max(total_debt, Decimal("0")).quantize(Decimal("0.01")),
                 principal_paid=principal_paid.quantize(Decimal("0.01")),
-                interest_paid=interest_by_month.get(month_key, Decimal("0")).quantize(
-                    Decimal("0.01")
-                ),
+                interest_paid=interest_paid.quantize(Decimal("0.01")),
                 kind="historical",
             )
         )

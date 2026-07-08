@@ -36,11 +36,12 @@ export interface DebtCompositionDonutProps {
 }
 
 /**
- * PHASE-30.3 — Donut con los PAGOS a deuda del periodo desglosados por
- * tipo (hipoteca, préstamo, tarjeta, otros). Ojo: NO es el saldo vivo de
- * la deuda — el total del centro es `total_payments` del rango, igual que
- * la card "Pagos a deuda" de al lado. Centro muestra el total cuando no
- * hay hover; al pasar por encima muestra el tipo activo + su importe.
+ * PHASE-30.3 / PHASE-37 — Donut de composición de la DEUDA VIVA por tipo
+ * (hipoteca, préstamo, tarjeta). Es un STOCK: el total del centro es la
+ * deuda pendiente (`debt-health.total_liabilities`, dirigida por el cuadro
+ * `schedule_outstanding`), NO un flujo de pagos. Coincide con la KPI de
+ * cabecera y con el patrimonio neto. Centro muestra el total sin hover; al
+ * pasar por encima, el tipo activo + su importe + su %.
  */
 export function DebtCompositionDonut({
   items,
@@ -74,7 +75,7 @@ export function DebtCompositionDonut({
             letterSpacing: '-0.01em',
           }}
         >
-          Pagos por tipo de deuda
+          Composición de la deuda
         </h2>
       </header>
 
@@ -86,8 +87,8 @@ export function DebtCompositionDonut({
             fontSize: fontSize.sm,
           }}
         >
-          Sin pagos categorizados como deuda. El donut aparece cuando
-          haya datos en el rango.
+          Sin deuda viva registrada. El donut aparece cuando tengas un
+          préstamo, hipoteca o tarjeta con saldo pendiente.
         </p>
       ) : (
         <div

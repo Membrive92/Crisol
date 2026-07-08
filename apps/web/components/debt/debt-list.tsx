@@ -234,8 +234,11 @@ export function DebtList({ liabilities, loading }: DebtListProps) {
             color: colors.textMuted,
           }}
         >
-          {liabilities.length}{' '}
-          {liabilities.length === 1 ? 'pasivo activo' : 'pasivos activos'}
+          {/* PHASE-37 — contamos CONTRATOS de nivel superior: las compras a
+              plazos (hijas) van anidadas bajo su tarjeta, no como pasivos
+              sueltos. */}
+          {topLevel.length}{' '}
+          {topLevel.length === 1 ? 'pasivo activo' : 'pasivos activos'}
         </p>
       </header>
 
@@ -314,7 +317,15 @@ function DebtRow({ balance, account, category, isChild = false, groupTotal }: De
 
   const isAmortizable =
     AMORTIZABLE_ACCOUNT_TYPES.includes(balance.type);
-  const monthlyPayment = account ? estimateMonthlyPayment(account) : null;
+  // PHASE-37 — cuota real del cuadro persistido cuando existe (tarjetas
+  // financiadas con opening_balance=0 no se pueden recomputar en cliente);
+  // fallback a la estimación francesa desde opening_balance.
+  const monthlyPayment =
+    balance.monthly_payment != null
+      ? Number(balance.monthly_payment)
+      : account
+        ? estimateMonthlyPayment(account)
+        : null;
   const aprValue = account?.apr ?? null;
   const aprPercent =
     aprValue !== null ? (Number(aprValue) * 100).toFixed(2) : null;
