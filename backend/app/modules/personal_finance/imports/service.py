@@ -308,9 +308,16 @@ async def run_commit(
 
     # Validar y persistir overrides como equivalencias antes de procesar
     # las filas, para que el lookup encuentre las categorías correctas.
+    # PHASE-37 (bugfix): NO aprendemos equivalencias para conceptos de
+    # dirección ambigua en el lote (aparecen con cargo y abono) — evita
+    # fijar un "BIZUM" → categoría de ingreso que luego mal-etiqueta pagos
+    # salientes. El override sí se aplica a esta importación.
     valid_overrides: dict[str, uuid.UUID] = {}
     if category_overrides:
-        valid_overrides = await _persist_user_category_overrides(db, user_id, category_overrides)
+        ambiguous = _direction_ambiguous_concepts(rows_raw, effective_mappings)
+        valid_overrides = await _persist_user_category_overrides(
+            db, user_id, category_overrides, skip_learn=frozenset(ambiguous)
+        )
 
     job.status = ImportJobStatus.PROCESSING
     job.error_log = []
@@ -334,10 +341,51 @@ async def run_commit(
     return job
 
 
+def _direction_ambiguous_concepts(
+    rows: list[dict[str, str]], mappings: ImportColumnMappings
+) -> set[str]:
+    """PHASE-37 (bugfix) — conceptos cuyo signo es AMBIGUO en el lote:
+    aparecen con cargo (−) Y con abono (+).
+
+    Un concepto así (p. ej. "BIZUM" pelado, que a veces sale y a veces
+    entra) NO debe fijarse como una única equivalencia aprendida
+    `concepto → categoría`: colapsaría la dirección y clasificaría un
+    pago saliente en una categoría de ingreso (bug "Bizum recibido" con
+    flow=OUT). Es la lección PHASE-32 generalizada al autoaprendizaje: la
+    dirección se deriva del SIGNO del extracto (la verdad), no de una
+    equivalencia fijada una vez.
+
+    Se computa desde el signo del extracto por concepto normalizado (misma
+    clave que usa `_persist_user_category_overrides` al aprender). Ámbito:
+    el propio lote — que es donde el mapping venenoso se aprendió en el
+    caso real (un extracto con BIZUM entrantes y salientes a la vez).
+    """
+    if not mappings.category_name or not mappings.amount:
+        return set()
+    signs_by_concept: dict[str, set[int]] = {}
+    for raw in rows:
+        concept_raw = raw.get(mappings.category_name, "")
+        amount_raw = raw.get(mappings.amount, "")
+        if not concept_raw or not amount_raw:
+            continue
+        normalized = normalize_concept(concept_raw)
+        if not normalized:
+            continue
+        try:
+            _amount, bank_sign = _parse_amount_signed(amount_raw)
+        except (ArithmeticError, ValueError):
+            continue
+        if bank_sign != 0:
+            signs_by_concept.setdefault(normalized, set()).add(bank_sign)
+    return {concept for concept, seen in signs_by_concept.items() if len(seen) > 1}
+
+
 async def _persist_user_category_overrides(
     db: AsyncSession,
     user_id: uuid.UUID,
     overrides: dict[str, uuid.UUID],
+    *,
+    skip_learn: frozenset[str] = frozenset(),
 ) -> dict[str, uuid.UUID]:
     """Valida que cada `category_id` pertenece al usuario y guarda la
     equivalencia (UPSERT). Devuelve los pares válidos con el concepto
@@ -346,6 +394,12 @@ async def _persist_user_category_overrides(
     Conceptos con `category_id` ajeno se filtran silenciosamente —
     es un error del cliente, no del usuario, y no debe abortar la
     importación entera.
+
+    PHASE-37 (bugfix): los conceptos en `skip_learn` (dirección ambigua en
+    el lote, ver `_direction_ambiguous_concepts`) SÍ se devuelven en `valid`
+    —el override del usuario se aplica en ESTA importación— pero NO se
+    persisten como equivalencia aprendida, para no envenenar futuras
+    importaciones con una dirección colapsada.
     """
     # Carga las categorías del usuario una vez para validar todas.
     user_cat_ids = {
@@ -362,7 +416,8 @@ async def _persist_user_category_overrides(
         normalized = normalize_concept(raw_concept)
         if not normalized:
             continue
-        await upsert_bank_mapping(db, user_id, bank_concept=normalized, category_id=cat_id)
+        if normalized not in skip_learn:
+            await upsert_bank_mapping(db, user_id, bank_concept=normalized, category_id=cat_id)
         valid[normalized] = cat_id
     return valid
 

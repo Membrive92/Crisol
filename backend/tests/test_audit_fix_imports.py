@@ -30,6 +30,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from app.modules.personal_finance.bank_mappings.repository import get_mappings_for_concepts
 from app.modules.personal_finance.categories.models import CategoryKind
 from app.modules.personal_finance.imports.parser import (
     _DATE_HEADER_HINTS,
@@ -38,9 +39,11 @@ from app.modules.personal_finance.imports.parser import (
 from app.modules.personal_finance.imports.schemas import ImportColumnMappings
 from app.modules.personal_finance.imports.service import (
     _compute_hash,
+    _direction_ambiguous_concepts,
     _parse_amount,
     _parse_amount_signed,
     _parse_row,
+    _persist_user_category_overrides,
 )
 from app.modules.personal_finance.transactions.models import Transaction
 
@@ -542,3 +545,83 @@ async def test_import_persists_amount_magnitude_with_signed_statement(
             )
         ).scalar_one()
     assert tx.amount == Decimal("29.66")  # magnitud positiva
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PHASE-37 (bugfix) — guard de dirección ambigua en el autoaprendizaje
+# ("BIZUM" que entra y sale no debe fijar una equivalencia aprendida)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _amt_row(amount: str, concept: str) -> dict[str, str]:
+    return {"Importe": amount, "Fecha": "2026-06-23", "Concepto": "x", "Categoria": concept}
+
+
+def test_direction_ambiguous_detects_concept_with_both_signs() -> None:
+    """Un concepto con cargo (−) y abono (+) en el lote es ambiguo."""
+    rows = [
+        _amt_row("-30,00", "BIZUM"),
+        _amt_row("+25,00", "BIZUM"),
+        _amt_row("-10,00", "GASOLINA"),  # una sola dirección
+    ]
+    assert _direction_ambiguous_concepts(rows, _MAPPING) == {"bizum"}
+
+
+def test_direction_ambiguous_ignores_single_direction_concept() -> None:
+    """Un reembolso recurrente (solo abonos) NO es ambiguo — se sigue
+    aprendiendo con normalidad, sin falsos positivos."""
+    rows = [_amt_row("+25,00", "DEVOLUCION AMZN"), _amt_row("+30,00", "DEVOLUCION AMZN")]
+    assert _direction_ambiguous_concepts(rows, _MAPPING) == set()
+
+
+def test_direction_ambiguous_ignores_unsigned_rows() -> None:
+    """Sin signo en el extracto (sign 0) no hay evidencia de dirección."""
+    rows = [_amt_row("25,00", "BIZUM"), _amt_row("30,00", "BIZUM")]
+    assert _direction_ambiguous_concepts(rows, _MAPPING) == set()
+
+
+def test_direction_ambiguous_empty_without_category_mapping() -> None:
+    mapping = ImportColumnMappings(
+        amount="Importe", occurred_at="Fecha", description="Concepto", category_name=None
+    )
+    assert _direction_ambiguous_concepts([_amt_row("-1,00", "x")], mapping) == set()
+
+
+async def _create_category(client: AsyncClient, token: str, name: str) -> dict:
+    r = await client.post(
+        "/categories",
+        json={"name": name, "kind": "income"},
+        headers=_auth(token),
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+async def test_persist_overrides_skips_learning_ambiguous_concept(
+    client: AsyncClient, test_engine
+) -> None:
+    """El override de un concepto ambiguo se APLICA a esta importación
+    (`valid`) pero NO se persiste como equivalencia aprendida (`skip_learn`),
+    para no envenenar futuras. Un concepto normal sí se aprende."""
+    token, _account_id = await _register(client, "audit-ambiguous@example.com")
+    cat = await _create_category(client, token, "Bizum recibido")
+    user_id = uuid.UUID(cat["user_id"])
+    cat_id = uuid.UUID(cat["id"])
+
+    factory = async_sessionmaker(bind=test_engine, expire_on_commit=False)
+    async with factory() as db:
+        valid = await _persist_user_category_overrides(
+            db,
+            user_id,
+            {"BIZUM": cat_id, "NOMINA": cat_id},
+            skip_learn=frozenset({"bizum"}),
+        )
+        await db.commit()
+        learned = await get_mappings_for_concepts(db, user_id, ["bizum", "nomina"])
+
+    # Ambiguo: aplicado a esta importación pero NO aprendido.
+    assert valid["bizum"] == cat_id
+    assert "bizum" not in learned
+    # Normal: aprendido para futuras importaciones.
+    assert valid["nomina"] == cat_id
+    assert learned.get("nomina") == cat_id
