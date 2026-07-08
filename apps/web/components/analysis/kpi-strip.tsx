@@ -23,6 +23,13 @@ export interface KpiTileProps {
   status?: KpiStatus;
   /** Para KPIs donde BAJAR es bueno (esfuerzo, gasto): invierte el color del Δ. */
   invertDeltaColor?: boolean;
+  /**
+   * PHASE-37.3 — pill sutil junto al label (p. ej. "Estruct. +9 pp" cuando
+   * la tasa estructural difiere de la bruta). Se omite si no aporta.
+   */
+  badge?: string | undefined;
+  /** Tooltip nativo (title) con la explicación ampliada del tile. */
+  title?: string | undefined;
 }
 
 const STATUS_COLOR: Record<KpiStatus, string> = {
@@ -42,6 +49,8 @@ export function KpiTile({
   sparkline,
   status,
   invertDeltaColor = false,
+  badge,
+  title,
 }: KpiTileProps) {
   const hasDelta = delta != null && deltaText != null;
   const positive = (delta ?? 0) >= 0;
@@ -51,6 +60,7 @@ export function KpiTile({
 
   return (
     <div
+      title={title}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -61,6 +71,9 @@ export function KpiTile({
     >
       <span
         style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
           fontSize: 10,
           fontWeight: fontWeight.semibold,
           letterSpacing: '0.05em',
@@ -72,6 +85,23 @@ export function KpiTile({
         }}
       >
         {label}
+        {badge ? (
+          <span
+            style={{
+              flex: '0 0 auto',
+              padding: '1px 6px',
+              borderRadius: 999,
+              backgroundColor: colors.primarySoft,
+              color: colors.primary,
+              fontSize: 9,
+              fontWeight: fontWeight.bold,
+              letterSpacing: '0.02em',
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            {badge}
+          </span>
+        ) : null}
       </span>
       <span
         style={{

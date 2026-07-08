@@ -46,6 +46,10 @@ class TransactionCreate(BaseModel):
     # envía ([Gasto]/[Ingreso]/[Entre mis cuentas]), manda; si no, el
     # service la deriva de la categoría (puente de transición).
     flow: TransactionFlow | None = None
+    # PHASE-37.3: override de la clasificación estructural/puntual. NULL =
+    # heurística decide (lo normal al crear), TRUE = puntual, FALSE =
+    # estructural.
+    is_exceptional: bool | None = None
 
     @field_validator("currency")
     @classmethod
@@ -67,6 +71,10 @@ class TransactionUpdate(BaseModel):
     occurred_at: datetime | None = None
     description: str | None = None
     flow: TransactionFlow | None = None
+    # PHASE-37.3 — override tri-estado. Con `exclude_unset` en el service,
+    # enviar `is_exceptional: null` EXPLÍCITO resetea a heurística; omitir
+    # el campo no lo toca. TRUE = puntual, FALSE = estructural.
+    is_exceptional: bool | None = None
 
     @field_validator("currency")
     @classmethod
@@ -97,6 +105,10 @@ class TransactionResponse(BaseModel):
     # PHASE-34: fuente de verdad de la dirección del dinero. La UI pinta
     # el signo/color y clasifica gasto/ingreso/transferencia desde aquí.
     flow: TransactionFlow | None = None
+    # PHASE-37.3: override de la clasificación estructural/puntual (tri-estado).
+    # NULL = automático (heurística), TRUE = puntual, FALSE = estructural.
+    # La UI del detalle pinta el toggle "Gasto puntual" desde aquí.
+    is_exceptional: bool | None = None
     receipt_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime

@@ -1,0 +1,53 @@
+"""Router del módulo analytics (PHASE-37.3+).
+
+Read-only. Mismo modo de moneda que el dashboard: `currency` (legacy,
+filtra + agrega crudo) o `target_currency` (convierte por fecha y
+agrega). Si no llega ninguno, default legacy `USD` — coherente con
+`dashboard.router`.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
+from app.core.deps import CurrentUser
+from app.modules.personal_finance.analytics.schemas import ExpenseStructureResponse
+from app.modules.personal_finance.analytics.service import get_expense_structure
+
+router = APIRouter(prefix="/analytics", tags=["analytics"])
+
+_DEFAULT_CURRENCY = "USD"
+
+
+def _resolve_currency_params(
+    currency: str | None, target_currency: str | None
+) -> tuple[str | None, str | None]:
+    if target_currency is None and currency is None:
+        return _DEFAULT_CURRENCY, None
+    return currency, target_currency
+
+
+@router.get("/expense-structure", response_model=ExpenseStructureResponse)
+async def expense_structure_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
+    target_currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+) -> ExpenseStructureResponse:
+    """Gasto estructural vs puntual + tasa de ahorro dual para el rango."""
+    cur, target = _resolve_currency_params(currency, target_currency)
+    return await get_expense_structure(
+        db,
+        user.id,
+        currency=cur,
+        target_currency=target,
+        date_from=date_from,
+        date_to=date_to,
+    )

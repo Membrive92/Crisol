@@ -11,6 +11,9 @@ export interface TransactionCreateRequest {
   /** PHASE-34: dirección/transfer-ness explícita. Si se omite, el backend la
    * deriva de la categoría (puente de transición). */
   flow?: TransactionFlow | null;
+  /** PHASE-37.3: override estructural/puntual. Normalmente se omite al crear
+   * (deja que decida la heurística). */
+  is_exceptional?: boolean | null;
 }
 
 export interface TransactionUpdateRequest {
@@ -21,6 +24,12 @@ export interface TransactionUpdateRequest {
   occurred_at?: string;
   description?: string | null;
   flow?: TransactionFlow | null;
+  /**
+   * PHASE-37.3 — override tri-estado. Enviar `null` EXPLÍCITO resetea a
+   * automático (el backend usa `exclude_unset`, así que omitirlo no lo
+   * toca). `true` = puntual, `false` = estructural.
+   */
+  is_exceptional?: boolean | null;
 }
 
 export interface TransactionListQuery {

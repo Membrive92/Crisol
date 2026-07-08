@@ -1,21 +1,68 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
 
-import type { CategoryBreakdownItem } from '@crisol/types';
+import type { AnalyticsCategoryAmount, CategoryBreakdownItem } from '@crisol/types';
 import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@crisol/ui';
 
 import { iconForCategoryName } from '@/lib/category-icons';
 import { Card } from '@/components/ui/card';
 import { FolderIcon } from '@/components/ui/icons';
 
+/** PHASE-37.3 — filtro estructural/puntual del desglose. */
+export type StructureFilter = 'all' | 'structural' | 'exceptional';
+
 export interface StitchExpenseBreakdownProps {
   items: CategoryBreakdownItem[];
   currency: string;
   isLoading: boolean;
   topN?: number | undefined;
+  /**
+   * PHASE-37.3 — gasto puntual por categoría. Cuando se pasa, se habilita
+   * el control `[Todo | Estructural | Puntual]`: "Puntual" usa esta lista y
+   * "Estructural" se deriva restándola del total por categoría.
+   */
+  exceptionalByCategory?: AnalyticsCategoryAmount[] | undefined;
+}
+
+const STRUCTURE_LABELS: Record<StructureFilter, string> = {
+  all: 'Todo',
+  structural: 'Estructural',
+  exceptional: 'Puntual',
+};
+
+/** Clave de emparejamiento entre datasets: id real o el bucket sin categoría. */
+function categoryKey(id: string | null): string {
+  return id ?? '_nocat_';
+}
+
+function toBreakdownItem(c: AnalyticsCategoryAmount): CategoryBreakdownItem {
+  return {
+    category_id: c.category_id,
+    category_name: c.category_name ?? 'Sin categoría',
+    category_kind: 'expense',
+    category_color: c.color,
+    category_icon: c.icon,
+    total: c.total,
+    count: 0,
+  };
+}
+
+/** Estructural por categoría = total − puntual (descarta lo que queda ~0). */
+export function deriveStructural(
+  all: CategoryBreakdownItem[],
+  exceptional: AnalyticsCategoryAmount[],
+): CategoryBreakdownItem[] {
+  const excByKey = new Map<string, number>();
+  for (const e of exceptional) excByKey.set(categoryKey(e.category_id), Number(e.total));
+  const out: CategoryBreakdownItem[] = [];
+  for (const it of all) {
+    const structural = Number(it.total) - (excByKey.get(categoryKey(it.category_id)) ?? 0);
+    if (structural > 0.005) out.push({ ...it, total: structural.toFixed(2) });
+  }
+  return out;
 }
 
 const SLICE_PALETTE = [
@@ -54,12 +101,30 @@ export function StitchExpenseBreakdown({
   // (la queja era "Otros (39%)"). La fila "Otros (n)" sigue siendo clicable
   // para desplegar la lista completa inline (`otherExpanded`).
   topN = 6,
+  exceptionalByCategory,
 }: StitchExpenseBreakdownProps) {
   const router = useRouter();
   const [activeId, setActiveId] = useState<string | null>(null);
   const [otherExpanded, setOtherExpanded] = useState(false);
+  const [filter, setFilter] = useState<StructureFilter>('all');
 
-  const sorted = [...items].sort((a, b) => Number(b.total) - Number(a.total));
+  const canFilter = exceptionalByCategory != null;
+  const exceptionalItems = useMemo(
+    () => (exceptionalByCategory ?? []).map(toBreakdownItem),
+    [exceptionalByCategory],
+  );
+  const structuralItems = useMemo(
+    () => deriveStructural(items, exceptionalByCategory ?? []),
+    [items, exceptionalByCategory],
+  );
+  const displayItems =
+    !canFilter || filter === 'all'
+      ? items
+      : filter === 'exceptional'
+        ? exceptionalItems
+        : structuralItems;
+
+  const sorted = [...displayItems].sort((a, b) => Number(b.total) - Number(a.total));
   const total = sorted.reduce((acc, x) => acc + Number(x.total), 0);
   // Si el usuario ha desplegado "Otros", mostramos TODAS las categorías
   // y se omite el bucket agrupado. Si no, top N + Otros (PHASE-25).
@@ -128,19 +193,22 @@ export function StitchExpenseBreakdown({
         >
           Desglose de gastos
         </h3>
-        <span
-          style={{
-            fontSize: fontSize.xs,
-            color: colors.textMuted,
-          }}
-        >
-          {slices.length} {slices.length === 1 ? 'categoría' : 'categorías'}
-        </span>
+        {canFilter ? (
+          <StructureSegmented value={filter} onChange={setFilter} />
+        ) : (
+          <span style={{ fontSize: fontSize.xs, color: colors.textMuted }}>
+            {slices.length} {slices.length === 1 ? 'categoría' : 'categorías'}
+          </span>
+        )}
       </header>
 
       {empty ? (
         <p style={{ margin: 0, fontSize: fontSize.sm, color: colors.textMuted }}>
-          Sin gastos en el periodo.
+          {filter === 'exceptional'
+            ? 'Sin gastos puntuales en el periodo.'
+            : filter === 'structural'
+              ? 'Sin gastos estructurales en el periodo.'
+              : 'Sin gastos en el periodo.'}
         </p>
       ) : (
         <div
@@ -238,6 +306,58 @@ export function StitchExpenseBreakdown({
         </div>
       )}
     </Card>
+  );
+}
+
+/** Control segmentado [Todo | Estructural | Puntual] (PHASE-37.3). */
+export function StructureSegmented({
+  value,
+  onChange,
+}: {
+  value: StructureFilter;
+  onChange: (next: StructureFilter) => void;
+}) {
+  const options: StructureFilter[] = ['all', 'structural', 'exceptional'];
+  return (
+    <div
+      role="tablist"
+      aria-label="Filtrar gasto por tipo"
+      style={{
+        display: 'inline-flex',
+        gap: 2,
+        padding: 2,
+        borderRadius: radius.sm,
+        backgroundColor: colors.surfaceMuted,
+        border: `1px solid ${colors.border}`,
+      }}
+    >
+      {options.map((opt) => {
+        const active = value === opt;
+        return (
+          <button
+            key={opt}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(opt)}
+            style={{
+              padding: '4px 10px',
+              borderRadius: radius.sm - 2,
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: fontSize.xs,
+              fontWeight: active ? fontWeight.semibold : fontWeight.medium,
+              backgroundColor: active ? colors.surface : 'transparent',
+              color: active ? colors.text : colors.textMuted,
+              boxShadow: active ? '0 1px 2px rgba(0,0,0,0.18)' : 'none',
+              transition: 'background-color 120ms ease, color 120ms ease',
+            }}
+          >
+            {STRUCTURE_LABELS[opt]}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

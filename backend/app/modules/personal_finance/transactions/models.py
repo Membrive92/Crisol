@@ -130,6 +130,15 @@ class Transaction(Base):
     absorbed_as_mirror: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+    # PHASE-37.3 — override manual de tres estados sobre la clasificación
+    # estructural/puntual del gasto (ver `analytics/recurrence.py`):
+    #   NULL  → decide la heurística (recurrencia / fixed_expense / rol deuda).
+    #   TRUE  → el usuario lo marcó como PUNTUAL (one-off, excluido de la base
+    #           de gasto estructural y del runway).
+    #   FALSE → el usuario lo marcó como ESTRUCTURAL (recurrente).
+    # Ortogonal a `flow`: `flow` dice si es gasto/ingreso/transferencia;
+    # `is_exceptional` sólo matiza, dentro de los gastos, si es recurrente.
+    is_exceptional: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     __table_args__ = (
         # Partial unique para dedup de imports — incluye `AND deleted_at

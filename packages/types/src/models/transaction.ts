@@ -83,6 +83,13 @@ export interface Transaction {
    */
   is_debt_pair: boolean;
   /**
+   * PHASE-37.3 — override de la clasificación estructural/puntual del
+   * gasto (tri-estado). `null` = automático (decide la heurística de
+   * recurrencia), `true` = puntual (one-off), `false` = estructural. El
+   * detalle de la tx pinta el toggle "Gasto puntual" desde aquí.
+   */
+  is_exceptional?: boolean | null;
+  /**
    * Alert proactiva (PHASE-14.5). Sólo presente en la respuesta del
    * POST /transactions cuando la nueva tx empuja la categoría a
    * warning/over. `null` siempre en lecturas y cuando no aplica.

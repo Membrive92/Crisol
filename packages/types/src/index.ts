@@ -24,6 +24,11 @@ export type {
 } from './models/account-balance';
 export type { PositionHistoryResponse, PositionPoint } from './models/position';
 export type {
+  AnalyticsCategoryAmount,
+  AnalyticsTxRef,
+  ExpenseStructureResponse,
+} from './models/analytics';
+export type {
   AmortizationRow,
   AmortizationSchedule,
   DailyDebtPoint,
@@ -147,6 +152,8 @@ export type {
   DashboardSummaryQuery,
   DashboardTopExpensesQuery,
 } from './dto/dashboard.dto';
+
+export type { ExpenseStructureQuery } from './dto/analytics.dto';
 
 export type { ImportListQuery, ImportListResponse } from './dto/import.dto';
 

@@ -17,6 +17,7 @@ import {
   looksLikeFinancedOperation,
 } from '@/components/transfers/convert-to-debt-dialog';
 import { MarkAsTransferModal } from '@/components/transfers/mark-as-transfer-modal';
+import { ExceptionalToggle } from '@/components/transactions/exceptional-toggle';
 import { TransactionForm } from '@/components/transactions/transaction-form';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -26,6 +27,9 @@ export default function EditTransactionPage({ params }: { params: Promise<{ id: 
   const router = useRouter();
   const { data, isLoading, isError, error } = useTransaction(id);
   const mutation = useUpdateTransaction(id);
+  // Mutación dedicada para el toggle estructural/puntual — separada de la del
+  // form para que su `isPending` no interfiera con el botón "Guardar".
+  const exceptionalMutation = useUpdateTransaction(id);
   // Punto de entrada al modal: lo abrimos en el detalle (no en la lista)
   // para no saturar las filas con un botón por tx. El usuario que quiera
   // catalogar/recatalogar una transferencia entra a la edición y la
@@ -99,6 +103,50 @@ export default function EditTransactionPage({ params }: { params: Promise<{ id: 
                 : 'Reasignar transferencia'}
             </Button>
           </Card>
+
+          {data.flow === 'OUT' ? (
+            <Card style={{ marginTop: spacing.lg, padding: spacing.lg }}>
+              <h2
+                style={{
+                  margin: 0,
+                  marginBottom: spacing.xs,
+                  fontSize: fontSize.md,
+                  fontWeight: fontWeight.semibold,
+                  color: colors.text,
+                }}
+              >
+                Clasificación del gasto
+              </h2>
+              <p
+                style={{
+                  margin: `0 0 ${spacing.md}px 0`,
+                  fontSize: fontSize.sm,
+                  color: colors.textMuted,
+                  lineHeight: 1.4,
+                }}
+              >
+                Los gastos <strong>puntuales</strong> (impuestos, dentista, reformas)
+                se excluyen del gasto estructural y del cálculo de colchón. Por
+                defecto lo decide una heurística; aquí puedes forzarlo.
+              </p>
+              <ExceptionalToggle
+                value={data.is_exceptional ?? null}
+                pending={exceptionalMutation.isPending}
+                onChange={(next) =>
+                  exceptionalMutation.mutate(
+                    { is_exceptional: next },
+                    {
+                      onSuccess: () => toast.success('Clasificación actualizada.'),
+                      onError: (err) =>
+                        toast.error(
+                          formatApiError(err, 'No se pudo actualizar la clasificación'),
+                        ),
+                    },
+                  )
+                }
+              />
+            </Card>
+          ) : null}
 
           {data.transfer_pair_id === null ? (
             <ConvertToDebtDialog

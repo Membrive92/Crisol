@@ -3,6 +3,7 @@ import type {
   DashboardByMonthQuery,
   DashboardSummaryQuery,
   DashboardTopExpensesQuery,
+  ExpenseStructureQuery,
   ImportListQuery,
   ReceiptListQuery,
   TransactionListQuery,
@@ -108,6 +109,11 @@ export const queryKeys = {
         'category-available-periods',
         categoryId,
       ] as const,
+  },
+  analytics: {
+    all: ['analytics'] as const,
+    expenseStructure: (query: ExpenseStructureQuery = {}) =>
+      [...queryKeys.analytics.all, 'expense-structure', normalizeQuery(query)] as const,
   },
   imports: {
     all: ['imports'] as const,

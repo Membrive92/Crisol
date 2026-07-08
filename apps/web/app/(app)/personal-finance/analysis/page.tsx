@@ -9,6 +9,7 @@ import {
   useDashboardByMonth,
   useDashboardSummary,
   useDebtHealth,
+  useExpenseStructure,
   usePositionHistory,
 } from '@crisol/services';
 import { useCurrencyStore } from '@crisol/store';
@@ -90,10 +91,15 @@ export default function AnalysisPage() {
   const byCategoryParams = convertAll
     ? { target_currency: currency, date_from: dateFrom, date_to: dateTo, kind: 'expense' as const }
     : { currency, date_from: dateFrom, date_to: dateTo, kind: 'expense' as const };
+  // PHASE-37.3 — gasto estructural/puntual del rango (mismo scope de período).
+  const structureParams = convertAll
+    ? { target_currency: currency, date_from: dateFrom, date_to: dateTo }
+    : { currency, date_from: dateFrom, date_to: dateTo };
 
   const summaryQuery = useDashboardSummary(summaryParams);
   const monthlyQuery = useDashboardByMonth(monthlyParams);
   const expensesByCategoryQuery = useDashboardByCategory(byCategoryParams);
+  const structureQuery = useExpenseStructure(structureParams);
   // PHASE-37 — patrimonio (stock): posición actual + serie + salud de deuda.
   // No dependen del período (son fotos a fecha); su dimensión temporal es la
   // serie y el Δ, no el filtro de rango.
@@ -132,6 +138,15 @@ export default function AnalysisPage() {
       ? (Number(summary.balance) / Number(summary.income)) * 100
       : null;
   const savingsDeltaPp = summary?.savings_rate_delta_pp ?? null;
+  // PHASE-37.3 — tasa de ahorro estructural (excluye gastos puntuales). Si
+  // difiere >10pp de la bruta, un badge en el tile invita a fijarse.
+  const structure = structureQuery.data;
+  const savingsStructuralPct =
+    structure?.savings_rate_structural != null ? structure.savings_rate_structural * 100 : null;
+  const savingsDiffPp =
+    savingsStructuralPct != null && savingsRate != null
+      ? savingsStructuralPct - savingsRate
+      : null;
 
   const monthlyNets = monthly.map((m) => Number(m.income) - Number(m.expenses));
 
@@ -260,7 +275,21 @@ export default function AnalysisPage() {
             value={savingsRate != null ? `${savingsRate.toFixed(1)} %` : '—'}
             delta={savingsDeltaPp}
             deltaText={savingsDeltaPp != null ? `${savingsDeltaPp >= 0 ? '+' : ''}${savingsDeltaPp.toFixed(1)} pp` : undefined}
-            subtitle="vs periodo anterior"
+            subtitle={
+              savingsStructuralPct != null
+                ? `Estructural ${savingsStructuralPct.toFixed(0)} %`
+                : 'vs periodo anterior'
+            }
+            badge={
+              savingsDiffPp != null && Math.abs(savingsDiffPp) > 10
+                ? `${savingsDiffPp >= 0 ? '+' : ''}${savingsDiffPp.toFixed(0)} pp`
+                : undefined
+            }
+            title={
+              savingsStructuralPct != null
+                ? `Excluyendo gastos puntuales (impuestos, one-offs), tu tasa de ahorro sería ${savingsStructuralPct.toFixed(0)} %.`
+                : undefined
+            }
           />
         </KpiStrip>
       </div>
@@ -301,6 +330,7 @@ export default function AnalysisPage() {
           items={expensesByCategory}
           currency={currency}
           isLoading={expensesByCategoryQuery.isLoading}
+          exceptionalByCategory={structure?.exceptional_by_category}
         />
         <DebtSummaryCard />
       </div>

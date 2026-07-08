@@ -251,6 +251,7 @@ async def create_transaction(
         description=data.description,
         source=data.source,
         flow=flow,
+        is_exceptional=data.is_exceptional,
     )
     return await persist_transaction(db, transaction)
 
