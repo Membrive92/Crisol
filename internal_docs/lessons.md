@@ -349,6 +349,58 @@ para ser **idéntica** al comportamiento previo; la corrección de datos es un
 paso separado y auditado (reimport o data-fix), nunca un efecto colateral de
 la migración. Así el test prueba la query, no el parche de datos.
 
+### [PHASE-37] Un dato IMPLÍCITO tiene su fuente de verdad en el modelo, no en transacciones — y no se agrega aditivamente
+**Error:** El módulo de deuda calculaba "intereses pagados" sumando
+transacciones en categorías `DEBT_INTEREST`. Esas categorías están
+estructuralmente VACÍAS: el banco no desglosa el interés como un movimiento
+aparte, va dentro de la cuota. Resultado: "Intereses YTD 0,00 €", card "Pagos
+a deuda" vacía, barras de interés a 0 y trend con histórico=0 vs proyección≠0,
+pese a tener TIN/TAE configurados.
+**Causa:** Buscar un dato donde no se registra. El interés es IMPLÍCITO — vive
+en el cuadro de amortización (`liability_installments.interest`), no en el
+ledger de transacciones.
+**Solución:** Leer el interés/capital del CUADRO, con **MUX por pasivo**
+(schedule XOR transacciones, nunca la suma): una deuda con cuadro aporta desde
+el cuadro; una sin cuadro, desde sus transacciones. Sumar ambos (aditivo)
+reintroduce el doble conteo "dos fuentes de verdad" de [PHASE-34].
+**Regla:** Si un dato es implícito (no se registra como movimiento propio), su
+fuente de verdad es el modelo estructural que lo contiene (el cuadro, el plan),
+no las transacciones. Al combinar dos fuentes para la misma entidad, elige una
+por entidad (MUX), no las sumes.
+
+### [PHASE-37] Un dedup por la clave equivocada over- y under-excluye a la vez
+**Error:** En el month-outlook, para no doblar un pago de cuota que también
+fuese gasto fijo, se excluían los gastos fijos cuyo `account_id` fuese un
+pasivo con cuadro. La revisión adversarial mostró que esa clave es doblemente
+mala: (a) NO captura el doble conteo real —un pago de préstamo modelado como
+gasto fijo se cobra desde el BANCO, no desde el pasivo, así que su `account_id`
+no es el pasivo— y (b) SÍ excluye cargos legítimos distintos —una suscripción
+en una tarjeta financiada comparte `account_id` con el pasivo pero no es la
+cuota.
+**Causa:** La clave de dedup (`account_id`) no modelaba la relación buscada
+(¿este cargo ES la cuota?). Una clave plausible pero incorrecta.
+**Solución:** Eliminar el MUX por `account_id`. El solape real (un pago
+modelado como cuota Y como gasto fijo) es raro y no se captura por cuenta;
+mejor no dedup que uno que corrompe en dos direcciones.
+**Regla:** Antes de dedup por una clave, comprueba con un caso concreto que la
+clave capture la relación real en AMBOS sentidos. Una revisión adversarial con
+escenarios concretos lo destapa; un test "verde" con el caso feliz, no.
+
+### [PHASE-37] El autoaprendizaje no debe fijar categoría para un concepto de dirección ambigua
+**Error:** Un bank-mapping aprendido `'bizum' → Bizum recibido` (ingreso)
+etiquetaba como ingreso los BIZUM SALIENTES (flow=OUT): el autoaprendizaje fija
+UNA categoría para un concepto que aparece con cargo y con abono. Los saldos
+iban bien (por `flow`, ADR-0004), pero la etiqueta mentía y el desglose
+mostraba un ingreso como gasto.
+**Causa:** Generalización de [PHASE-32] al paso de APRENDIZAJE: una
+equivalencia aprendida colapsa la dirección de un concepto que la tiene variable.
+**Solución:** Al aprender, saltar los conceptos de dirección ambigua (que
+aparecen con ambos signos en el lote). El override del usuario se aplica a esa
+importación, pero no se persiste como equivalencia.
+**Regla:** No fijes una equivalencia aprendida `concepto → categoría` para un
+concepto que aparece con signos opuestos; su dirección la decide el signo del
+extracto en el punto de uso, no una equivalencia grabada una vez.
+
 ---
 
 ## Ejemplos de referencia (no son lecciones reales)

@@ -334,6 +334,24 @@ y [`design-explorations/debt-redesign-30/wireframe.md`](design-explorations/debt
 > Convive con PHASE-34 en la misma rama. Backend + frontend completos y
 > verdes. Pendiente prueba manual del usuario y PR.
 
+### Fase 37 — Rediseño módulo Análisis + saneamiento de deuda
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 37.1 | Serie temporal de patrimonio + `signed_amount_expr` + Δ-periodo | ✅ | — |
+| 37.2 | KPI strip + grid ancho + cuentas colapsables + donut top-6   | ✅     | —  |
+| 37.3 | Gasto estructural vs puntual + tasa de ahorro dual (`is_exceptional`) | ✅ | — |
+| —    | Bugfix: autoaprendizaje no fija categoría para concepto de dirección ambigua (BIZUM) | ✅ | — |
+| —    | Deuda: interés y deuda viva desde el cuadro de amortización (MUX por pasivo) | ✅ | — |
+| 37.4 | Proyección fin de mes + runway (`/analytics/month-outlook`)  | ✅     | —  |
+| 37.5 | Smart Insights v2 (no-redundancia + insights derivados)      | ✅     | —  |
+| 37.6 | Mobile parity                                                | ⏳     | —  |
+
+> Detalle en [`phases/phase-37-analysis-redesign.md`](phases/phase-37-analysis-redesign.md)
+> (as-built) y [`phase-37-analysis-redesign.md`](phase-37-analysis-redesign.md) (plan).
+> Rama `feat/phase-37-analysis-redesign` en origin (7 commits). 642 tests BE +
+> 95 web · mypy · ruff · lint verdes. Pendiente PR y 37.6 (mobile).
+
 ---
 
 ## Estructura de este directorio
