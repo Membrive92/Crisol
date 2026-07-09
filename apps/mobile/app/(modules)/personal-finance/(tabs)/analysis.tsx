@@ -25,6 +25,7 @@ import { DebtHealthCard } from '../../../../components/dashboard/debt-health-car
 import { KpiCards } from '../../../../components/dashboard/kpi-cards';
 import { MonthlyChart } from '../../../../components/dashboard/monthly-chart';
 import { MonthOutlookCard } from '../../../../components/dashboard/month-outlook-card';
+import { NetworthEvolutionCard } from '../../../../components/dashboard/networth-evolution-card';
 import {
   PeriodToggle,
   rangeForPeriod,
@@ -246,6 +247,7 @@ export default function AnalysisScreen() {
 
         <BalancesCard />
         <DebtHealthCard />
+        <NetworthEvolutionCard />
         <KpiCards summary={summaryQuery.data} isLoading={summaryQuery.isLoading} />
         <SavingsRateCard summary={summaryQuery.data} />
         <MonthOutlookCard data={outlookQuery.data} currency={currency} />
