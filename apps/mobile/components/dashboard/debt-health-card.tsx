@@ -47,6 +47,18 @@ function formatMonths(months: number | null): string {
   return `${years}a ${remainder}m`;
 }
 
+// PHASE-37.6 (parity deuda) — etiquetas + colores por tipo de deuda.
+const DEBT_TYPE_LABEL: Record<string, string> = {
+  mortgage: 'Hipoteca',
+  loan: 'Préstamo',
+  credit_card: 'Tarjeta',
+};
+const DEBT_TYPE_COLOR: Record<string, string> = {
+  mortgage: colors.primary,
+  loan: colors.warning,
+  credit_card: colors.danger,
+};
+
 /**
  * Card de salud financiera mobile (PHASE-22). Espejo de
  * `apps/web/components/dashboard/debt-health-card.tsx`.
@@ -142,6 +154,7 @@ export function DebtHealthCard() {
       </View>
 
       {hasDebt ? (
+        <>
         <View style={styles.kpiGrid}>
           <Metric
             label="DTI"
@@ -177,7 +190,45 @@ export function DebtHealthCard() {
               debtToAssetsPercent !== null ? `${debtToAssetsPercent}%` : '—'
             }
           />
+          {/* PHASE-37.6 (parity deuda) — coste del crédito desde el cuadro. */}
+          <Metric
+            label="Interés total"
+            value={formatAmount(data.interest_scheduled_total, data.reference_currency)}
+          />
+          <Metric
+            label="Interés restante"
+            value={formatAmount(data.interest_remaining, data.reference_currency)}
+          />
         </View>
+        {data.debt_by_type.length > 0 ? (
+          <View style={styles.composition}>
+            <Text style={styles.compositionHeader}>Composición de la deuda</Text>
+            {data.debt_by_type.map((s) => {
+              const pct =
+                totalLiabilitiesNum > 0 ? (Number(s.amount) / totalLiabilitiesNum) * 100 : 0;
+              return (
+                <View key={s.type} style={styles.compRow}>
+                  <Text style={styles.compLabel}>{DEBT_TYPE_LABEL[s.type] ?? s.type}</Text>
+                  <View style={styles.compBarTrack}>
+                    <View
+                      style={[
+                        styles.compBarFill,
+                        {
+                          width: `${pct}%`,
+                          backgroundColor: DEBT_TYPE_COLOR[s.type] ?? colors.primary,
+                        },
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.compAmount}>
+                    {formatAmount(s.amount, data.reference_currency)}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        ) : null}
+        </>
       ) : (
         <View style={styles.emptyBlock}>
           <Text style={styles.emptyText}>
@@ -373,6 +424,37 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: fontWeight.semibold,
     letterSpacing: 0.4,
+  },
+  composition: {
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: spacing.md,
+    gap: spacing.xs,
+  },
+  compositionHeader: {
+    fontSize: 11,
+    fontWeight: fontWeight.semibold,
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  compRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  compLabel: { width: 72, fontSize: fontSize.xs, color: colors.text },
+  compBarTrack: {
+    flex: 1,
+    height: 6,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.sm,
+    overflow: 'hidden',
+  },
+  compBarFill: { height: '100%', borderRadius: radius.sm },
+  compAmount: {
+    width: 84,
+    textAlign: 'right',
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.semibold,
+    color: colors.text,
   },
   emptyBlock: {
     borderTopWidth: 1,
