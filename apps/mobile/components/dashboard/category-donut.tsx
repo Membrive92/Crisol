@@ -3,11 +3,14 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { PieChart } from 'react-native-gifted-charts';
 
-import type { CategoryBreakdownItem } from '@crisol/types';
+import type { AnalyticsCategoryAmount, CategoryBreakdownItem } from '@crisol/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 import { formatAmount } from '@crisol/ui';
 
 export type DonutKindFilter = 'all' | 'income' | 'expense';
+
+/** PHASE-37.6 (parity 37.3) — sub-filtro estructural/puntual del gasto. */
+type StructureFilter = 'all' | 'structural' | 'exceptional';
 
 export interface CategoryDonutProps {
   data: CategoryBreakdownItem[] | undefined;
@@ -15,8 +18,45 @@ export interface CategoryDonutProps {
   isLoading: boolean;
   kind: DonutKindFilter;
   onKindChange: (next: DonutKindFilter) => void;
+  /**
+   * PHASE-37.6 (parity 37.3) — gasto puntual por categoría (de
+   * `useExpenseStructure`). En modo "Gastos" habilita el sub-filtro
+   * `[Todo|Estructural|Puntual]`; "Estructural" se deriva restándolo del total.
+   */
+  exceptionalByCategory?: AnalyticsCategoryAmount[] | undefined;
   /** Cuántas categorías mostrar como slices independientes; el resto agrupa en "Otros". */
   topN?: number;
+}
+
+function categoryKey(id: string | null): string {
+  return id ?? '_nocat_';
+}
+
+function toBreakdownItem(c: AnalyticsCategoryAmount): CategoryBreakdownItem {
+  return {
+    category_id: c.category_id,
+    category_name: c.category_name ?? 'Sin categoría',
+    category_kind: 'expense',
+    category_color: c.color,
+    category_icon: c.icon,
+    total: c.total,
+    count: 0,
+  };
+}
+
+/** Estructural por categoría = total − puntual (descarta lo que queda ~0). */
+function deriveStructural(
+  all: CategoryBreakdownItem[],
+  exceptional: AnalyticsCategoryAmount[],
+): CategoryBreakdownItem[] {
+  const excByKey = new Map<string, number>();
+  for (const e of exceptional) excByKey.set(categoryKey(e.category_id), Number(e.total));
+  const out: CategoryBreakdownItem[] = [];
+  for (const it of all) {
+    const structural = Number(it.total) - (excByKey.get(categoryKey(it.category_id)) ?? 0);
+    if (structural > 0.005) out.push({ ...it, total: structural.toFixed(2) });
+  }
+  return out;
 }
 
 const PALETTE = [
@@ -56,15 +96,25 @@ export function CategoryDonut({
   isLoading,
   kind,
   onKindChange,
+  exceptionalByCategory,
   topN = 5,
 }: CategoryDonutProps) {
   const router = useRouter();
   const [activeId, setActiveId] = useState<string | null>(null);
   const [otherExpanded, setOtherExpanded] = useState(false);
+  const [structureFilter, setStructureFilter] = useState<StructureFilter>('all');
 
-  const sorted = [...(data ?? [])].sort(
-    (a, b) => Number(b.total) - Number(a.total),
-  );
+  // El sub-filtro estructural/puntual sólo aplica al gasto (parity 37.3).
+  const canStructure = kind === 'expense' && exceptionalByCategory != null;
+  const baseData = data ?? [];
+  const displayData =
+    !canStructure || structureFilter === 'all'
+      ? baseData
+      : structureFilter === 'exceptional'
+        ? (exceptionalByCategory ?? []).map(toBreakdownItem)
+        : deriveStructural(baseData, exceptionalByCategory ?? []);
+
+  const sorted = [...displayData].sort((a, b) => Number(b.total) - Number(a.total));
   const total = sorted.reduce((acc, x) => acc + Number(x.total), 0);
   const top = otherExpanded ? sorted : sorted.slice(0, topN);
   const rest = otherExpanded ? [] : sorted.slice(topN);
@@ -133,6 +183,26 @@ export function CategoryDonut({
           </ToggleButton>
         </View>
       </View>
+
+      {canStructure ? (
+        <View style={styles.subToggle}>
+          <ToggleButton active={structureFilter === 'all'} onPress={() => setStructureFilter('all')}>
+            Todo
+          </ToggleButton>
+          <ToggleButton
+            active={structureFilter === 'structural'}
+            onPress={() => setStructureFilter('structural')}
+          >
+            Estructural
+          </ToggleButton>
+          <ToggleButton
+            active={structureFilter === 'exceptional'}
+            onPress={() => setStructureFilter('exceptional')}
+          >
+            Puntual
+          </ToggleButton>
+        </View>
+      ) : null}
 
       {isLoading && !data ? (
         <Text style={styles.placeholder}>Cargando…</Text>
@@ -274,6 +344,15 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radius.md,
     overflow: 'hidden',
+  },
+  subToggle: {
+    flexDirection: 'row',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    overflow: 'hidden',
+    alignSelf: 'flex-start',
+    marginBottom: spacing.sm,
   },
   toggleButton: { paddingVertical: 4, paddingHorizontal: 10, backgroundColor: colors.surface },
   toggleButtonActive: { backgroundColor: colors.primary },

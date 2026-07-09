@@ -260,6 +260,7 @@ export default function AnalysisScreen() {
           isLoading={byCategoryQuery.isLoading}
           kind={donutKind}
           onKindChange={setDonutKind}
+          exceptionalByCategory={structureQuery.data?.exceptional_by_category}
         />
         <TopExpensesList
           data={topExpensesQuery.data}
