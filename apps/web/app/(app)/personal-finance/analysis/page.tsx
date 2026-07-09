@@ -380,6 +380,8 @@ export default function AnalysisPage() {
         <StitchSmartInsights
           summary={summary}
           expensesByCategory={expensesByCategory}
+          structure={structure}
+          outlook={outlookQuery.data}
           currency={currency}
         />
       </div>

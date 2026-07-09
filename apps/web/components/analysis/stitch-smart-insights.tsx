@@ -1,19 +1,23 @@
 'use client';
 
-import type { CategoryBreakdownItem, DashboardSummary } from '@crisol/types';
+import type {
+  CategoryBreakdownItem,
+  DashboardSummary,
+  ExpenseStructureResponse,
+  MonthOutlookResponse,
+} from '@crisol/types';
 import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@crisol/ui';
 
 import { Card } from '@/components/ui/card';
-import {
-  CheckCircleIcon,
-  ChevronRightIcon,
-  InfoIcon,
-  SparklesIcon,
-} from '@/components/ui/icons';
+import { CheckCircleIcon, InfoIcon, SparklesIcon } from '@/components/ui/icons';
 
 export interface StitchSmartInsightsProps {
   summary: DashboardSummary | undefined;
   expensesByCategory: CategoryBreakdownItem[] | undefined;
+  /** PHASE-37.5 — gasto estructural/puntual (37.3), para el insight de impacto de puntuales. */
+  structure: ExpenseStructureResponse | undefined;
+  /** PHASE-37.5 — proyección de fin de mes (37.4), para el insight de cargo próximo. */
+  outlook: MonthOutlookResponse | undefined;
   currency: string;
 }
 
@@ -21,19 +25,32 @@ interface Insight {
   kind: 'info' | 'success';
   title: string;
   body: string;
+  /** Prioridad (1 = más importante). Se ordena por ella y se topan a 3. */
+  priority: number;
 }
 
 /**
- * Tarjetas de insights calculados client-side a partir de los datos
- * reales del usuario. Sin mocks: si no hay datos suficientes, sólo se
- * muestra el placeholder de "Gastos fijos recurrentes" (próximamente).
+ * PHASE-37.5 — Insights v2, calculados client-side. Regla de NO-REDUNDANCIA:
+ * no se emite un insight cuyo dato principal ya sea visible en un KPI/card del
+ * layout. Por eso se ELIMINARON los insights de "saldo neto vs periodo
+ * anterior" (duplicaba el Δ del tile Flujo) y "tasa de ahorro" (duplicaba el
+ * tile T. Ahorro). Los generadores nuevos derivan de 37.3 (impacto de gastos
+ * puntuales) y 37.4 (cargo próximo relevante). Máximo 3, por prioridad.
  */
 export function StitchSmartInsights({
   summary,
   expensesByCategory,
+  structure,
+  outlook,
   currency,
 }: StitchSmartInsightsProps) {
-  const insights = computeInsights(summary, expensesByCategory ?? [], currency);
+  const insights = computeInsights(
+    summary,
+    expensesByCategory ?? [],
+    structure,
+    outlook,
+    currency,
+  );
 
   return (
     <Card
@@ -70,90 +87,102 @@ export function StitchSmartInsights({
       <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
         {insights.length === 0 ? (
           <p style={{ margin: 0, fontSize: fontSize.sm, color: colors.textMuted }}>
-            Todavía no hay datos suficientes para sacar insights. Sigue
-            registrando transacciones y vuelve aquí.
+            Detección automática activa. Aún no hay una señal que no veas ya en
+            los indicadores de arriba — cuando la haya, aparecerá aquí.
           </p>
         ) : (
-          insights.map((ins, idx) => (
-            <InsightCard key={idx} insight={ins} />
-          ))
+          insights.map((ins, idx) => <InsightCard key={idx} insight={ins} />)
         )}
-        <ComingSoonRow
-          title="Gastos fijos recurrentes"
-          subtitle="Detección automática de cargos periódicos."
-        />
       </div>
     </Card>
   );
 }
 
-function computeInsights(
+/**
+ * PHASE-37.5 — Genera los insights v2 y los topa a 3 por prioridad. Cada
+ * generador comprueba antes que su dato NO sea ya visible en un KPI/card del
+ * layout (no-redundancia). Exportada para testear la lógica sin renderizar.
+ */
+export function computeInsights(
   summary: DashboardSummary | undefined,
   byCategory: CategoryBreakdownItem[],
+  structure: ExpenseStructureResponse | undefined,
+  outlook: MonthOutlookResponse | undefined,
   currency: string,
 ): Insight[] {
   const out: Insight[] = [];
-  if (!summary) return out;
 
-  // 1) Saving rate / cash flow vs periodo anterior.
-  const balance = Number(summary.balance);
-  const previousBalance =
-    summary.previous_period_balance != null ? Number(summary.previous_period_balance) : null;
-  if (previousBalance !== null && balance > previousBalance && balance > 0) {
-    out.push({
-      kind: 'success',
-      title: 'Mejor que el periodo anterior',
-      body: `Tu saldo neto es ${currencyDelta(balance, previousBalance, currency)} mayor que el periodo anterior. Buena tendencia.`,
-    });
-  } else if (previousBalance !== null && balance < previousBalance) {
-    out.push({
-      kind: 'info',
-      title: 'Bajada vs el periodo anterior',
-      body: `Tu saldo neto bajó ${currencyDelta(previousBalance, balance, currency)} respecto al periodo previo. Revisa los gastos que más han crecido.`,
-    });
-  }
-
-  // 2) Top categoría de gasto representando una porción importante.
-  const expenses = Number(summary.expenses);
-  if (expenses > 0 && byCategory.length > 0) {
+  // P1 — Concentración de gasto: una sola categoría domina el periodo. (El
+  // donut muestra el reparto pero no señala la concentración como alerta.)
+  if (summary) {
+    const expenses = Number(summary.expenses);
     const top = [...byCategory].sort((a, b) => Number(b.total) - Number(a.total))[0];
-    if (top) {
-      const topVal = Number(top.total);
-      const ratio = (topVal / expenses) * 100;
-      if (ratio >= 30) {
+    if (expenses > 0 && top) {
+      const ratio = (Number(top.total) / expenses) * 100;
+      if (ratio >= 35) {
         out.push({
           kind: 'info',
+          priority: 1,
           title: `${top.category_name} concentra el ${ratio.toFixed(0)}% de tus gastos`,
-          body: `Es la categoría con más peso del periodo. Revisa si puedes optimizarla con presupuestos por subcategoría.`,
+          body: 'Una sola categoría se lleva más de un tercio del gasto del periodo. Si es puntual, márcala como gasto puntual; si es estructural, un presupuesto ayuda a contenerla.',
         });
       }
     }
   }
 
-  // 3) Tasa de ahorro saludable.
-  const incomeNum = Number(summary.income);
-  if (incomeNum > 0 && balance > 0) {
-    const rate = (balance / incomeNum) * 100;
-    if (rate >= 25) {
+  // P2 — Impacto de gastos puntuales (37.3): los one-offs te dejan en negativo
+  // pero el coste estructural está sano. Enmarca el dato, no lo repite.
+  if (
+    structure &&
+    structure.savings_rate_gross !== null &&
+    structure.savings_rate_structural !== null &&
+    structure.savings_rate_gross < 0 &&
+    structure.savings_rate_structural > 0
+  ) {
+    const struct = structure.savings_rate_structural * 100;
+    const gross = structure.savings_rate_gross * 100;
+    out.push({
+      kind: 'info',
+      priority: 2,
+      title: 'Los gastos puntuales marcan el periodo',
+      body: `Sin los gastos puntuales (impuestos, one-offs) tu tasa de ahorro sería +${struct.toFixed(0)}% en vez de ${gross.toFixed(0)}%. Tu coste estructural está bajo control.`,
+    });
+  }
+
+  // P3 — Cargo próximo relevante (37.4): el mayor cargo de los próximos 7 días
+  // si domina lo comprometido — un aviso para tener saldo, no la lista entera.
+  if (outlook) {
+    const committed = Number(outlook.committed_remaining);
+    const soon = upcomingWithin7Days(outlook.committed_items);
+    const biggest = soon.sort((a, b) => Number(b.amount) - Number(a.amount))[0];
+    if (biggest && committed > 0 && Number(biggest.amount) >= committed * 0.25) {
       out.push({
-        kind: 'success',
-        title: `Tasa de ahorro: ${rate.toFixed(0)}%`,
-        body: `Estás ahorrando una proporción saludable de tus ingresos. El umbral recomendado es 20%.`,
+        kind: 'info',
+        priority: 3,
+        title: `Cargo próximo: ${biggest.name}`,
+        body: `El ${formatDay(biggest.expected_date)} te llega ${formatAmount(biggest.amount, currency)}, el mayor cargo de los próximos días. Asegúrate de tener saldo.`,
       });
     }
   }
 
-  return out;
+  return out.sort((a, b) => a.priority - b.priority).slice(0, 3);
 }
 
-/**
- * Formatea la diferencia `a - b` como importe en la divisa activa.
- * Delega en `formatAmount` para respetar el símbolo de la divisa y el
- * formato es-ES (punto de millares + coma decimal) en vez de pegar el
- * código de divisa con un separador de punto.
- */
-function currencyDelta(a: number, b: number, currency: string): string {
-  return formatAmount(String((a - b).toFixed(2)), currency);
+/** Cargos con `expected_date` en los próximos 7 días (desde hoy, no vencidos). */
+function upcomingWithin7Days(items: MonthOutlookResponse['committed_items']) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const in7 = new Date(today);
+  in7.setDate(in7.getDate() + 7);
+  return items.filter((it) => {
+    const d = new Date(`${it.expected_date}T00:00:00`);
+    return d >= today && d <= in7;
+  });
+}
+
+/** `YYYY-MM-DD` → `DD/MM`. */
+function formatDay(dateStr: string): string {
+  return `${dateStr.slice(8, 10)}/${dateStr.slice(5, 7)}`;
 }
 
 function InsightCard({ insight }: { insight: Insight }) {
@@ -195,35 +224,3 @@ function InsightCard({ insight }: { insight: Insight }) {
   );
 }
 
-function ComingSoonRow({ title, subtitle }: { title: string; subtitle: string }) {
-  return (
-    <div
-      style={{
-        border: `1px dashed ${colors.borderStrong}`,
-        borderRadius: radius.md,
-        padding: spacing.md,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: spacing.sm,
-      }}
-    >
-      <div>
-        <span
-          style={{
-            display: 'block',
-            fontSize: fontSize.sm,
-            fontWeight: fontWeight.semibold,
-            color: colors.text,
-          }}
-        >
-          {title}
-        </span>
-        <span style={{ fontSize: fontSize.xs, color: colors.textSubtle }}>{subtitle}</span>
-      </div>
-      <span style={{ color: colors.textSubtle }}>
-        <ChevronRightIcon size={18} />
-      </span>
-    </div>
-  );
-}
