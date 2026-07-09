@@ -345,12 +345,12 @@ y [`design-explorations/debt-redesign-30/wireframe.md`](design-explorations/debt
 | —    | Deuda: interés y deuda viva desde el cuadro de amortización (MUX por pasivo) | ✅ | — |
 | 37.4 | Proyección fin de mes + runway (`/analytics/month-outlook`)  | ✅     | —  |
 | 37.5 | Smart Insights v2 (no-redundancia + insights derivados)      | ✅     | —  |
-| 37.6 | Mobile parity                                                | ⏳     | —  |
+| 37.6 | Mobile parity (month-outlook + insights v2 + filtro estructural donut + composición deuda + evolución patrimonio) | ✅ | — |
 
 > Detalle en [`phases/phase-37-analysis-redesign.md`](phases/phase-37-analysis-redesign.md)
 > (as-built) y [`phase-37-analysis-redesign.md`](phase-37-analysis-redesign.md) (plan).
-> Rama `feat/phase-37-analysis-redesign` en origin (7 commits). 642 tests BE +
-> 95 web · mypy · ruff · lint verdes. Pendiente PR y 37.6 (mobile).
+> Rama `feat/phase-37-analysis-redesign` en origin (16 commits). 643 tests BE +
+> 95 web + 18 móvil · mypy · ruff · lint · typecheck verdes. Pendiente sólo el PR.
 
 ---
 

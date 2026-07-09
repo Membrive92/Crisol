@@ -106,7 +106,17 @@ Plan completo (con ADR informal y wireframes) en
   diseño: un resumen mensual no lista 6 meses de impagos).
 - Guard defensivo padre/hija en debt-health (doble conteo si un cargo espejo
   cae sobre la tarjeta padre): latente, sin defecto actual — follow-up.
-- Mobile mantiene el layout antiguo (37.6 aplazada).
+- La serie de patrimonio móvil (37.6) no convierte divisas (modo nativo),
+  misma limitación que web.
+
+### 37.6 — Mobile parity (✅)
+Espejo de los features nuevos en la pantalla de análisis RN (la capa de datos
+—hooks/tipos— ya era cross-platform): card "Fin de mes" (37.4), Smart Insights
+v2 (37.5), sub-filtro `[Todo|Estructural|Puntual]` en el donut (37.3),
+composición de deuda + interés contractual/restante en la DebtHealthCard, y
+card de evolución de patrimonio (37.1, `LineChart`). Los Δ vs periodo previo
+(37.2) ya estaban en `KpiCards`. Verde: typecheck + lint + 18 tests jest-expo.
 
 ## Próxima fase
-37.6 — mobile parity (aplazable).
+Ninguna pendiente de PHASE-37. Follow-ups sueltos: guard defensivo padre/hija
+(latente) y saldo de apertura de BBVA (data-fix del usuario).
