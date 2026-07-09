@@ -8,6 +8,8 @@ import {
   useDashboardByMonth,
   useDashboardSummary,
   useDashboardTopExpenses,
+  useExpenseStructure,
+  useMonthOutlook,
   useUserCurrencies,
 } from '@crisol/services';
 import { useAuthStore, useCurrencyStore } from '@crisol/store';
@@ -22,6 +24,7 @@ import { CurrencyPicker } from '../../../../components/dashboard/currency-picker
 import { DebtHealthCard } from '../../../../components/dashboard/debt-health-card';
 import { KpiCards } from '../../../../components/dashboard/kpi-cards';
 import { MonthlyChart } from '../../../../components/dashboard/monthly-chart';
+import { MonthOutlookCard } from '../../../../components/dashboard/month-outlook-card';
 import {
   PeriodToggle,
   rangeForPeriod,
@@ -116,10 +119,19 @@ export default function AnalysisScreen() {
         limit: TOP_EXPENSES_LIMIT,
       };
 
+  // PHASE-37.6 (parity 37.3/37.4) — gasto estructural (impacto de puntuales) +
+  // proyección fin de mes + runway. El outlook no tiene rango (mes en curso).
+  const structureParams = convertAll
+    ? { target_currency: currency, date_from: dateFrom, date_to: dateTo }
+    : { currency, date_from: dateFrom, date_to: dateTo };
+  const outlookParams = convertAll ? { target_currency: currency } : { currency };
+
   const summaryQuery = useDashboardSummary(summaryParams);
   const monthlyQuery = useDashboardByMonth(monthlyParams);
   const byCategoryQuery = useDashboardByCategory(byCategoryParams);
   const topExpensesQuery = useDashboardTopExpenses(topExpensesParams);
+  const structureQuery = useExpenseStructure(structureParams);
+  const outlookQuery = useMonthOutlook(outlookParams);
 
   const refreshing =
     summaryQuery.isFetching ||
@@ -236,6 +248,7 @@ export default function AnalysisScreen() {
         <DebtHealthCard />
         <KpiCards summary={summaryQuery.data} isLoading={summaryQuery.isLoading} />
         <SavingsRateCard summary={summaryQuery.data} />
+        <MonthOutlookCard data={outlookQuery.data} currency={currency} />
         <MonthlyChart
           data={monthlyQuery.data}
           isLoading={monthlyQuery.isLoading}
@@ -256,6 +269,8 @@ export default function AnalysisScreen() {
         <SmartInsights
           summary={summaryQuery.data}
           expensesByCategory={expensesByCategory}
+          structure={structureQuery.data}
+          outlook={outlookQuery.data}
           currency={currency}
         />
       </ScrollView>
