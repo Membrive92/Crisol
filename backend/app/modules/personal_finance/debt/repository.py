@@ -26,7 +26,8 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.modules.personal_finance.accounts.models import Account
+from app.modules.personal_finance.accounts.installments_model import LiabilityInstallment
+from app.modules.personal_finance.accounts.models import Account, AccountNature
 from app.modules.personal_finance.accounts.repository import is_inflow, is_outflow
 from app.modules.personal_finance.categories.models import Category, CategoryRole
 from app.modules.personal_finance.dashboard.conversion import (
@@ -386,15 +387,20 @@ async def debt_movement_bounds(
     *,
     target_currency: str | None = None,
 ) -> tuple[date | None, date | None]:
-    """Primer y último `occurred_at` (como fecha) con movimientos de
-    deuda (PHASE-30.8).
+    """Primer y último período con actividad de deuda (PHASE-30.8).
 
-    Usa el **mismo set de predicados** que los agregados (papelera,
-    transferencias internas, roles de deuda y, en modo nativo, moneda)
-    para que el navegador de período nunca aterrice en un período cuyos
-    KPIs de Capa 1 sean todos cero. `(None, None)` si no hay datos.
+    Combina DOS fuentes para que el navegador cubra los meses con datos de
+    Capa 1 tras PHASE-37 (interés/capital del cuadro):
+    - Transacciones en categorías de deuda (mismo set de predicados que los
+      agregados: papelera, transferencias, roles de deuda y, en nativo, moneda).
+    - El CUADRO de amortización: `due_date` de las cuotas de las liabilities
+      no archivadas, acotado a hoy (las cuotas futuras no deben empujar el
+      navegador a meses sin histórico). Sin esto, un usuario cuyo pago de deuda
+      va por transferencia (interés implícito, sin tx de deuda) se quedaba con
+      el navegador anclado a la última tx categorizada aunque el cuadro tuviera
+      actividad posterior. `(None, None)` si no hay ninguna de las dos.
     """
-    query = (
+    tx_query = (
         select(
             func.min(Transaction.occurred_at),
             func.max(Transaction.occurred_at),
@@ -407,9 +413,24 @@ async def debt_movement_bounds(
         .where(Category.role.in_(DEBT_ROLES))
     )
     if target_currency is None:
-        query = query.where(Transaction.currency == currency)
-    min_dt, max_dt = (await db.execute(query)).one()
-    return (
-        min_dt.date() if min_dt is not None else None,
-        max_dt.date() if max_dt is not None else None,
+        tx_query = tx_query.where(Transaction.currency == currency)
+    tx_min, tx_max = (await db.execute(tx_query)).one()
+
+    today = datetime.now(UTC).date()
+    sched_query = (
+        select(
+            func.min(LiabilityInstallment.due_date),
+            func.max(LiabilityInstallment.due_date),
+        )
+        .select_from(LiabilityInstallment)
+        .join(Account, Account.id == LiabilityInstallment.account_id)
+        .where(LiabilityInstallment.user_id == user_id)
+        .where(Account.nature == AccountNature.LIABILITY)
+        .where(Account.is_archived.is_(False))
+        .where(LiabilityInstallment.due_date <= today)
     )
+    sched_min, sched_max = (await db.execute(sched_query)).one()
+
+    lows = [d.date() if isinstance(d, datetime) else d for d in (tx_min, sched_min) if d is not None]
+    highs = [d.date() if isinstance(d, datetime) else d for d in (tx_max, sched_max) if d is not None]
+    return (min(lows) if lows else None, max(highs) if highs else None)

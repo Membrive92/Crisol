@@ -23,6 +23,7 @@ from app.modules.personal_finance.accounts.installments_repository import (
 )
 from app.modules.personal_finance.accounts.models import Account, AccountNature, AccountType
 from app.modules.personal_finance.categories.models import Category, CategoryKind, CategoryRole
+from app.modules.personal_finance.debt.repository import debt_movement_bounds
 from app.modules.personal_finance.transactions.models import Transaction, TransactionFlow
 from app.modules.users.models import User
 
@@ -85,6 +86,19 @@ async def test_interest_and_debt_from_schedule(session_factory) -> None:  # type
     assert [(s.type, s.amount) for s in k.debt_by_type] == [
         ("loan", exp_outstanding.quantize(q))
     ]
+
+
+async def test_debt_movement_bounds_include_schedule(session_factory) -> None:  # type: ignore[no-untyped-def]
+    """PHASE-37 (follow-up) — el navegador de período toma sus límites también
+    del cuadro (due_date de cuotas <= hoy), no sólo de transacciones de deuda:
+    un préstamo sin tx de deuda ya no deja el navegador en (None, None)."""
+    uid, _aid = await _setup_loan(session_factory)  # préstamo, sin tx de deuda
+    async with session_factory() as db:
+        lo, hi = await debt_movement_bounds(db, uid, "EUR")
+    today = datetime.now(UTC).date()
+    assert lo is not None and hi is not None
+    assert lo.year == _YEAR  # arranca en el año del préstamo
+    assert hi <= today  # no empuja el navegador a cuotas futuras
 
 
 async def test_interest_tx_on_scheduled_liability_not_double_counted(
