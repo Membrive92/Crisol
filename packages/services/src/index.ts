@@ -109,7 +109,7 @@ export {
   useDashboardTopExpenses,
   useUserCurrencies,
 } from './query/hooks/useDashboard';
-export { useExpenseStructure } from './query/hooks/useAnalytics';
+export { useExpenseStructure, useMonthOutlook } from './query/hooks/useAnalytics';
 export {
   useImports,
   useImport,

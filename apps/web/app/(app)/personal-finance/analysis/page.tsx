@@ -10,6 +10,7 @@ import {
   useDashboardSummary,
   useDebtHealth,
   useExpenseStructure,
+  useMonthOutlook,
   usePositionHistory,
 } from '@crisol/services';
 import { useCurrencyStore } from '@crisol/store';
@@ -24,6 +25,7 @@ import {
   MiniSparkline,
   type KpiStatus,
 } from '@/components/analysis/kpi-strip';
+import { MonthOutlookCard } from '@/components/analysis/month-outlook-card';
 import { NetworthEvolutionCard } from '@/components/analysis/networth-evolution-card';
 import {
   boundsForAnchor,
@@ -100,6 +102,10 @@ export default function AnalysisPage() {
   const monthlyQuery = useDashboardByMonth(monthlyParams);
   const expensesByCategoryQuery = useDashboardByCategory(byCategoryParams);
   const structureQuery = useExpenseStructure(structureParams);
+  // PHASE-37.4 — proyección fin de mes + runway (sin rango: siempre el mes
+  // en curso). Sólo modo de divisa.
+  const outlookParams = convertAll ? { target_currency: currency } : { currency };
+  const outlookQuery = useMonthOutlook(outlookParams);
   // PHASE-37 — patrimonio (stock): posición actual + serie + salud de deuda.
   // No dependen del período (son fotos a fecha); su dimensión temporal es la
   // serie y el Δ, no el filtro de rango.
@@ -335,15 +341,20 @@ export default function AnalysisPage() {
         <DebtSummaryCard />
       </div>
 
-      {/* Fila 3: Flujo neto mensual + Smart Insights. */}
+      {/* Fila 3: Flujo neto mensual + Fin de mes (outlook) + Smart Insights. */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
           gap: spacing.md,
           marginBottom: spacing.md,
         }}
       >
+        <MonthOutlookCard
+          data={outlookQuery.data}
+          currency={refCurrency}
+          isLoading={outlookQuery.isLoading}
+        />
         <Card style={{ padding: spacing.lg }}>
           <h3
             style={{

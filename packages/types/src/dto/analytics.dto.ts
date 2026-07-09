@@ -8,3 +8,9 @@ export interface ExpenseStructureQuery {
   date_from?: string;
   date_to?: string;
 }
+
+// PHASE-37.4 — Query del month-outlook (sin rango: siempre el mes en curso).
+export interface MonthOutlookQuery {
+  currency?: string;
+  target_currency?: string;
+}

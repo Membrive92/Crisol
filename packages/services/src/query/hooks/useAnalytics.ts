@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 
-import type { ExpenseStructureQuery } from '@crisol/types';
+import type { ExpenseStructureQuery, MonthOutlookQuery } from '@crisol/types';
 
 import { analyticsApi } from '../../api/endpoints/analytics';
 import { queryKeys } from '../keys';
@@ -17,6 +17,20 @@ export function useExpenseStructure(query: ExpenseStructureQuery = {}) {
   return useQuery({
     queryKey: queryKeys.analytics.expenseStructure(query),
     queryFn: () => analyticsApi.expenseStructure(query),
+    staleTime: STALE_TIME,
+    placeholderData: (previous) => previous,
+  });
+}
+
+/**
+ * PHASE-37.4 — Proyección de fin de mes (cargos comprometidos) + colchón/
+ * runway. Sin rango: siempre el mes en curso. Espera `currency` (o
+ * `target_currency`) del selector del header.
+ */
+export function useMonthOutlook(query: MonthOutlookQuery = {}) {
+  return useQuery({
+    queryKey: queryKeys.analytics.monthOutlook(query),
+    queryFn: () => analyticsApi.monthOutlook(query),
     staleTime: STALE_TIME,
     placeholderData: (previous) => previous,
   });

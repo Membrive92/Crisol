@@ -37,3 +37,27 @@ export interface ExpenseStructureResponse {
   top_exceptional: AnalyticsTxRef[];
   exceptional_by_category: AnalyticsCategoryAmount[];
 }
+
+// PHASE-37.4 — Proyección de fin de mes + runway.
+
+export interface CommittedItem {
+  name: string;
+  amount: string;
+  /** Día de cargo estimado (`YYYY-MM-DD`). */
+  expected_date: string;
+  /** `true` si ya venció este mes y sigue sin cargarse/pagarse. */
+  overdue: boolean;
+  kind: 'fixed' | 'installment';
+}
+
+export interface MonthOutlookResponse {
+  reference_currency: string;
+  /** Σ de lo comprometido aún este mes (gastos fijos + cuotas). */
+  committed_remaining: string;
+  committed_items: CommittedItem[];
+  days_remaining: number;
+  /** Σ saldo de cuentas líquidas (bank/savings/cash) no archivadas. */
+  liquid_balance: string;
+  /** `liquid_balance / gasto estructural mensual`; `null` sin base o sin colchón. */
+  runway_months: number | null;
+}

@@ -26,7 +26,9 @@ export type { PositionHistoryResponse, PositionPoint } from './models/position';
 export type {
   AnalyticsCategoryAmount,
   AnalyticsTxRef,
+  CommittedItem,
   ExpenseStructureResponse,
+  MonthOutlookResponse,
 } from './models/analytics';
 export type {
   AmortizationRow,
@@ -153,7 +155,7 @@ export type {
   DashboardTopExpensesQuery,
 } from './dto/dashboard.dto';
 
-export type { ExpenseStructureQuery } from './dto/analytics.dto';
+export type { ExpenseStructureQuery, MonthOutlookQuery } from './dto/analytics.dto';
 
 export type { ImportListQuery, ImportListResponse } from './dto/import.dto';
 

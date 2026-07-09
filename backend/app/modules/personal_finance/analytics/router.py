@@ -16,8 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
-from app.modules.personal_finance.analytics.schemas import ExpenseStructureResponse
-from app.modules.personal_finance.analytics.service import get_expense_structure
+from app.modules.personal_finance.analytics.schemas import (
+    ExpenseStructureResponse,
+    MonthOutlookResponse,
+)
+from app.modules.personal_finance.analytics.service import (
+    get_expense_structure,
+    get_month_outlook,
+)
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -51,3 +57,15 @@ async def expense_structure_endpoint(
         date_from=date_from,
         date_to=date_to,
     )
+
+
+@router.get("/month-outlook", response_model=MonthOutlookResponse)
+async def month_outlook_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
+    target_currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
+) -> MonthOutlookResponse:
+    """Proyección de fin de mes (cargos comprometidos) + colchón/runway."""
+    cur, target = _resolve_currency_params(currency, target_currency)
+    return await get_month_outlook(db, user.id, currency=cur, target_currency=target)
