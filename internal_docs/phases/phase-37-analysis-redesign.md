@@ -1,6 +1,6 @@
 # PHASE-37 — Rediseño módulo Análisis + saneamiento de deuda
 
-**Estado**: ✅ completada (código) · PR pendiente
+**Estado**: ✅ completada · en `main` (push directo `89eea70`, 2026-07-12, sin PR)
 **Rama**: `feat/phase-37-analysis-redesign`
 **Commits**: `397f3db` (37.1) · `ba5123f`+`bdd0574` (37.2) · `e7f9331` (37.3) ·
 `da3d376` (bugfix Bizum) · `be548f5` (deuda) · `ed61adb` (37.4) · `e141cf0` (37.5)

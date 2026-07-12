@@ -359,26 +359,24 @@ y [`design-explorations/debt-redesign-30/wireframe.md`](design-explorations/debt
 
 > Detalle en [`phases/phase-37-analysis-redesign.md`](phases/phase-37-analysis-redesign.md)
 > (as-built) y [`phase-37-analysis-redesign.md`](phase-37-analysis-redesign.md) (plan).
-> Rama `feat/phase-37-analysis-redesign` empujada a origin (16 commits,
-> `00a16b9`…`73f0484`), **aún NO mergeada a `main`** — única fase pendiente de
-> PR. 643 tests BE + 95 web + 18 móvil · mypy · ruff · lint · typecheck verdes.
-> Encima de la rama hay además cambios sin commitear (groundwork PHASE-38).
+> **En `main`** (push directo, fast-forward hasta `89eea70`, 2026-07-12; sin PR).
+> 643 tests BE + 95 web + 18 móvil · mypy · ruff · lint · typecheck verdes.
 
 ### Fase 38 — Cuota de compra a plazos = gasto de caja + estandarización de layout web
 
-🚧 **En curso** — sin commitear (sobre la rama `feat/phase-37-analysis-redesign`),
-sin rama/PR propios. No hay migraciones ni endpoints nuevos.
+Solo web + backend (sin paridad móvil). No hay migraciones ni endpoints nuevos.
 
 | Fase | Nombre                                                       | Estado | PR |
 |------|--------------------------------------------------------------|--------|----|
-| 38.1 | Carve-out `is_card_financed_op` en `classify_import_flow`: la CUOTA de una compra a plazos con tarjeta cuenta como gasto real (`flow=OUT`); ADEUDO/liquidación y creación de deuda siguen neutros | 🚧 | — |
-| 38.2 | UX deuda-como-gasto: el form fija el segmento Gasto/Ingreso desde `category.kind` + badge "Pago de deuda" (`role=DEBT_PAYMENT/DEBT_INTEREST`) en la lista | 🚧 | — |
-| 38.3 | Estandarización layout web: tokens `layout.{pageWide,pageNarrow}` + `Card`/`CardTitle`/`CardHeader` (padding `lg` por defecto, `compact` opt-in) en ~22 páginas y 5 cards | 🚧 | — |
-| —    | Housekeeping: `type: ignore[attr-defined]` en `rowcount` (auth + transactions repos) · poda de backlog | 🚧 | — |
+| 38.1 | Carve-out `is_card_financed_op` en `classify_import_flow`: la CUOTA de una compra a plazos con tarjeta cuenta como gasto real (`flow=OUT`); ADEUDO/liquidación y creación de deuda siguen neutros | ✅ | — |
+| 38.2 | UX deuda-como-gasto: el form fija el segmento Gasto/Ingreso desde `category.kind` + badge "Pago de deuda" (`role=DEBT_PAYMENT/DEBT_INTEREST`) en la lista | ✅ | — |
+| 38.3 | Estandarización layout web: tokens `layout.{pageWide,pageNarrow}` + `Card`/`CardTitle`/`CardHeader` (padding `lg` por defecto, `compact` opt-in) en ~22 páginas y 5 cards | ✅ | — |
+| —    | Housekeeping: `type: ignore[attr-defined]` en `rowcount` (auth + transactions repos) · poda de backlog | ✅ | — |
 
 > Detalle en [`phases/phase-38-installment-cash-expense-and-web-layout.md`](phases/phase-38-installment-cash-expense-and-web-layout.md).
 > Cierra la familia de lecciones PHASE-34/37/38 sobre "qué es un pago de deuda".
-> Solo web + backend (sin paridad móvil). Pendiente prueba manual del usuario y PR.
+> **En `main`** (commit `ac3b456`, push directo `89eea70`, 2026-07-12; sin PR).
+> Sin paridad móvil todavía y sin prueba manual previa al merge (follow-ups).
 
 ---
 

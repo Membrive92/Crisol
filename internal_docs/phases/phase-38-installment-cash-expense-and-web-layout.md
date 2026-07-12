@@ -1,13 +1,13 @@
 # PHASE-38 — Cuota de compra a plazos = gasto de caja + estandarización de layout web
 
-**Estado**: 🚧 en curso (sin commitear; groundwork sobre la rama de PHASE-37)
-**Rama**: `feat/phase-37-analysis-redesign` (sin rama/PR propios todavía)
-**PR**: —
-**Fecha de merge**: —
+**Estado**: ✅ en `main` (push directo, sin PR) · sin paridad móvil ni prueba manual previa
+**Rama**: `feat/phase-37-analysis-redesign` (fast-forward directo a `main`)
+**PR**: — (push directo)
+**Fecha de merge**: 2026-07-12 (commit `ac3b456`, fast-forward `89eea70`)
 
-> Fase entrelazada encima de PHASE-37 (aún sin mergear). No es self-contained
-> en su propia rama: requiere rebase o aterrizar PHASE-37 antes. Sólo web +
-> backend (sin paridad móvil).
+> Fue groundwork encima de PHASE-37 y se movió a `main` junto con ella en el
+> mismo fast-forward. Sólo web + backend (sin paridad móvil); se subió sin la
+> prueba manual habitual (decisión del usuario: push directo a prod).
 
 ## Objetivo
 
