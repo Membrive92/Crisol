@@ -1,6 +1,6 @@
 # PHASE-7.0 — Design primitives + layout shell
 
-**Estado**: 🚧 en curso
+**Estado**: ✅ completada
 **Rama**: `feat/phase-7.0-design-primitives`
 **PR**: —
 **Fecha de merge**: —

@@ -1,6 +1,6 @@
 # PHASE-7.1 — Dashboard bento + delta vs periodo anterior
 
-**Estado**: 🚧 en curso
+**Estado**: ✅ completada
 **Rama**: `feat/phase-7.1-dashboard-bento`
 **PR**: —
 **Fecha de merge**: —

@@ -1,6 +1,6 @@
 # PHASE-7.2 — Transactions tabla
 
-**Estado**: 🚧 en curso
+**Estado**: ✅ completada
 **Rama**: `feat/phase-7.2-transactions-table`
 **PR**: —
 **Fecha de merge**: —

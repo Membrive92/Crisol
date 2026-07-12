@@ -1,7 +1,8 @@
 # Schema de base de datos
 
 > Estado actual del modelo de datos. Se actualiza cuando una fase
-> introduce migraciones. Última actualización: PHASE-5.1.
+> introduce migraciones. Última actualización: PHASE-37.3 (head Alembic
+> `c6s92u4rp6t5s1`).
 
 ## Convenciones
 
@@ -25,6 +26,8 @@
 | `c5d28e7f3b91` | 8.1 | `exchange_rates` + carga de snapshot offline embebido. |
 | `e4f7c91a8b3d` | 10.1 | `transactions.deleted_at` + partial index `ix_transactions_user_id_active` + recreado `uq_transactions_user_import_hash` con `AND deleted_at IS NULL`. |
 | `f8b3c91d4e22` | 12.1 | `budgets` (presupuestos mensuales por categoría) + índices por `user_id` y `category_id`. |
+| `a92f5b1c8d34` | 13.1 | `subscriptions` (detección de recurrentes) + enum `subscriptionstatus`. |
+| `b32c8a4d5f17` | 15.2 | `subscriptionstatus` += `paused`, `cancelled`. |
 | `c54e9b3a7d18` | 16   | `budgets.convert_other_currencies` (BOOLEAN, default FALSE) — opt-in para sumar gasto en otras monedas convertido. |
 | `d72f1a5e8b29` | 17.1 | rename `subscriptions` → `fixed_expenses` (tabla, índices, enum `subscriptionstatus` → `fixedexpensestatus`). |
 | `e8c34a9b1d52` | 17.2 | `fixed_expenses.auto_post` (BOOLEAN, default FALSE) + `transactionsource.expected`. |
@@ -35,9 +38,23 @@
 | `j7e95d1b3f4c` | 21.2 | `accounts` + enums `accounttype`/`accountnature` + WIPE de transactions/import_jobs/receipts + `account_id` (NOT NULL en transactions, opcional en import_jobs y fixed_expenses). |
 | `k8a92c4e7d5a1` | 21.3 | `transactions.transfer_pair_id` (FK auto-referente, NULLABLE, ON DELETE SET NULL) + index parcial `WHERE transfer_pair_id IS NOT NULL AND deleted_at IS NULL`. |
 | `l9b03d5f8e6b2` | 22   | `accounts.apr` (NUMERIC(6,4) NULL) + `accounts.term_months` (INTEGER NULL) + `accounts.start_date` (DATE NULL) — campos opcionales del cuadro de amortización francés para loans/mortgages. |
-| …            | 22→30 | (varias migraciones intermedias no listadas aquí — ver `alembic/versions/`). |
+| `m0c14e6a9f7c3` | 23   | `categorykind` += `TRANSFER` (value legacy, luego en desuso) + seed por nombre. |
+| `n1d25f7ba0e8d4` | 23.1 | `categories.is_transfer` (BOOLEAN) + restaura `kind` original de las categorías `TRANSFER`. |
+| `o2e36g8cb1f9d5` | 24.1 | `liability_installments` (cuotas persistidas) + backfill con `build_schedule`. |
+| `p3f47h9dc2g0e6` | 24.2 | `accounts.tae` (NUMERIC(6,4) NULL). |
+| `q4g58i0ed3h1f7` | 24.3 | `accounts.total_to_pay` + `accounts.interest_only_first_payment` (NUMERIC(14,2) NULL). |
+| `r5h69j1fe4i2g8` | 31.1 | Seed `Transferencia a favor` (INCOME, is_transfer) + recategoriza tx entrantes mal clasificadas. |
+| `s6i70k2gf5j3h9` | 30.1 | `categories.role` + enum `categoryrole` + índice parcial `ix_categories_role_debt`. |
+| `t7j81l3hg6k4i0` | 30.4 | `accounts.category_id` (FK SET NULL) + índice parcial `ix_accounts_category_id`. |
 | `u8k92m4ih7l5j1` | AUDIT-2026-05 | refresh tokens auto-identificables: `refresh_tokens.token_id` (UNIQUE) + `family_id` (índice). Invalida sesiones previas (DELETE). |
 | `v9l14n6kj8m7l3` | AUDIT-2026-05 | `ix_transactions_user_occurred_active` PARTIAL `(user_id, occurred_at) WHERE deleted_at IS NULL`. |
+| `w0m25o7lk9n8m4` | 32   | `accounts.is_default` (BOOLEAN NOT NULL DEFAULT FALSE) — cuenta principal. |
+| `x1n36p8ml0o9n5` | AUDIT-2026-05 | `CHECK (rate > 0)` en `exchange_rates` (`ck_exchange_rates_rate_positive`, NOT VALID + VALIDATE). |
+| `y2o47q9nm1p0o6` | 32   | Índice único parcial `uq_accounts_one_default_per_user` `(user_id) WHERE is_default`. |
+| `z3p58r0on2q1p7` | 34.1 | `transactions.flow` + enum `transactionflow` + índice parcial `ix_transactions_user_flow_active` (backfill por categoría, equivalencia). |
+| `a4q70s2pn4r3q9` | 35   | `accounts.parent_account_id` (FK auto-ref CASCADE) + índice parcial `ix_accounts_parent_account_id`. |
+| `b5r81t3qo5s4r0` | AUDIT-2026-07 | `transactions.absorbed_as_mirror` (BOOLEAN NOT NULL DEFAULT FALSE) — cargo espejo absorbido. |
+| `c6s92u4rp6t5s1` | 37.3 | `transactions.is_exceptional` (BOOLEAN NULL) — override estructural/puntual. |
 
 ---
 
@@ -55,16 +72,50 @@
 | `created_at` | `TIMESTAMPTZ` | `now()`. |
 | `updated_at` | `TIMESTAMPTZ` | `now()`, `onupdate=now()`. |
 
-### `refresh_tokens` (`PHASE-1.1`)
+### `refresh_tokens` (`PHASE-1.1`, ampliada en AUDIT-2026-05)
 
 | Columna | Tipo | Notas |
 |---------|------|-------|
 | `id` | `UUID` PK | |
 | `user_id` | `UUID` FK → `users.id` `ON DELETE CASCADE` | índice. |
 | `token_hash` | `VARCHAR(512)` UNIQUE | SHA-256 del refresh token. |
+| `token_id` | `VARCHAR(64)` UNIQUE | AUDIT-2026-05 (migración `u8k92m4ih7l5j1`), indexado. Identificador público (parte izquierda de `<token_id>.<secret>`); localiza la fila con una query + un solo argon2 verify. |
+| `family_id` | `UUID` | AUDIT-2026-05 (migración `u8k92m4ih7l5j1`), indexado. Linaje de rotación: reutilizar un token revocado revoca toda la familia. |
 | `expires_at` | `TIMESTAMPTZ` | 7 días. |
 | `revoked` | `BOOLEAN` | rotación marca el viejo. |
 | `created_at` | `TIMESTAMPTZ` | |
+
+### `webauthn_credentials` (`PHASE-1.1`)
+
+Passkeys registradas (Touch ID / Windows Hello / llaves físicas). Sólo se
+guarda la clave pública; la privada nunca sale del dispositivo. Migración
+`d18a4c75b2e9`.
+
+| Columna | Tipo | Notas |
+|---------|------|-------|
+| `id` | `UUID` PK | |
+| `user_id` | `UUID` FK → `users.id` `ON DELETE CASCADE` | índice. |
+| `credential_id` | `BYTEA` UNIQUE | identificador que envía el navegador al autenticar. |
+| `public_key` | `BYTEA` | clave pública de la credencial. |
+| `sign_count` | `INTEGER` | default `0`. Detección de clones (si baja, alerta). |
+| `transports` | `VARCHAR(100)` NULLABLE | CSV de transports (usb, nfc, ble, internal, hybrid). |
+| `label` | `VARCHAR(100)` NULLABLE | etiqueta opcional del dispositivo. |
+| `created_at` | `TIMESTAMPTZ` | `now()`. |
+| `last_used_at` | `TIMESTAMPTZ` NULLABLE | |
+
+### `webauthn_challenges` (`PHASE-1.1`)
+
+Challenge efímero de un flujo de registro/autenticación. Migraciones
+`d18a4c75b2e9` + `b27e391fa4c8` (`user_id` nullable para Conditional UI).
+
+| Columna | Tipo | Notas |
+|---------|------|-------|
+| `id` | `UUID` PK | |
+| `user_id` | `UUID` FK → `users.id` `ON DELETE CASCADE` | NULLABLE (Conditional UI sin email), índice. |
+| `challenge` | `BYTEA` | reto emitido. |
+| `purpose` | `VARCHAR(20)` | `register` o `authenticate`. |
+| `expires_at` | `TIMESTAMPTZ` | expiración. |
+| `created_at` | `TIMESTAMPTZ` | `now()`. |
 
 ### `categories` (`PHASE-2.1`)
 
@@ -76,24 +127,30 @@
 | `icon` | `VARCHAR(50)` NULLABLE | identificador de icono (frontend lo resuelve). |
 | `color` | `VARCHAR(7)` NULLABLE | hex `#RRGGBB`. |
 | `kind` | `ENUM('income','expense')` | tipo `categorykind`. |
+| `is_transfer` | `BOOLEAN` | NOT NULL, default `FALSE` (PHASE-23.1, migración `n1d25f7ba0e8d4`). TRUE = transferencia interna: fuera del cashflow pero conserva el signo del `kind` en el saldo (separa exclusión y signo — lección PHASE-23.1). |
+| `role` | `ENUM('GENERIC','TRANSFER','DEBT_PAYMENT','DEBT_INTEREST')` | tipo `categoryrole`, NOT NULL, default `GENERIC` (PHASE-30.1, migración `s6i70k2gf5j3h9`). Rol semántico; los callers de deuda filtran por `role IN (DEBT_PAYMENT, DEBT_INTEREST)`. Índice parcial `ix_categories_role_debt`. Backfill deriva de `is_transfer` + nombres del seed. |
 | `created_at` / `updated_at` | `TIMESTAMPTZ` | |
 
-### `transactions` (`PHASE-2.1` + `PHASE-4.1` + `PHASE-10.1`)
+### `transactions` (`PHASE-2.1` + `PHASE-4.1` + `PHASE-10.1` + `PHASE-21.3` + `PHASE-34` + `PHASE-37.3`)
 
 | Columna | Tipo | Notas |
 |---------|------|-------|
 | `id` | `UUID` PK | |
 | `user_id` | `UUID` FK → `users.id` `ON DELETE CASCADE` | índice. |
 | `category_id` | `UUID` FK → `categories.id` `ON DELETE SET NULL` | índice, nullable. |
-| `amount` | `NUMERIC(14,2)` | siempre positivo. Signo lo decide `category.kind`. |
+| `amount` | `NUMERIC(14,2)` | siempre positivo. El signo lo deciden `flow` + `account.nature` (PHASE-34 / ADR-0004), ya no `category.kind`. |
 | `currency` | `CHAR(3)` | ISO 4217. Default `EUR`. |
 | `occurred_at` | `TIMESTAMPTZ` | fecha de la transacción. |
 | `description` | `TEXT` NULLABLE | |
-| `source` | `ENUM('manual','import','receipt')` | tipo `transactionsource`. |
+| `source` | `ENUM('manual','import','receipt','expected')` | tipo `transactionsource`. `expected` (PHASE-17.2) lo emite el autoposteo de gastos fijos. |
 | `receipt_id` | `UUID` NULLABLE | (PHASE-5.1, FK aún no creada). |
 | `import_hash` | `VARCHAR(64)` NULLABLE | SHA-256 — solo presente si `source='import'`. |
 | `created_at` / `updated_at` | `TIMESTAMPTZ` | |
 | `deleted_at` | `TIMESTAMPTZ` NULLABLE | PHASE-10.1. NULL = activa, timestamp = en papelera. |
+| `transfer_pair_id` | `UUID` FK → `transactions.id` `ON DELETE SET NULL` | NULLABLE (PHASE-21.3, migración `k8a92c4e7d5a1`). Enlace a la otra pata de una transferencia interna entre cuentas; NULL = movimiento normal. Índice parcial `ix_transactions_transfer_pair_id`. |
+| `flow` | `ENUM('IN','OUT','TRANSFER_IN','TRANSFER_OUT')` NULLABLE | tipo `transactionflow` (PHASE-34.1, migración `z3p58r0on2q1p7`, ADR-0004). Fuente de verdad del dinero: saldo y cashflow derivan de `flow` + `account.nature`, no de la categoría. NULL = sin clasificar (contribuye 0). Índice parcial `ix_transactions_user_flow_active`. |
+| `absorbed_as_mirror` | `BOOLEAN` | NOT NULL, default `FALSE` (AUDIT-2026-07 H-04, migración `b5r81t3qo5s4r0`). TRUE = "cargo espejo" (ADEUDO/liquidación de tarjeta) que el sistema soft-borró al convertir una compra en deuda; el dedup de imports lo trata como existente para no resucitarlo. |
+| `is_exceptional` | `BOOLEAN` NULLABLE | PHASE-37.3, migración `c6s92u4rp6t5s1`. Override manual estructural/puntual del gasto: NULL = heurística, TRUE = puntual (one-off), FALSE = estructural. |
 
 **Índices**:
 - `ix_transactions_user_id`.
@@ -109,13 +166,14 @@
 | `id` | `UUID` PK | |
 | `user_id` | `UUID` FK → `users.id` `ON DELETE CASCADE` | índice. |
 | `filename` | `VARCHAR(255)` | nombre original del fichero subido. |
-| `status` | `ENUM('pending','processing','completed','failed')` | tipo `importjobstatus`. |
+| `status` | `ENUM('pending','processing','preview','completed','failed')` | tipo `importjobstatus`. `preview` = flujo en dos pasos (POST /imports/preview → commit). |
 | `rows_total` | `INTEGER` | filas leídas del fichero. |
 | `rows_ok` | `INTEGER` | transacciones efectivamente persistidas. |
 | `rows_failed` | `INTEGER` | filas inválidas (validación). |
 | `rows_skipped` | `INTEGER` | duplicados intra-batch + ya existentes en BD. |
 | `column_mappings` | `JSONB` | mapping enviado en el upload. |
 | `error_log` | `JSONB` | `[{ row, error }]`, capado a 100. |
+| `preview_payload` | `JSONB` NULLABLE | PHASE-20 (migración `f3a78b5c19d0`). Filas parseadas + metadata del wizard preview para el commit posterior; NULL en jobs directos/antiguos. |
 | `created_at` / `updated_at` | `TIMESTAMPTZ` | |
 
 ### `receipts` (`PHASE-5.1`)
@@ -226,7 +284,7 @@ UNIQUE `(user_id, pattern, match_type, field, category_id)` — el
 mismo patrón puede mapear a categorías distintas si difiere algún
 otro campo, pero no se duplica la combinación exacta.
 
-### `accounts` (`PHASE-21.2`, ampliada en `PHASE-22`)
+### `accounts` (`PHASE-21.2`, ampliada en `PHASE-22`, `PHASE-24.2/24.3`, `PHASE-30.4`, `PHASE-32`, `PHASE-35`)
 
 | Columna | Tipo | Notas |
 |---------|------|-------|
@@ -243,6 +301,11 @@ otro campo, pero no se duplica la combinación exacta.
 | `apr` | `NUMERIC(6, 4)` | opcional (PHASE-22). Tasa **anual** como decimal (`0.035` = 3.5%). Sólo relevante en loans/mortgages/credit_cards. |
 | `term_months` | `INTEGER` | opcional (PHASE-22). Plazo del cuadro francés. Sólo relevante en loans/mortgages. |
 | `start_date` | `DATE` | opcional (PHASE-22). Fecha de inicio del cuadro francés. Sólo relevante en loans/mortgages. |
+| `tae` | `NUMERIC(6, 4)` NULLABLE | opcional (PHASE-24.2, migración `p3f47h9dc2g0e6`). TAE informativa (regulación ES); no afecta al cálculo, que usa `apr` como TIN. |
+| `total_to_pay` | `NUMERIC(14, 2)` NULLABLE | opcional (PHASE-24.3, migración `q4g58i0ed3h1f7`). "Total a pagar" del contrato; la diferencia con `Σ(cuotas) + interest_only_first_payment` aflora como cargos extra. |
+| `interest_only_first_payment` | `NUMERIC(14, 2)` NULLABLE | opcional (PHASE-24.3, migración `q4g58i0ed3h1f7`). Primera cuota especial sólo de intereses cuando el contrato no arranca en fecha de cuota. |
+| `category_id` | `UUID` FK → `categories.id` `ON DELETE SET NULL` | opcional (PHASE-30.4, migración `t7j81l3hg6k4i0`). Categoría de pagos vinculada; sólo en liabilities cuya categoría tenga `role IN (DEBT_PAYMENT, DEBT_INTEREST)`. Índice parcial `ix_accounts_category_id`. |
+| `parent_account_id` | `UUID` FK → `accounts.id` `ON DELETE CASCADE` | opcional (PHASE-35, migración `a4q70s2pn4r3q9`). Tarjeta padre cuando la cuenta es una compra a plazos; NULL = cuenta normal. Índice parcial `ix_accounts_parent_account_id`. |
 | `display_order` | `INTEGER` | default `0`. Orden en UI. |
 | `is_archived` | `BOOLEAN` | default `FALSE`. Si TRUE, oculta del selector pero conserva histórico. |
 | `is_default` | `BOOLEAN` | default `FALSE` (PHASE-32, migración `w0m25o7lk9n8m4`). Cuenta principal del usuario, pre-seleccionada en formularios. Única por usuario (la fuerza el service, sin constraint en BD). Su saldo refleja ahorro neto (ver excepción abajo). |
@@ -270,6 +333,34 @@ arrastrado (cada compra suma deuda, cada pago la resta) sin invertir
 las transacciones en sí. El resto de cuentas (no `is_default`) sí
 suma las transferencias internas a su saldo individual (modo cash,
 PHASE-23.1).
+
+### `liability_installments` (`PHASE-24.1`)
+
+Cuotas persistidas y editables del cuadro de amortización francés de una
+liability (`loan`/`mortgage`, y `credit_card` financiada). Antes calculado
+en vivo; desde PHASE-24.1 se materializa para permitir overrides puntuales
+y marcar cuotas como pagadas.
+
+| Columna | Tipo | Notas |
+|---------|------|-------|
+| `id` | `UUID` PK | |
+| `user_id` | `UUID` FK → `users.id` `ON DELETE CASCADE` | índice. |
+| `account_id` | `UUID` FK → `accounts.id` `ON DELETE CASCADE` | índice. |
+| `installment_index` | `INTEGER` | 1..term_months. Orden en la UI. |
+| `due_date` | `DATE` | vencimiento de la cuota. |
+| `payment` | `NUMERIC(14,2)` | importe total de la cuota. |
+| `interest` | `NUMERIC(14,2)` | parte de intereses. |
+| `principal` | `NUMERIC(14,2)` | parte de capital. |
+| `remaining_balance` | `NUMERIC(14,2)` | capital vivo tras la cuota. |
+| `paid_at` | `TIMESTAMPTZ` NULLABLE | NULL = pendiente, timestamp = pagada. |
+| `paid_transaction_id` | `UUID` FK → `transactions.id` `ON DELETE SET NULL` | tx del extracto que liquidó la cuota (informativo). |
+| `created_at` / `updated_at` | `TIMESTAMPTZ` | |
+
+UNIQUE `(account_id, installment_index)` (`uq_liability_installments_account_index`)
+— una cuota N por cuenta; permite UPSERT al regenerar el cuadro. Migración
+`o2e36g8cb1f9d5` (backfill con `build_schedule` para liabilities con
+apr+term_months+start_date+opening_balance>0). Las ediciones son overrides
+puntuales — no recomputan las cuotas siguientes.
 
 ### `exchange_rates` (`PHASE-8.1`)
 
@@ -304,8 +395,14 @@ users ─┬─< refresh_tokens
        ├─< budgets ── (category_id ON DELETE SET NULL)
        ├─< fixed_expenses ── (account_id, category_id ON DELETE SET NULL)
        ├─< bank_category_mappings ── (category_id ON DELETE CASCADE)
-       └─< category_rules ── (category_id ON DELETE CASCADE)
+       ├─< category_rules ── (category_id ON DELETE CASCADE)
+       └─< liability_installments ─┬ (account_id ON DELETE CASCADE)
+                                   └ (paid_transaction_id → transactions.id ON DELETE SET NULL)
 
+accounts.parent_account_id     → FK auto-referente ON DELETE CASCADE
+                                  (compras a plazos agrupadas bajo su tarjeta, PHASE-35).
+accounts.category_id           → FK → categories.id ON DELETE SET NULL
+                                  (liability ↔ categoría de pagos, PHASE-30.4).
 transactions.import_hash       → unique partial index para deduplicar
                                   imports sin afectar a manual/receipt.
 transactions.receipt_id        → UUID sin FK formal (consistencia en service).
@@ -323,7 +420,10 @@ transactions.transfer_pair_id  → FK auto-referente bidireccional;
 | `transactionsource` | `MANUAL`, `IMPORT`, `RECEIPT`, `EXPECTED` |
 | `importjobstatus` | `PENDING`, `PROCESSING`, `PREVIEW`, `COMPLETED`, `FAILED` |
 | `receiptstatus` | `PENDING`, `CONFIRMED`, `REJECTED` |
-| `accounttype` | `BANK`, `SAVINGS`, `BROKERAGE`, `CRYPTO`, `CASH`, `CREDIT_CARD`, `LOAN`, `MORTGAGE` (los 3 últimos reservados para PHASE-22). |
-| `accountnature` | `ASSET`, `LIABILITY` (la última reservada). |
+| `accounttype` | `BANK`, `SAVINGS`, `BROKERAGE`, `CRYPTO`, `CASH`, `CREDIT_CARD`, `LOAN`, `MORTGAGE` (los 3 últimos = liabilities, activos desde PHASE-22). |
+| `accountnature` | `ASSET`, `LIABILITY` (activa desde PHASE-22). |
 | `rulematchtype` | `EXACT`, `CONTAINS`, `STARTS_WITH`, `REGEX` |
 | `rulefield` | `CONCEPT`, `DESCRIPTION`, `BOTH` |
+| `transactionflow` | `IN`, `OUT`, `TRANSFER_IN`, `TRANSFER_OUT` (PHASE-34.1, migración `z3p58r0on2q1p7`) |
+| `categoryrole` | `GENERIC`, `TRANSFER`, `DEBT_PAYMENT`, `DEBT_INTEREST` (PHASE-30.1, migración `s6i70k2gf5j3h9`) |
+| `fixedexpensestatus` | `PENDING`, `CONFIRMED`, `PAUSED`, `CANCELLED`, `DISMISSED` (rename desde `subscriptionstatus`, migración `d72f1a5e8b29`) |

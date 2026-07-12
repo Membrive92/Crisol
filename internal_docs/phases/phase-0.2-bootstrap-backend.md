@@ -1,6 +1,6 @@
 # PHASE-0.2 — Bootstrap backend
 
-**Estado**: 🚧 en curso
+**Estado**: ✅ completada
 **Rama**: `feat/phase-0.2-bootstrap-backend`
 **PR**: (pendiente)
 **Fecha de merge**: (pendiente)

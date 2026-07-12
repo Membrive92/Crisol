@@ -1,6 +1,6 @@
 # PHASE-7.4 — Mobile parity
 
-**Estado**: 🚧 en curso
+**Estado**: ✅ completada
 **Rama**: `feat/phase-7.4-mobile-parity`
 **PR**: —
 **Fecha de merge**: —

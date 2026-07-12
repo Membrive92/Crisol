@@ -1,9 +1,9 @@
 # PHASE-35 — Compras a plazos bajo una tarjeta (`parent_account_id`)
 
-**Estado**: 🚧 en curso (código completo + verde; pendiente prueba manual del usuario y PR)
+**Estado**: ✅ completada (en `main`)
 **Rama**: `feat/phase-34-transaction-flow` (convive con PHASE-34)
-**PR**: —
-**Fecha de merge**: —
+**PR**: — (squash directo)
+**Fecha de merge**: 2026-07-04 (squash `5215a80`, junto con PHASE-34 y PHASE-36)
 
 ## Objetivo
 

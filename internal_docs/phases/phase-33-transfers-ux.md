@@ -1,9 +1,9 @@
 # PHASE-33 — Transferencias internas: overhaul de UX e integridad
 
-**Estado**: 🚧 en curso (código completo + verde; pendiente prueba manual del usuario y PR)
+**Estado**: ✅ completada (en `main`)
 **Rama**: `feat/transfers-ux-overhaul`
 **PR**: —
-**Fecha de merge**: —
+**Fecha de merge**: 2026-06-26 (commits transfers-ux P1–P8, `8ae798e`…`5527f61`)
 
 ## Objetivo
 

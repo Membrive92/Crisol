@@ -1,6 +1,6 @@
 # PHASE-0.1 — Bootstrap monorepo
 
-**Estado**: 🚧 en curso
+**Estado**: ✅ completada
 **Rama**: `feat/phase-0.1-bootstrap-monorepo`
 **PR**: (pendiente)
 **Fecha de merge**: (pendiente)

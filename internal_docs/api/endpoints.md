@@ -1,7 +1,8 @@
 # API endpoints
 
 > Catálogo del backend. Se actualiza cada vez que una fase añade o
-> modifica endpoints. Última actualización: PHASE-4.1.
+> modifica endpoints. Última actualización: PHASE-37 (módulo `analytics`,
+> series de deuda/patrimonio, operaciones en bloque, `flow`/`is_exceptional`).
 
 Convenciones generales:
 
@@ -90,23 +91,43 @@ asociadas conservan `category_id = NULL` (`ON DELETE SET NULL`).
 
 ---
 
-## Transactions (`PHASE-2.1` + `PHASE-8.4` + `PHASE-10.1` + `PHASE-21.2` + `PHASE-21.3`)
+## Transactions (`PHASE-2.1` + `PHASE-8.4` + `PHASE-10.1` + `PHASE-21.2` + `PHASE-21.3` + `PHASE-34` + `PHASE-37.3`)
 
 | Método | Ruta | Auth | Body / Query | Response |
 |--------|------|------|--------------|----------|
-| GET | `/transactions` | sí | `account_id?` (PHASE-21.3), `category_id?`, `date_from?`, `date_to?`, `search?`, `target_currency?` (3 letras, PHASE-8.4), `limit` (1..200, def 50), `offset` (def 0) | `200` `{ items, total, limit, offset }` (sólo activas) |
+| GET | `/transactions` | sí | `account_id?` (PHASE-21.3), `category_id?`, `uncategorized?` (bool, PHASE-31.3 — filtra las sin categoría; ignora `category_id` si llegan ambos), `date_from?`, `date_to?`, `search?`, `target_currency?` (3 letras, PHASE-8.4), `limit` (1..200, def 50), `offset` (def 0) | `200` `{ items, total, limit, offset }` (sólo activas) |
 | GET | `/transactions/trash` | sí | `limit` (1..200, def 50), `offset` (def 0) | `200` `{ items, total, limit, offset }` — soft-deleted, `deleted_at DESC` (PHASE-10.1) |
 | GET | `/transactions/{id}` | sí | — | `200` `TransactionResponse` (404 si trasheada) |
-| POST | `/transactions` | sí | `{ account_id, amount, occurred_at, category_id?, currency?, description?, source? }` (PHASE-21.2: `account_id` obligatorio) | `201` `TransactionResponse` |
+| POST | `/transactions` | sí | `{ account_id, amount, occurred_at, category_id?, currency?, description?, source?, flow?, is_exceptional? }` (PHASE-21.2: `account_id` obligatorio; PHASE-34: `flow` = `IN\|OUT\|TRANSFER_IN\|TRANSFER_OUT`, si se omite se deriva de la categoría; PHASE-37.3: `is_exceptional` tri-estado `null`/`true`/`false`) | `201` `TransactionResponse` (puede traer `budget_alert`, PHASE-14.5) |
 | PUT | `/transactions/{id}` | sí | `Partial<TransactionCreate>` (acepta cambiar `account_id` a otra cuenta del mismo usuario) | `200` `TransactionResponse` |
 | DELETE | `/transactions/{id}` | sí | — | `204` (soft-delete, PHASE-10.1: mueve a papelera) |
 | POST | `/transactions/{id}/restore` | sí | — | `200` `TransactionResponse` (404 si no está en papelera) — PHASE-10.1 |
 | DELETE | `/transactions/{id}/purge` | sí | — | `204` (DELETE real; 404 si no está en papelera — forzar soft-delete previo) — PHASE-10.1 |
 | POST | `/transactions/reassign-account` | sí | `{ target_account_id, account_id?, category_id?, date_from?, date_to?, search? }` (PHASE-32; filtros = los de `GET /transactions`) | `200 { reassigned_count, skipped_other_currency }` — mueve en bloque las tx **activas** que matchean a `target_account_id`. Excluye transferencias internas, las ya en destino y (HIGH#3) las de **otra divisa** que la cuenta destino (moverlas las sacaría del saldo); estas se cuentan en `skipped_other_currency`. 404 si la cuenta destino no es del usuario |
+| POST | `/transactions/trash/restore` | sí | — | `200 { restored_count }` — restaura TODAS las tx en papelera del usuario (idempotente) — PHASE-10.2 |
+| DELETE | `/transactions/trash` | sí | — | `200 { purged_count }` — DELETE real de TODAS las tx en papelera (IRREVERSIBLE, idempotente) — PHASE-10.2 |
+| GET | `/transactions/available-periods` | sí | — | `200 { periods: [{ year, months[] }] }` — años + meses con tx activas, para el selector temporal (PHASE-27) |
+| GET | `/transactions/uncategorized-summary` | sí | — | `200 { count, total_amount, currency }` — conteo + suma de tx activas sin categoría (banner UX, PHASE-31.3) |
+| DELETE | `/transactions` | sí | `account_id?`, `category_id?`, `date_from?`, `date_to?`, `search?` (filtros = `GET /transactions`) | `200 { deleted_count }` — mueve a papelera en bloque las tx activas que matchean; sin filtros, todas. Idempotente |
+| POST | `/transactions/bulk-categorize` | sí | `{ transaction_ids[], category_id }` | `200 { updated }` — relabel puro de categoría de las tx seleccionadas; NO toca el dinero (`flow`/par). `400` si `category_id` ajeno (PHASE-34) |
 
 `source`: `manual | import | receipt | expected` (default `manual`).
-Importes positivos; el signo se infiere de `category.kind` en
-frontend.
+Importes positivos.
+
+`flow` (PHASE-34) — fuente de verdad de la dirección del dinero
+(`IN | OUT | TRANSFER_IN | TRANSFER_OUT`). Siempre presente en
+respuestas. El saldo y el cashflow derivan de `flow` + `account.nature`,
+no de la categoría (ADR-0004). El signo YA NO se infiere de
+`category.kind` en frontend.
+
+`is_exceptional` (PHASE-37.3) — override tri-estado de la clasificación
+estructural/puntual del gasto (`null` = heurística, `true` = puntual,
+`false` = estructural). Presente en respuestas; lo consume
+`/analytics/expense-structure`.
+
+`is_debt_pair` (PHASE-35) — `true` cuando la tx es una pata de un par
+de conversión a deuda (activo↔pasivo); sólo lo computa el endpoint de
+LISTADO, el resto devuelve `false`.
 
 `account_id` (PHASE-21.2) — obligatorio en `POST` y siempre
 presente en respuestas. Validado contra ownership: un `account_id`
@@ -155,6 +176,8 @@ gana `target_currency` si llegan ambos. Sin ninguno, default a
 | GET | `/dashboard/by-category` | `currency` o `target_currency`, `date_from?`, `date_to?`, `kind?` (`income\|expense`) | `[{ category_id, category_name, category_kind, total, count }]` |
 | GET | `/dashboard/by-month` | `year` (def actual), `currency` o `target_currency` | `[{ month: "YYYY-MM", income, expenses, balance }]` (12 buckets) |
 | GET | `/dashboard/top-expenses` | `currency` o `target_currency`, `date_from?`, `date_to?`, `limit` (1..50, def 10) | `[{ transaction_id, description, amount, occurred_at, category_id, category_name, original_amount, original_currency }]` (PHASE-8.4: `original_*` siempre presentes; `amount` es el convertido en cross-currency, original en legacy) |
+| GET | `/dashboard/category/{category_id}` | `currency` o `target_currency`, `date_from?`, `date_to?`, `months_back` (1..36, def 12) | `200 CategoryDetailResponse` — drill-down de una categoría: KPIs del rango + evolución mensual + top 10 tx (PHASE-25) |
+| GET | `/dashboard/category/{category_id}/available-periods` | — | `200 CategoryAvailablePeriodsResponse` — años + meses con tx activas de la categoría, para el selector temporal del drill-down (PHASE-27) |
 
 Reglas relevantes:
 - `summary.transaction_count` cuenta todas las transacciones del rango,
@@ -180,6 +203,33 @@ Reglas relevantes:
   de transacciones del scope que aún no tenga tasa en BD. Tras el
   primer hit las tasas quedan persistidas y los siguientes requests
   no triggerean fetch.
+
+---
+
+## Analytics (`PHASE-37.3` + `PHASE-37.4`)
+
+Read-only. Mismo modo de moneda que el dashboard: `currency` (legacy,
+filtra + agrega crudo) o `target_currency` (convierte por fecha y
+agrega). Sin ninguno, default legacy `USD`.
+
+| Método | Ruta | Auth | Query | Response |
+|--------|------|------|-------|----------|
+| GET | `/analytics/expense-structure` | sí | `currency` o `target_currency`, `date_from?`, `date_to?` | `200 ExpenseStructureResponse { reference_currency, income_total, structural_total, exceptional_total, structural_monthly_avg, savings_rate_gross, savings_rate_structural, top_exceptional[], exceptional_by_category[] }` |
+| GET | `/analytics/month-outlook` | sí | `currency` o `target_currency` | `200 MonthOutlookResponse { reference_currency, committed_remaining, committed_items[], days_remaining, liquid_balance, runway_months }` |
+
+Reglas:
+- `expense-structure` (PHASE-37.3) separa el gasto en estructural vs
+  puntual usando `Transaction.is_exceptional` (override tri-estado) +
+  heurística de recurrencia. `structural_monthly_avg` es la media
+  mensual del gasto estructural en la ventana (base estable del runway).
+  `savings_rate_gross`/`savings_rate_structural` = tasa de ahorro bruta
+  y estructural (`null` si no hay ingresos).
+- `month-outlook` (PHASE-37.4) proyecta el fin de mes:
+  `committed_remaining` = gastos fijos confirmados + cuotas de deuda que
+  aún se cargarán en lo que queda de mes (más los atrasados sin pagar).
+  `runway_months` = `liquid_balance / structural_monthly_avg`;
+  `liquid_balance` = Σ saldo de cuentas líquidas (bank/savings/cash) no
+  archivadas. `runway_months` = `null` si no hay base estructural.
 
 ---
 
@@ -366,10 +416,19 @@ Reglas:
 |--------|------|------|--------------|----------|
 | GET    | `/accounts` | sí | `?include_archived=` | `200 list[Account]` |
 | GET    | `/accounts/{id}` | sí | — | `200 Account` |
-| GET    | `/accounts/balances` | sí | — | `200 AccountBalancesResponse { items, total_assets, total_liabilities, net_worth, mixed_currencies, reference_currency }` (PHASE-21.3) |
-| GET    | `/accounts/debt-health` | sí | `?target_currency=` (opc, PHASE-30.6) | `200 DebtHealthKpis { total_liabilities, total_assets, net_worth, debt_to_assets_ratio, dti_ratio, dti_status, monthly_debt_payment, monthly_income_avg, interest_paid_ytd, weighted_apr, time_to_payoff_months, reference_currency }` (PHASE-22) |
+| GET    | `/accounts/balances` | sí | `?target_currency=` (opc, AUDIT-2026-06) | `200 AccountBalancesResponse { items, total_assets, total_liabilities, net_worth, mixed_currencies, reference_currency }` (PHASE-21.3). Con `target_currency` cada saldo se convierte con la tasa de hoy y las cuentas sin tasa se excluyen del agregado; sin él, suma cruda + `mixed_currencies` |
+| GET    | `/accounts/debt-health` | sí | `?target_currency=` (opc, PHASE-30.6) | `200 DebtHealthKpis { total_liabilities, total_assets, net_worth, debt_to_assets_ratio, dti_ratio, dti_status, monthly_debt_payment, monthly_income_avg, debt_by_type[], interest_paid_ytd, interest_scheduled_total, interest_remaining, weighted_apr, time_to_payoff_months, reference_currency }` (PHASE-22; PHASE-37: `debt_by_type` = deuda viva por tipo para el donut, `interest_paid_ytd` sale del cuadro —MUX por pasivo, no de tx—, `interest_scheduled_total`/`interest_remaining` = interés contractual total y pendiente) |
+| GET    | `/accounts/debt-history` | sí | `months_back` (1..36, def 12), `months_ahead` (0..36, def 12), `?target_currency=` (opc, PHASE-30.6) | `200 DebtHistoryResponse { items[], reference_currency, months_historical, months_projected }` — serie mensual de deuda: histórico (meses cerrados) + proyección por cuadro; cada punto `{ month, total_debt, principal_paid, interest_paid, kind }` (PHASE-22.1) |
+| GET    | `/accounts/position-history` | sí | `months_back` (1..36, def 12), `months_forward` (0..36, def 0) | `200 PositionHistoryResponse { reference_currency, points[], delta_period, delta_period_pct }` — serie mensual de patrimonio (activos/pasivos/neto), histórico + proyección; mono-divisa. `delta_period` = Δ neto del rango (PHASE-37.1) |
+| POST   | `/accounts/reconcile-debt` | sí | `?dry_run=` (bool, def `true`) | `200 ReconcilePlanResponse` — reconcilia aportaciones (amortización de préstamo, cuotas de op. financiada) contra el cuadro de cada deuda: genera el cuadro que falte, ancla cuotas previas y marca pagadas las que cada aportación liquida. `dry_run=true` sólo devuelve el plan; `false` lo aplica (idempotente) (PHASE-36) |
 | GET    | `/accounts/{id}/amortization-schedule` | sí | — | `200 AmortizationScheduleResponse { account_id, principal, apr, term_months, start_date, monthly_payment, total_interest, total_paid, rows[] }` (`400` si la cuenta no es loan/mortgage, falta APR/plazo/start_date o `opening_balance <= 0`) (PHASE-22) |
-| POST   | `/accounts` | sí | `{ name, type, currency?, color?, icon?, opening_balance?, opening_balance_date?, apr?, term_months?, start_date?, display_order?, is_default?, category_id? }` | `201 Account` (`409` si nombre duplicado, `400` si `type` no soportado o `category_id` inválido) |
+| POST   | `/accounts/{id}/amortization-schedule/regenerate` | sí | — | `200 AmortizationScheduleResponse` — borra y regenera el cuadro con `apr`/`term`/`start` actuales. PIERDE el estado de pago (`paid_at`) de las cuotas (PHASE-24.3) |
+| PATCH  | `/accounts/installments/{installment_id}` | sí | `{ payment?, due_date? }` | `200 AmortizationRowResponse` — override puntual de importe/fecha de una cuota; no recomputa las siguientes (PHASE-24.1) |
+| POST   | `/accounts/installments/{installment_id}/pay` | sí | `{ paid_at?, paid_transaction_id? }` | `200 AmortizationRowResponse` — marca la cuota como pagada (PHASE-24.1) |
+| DELETE | `/accounts/installments/{installment_id}/pay` | sí | — | `200 AmortizationRowResponse` — revierte la cuota a pendiente (PHASE-24.1) |
+| POST   | `/accounts/{id}/pay-installments` | sí | `{ principal_amount, paid_at?, paid_transaction_id? }` | `200 InstallmentBulkPayResponse { marked_count, covered_principal, uncovered_principal, schedule_outstanding }` — marca las cuotas que un pago de principal cubre, de la más antigua pendiente hacia adelante (AUDIT-2026-07 H-05) |
+| POST   | `/accounts/{id}/reconcile` | sí | `{ current_balance }` | `200 Account` — "Cuadrar saldo": fija el saldo real de una cuenta de **activo** ajustando `opening_balance`. `400` si la cuenta no es de activo (PHASE-34) |
+| POST   | `/accounts` | sí | `{ name, type, currency?, color?, icon?, opening_balance?, opening_balance_date?, apr?, tae?, term_months?, start_date?, total_to_pay?, interest_only_first_payment?, display_order?, is_default?, category_id?, parent_account_id? }` | `201 Account` (`409` si nombre duplicado; `400` si `type` no soportado, `category_id` inválido, o `parent_account_id` no es una `credit_card` del usuario / falta plan de la compra a plazos) |
 | PUT    | `/accounts/{id}` | sí | partial (incluye `apr`, `term_months`, `start_date`, `is_default`) | `200 Account` |
 | DELETE | `/accounts/{id}` | sí | — | `204` (`409` si la cuenta tiene transacciones — usar `PUT { is_archived: true }`) |
 
@@ -399,6 +458,12 @@ Reglas:
   un ingreso/transferencia la baja). Excluye papelera.
 - `mixed_currencies=true` cuando las cuentas activas no comparten
   moneda — los totales son suma cruda sin conversión.
+- Cada item de `/accounts/balances` (`AccountBalance`) incluye además
+  `monthly_payment` (PHASE-37 — cuota mensual del cuadro para liabilities
+  con schedule; `null` en activos y liabilities sin cuadro),
+  `parent_account_id` (PHASE-35 — tarjeta padre si es una compra a plazos,
+  para agrupar) e `is_unvalued` (PHASE-31.4 — `true` para brokerage/crypto,
+  que aparecen pero NO suman al patrimonio neto agregado).
 - `/accounts/debt-health` opera sólo en la `reference_currency`
   (primera cuenta no archivada por `display_order`). Cuentas en
   otras divisas se ignoran silenciosamente.
@@ -453,6 +518,12 @@ Reglas:
 | POST   | `/transfers/match` | sí | `{ window_days?: N }` | `200 TransferMatchResponse { linked_count, pending_candidates }` |
 | POST   | `/transfers/link` | sí | `{ out_transaction_id, in_transaction_id }` | `201 TransferPair` (`400` si misma cuenta o importe distinto, `409` si ya hay par, `404` si tx ajena) |
 | DELETE | `/transfers/{transaction_id}` | sí | — | `204` |
+| GET    | `/transfers/suspects` | sí | — | `200 list[TransferSuspect]` — tx candidatas a transferencia sin pareja (descripción con transfer/BIZUM/TRASPASO, aún no marcadas) (PHASE-23/33) |
+| GET    | `/transfers/misclassified` | sí | — | `200 list[MisclassifiedTransfer]` — tx `is_transfer` cuyo `kind` no encaja con la dirección del texto (RECIBIDA en categoría EXPENSE). Candidatas a recategorización en bloque (PHASE-31.2) |
+| POST   | `/transfers/reclassify-bulk` | sí | `{ transaction_ids[], target_category_id? }` | `200 ReclassifyBulkResponse` — recategoriza en bloque; sin `target_category_id`, cada tx va a la categoría `is_transfer` del kind opuesto (PHASE-31.2) |
+| POST   | `/transfers/mark` | sí | `{ transaction_id }` | `201 TransferMarkResponse` — marca una tx como transferencia interna (categoría `is_transfer`, creándola si falta). Sale del cashflow, sigue impactando el saldo (PHASE-23.1) |
+| POST   | `/transfers/from-source` | sí | `{ source_transaction_id, originating_account_id, beneficiary_account_id }` | `201 TransferPairResponse` — convierte una tx en transferencia interna creando la contraparte y emparejando ambas; dirección EXPLÍCITA (PHASE-23.1/28) |
+| POST   | `/transfers/from-source-debt` | sí | `{ source_transaction_id, destination_account_id?, new_liability? }` | `201 TransferPairResponse` — convierte una tx en operación financiada: crea la contraparte en una liability (existente o nueva al vuelo) y empareja; la deuda sube por el importe (PHASE-24) |
 
 Reglas:
 - El matcher empareja por `amount` + `currency` + cuentas distintas

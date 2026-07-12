@@ -1,9 +1,9 @@
 # PHASE-34 — La verdad del dinero vive en la transacción (`flow`)
 
-**Estado**: 🚧 en curso (código completo + verde; pendiente prueba manual del usuario y PR)
+**Estado**: ✅ completada (en `main`)
 **Rama**: `feat/phase-34-transaction-flow`
-**PR**: —
-**Fecha de merge**: —
+**PR**: — (squash directo)
+**Fecha de merge**: 2026-07-04 (squash `5215a80`, junto con PHASE-35 y PHASE-36)
 **ADR**: [`decisions/0004-transaction-level-money-truth.md`](../decisions/0004-transaction-level-money-truth.md)
 
 ## Objetivo

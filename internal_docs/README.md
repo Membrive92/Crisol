@@ -276,7 +276,7 @@ y [`design-explorations/debt-redesign-30/wireframe.md`](design-explorations/debt
 | 30.6 | Selector de divisa del header propagado a los 3 endpoints de deuda | ✅ | — |
 | 30.7 | Selector temporal `month/quarter/year` (alineado con `StitchPeriodToggle`) + donut por tipo de cuenta vinculada | ✅ | — |
 | 30.8 | Navegador de período (Capa 1) con flechas acotadas a datos + KPIs period-scoped | ✅ | — |
-| 30.9 | Serie diaria del saldo de deuda (`range=month`) + chart combo emisión/amortización | 🚧 | — |
+| 30.9 | Serie diaria del saldo de deuda (`range=month`) + chart combo emisión/amortización | ✅ | — |
 
 ### Fase 31 — Saneamiento de cuentas e integridad de saldos
 
@@ -296,43 +296,53 @@ y [`design-explorations/debt-redesign-30/wireframe.md`](design-explorations/debt
 
 | Fase | Nombre                                                       | Estado | PR |
 |------|--------------------------------------------------------------|--------|----|
-| 32   | `accounts.is_default` (cuenta principal = ahorro neto, pre-seleccionada) + `POST /transactions/reassign-account` (consolidar mes) + fix dirección de transferencias en imports + invalidación debt al mutar cuentas | 🚧 | — |
+| 32   | `accounts.is_default` (cuenta principal = ahorro neto, pre-seleccionada) + `POST /transactions/reassign-account` (consolidar mes) + fix dirección de transferencias en imports + invalidación debt al mutar cuentas | ✅ | — |
 
 > Detalle en [`phases/phase-32-default-account-and-transfer-direction.md`](phases/phase-32-default-account-and-transfer-direction.md).
-> Código completo y verde (FE + 445 tests BE); pendiente prueba manual del
-> usuario y commit.
+> Código completo y verde (FE + 445 tests BE); en `main` (commit `5a5fc74`,
+> 2026-06-26).
 
 ### Fase 33 — Transferencias internas: overhaul de UX e integridad
 
 | Fase | Nombre                                                       | Estado | PR |
 |------|--------------------------------------------------------------|--------|----|
-| 33   | Overhaul transversal (web + móvil) en 8 entregas: detección ES (BIZUM/TRASPASO) en sospechosas + badge de 3 estados (par/huérfana/deuda) + grupo "Transferencias" en el combobox + canal "A revisar" separado de "Errores" en imports + lenguaje cotidiano + dirección explícita en móvil + guard 409 al editar una pata emparejada | 🚧 | — |
+| 33   | Overhaul transversal (web + móvil) en 8 entregas: detección ES (BIZUM/TRASPASO) en sospechosas + badge de 3 estados (par/huérfana/deuda) + grupo "Transferencias" en el combobox + canal "A revisar" separado de "Errores" en imports + lenguaje cotidiano + dirección explícita en móvil + guard 409 al editar una pata emparejada | ✅ | — |
 
 > Detalle en [`phases/phase-33-transfers-ux.md`](phases/phase-33-transfers-ux.md).
 > Código completo y verde (FE: 67 web + 18 móvil · BE: 560 tests · ruff +
-> mypy); pendiente prueba manual del usuario y PR.
+> mypy); en `main` (commits transfers-ux P1–P8, `8ae798e`…`5527f61`, 2026-06-26).
 
 ### Fase 34 — La verdad del dinero vive en la transacción (`flow`)
 
 | Fase | Nombre                                                       | Estado | PR |
 |------|--------------------------------------------------------------|--------|----|
-| 34   | Columna `transactions.flow` (IN/OUT/TRANSFER_*) como fuente de verdad del dinero (ADR-0004): saldo + cashflow derivan de `flow`+`account.nature`, no de la categoría. Import y forms escriben `flow` (signo del extracto = invariante duro); `classify_import_flow` detecta transferencias y pago/liquidación de tarjeta; absorción del "cargo espejo" del `ADEUDO`; "Cuadrar saldo" + recategorización en bloque; saldo = caja real | 🚧 | — |
+| 34   | Columna `transactions.flow` (IN/OUT/TRANSFER_*) como fuente de verdad del dinero (ADR-0004): saldo + cashflow derivan de `flow`+`account.nature`, no de la categoría. Import y forms escriben `flow` (signo del extracto = invariante duro); `classify_import_flow` detecta transferencias y pago/liquidación de tarjeta; absorción del "cargo espejo" del `ADEUDO`; "Cuadrar saldo" + recategorización en bloque; saldo = caja real | ✅ | — |
 
 > Detalle en [`phases/phase-34-transaction-flow.md`](phases/phase-34-transaction-flow.md)
 > y [`decisions/0004-transaction-level-money-truth.md`](decisions/0004-transaction-level-money-truth.md).
 > Código completo y verde (BE: 589 tests · ruff · mypy · FE: 71 web + 18
-> móvil · typecheck · lint); migraciones aplicadas a dev. Cierra la familia
-> de lecciones PHASE-23.1/28/32. Pendiente prueba manual del usuario y PR.
+> móvil · typecheck · lint). Cierra la familia de lecciones PHASE-23.1/28/32.
+> En `main` (squash `5215a80`, 2026-07-04, junto con PHASE-35 y PHASE-36).
 
 ### Fase 35 — Compras a plazos bajo una tarjeta (`parent_account_id`)
 
 | Fase | Nombre                                                       | Estado | PR |
 |------|--------------------------------------------------------------|--------|----|
-| 35   | `accounts.parent_account_id`: una tarjeta agrupa varias compras financiadas a plazos, cada una con su cuadro propio. FE: alta de compra a plazos bajo una tarjeta + agrupación padre→hijas con total combinado en `/debt` + ocultar hijas de los selectores de transacción/import | 🚧 | — |
+| 35   | `accounts.parent_account_id`: una tarjeta agrupa varias compras financiadas a plazos, cada una con su cuadro propio. FE: alta de compra a plazos bajo una tarjeta + agrupación padre→hijas con total combinado en `/debt` + ocultar hijas de los selectores de transacción/import | ✅ | — |
 
 > Detalle en [`phases/phase-35-installment-cards.md`](phases/phase-35-installment-cards.md).
 > Convive con PHASE-34 en la misma rama. Backend + frontend completos y
-> verdes. Pendiente prueba manual del usuario y PR.
+> verdes. En `main` (squash `5215a80`, 2026-07-04, junto con PHASE-34 y PHASE-36).
+
+### Fase 36 — Saldo de deuda gobernado por el cuadro + reconciliación
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 36   | El saldo vivo de una liability con plan sale de las cuotas no pagadas del cuadro (`schedule_outstanding`); `POST /accounts/reconcile-debt` marca pagadas las cuotas desde los movimientos reales del extracto (amortización de préstamo FIFO + cargo agregado de tarjeta financiada), sin patas sintéticas ni tocar el cashflow. Ancla temporal para cuotas previas a los datos, exceso como `assumed_unregistered_debt`. Idempotente + reversible (`dry_run`) | ✅ | — |
+
+> Detalle en [`phases/phase-36-schedule-driven-debt-reconciliation.md`](phases/phase-36-schedule-driven-debt-reconciliation.md).
+> En `main` (squash `5215a80`, 2026-07-04, `Refs: PHASE-34, PHASE-35, PHASE-36`).
+> Documentada retroactivamente (la fase se plegó en el squash sin doc propia).
 
 ### Fase 37 — Rediseño módulo Análisis + saneamiento de deuda
 
@@ -349,8 +359,26 @@ y [`design-explorations/debt-redesign-30/wireframe.md`](design-explorations/debt
 
 > Detalle en [`phases/phase-37-analysis-redesign.md`](phases/phase-37-analysis-redesign.md)
 > (as-built) y [`phase-37-analysis-redesign.md`](phase-37-analysis-redesign.md) (plan).
-> Rama `feat/phase-37-analysis-redesign` en origin (16 commits). 643 tests BE +
-> 95 web + 18 móvil · mypy · ruff · lint · typecheck verdes. Pendiente sólo el PR.
+> Rama `feat/phase-37-analysis-redesign` empujada a origin (16 commits,
+> `00a16b9`…`73f0484`), **aún NO mergeada a `main`** — única fase pendiente de
+> PR. 643 tests BE + 95 web + 18 móvil · mypy · ruff · lint · typecheck verdes.
+> Encima de la rama hay además cambios sin commitear (groundwork PHASE-38).
+
+### Fase 38 — Cuota de compra a plazos = gasto de caja + estandarización de layout web
+
+🚧 **En curso** — sin commitear (sobre la rama `feat/phase-37-analysis-redesign`),
+sin rama/PR propios. No hay migraciones ni endpoints nuevos.
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 38.1 | Carve-out `is_card_financed_op` en `classify_import_flow`: la CUOTA de una compra a plazos con tarjeta cuenta como gasto real (`flow=OUT`); ADEUDO/liquidación y creación de deuda siguen neutros | 🚧 | — |
+| 38.2 | UX deuda-como-gasto: el form fija el segmento Gasto/Ingreso desde `category.kind` + badge "Pago de deuda" (`role=DEBT_PAYMENT/DEBT_INTEREST`) en la lista | 🚧 | — |
+| 38.3 | Estandarización layout web: tokens `layout.{pageWide,pageNarrow}` + `Card`/`CardTitle`/`CardHeader` (padding `lg` por defecto, `compact` opt-in) en ~22 páginas y 5 cards | 🚧 | — |
+| —    | Housekeeping: `type: ignore[attr-defined]` en `rowcount` (auth + transactions repos) · poda de backlog | 🚧 | — |
+
+> Detalle en [`phases/phase-38-installment-cash-expense-and-web-layout.md`](phases/phase-38-installment-cash-expense-and-web-layout.md).
+> Cierra la familia de lecciones PHASE-34/37/38 sobre "qué es un pago de deuda".
+> Solo web + backend (sin paridad móvil). Pendiente prueba manual del usuario y PR.
 
 ---
 

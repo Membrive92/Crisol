@@ -1,7 +1,7 @@
 # ADR-0004 — La verdad del dinero vive en la transacción, no en la categoría
 
-**Estado**: aceptada (implementada en PHASE-34; código completo y verde,
-pendiente prueba manual del usuario y PR)
+**Estado**: aceptada (implementada en PHASE-34; en `main`, squash `5215a80`,
+2026-07-04)
 **Fecha**: 2026-06-27 (propuesta) · 2026-06-29 (aceptada)
 **Fase**: PHASE-34 — ver [`phases/phase-34-transaction-flow.md`](../phases/phase-34-transaction-flow.md)
 

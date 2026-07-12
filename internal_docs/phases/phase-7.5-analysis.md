@@ -1,6 +1,6 @@
 # PHASE-7.5 — Analysis sub-tab
 
-**Estado**: 🚧 en curso
+**Estado**: ✅ completada
 **Rama**: `feat/phase-7.5-analysis`
 **PR**: —
 **Fecha de merge**: —

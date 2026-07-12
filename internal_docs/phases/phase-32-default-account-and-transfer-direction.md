@@ -1,9 +1,9 @@
 # PHASE-32 — Cuenta principal, reasignación en bloque y dirección de transferencias en imports
 
-**Estado**: 🚧 en curso (código completo + verde; pendiente prueba manual del usuario y commit)
-**Rama**: `main` (trabajo en árbol de trabajo, sin commitear)
+**Estado**: ✅ completada (en `main`)
+**Rama**: `main` (push directo, checkpoint `5a5fc74`)
 **PR**: —
-**Fecha de merge**: —
+**Fecha de merge**: 2026-06-26 (commit `5a5fc74`)
 
 ## Objetivo
 

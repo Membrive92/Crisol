@@ -1,6 +1,6 @@
 # PHASE-7.3 — Imports + Receipts polish
 
-**Estado**: 🚧 en curso
+**Estado**: ✅ completada
 **Rama**: `feat/phase-7.3-list-polish`
 **PR**: —
 **Fecha de merge**: —
