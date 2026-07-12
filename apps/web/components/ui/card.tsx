@@ -1,10 +1,28 @@
 'use client';
 
-import type { HTMLAttributes } from 'react';
+import type { CSSProperties, HTMLAttributes, ReactNode } from 'react';
 
-import { colors, radius, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
-export function Card({ style, ...rest }: HTMLAttributes<HTMLDivElement>) {
+export interface CardProps extends HTMLAttributes<HTMLDivElement> {
+  /**
+   * PHASE-38 — Padding compacto (`spacing.md`, 16px) para cards densas cuyo
+   * contenido se vería vacío con el padding roomier: KPI tiles, filas de
+   * lista, tarjetas de tip. Por defecto las cards de contenido usan
+   * `spacing.lg` (24px), alineado con la vista de Análisis. Un `padding`
+   * explícito en `style` sigue ganando (p. ej. `padding: 0` en contenedores
+   * de lista).
+   */
+  compact?: boolean;
+}
+
+/**
+ * Card base de la app. PHASE-38 estandariza el padding roomier (`lg`) como
+ * defecto — antes era `md` y cada card de Análisis lo sobreescribía a `lg`
+ * inline. Las cards compactas pasan `compact`. Fuente única del "look" de
+ * card (superficie, borde, radio, padding).
+ */
+export function Card({ compact, style, ...rest }: CardProps) {
   return (
     <div
       {...rest}
@@ -12,9 +30,77 @@ export function Card({ style, ...rest }: HTMLAttributes<HTMLDivElement>) {
         backgroundColor: colors.surface,
         border: `1px solid ${colors.border}`,
         borderRadius: radius.md,
-        padding: spacing.md,
+        padding: compact ? spacing.md : spacing.lg,
         ...style,
       }}
     />
+  );
+}
+
+/**
+ * PHASE-38 — Título de card consistente (`h3`). Unifica la tipografía de
+ * cabecera, que antes era ad-hoc por card (unas a `fontSize.lg`, otras `md`).
+ * `size="sm"` para sub-secciones dentro de una card.
+ */
+export function CardTitle({
+  children,
+  size = 'md',
+  style,
+  ...rest
+}: {
+  children: ReactNode;
+  size?: 'md' | 'sm';
+  style?: CSSProperties;
+} & Omit<HTMLAttributes<HTMLHeadingElement>, 'style'>) {
+  return (
+    <h3
+      {...rest}
+      style={{
+        margin: 0,
+        fontSize: size === 'sm' ? fontSize.md : fontSize.lg,
+        fontWeight: fontWeight.semibold,
+        color: colors.text,
+        letterSpacing: '-0.01em',
+        lineHeight: 1.2,
+        ...style,
+      }}
+    >
+      {children}
+    </h3>
+  );
+}
+
+/**
+ * PHASE-38 — Cabecera de card: icono opcional + título + acción/badge opcional
+ * a la derecha. Reemplaza el `<header>` ad-hoc que cada card repetía con
+ * espaciados distintos. `title` acepta texto o nodo (para badges inline).
+ */
+export function CardHeader({
+  icon,
+  title,
+  action,
+  size = 'md',
+  style,
+}: {
+  icon?: ReactNode;
+  title: ReactNode;
+  action?: ReactNode;
+  size?: 'md' | 'sm';
+  style?: CSSProperties;
+}) {
+  return (
+    <header
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: spacing.sm,
+        marginBottom: spacing.md,
+        ...style,
+      }}
+    >
+      {icon}
+      <CardTitle size={size}>{title}</CardTitle>
+      {action ? <span style={{ marginLeft: 'auto', display: 'inline-flex' }}>{action}</span> : null}
+    </header>
   );
 }

@@ -17,7 +17,7 @@ import type {
   RuleField,
   RuleMatchType,
 } from '@crisol/types';
-import { colors, fontSize, fontWeight, formatCategoryKind, radius, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, formatCategoryKind, layout, radius, spacing } from '@crisol/ui';
 
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -49,7 +49,7 @@ export default function CategoryRulesPage() {
   const categoriesById = new Map(categories.map((c) => [c.id, c]));
 
   return (
-    <div style={{ maxWidth: 960, margin: '0 auto', padding: spacing.lg }}>
+    <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
       <Link
         href="/settings/categories"
         style={{

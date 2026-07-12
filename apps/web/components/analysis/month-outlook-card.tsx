@@ -5,7 +5,7 @@ import { useState } from 'react';
 import type { MonthOutlookResponse } from '@crisol/types';
 import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@crisol/ui';
 
-import { Card } from '@/components/ui/card';
+import { Card, CardTitle } from '@/components/ui/card';
 
 export interface MonthOutlookCardProps {
   data: MonthOutlookResponse | undefined;
@@ -35,9 +35,7 @@ export function MonthOutlookCard({ data, currency, isLoading }: MonthOutlookCard
   return (
     <Card style={{ padding: spacing.lg, display: 'flex', flexDirection: 'column', gap: spacing.md }}>
       <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: spacing.sm }}>
-        <h3 style={{ margin: 0, fontSize: fontSize.md, fontWeight: fontWeight.semibold, color: colors.text }}>
-          Fin de mes
-        </h3>
+        <CardTitle size="sm">Fin de mes</CardTitle>
         {data ? (
           <span style={{ fontSize: fontSize.xs, color: colors.textMuted }}>
             {data.days_remaining} {data.days_remaining === 1 ? 'día' : 'días'} restantes

@@ -62,7 +62,7 @@ export function BalancesCard({ variant = 'full' }: BalancesCardProps) {
 
   if (isLoading) {
     return (
-      <Card style={{ padding: spacing.md }}>
+      <Card>
         <p style={{ margin: 0, color: colors.textMuted, fontSize: fontSize.sm }}>
           Cargando saldos…
         </p>
@@ -72,7 +72,7 @@ export function BalancesCard({ variant = 'full' }: BalancesCardProps) {
 
   if (isError || !data) {
     return (
-      <Card style={{ padding: spacing.md }}>
+      <Card>
         <p style={{ margin: 0, color: colors.danger, fontSize: fontSize.sm }}>
           Error cargando saldos por cuenta.
         </p>
@@ -100,7 +100,6 @@ export function BalancesCard({ variant = 'full' }: BalancesCardProps) {
   return (
     <Card
       style={{
-        padding: spacing.md,
         display: 'flex',
         flexDirection: 'column',
         gap: spacing.sm,

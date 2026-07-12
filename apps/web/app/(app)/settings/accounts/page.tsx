@@ -26,6 +26,7 @@ import {
   fontSize,
   fontWeight,
   formatAmount,
+  layout,
   radius,
   spacing,
 } from '@crisol/ui';
@@ -292,7 +293,7 @@ export default function AccountsSettingsPage() {
   );
 
   return (
-    <div style={{ maxWidth: 760, margin: '0 auto', padding: spacing.lg }}>
+    <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
       <Link
         href="/settings"
         style={{

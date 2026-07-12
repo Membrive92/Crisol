@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
 import { passkeysApi, type PasskeyResponse } from '@crisol/services';
-import { colors, fontSize, fontWeight, formatDate, radius, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, formatDate, layout, radius, spacing } from '@crisol/ui';
 
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { PasskeyAbortError, registerPasskey, supportsPasskeys } from '@/lib/webauthn';
@@ -86,7 +86,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div style={{ maxWidth: 720, margin: '0 auto', padding: spacing.lg }}>
+    <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
       <header style={{ marginBottom: spacing.lg }}>
         <h1
           style={{

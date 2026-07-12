@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useConfirmReceipt, useReceipt, useRejectReceipt } from '@crisol/services';
 import { toast } from '@crisol/store';
 import type { ReceiptConfirmRequest } from '@crisol/types';
-import { colors, fontSize, formatDate, spacing } from '@crisol/ui';
+import { colors, fontSize, formatDate, layout, spacing } from '@crisol/ui';
 
 import {
   ExtractionSummary,
@@ -69,7 +69,7 @@ export default function ReceiptDetailPage() {
   }
 
   return (
-    <div style={{ maxWidth: 720, margin: '0 auto', padding: spacing.lg }}>
+    <div style={{ maxWidth: layout.pageNarrow, margin: '0 auto', padding: spacing.lg }}>
       <header style={{ marginBottom: spacing.lg }}>
         <Button variant="ghost" onClick={() => router.push('/personal-finance/receipts')}>
           ← Volver

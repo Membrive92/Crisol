@@ -5,7 +5,7 @@ import { useCurrencyStore } from '@crisol/store';
 import type { DtiStatus } from '@crisol/types';
 import { colors, fontSize, fontWeight, formatAmount, spacing } from '@crisol/ui';
 
-import { Card } from '@/components/ui/card';
+import { Card, CardTitle } from '@/components/ui/card';
 import { HeartPulseIcon } from '@/components/ui/icons';
 
 const EFFORT_LABEL: Record<DtiStatus, string> = {
@@ -41,16 +41,7 @@ export function DebtSummaryCard() {
     <Card style={{ padding: spacing.lg, height: '100%' }}>
       <header style={{ display: 'flex', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md }}>
         <HeartPulseIcon size={16} />
-        <h3
-          style={{
-            margin: 0,
-            fontSize: fontSize.lg,
-            fontWeight: fontWeight.semibold,
-            color: colors.text,
-          }}
-        >
-          Deuda
-        </h3>
+        <CardTitle>Deuda</CardTitle>
         {debt ? (
           <span
             style={{

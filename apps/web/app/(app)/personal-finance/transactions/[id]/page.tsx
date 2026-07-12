@@ -10,7 +10,7 @@ import {
 } from '@crisol/services';
 import { toast } from '@crisol/store';
 import type { TransactionUpdateRequest } from '@crisol/types';
-import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, layout, spacing } from '@crisol/ui';
 
 import {
   ConvertToDebtDialog,
@@ -46,7 +46,7 @@ export default function EditTransactionPage({ params }: { params: Promise<{ id: 
   }
 
   return (
-    <div style={{ maxWidth: 560, margin: '0 auto', padding: spacing.lg }}>
+    <div style={{ maxWidth: layout.pageNarrow, margin: '0 auto', padding: spacing.lg }}>
       <h1 style={{ fontSize: fontSize.xl, color: colors.text, marginBottom: spacing.lg }}>
         Editar transacción
       </h1>

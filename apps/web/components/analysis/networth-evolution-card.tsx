@@ -14,7 +14,7 @@ import {
 import type { PositionPoint } from '@crisol/types';
 import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@crisol/ui';
 
-import { Card } from '@/components/ui/card';
+import { Card, CardTitle } from '@/components/ui/card';
 
 export interface NetworthEvolutionCardProps {
   points: PositionPoint[];
@@ -53,16 +53,7 @@ export function NetworthEvolutionCard({ points, currency, isLoading }: NetworthE
 
   return (
     <Card style={{ padding: spacing.lg, height: '100%' }}>
-      <h3
-        style={{
-          margin: `0 0 ${spacing.md}px 0`,
-          fontSize: fontSize.lg,
-          fontWeight: fontWeight.semibold,
-          color: colors.text,
-        }}
-      >
-        Evolución del patrimonio
-      </h3>
+      <CardTitle style={{ marginBottom: spacing.md }}>Evolución del patrimonio</CardTitle>
 
       {empty ? (
         <p style={{ margin: 0, fontSize: fontSize.sm, color: colors.textMuted }}>

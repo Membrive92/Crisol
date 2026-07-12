@@ -70,6 +70,17 @@ export const radius = {
   lg: 12,
 } as const;
 
+// PHASE-38 — Anchos de página compartidos (web). Antes cada página fijaba su
+// `maxWidth` a mano (1200 dashboard/deuda/transacciones, 960 budgets…), y en
+// pantallas grandes se veían estrechas. `pageWide` alinea las páginas de
+// datos/grid con /analysis para llenar monitores grandes; `pageNarrow` es para
+// formularios y detalles de una sola columna, donde ensanchar perjudica la
+// legibilidad. Un único sitio para tunear el ancho global.
+export const layout = {
+  pageWide: 2400,
+  pageNarrow: 720,
+} as const;
+
 // PHASE-37 — la UI web se veía pequeña en pantallas grandes (2.5K+): con el
 // ancho ya al máximo, la tipografía quedaba diminuta y "alejada". Escalamos la
 // fuente SÓLO en web (isReactNative=false, incluido el SSR de Next, así que no

@@ -3,7 +3,7 @@
 import { useParams, useRouter } from 'next/navigation';
 
 import { useImport } from '@crisol/services';
-import { colors, fontSize, spacing } from '@crisol/ui';
+import { colors, fontSize, layout, spacing } from '@crisol/ui';
 
 import { ResultStep } from '@/components/imports/result-step';
 import { Button } from '@/components/ui/button';
@@ -17,7 +17,7 @@ export default function ImportDetailPage() {
   const { data, isLoading, isError, error } = useImport(id);
 
   return (
-    <div style={{ maxWidth: 720, margin: '0 auto', padding: spacing.lg }}>
+    <div style={{ maxWidth: layout.pageNarrow, margin: '0 auto', padding: spacing.lg }}>
       <header style={{ marginBottom: spacing.lg }}>
         <Button variant="ghost" onClick={() => router.push('/personal-finance/imports')}>
           ← Volver

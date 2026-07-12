@@ -12,7 +12,7 @@ import {
 } from '@crisol/services';
 import { toast } from '@crisol/store';
 import type { BudgetCreateRequest } from '@crisol/types';
-import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, layout, spacing } from '@crisol/ui';
 
 import { BudgetForm } from '@/components/budgets/budget-form';
 import { BudgetRow } from '@/components/budgets/budget-row';
@@ -77,7 +77,7 @@ export default function BudgetsPage() {
   }
 
   return (
-    <div style={{ maxWidth: 960, margin: '0 auto', padding: spacing.lg }}>
+    <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
       <header style={{ marginBottom: spacing.xl }}>
         <h1
           style={{

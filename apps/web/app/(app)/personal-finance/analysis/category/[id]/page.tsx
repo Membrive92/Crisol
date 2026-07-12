@@ -24,6 +24,7 @@ import {
   fontWeight,
   formatAmount,
   formatDate,
+  layout,
   radius,
   spacing,
 } from '@crisol/ui';
@@ -76,7 +77,7 @@ export default function CategoryDetailPage() {
   }
 
   return (
-    <div style={{ maxWidth: 1200, margin: '0 auto', padding: spacing.lg }}>
+    <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
       <Link
         href="/personal-finance/analysis"
         style={{

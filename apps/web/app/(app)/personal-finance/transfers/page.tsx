@@ -18,6 +18,7 @@ import {
   fontWeight,
   formatAmount,
   formatDate,
+  layout,
   pluralize,
   radius,
   spacing,
@@ -114,7 +115,7 @@ export default function TransfersPage() {
   const showSuggestions = candidates.length > 0;
 
   return (
-    <div style={{ maxWidth: 960, margin: '0 auto', padding: spacing.lg }}>
+    <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
       <header
         style={{
           display: 'flex',

@@ -350,7 +350,9 @@ async def bulk_soft_delete_transactions(
         )
         await db.execute(orphan_unlink)
     await db.flush()
-    return result.rowcount or 0
+    # SQLAlchemy tipa execute() como Result (sin `rowcount`); en un DML el
+    # runtime devuelve CursorResult, que sí lo expone.
+    return result.rowcount or 0  # type: ignore[attr-defined]
 
 
 async def bulk_update_category(
@@ -410,7 +412,9 @@ async def bulk_update_category(
     )
     result = await db.execute(stmt)
     await db.flush()
-    return result.rowcount or 0
+    # SQLAlchemy tipa execute() como Result (sin `rowcount`); en un DML el
+    # runtime devuelve CursorResult, que sí lo expone.
+    return result.rowcount or 0  # type: ignore[attr-defined]
 
 
 async def bulk_reassign_account(
@@ -458,7 +462,9 @@ async def bulk_reassign_account(
     )
     result = await db.execute(stmt)
     await db.flush()
-    return result.rowcount or 0
+    # SQLAlchemy tipa execute() como Result (sin `rowcount`); en un DML el
+    # runtime devuelve CursorResult, que sí lo expone.
+    return result.rowcount or 0  # type: ignore[attr-defined]
 
 
 async def count_reassignable_skipped_by_currency(
@@ -507,7 +513,9 @@ async def bulk_restore_trashed(db: AsyncSession, user_id: uuid.UUID) -> int:
     stmt = _scope(stmt, user_id, deleted="trashed")
     result = await db.execute(stmt)
     await db.flush()
-    return result.rowcount or 0
+    # SQLAlchemy tipa execute() como Result (sin `rowcount`); en un DML el
+    # runtime devuelve CursorResult, que sí lo expone.
+    return result.rowcount or 0  # type: ignore[attr-defined]
 
 
 async def bulk_purge_trashed(db: AsyncSession, user_id: uuid.UUID) -> int:

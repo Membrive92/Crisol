@@ -20,7 +20,7 @@ import {
 } from '@crisol/services';
 import { toast, useCurrencyStore } from '@crisol/store';
 import type { TransactionListQuery } from '@crisol/types';
-import { colors, fontSize, fontWeight, pluralize, radius, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, layout, pluralize, radius, spacing } from '@crisol/ui';
 
 import { StitchSearchToolbar } from '@/components/transactions/stitch-search-toolbar';
 import { StitchTransactionsKpiRow } from '@/components/transactions/stitch-transactions-kpi-row';
@@ -292,7 +292,7 @@ export default function TransactionsPage() {
   }
 
   return (
-    <div style={{ maxWidth: 1200, margin: '0 auto', padding: spacing.lg }}>
+    <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
       {/* Eyebrow bar */}
       <div
         style={{

@@ -10,7 +10,7 @@ import {
 } from '@crisol/services';
 import { toast } from '@crisol/store';
 import type { Receipt, ReceiptConfirmRequest, ReceiptExtraction } from '@crisol/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, layout, radius, spacing } from '@crisol/ui';
 
 import {
   ExtractionSummary,
@@ -136,7 +136,7 @@ export default function NewReceiptPage() {
   const inExtraction = stagedReceipt !== null && stagedExtraction !== null;
 
   return (
-    <div style={{ maxWidth: 720, margin: '0 auto', padding: spacing.lg }}>
+    <div style={{ maxWidth: layout.pageNarrow, margin: '0 auto', padding: spacing.lg }}>
       <h1
         style={{
           fontSize: fontSize.xl,

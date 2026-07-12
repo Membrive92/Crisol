@@ -192,8 +192,11 @@ export function TransactionList({
           >
             {tx.description ?? '(sin descripción)'}
           </span>
-          {tx.transfer_pair_id !== null || category?.is_transfer ? (
-            <TransferBadge tx={tx} />
+          {tx.transfer_pair_id !== null ||
+          category?.is_transfer ||
+          category?.role === 'DEBT_PAYMENT' ||
+          category?.role === 'DEBT_INTEREST' ? (
+            <TransferBadge tx={tx} category={category} />
           ) : null}
         </span>
       ),
@@ -343,7 +346,10 @@ export function TransactionList({
  *    ninguna contraparte. Antes mostraba el mismo chip que un par real,
  *    así que el usuario creía "ya está" cuando faltaba enlazarla.
  */
-function badgeFor(tx: Transaction): {
+function badgeFor(
+  tx: Transaction,
+  category: Category | undefined,
+): {
   label: string;
   title: string;
   tone: 'info' | 'warning';
@@ -352,6 +358,18 @@ function badgeFor(tx: Transaction): {
     return {
       label: 'Deuda',
       title: 'Operación financiada, enlazada a una cuenta de deuda.',
+      tone: 'info',
+    };
+  }
+  // PHASE-38 — cuota de una compra a plazos / deuda categorizada
+  // (DEBT_PAYMENT/DEBT_INTEREST). Cuenta como gasto real del mes (flow OUT),
+  // pero se etiqueta para que se sepa que descuenta deuda; su contraparte es
+  // el cuadro de amortización (no una tx-pareja), así que NO es "Sin pareja".
+  if (category?.role === 'DEBT_PAYMENT' || category?.role === 'DEBT_INTEREST') {
+    return {
+      label: 'Pago de deuda',
+      title:
+        'Cuota de una deuda (compra a plazos / préstamo). Cuenta como gasto del mes y descuenta del cuadro de amortización.',
       tone: 'info',
     };
   }
@@ -373,8 +391,14 @@ function badgeFor(tx: Transaction): {
  * Chip informativo (no clicable: "Deshacer"/"Borrar" viven en la columna
  * de acciones). El tono `warning` señala una transferencia incompleta.
  */
-function TransferBadge({ tx }: { tx: Transaction }) {
-  const { label, title, tone } = badgeFor(tx);
+function TransferBadge({
+  tx,
+  category,
+}: {
+  tx: Transaction;
+  category: Category | undefined;
+}) {
+  const { label, title, tone } = badgeFor(tx, category);
   const bg = tone === 'warning' ? colors.warningSoft : colors.primarySoft;
   const fg = tone === 'warning' ? colors.warning : colors.primary;
   return (

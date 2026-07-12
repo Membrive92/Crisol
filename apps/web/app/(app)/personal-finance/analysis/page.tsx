@@ -15,7 +15,7 @@ import {
 } from '@crisol/services';
 import { useCurrencyStore } from '@crisol/store';
 import type { DtiStatus } from '@crisol/types';
-import { colors, fontSize, fontWeight, formatAmount, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, formatAmount, layout, spacing } from '@crisol/ui';
 
 import { AccountsSection } from '@/components/analysis/accounts-section';
 import { DebtSummaryCard } from '@/components/analysis/debt-summary-card';
@@ -169,7 +169,7 @@ export default function AnalysisPage() {
   }
 
   return (
-    <div style={{ maxWidth: 2400, margin: '0 auto', padding: spacing.lg }}>
+    <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
       <header style={{ marginBottom: spacing.lg }}>
         <span
           style={{

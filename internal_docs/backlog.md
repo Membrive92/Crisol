@@ -12,7 +12,10 @@
 >   (no se tacha) — la phase doc deja la traza histórica.
 > - Si un item se promueve a fase formal, se traslada a
 >   `phases/phase-X.Y-*.md` y se borra de aquí.
-> - Última actualización: 2026-05-31 (AUDIT-2026-05, Ola 4).
+> - Última actualización: 2026-07-11 (poda tras fases 14/21/37: se
+>   borran items ya resueltos — edición inline de presupuestos, budget
+>   over, date picker mobile, `convertAll` mobile, color/icono
+>   per-categoría, refresh token web en cookie `httpOnly`).
 
 ---
 
@@ -76,16 +79,16 @@ Items de la auditoría conscientemente diferidos durante la remediación
 
 ## Top candidatos prácticos
 
-Si quieres atacar trabajo real, por orden:
+Si quieres atacar trabajo real, por orden de valor:
 
-1. **PHASE-13 — Detección de subscripciones recurrentes vía IA
-   local** — el módulo `ai/` está listo (cliente Ollama), falta el
-   pipeline de análisis sobre transacciones existentes.
-2. **Edición inline de amount en presupuestos** (web + mobile) —
-   los hooks `useUpdateBudget` están listos; falta UI.
-3. **Notificaciones proactivas de budget over** — actualmente sólo
-   visible en GET /budgets/status. Hook tras `transactions.create`
-   o cron nocturno.
+1. **Captura por ticket en mobile** (`expo-camera` /
+   `expo-image-picker`) — el backend de receipts ya lo soporta; falta
+   la pantalla de captura. Es el hueco funcional más grande de mobile.
+2. **Materializar `line_items` de tickets en transacciones** — hoy un
+   ticket crea **una** sola tx con el total; desglosar por línea daría
+   gasto por categoría real desde el ticket.
+3. **Endurecer auth** — **reset / forgot password** + **rate-limit en
+   `/auth/login`**. Lo mínimo antes de cualquier despliegue.
 
 ---
 
@@ -159,16 +162,15 @@ Si quieres atacar trabajo real, por orden:
 
 ### IA local (módulo `ai`)
 
-- **[PHASE-7.1]** Smart Insights es placeholder honesto en UI.
-  Requiere madurar el módulo `ai` antes de generar consejos reales.
+- **[PHASE-7.1 → 37.5]** Smart Insights v2 (PHASE-37.5) ya genera
+  insights **derivados** no-redundantes (sin IA). Queda pendiente el
+  consejo **generativo** real (LLM sobre el histórico) — requiere
+  madurar el módulo `ai` para texto, no sólo visión.
 
 ---
 
 ## Frontend web
 
-- **[PHASE-1.2]** Refresh token en `localStorage` (no `httpOnly`).
-  Documentado como MVP local-only — al desplegar, mover a cookie
-  `httpOnly` vía backend.
 - **[PHASE-4.2]** Mapping de columnas es free-text — sin validar
   contra cabeceras del fichero antes del upload. Si el usuario teclea
   un nombre que no está, el job termina con `rows_failed`.
@@ -178,9 +180,6 @@ Si quieres atacar trabajo real, por orden:
   ticket es mala — toca editar manualmente o rechazar y resubir.
 - **[PHASE-7.2]** Description en tabla truncada a 280px — sólo en el
   detalle se ve completo.
-- **[PHASE-7.6]** Color e icono per-categoría: las columnas existen en
-  BD (`categories.color`, `categories.icon`) pero el selector en UI
-  está pendiente — hoy se pinta por `kind`.
 
 ---
 
@@ -188,10 +187,6 @@ Si quieres atacar trabajo real, por orden:
 
 - **[PHASE-5.2]** Sin captura por cámara. El backend ya lo soporta —
   falta integrar `expo-camera` / `expo-image-picker`.
-- **[PHASE-11.2]** `convertAll` (toggle cross-currency global) sigue
-  sólo en web. PHASE-11.2 cerró el adapter cross-platform del store;
-  ahora basta con añadir el toggle en el header de Análisis mobile +
-  consumir `convertAll` en las queries de dashboard mobile.
 - **[PHASE-9.2]** `MonthlyChart` ligado a año en curso (la query
   `useDashboardByMonth` sólo acepta `year`). Si se quiere "últimos
   12 meses rolling" o rango libre, requiere cambio en backend.
@@ -200,8 +195,6 @@ Si quieres atacar trabajo real, por orden:
 - **[PHASE-9.2]** `apps/mobile/components/dashboard/dashboard-filters.tsx`
   quedó sin callers tras PHASE-9.2 (lo reemplazó `currency-picker.tsx`).
   Eliminar si no resurge necesidad de year picker.
-- **[PHASE-2.2]** Sin date picker nativo — input de texto con formato
-  `YYYY-MM-DD`. `@react-native-community/datetimepicker` pendiente.
 - **[PHASE-11.6]** Cobertura UI mobile mínima — `jest-expo` ya
   configurado y un test smoke (Toaster), pero pantallas
   (`analysis`, `transactions`, `trash`, `receipt/new`) sin tests.

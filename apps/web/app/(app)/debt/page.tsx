@@ -18,7 +18,7 @@ import type {
   DebtTypeBreakdown,
   DebtTypeBucket,
 } from '@crisol/types';
-import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, formatAmount, layout, radius, spacing } from '@crisol/ui';
 
 import { DebtList } from '@/components/debt/debt-list';
 import { EffortRatioSection } from '@/components/debt/effort-ratio-section';
@@ -139,7 +139,7 @@ export default function DebtPage() {
   }, [health?.debt_by_type]);
 
   return (
-    <div style={{ maxWidth: 1200, margin: '0 auto', padding: spacing.lg }}>
+    <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
       <PageHeader />
 
       <DebtKpiStrip health={health} currency={referenceCurrency} isLoading={healthQuery.isLoading} />

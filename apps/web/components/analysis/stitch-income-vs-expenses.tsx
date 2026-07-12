@@ -15,7 +15,7 @@ import {
 import type { MonthlyBucket } from '@crisol/types';
 import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@crisol/ui';
 
-import { Card } from '@/components/ui/card';
+import { Card, CardTitle } from '@/components/ui/card';
 import type { PeriodKey } from './stitch-period-toggle';
 
 const SHORT_MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
@@ -102,16 +102,7 @@ export function StitchIncomeVsExpenses({
           marginBottom: spacing.lg,
         }}
       >
-        <h3
-          style={{
-            margin: 0,
-            fontSize: fontSize.lg,
-            fontWeight: fontWeight.semibold,
-            color: colors.text,
-          }}
-        >
-          Ingresos vs Gastos
-        </h3>
+        <CardTitle>Ingresos vs Gastos</CardTitle>
         {periodCaption ? (
           <span
             style={{

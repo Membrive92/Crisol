@@ -18,7 +18,7 @@ import {
   useUpdateFixedExpense,
 } from '@crisol/services';
 import { toast } from '@crisol/store';
-import { colors, fontSize, fontWeight, pluralize, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, layout, pluralize, spacing } from '@crisol/ui';
 
 import { FixedExpenseCard } from '@/components/fixed-expenses/fixed-expense-card';
 import { Button } from '@/components/ui/button';
@@ -197,7 +197,7 @@ export default function FixedExpensesPage() {
     : null;
 
   return (
-    <div style={{ maxWidth: 960, margin: '0 auto', padding: spacing.lg }}>
+    <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
       <header
         style={{
           display: 'flex',

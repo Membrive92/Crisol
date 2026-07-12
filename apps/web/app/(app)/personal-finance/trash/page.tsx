@@ -12,7 +12,7 @@ import {
   useTrashedTransactions,
 } from '@crisol/services';
 import { toast } from '@crisol/store';
-import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, layout, spacing } from '@crisol/ui';
 
 import { TrashList } from '@/components/transactions/trash-list';
 import { Button } from '@/components/ui/button';
@@ -105,7 +105,7 @@ export default function TrashPage() {
   }
 
   return (
-    <div style={{ maxWidth: 1200, margin: '0 auto', padding: spacing.lg }}>
+    <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
       <div
         style={{
           display: 'flex',

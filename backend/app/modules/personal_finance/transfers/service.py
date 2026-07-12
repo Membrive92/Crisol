@@ -9,6 +9,9 @@ from decimal import Decimal
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.personal_finance.accounts.debt_reconciliation import (
+    is_card_financed_op,
+)
 from app.modules.personal_finance.accounts.installments_repository import (
     generate_installments_for_account,
 )
@@ -524,7 +527,21 @@ def classify_import_flow(
     text_says_internal = is_internal_movement_text(text) and not _has_external_income_marker(
         text
     )
-    is_transfer = category_is_transfer or text_says_internal
+    # PHASE-38 (decisión del usuario): la CUOTA de una compra a plazos con
+    # tarjeta ("OPERACIÓN FINANCIADA CON TARJETA") SÍ cuenta como gasto real
+    # del mes (visión de caja), a diferencia de la liquidación de tarjeta
+    # ("ADEUDO MENSUAL DE TARJETA") o la creación de deuda ("OPERACIÓN
+    # FINANCIADA" a secas), que siguen siendo movimientos internos neutros.
+    # La compra financiada NO aparece como gasto en ningún otro sitio (la
+    # compra original se modela como creación de deuda, neutra), así que
+    # contar la cuota no dobla nada; la deuda la sigue descontando el cuadro
+    # vía reconciliación (independiente del `flow`). `is_card_financed_op` es
+    # la MISMA definición que usa la reconciliación → clasificador y matcher
+    # no divergen (exige "operaci"+"financiada"+"tarjeta"; excluye el ADEUDO
+    # y la "OPERACIÓN FINANCIADA" a secas). Gana sobre `text_says_internal`
+    # (que también matchea por "operación financiada") y sobre un
+    # `category_is_transfer` mal puesto: el concepto es inequívocamente cuota.
+    is_transfer = (category_is_transfer or text_says_internal) and not is_card_financed_op(text)
     if bank_sign > 0:
         income = True
     elif bank_sign < 0:

@@ -13,7 +13,7 @@ import {
 } from '@crisol/services';
 import { toast } from '@crisol/store';
 import type { AmortizationRow } from '@crisol/types';
-import { colors, fontSize, fontWeight, formatAmount, formatDate, radius, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, formatAmount, formatDate, layout, radius, spacing } from '@crisol/ui';
 import { useState } from 'react';
 
 import { AccountSwatch } from '@/components/accounts/account-swatch';
@@ -84,7 +84,7 @@ export default function AmortizationPage() {
   }
 
   return (
-    <div style={{ maxWidth: 960, margin: '0 auto', padding: spacing.lg }}>
+    <div style={{ maxWidth: layout.pageNarrow, margin: '0 auto', padding: spacing.lg }}>
       <Link
         href="/settings/accounts"
         style={{

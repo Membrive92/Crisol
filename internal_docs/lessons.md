@@ -401,6 +401,39 @@ importación, pero no se persiste como equivalencia.
 concepto que aparece con signos opuestos; su dirección la decide el signo del
 extracto en el punto de uso, no una equivalencia grabada una vez.
 
+### [PHASE-38] La cuota de una compra a plazos SÍ es gasto de caja; la liquidación de tarjeta NO — y ambas comparten prefijo
+**Error:** `classify_import_flow` marcaba TODO lo que matchease "operación
+financiada" como movimiento interno (`TRANSFER_OUT`, fuera del cashflow), igual
+que el ADEUDO/liquidación de tarjeta. Efecto: la cuota mensual de una compra a
+plazos ("OPERACIÓN FINANCIADA CON TARJETA") salía blanca/neutra y **el gasto
+financiado no aparecía en el neto del mes por ningún sitio** — ni la compra
+original (modelada como creación de deuda, `TRANSFER_*`) ni la cuota. El usuario
+veía un movimiento "sin gasto ni ingreso" que en su cabeza era gasto real.
+**Causa:** Meter en un mismo cubo ("movimiento interno") tres conceptos que
+comparten el prefijo "operación financiada" pero son distintos: (a) la CREACIÓN
+de la deuda ("operación financiada" a secas) → neutra; (b) la LIQUIDACIÓN de
+tarjeta ("adeudo mensual de tarjeta") → neutra (las compras sueltas ya son
+gasto); (c) la CUOTA de una compra a plazos ("...con tarjeta") → gasto de caja
+real, porque su compra original no cuenta como gasto en ninguna otra parte.
+Contar (b) como gasto doblaría; NO contar (c) esconde el gasto.
+**Solución:** Carve-out en `classify_import_flow`: `is_card_financed_op(text)`
+(exige "operaci"+"financiada"+"tarjeta"; excluye el ADEUDO y la creación a
+secas) fuerza `flow=OUT`, ganando sobre `is_internal_movement_text` y sobre un
+`category_is_transfer` mal puesto. Es la MISMA definición que usa la
+reconciliación → clasificador y matcher no divergen. La deuda la sigue
+descontando el cuadro vía reconciliación (independiente del `flow`), así que
+`OUT` no rompe saldo ni patrimonio (`is_outflow()` cubre `OUT` y `TRANSFER_OUT`
+igual para un ASSET) y el módulo de deuda no dobla el interés (excluye la
+categoría vinculada al pasivo con cuadro). Es una vista de CAJA deliberada: el
+capital de la cuota cuenta como gasto del mes (decisión del usuario).
+**Regla:** Antes de meter varios conceptos bajo una misma etiqueta por compartir
+un prefijo de texto, comprueba caso a caso si comparten el MISMO tratamiento de
+dinero. "Pago de deuda" no es un tratamiento único: liquidar tarjeta (gasto ya
+contado en las compras) ≠ amortizar una compra a plazos (gasto de caja que no
+está en ningún otro lado). Y cuando dos módulos deben coincidir en "qué es X"
+(aquí clasificador de `flow` y matcher de reconciliación), comparte UNA sola
+definición del predicado, no dos que puedan divergir.
+
 ---
 
 ## Ejemplos de referencia (no son lecciones reales)

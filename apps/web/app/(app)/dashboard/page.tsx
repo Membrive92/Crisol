@@ -9,7 +9,7 @@ import {
   useDashboardSummary,
 } from '@crisol/services';
 import { useCurrencyStore } from '@crisol/store';
-import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, layout, spacing } from '@crisol/ui';
 
 import {
   StitchPeriodToggle,
@@ -67,7 +67,7 @@ export default function DashboardPage() {
   const unconvertible = summary?.unconvertible_count ?? 0;
 
   return (
-    <div style={{ maxWidth: 1200, margin: '0 auto', padding: spacing.lg }}>
+    <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
       <header
         style={{
           display: 'flex',

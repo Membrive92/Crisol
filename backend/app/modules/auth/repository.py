@@ -86,4 +86,6 @@ async def purge_expired_tokens(db: AsyncSession) -> int:
         delete(RefreshToken).where(RefreshToken.expires_at < datetime.now(UTC))
     )
     await db.flush()
-    return result.rowcount or 0
+    # SQLAlchemy tipa execute() como Result (sin `rowcount`); en un DML el
+    # runtime devuelve CursorResult, que sí lo expone.
+    return result.rowcount or 0  # type: ignore[attr-defined]

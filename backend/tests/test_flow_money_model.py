@@ -325,12 +325,37 @@ def test_classify_card_adeudo_is_transfer() -> None:
     )
 
 
-def test_classify_operacion_financiada_is_transfer() -> None:
+def test_classify_operacion_financiada_con_tarjeta_is_expense() -> None:
+    """PHASE-38 (decisión del usuario): la CUOTA de una compra a plazos con
+    tarjeta cuenta como gasto real del mes (visión de caja), a diferencia del
+    ADEUDO/liquidación. La compra original se modela como creación de deuda
+    (neutra), así que la cuota no dobla nada; la deuda la descuenta el cuadro."""
+    for text in ("OPERACIÓN FINANCIADA CON TARJETA", "Operación financiada con tarjeta"):
+        assert (
+            classify_import_flow(bank_sign=-1, text=text, category_is_transfer=False)
+            == TransactionFlow.OUT
+        )
+
+
+def test_classify_operacion_financiada_bare_is_transfer() -> None:
+    """La 'OPERACIÓN FINANCIADA' a secas (evento de CREACIÓN de deuda, sin
+    'tarjeta') sigue siendo movimiento interno neutro — no es una cuota."""
     assert (
         classify_import_flow(
-            bank_sign=-1, text="OPERACIÓN FINANCIADA CON TARJETA", category_is_transfer=False
+            bank_sign=-1, text="OPERACIÓN FINANCIADA", category_is_transfer=False
         )
         == TransactionFlow.TRANSFER_OUT
+    )
+
+
+def test_classify_financiada_con_tarjeta_overrides_category_transfer() -> None:
+    """El concepto 'financiada con tarjeta' es inequívocamente una cuota:
+    gana sobre un `category_is_transfer` mal puesto → gasto, no transferencia."""
+    assert (
+        classify_import_flow(
+            bank_sign=-1, text="OPERACIÓN FINANCIADA CON TARJETA", category_is_transfer=True
+        )
+        == TransactionFlow.OUT
     )
 
 

@@ -277,7 +277,24 @@ export function TransactionForm({
         label="Categoría"
         categories={categories ?? []}
         value={values.category_id}
-        onChange={(id) => handleChange('category_id', id)}
+        onChange={(id) => {
+          // PHASE-38 — al elegir categoría, el segmento [Gasto]/[Ingreso]
+          // sigue su `kind` (ingreso → Ingreso, gasto → Gasto): recategorizar
+          // un reembolso a una categoría de ingreso lo vuelve positivo sin
+          // tener que tocar el segmento aparte (el caso reportado). Es sólo un
+          // default de UI — `flow` sigue siendo la verdad explícita (ADR-0004)
+          // y el usuario puede re-togglear la dirección después. No aplica a
+          // transferencias (segmento oculto, dirección la fija el par) ni a
+          // categorías is_transfer.
+          const cat = (categories ?? []).find((c) => c.id === id);
+          setValues((prev) => ({
+            ...prev,
+            category_id: id,
+            ...(cat && !cat.is_transfer && !isTransfer
+              ? { direction: cat.kind === 'income' ? ('IN' as const) : ('OUT' as const) }
+              : {}),
+          }));
+        }}
         disabled={loadingCategories}
       />
       <TextArea

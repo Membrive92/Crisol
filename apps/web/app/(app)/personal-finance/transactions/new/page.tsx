@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useCreateTransaction } from '@crisol/services';
 import { toast } from '@crisol/store';
 import type { TransactionCreateRequest } from '@crisol/types';
-import { colors, fontSize, spacing } from '@crisol/ui';
+import { colors, fontSize, layout, spacing } from '@crisol/ui';
 
 import { TransactionForm } from '@/components/transactions/transaction-form';
 import { Card } from '@/components/ui/card';
@@ -34,7 +34,7 @@ export default function NewTransactionPage() {
   }
 
   return (
-    <div style={{ maxWidth: 560, margin: '0 auto', padding: spacing.lg }}>
+    <div style={{ maxWidth: layout.pageNarrow, margin: '0 auto', padding: spacing.lg }}>
       <h1 style={{ fontSize: fontSize.xl, color: colors.text, marginBottom: spacing.lg }}>
         Nueva transacción
       </h1>
