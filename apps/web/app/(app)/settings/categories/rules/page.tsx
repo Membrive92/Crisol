@@ -13,12 +13,14 @@ import {
 } from '@crisol/services';
 import { toast } from '@crisol/store';
 import type {
+  Category,
   CategoryRule,
   RuleField,
   RuleMatchType,
 } from '@crisol/types';
-import { colors, fontSize, fontWeight, formatCategoryKind, layout, radius, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, layout, radius, spacing } from '@crisol/ui';
 
+import { CategoryCombobox } from '@/components/transactions/category-combobox';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -172,7 +174,7 @@ export default function CategoryRulesPage() {
 }
 
 interface NewRuleFormProps {
-  categories: { id: string; name: string; kind: string }[];
+  categories: Category[];
   submitting: boolean;
   onSubmit: (data: {
     pattern: string;
@@ -257,19 +259,12 @@ function NewRuleForm({ categories, submitting, onSubmit }: NewRuleFormProps) {
             </option>
           ))}
         </Select>
-        <Select
+        <CategoryCombobox
           label="Categoría"
+          categories={categories}
           value={categoryId}
-          onChange={(e) => setCategoryId(e.target.value)}
-          required
-        >
-          <option value="">— Elige —</option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name} ({formatCategoryKind(c.kind)})
-            </option>
-          ))}
-        </Select>
+          onChange={setCategoryId}
+        />
         <TextInput
           label="Prioridad"
           type="number"
