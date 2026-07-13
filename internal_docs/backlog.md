@@ -19,6 +19,32 @@
 
 ---
 
+## AUDIT-2026-07-13 — integridad de datos (pendiente de verificar)
+
+Hallazgos de la auditoría de integridad de datos sobre la BD del usuario
+`membrij7@gmail.com`, disparada por una revisión manual del drill-down de
+categoría. Inventario completo en
+[`audits/2026-07-13-data-integrity-pending-check.md`](audits/2026-07-13-data-integrity-pending-check.md).
+**Ninguno corregido todavía.**
+
+- ✅ ~~🐛 **Selector temporal desincronizado (UTC vs local)** en el drill-down
+  de categoría~~ **CORREGIDO 2026-07-13** (`analysis/category/[id]/page.tsx`
+  ahora construye el rango con `Date.UTC`; typecheck+lint+test verdes).
+  Pendiente verificación manual + commit.
+- 💾 **Doble conteo de gasto** en compra financiada de Taxdown (239 € cuenta
+  como gasto en "Impuestos" Y en las cuotas). Contradice el modelo PHASE-38.
+- 🟡 **Pares de transferencia incoherentes** en operaciones financiadas.
+  **4a CORREGIDO 2026-07-13** (pata BBVA de la compra financiada de 824,77 €
+  volteada `TRANSFER_OUT`→`TRANSFER_IN`; BBVA −11.777,93 → −10.953,16 €). Queda
+  **4b** (Western Union de 215,99 € con `TRANSFER_IN` de signo dudoso, pendiente
+  extracto) + guardarraíl de código para forzar el par canónico OUT↔IN.
+- 💾 **Saldos sin `opening_balance` real** (BBVA −11.322,94 € con apertura 0;
+  Wise con apertura −5.000 € de apaño + 210 € de patas huérfanas).
+- 🔍 **Verificar contra extracto**: hueco de tarjeta en abril 2026; posibles
+  duplicados en BBVA (12/03 dos cargos de 900 €; 18/03 dos de 1.000 €).
+
+---
+
 ## AUDIT-2026-05 — follow-ups diferidos
 
 Items de la auditoría conscientemente diferidos durante la remediación

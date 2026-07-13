@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
@@ -297,6 +298,36 @@ async def get_net_savings_movement_for_account(
         .where(Transaction.account_id == account_id)
         .where(Transaction.deleted_at.is_(None))
         .where(Transaction.currency == Account.currency)
+    )
+    return Decimal((await db.execute(query)).scalar_one())
+
+
+async def get_account_movement_until(
+    db: AsyncSession, user_id: uuid.UUID, account_id: uuid.UUID, *, until: datetime
+) -> Decimal:
+    """PHASE-39 — Σ firmado de UNA cuenta con `occurred_at <= until`.
+
+    MISMA expresión de signo que `get_balances_for_user`
+    (`signed_amount_expr`, incluido el carve-out H-02 de la pata-activo de
+    un par de deuda) para que el anclaje sea coherente con el saldo
+    mostrado: `opening = saldo_extracto(D) − Σmov(≤D)` garantiza que el
+    saldo de la app a fecha D coincide EXACTAMENTE con el del banco.
+    """
+    paired_tx = aliased(Transaction)
+    paired_account = aliased(Account)
+    signed_amount = signed_amount_expr(Account, paired_account)
+    query = (
+        select(func.coalesce(func.sum(signed_amount), 0))
+        .select_from(Transaction)
+        .join(Account, Account.id == Transaction.account_id)
+        .outerjoin(Category, Category.id == Transaction.category_id)
+        .outerjoin(paired_tx, paired_tx.id == Transaction.transfer_pair_id)
+        .outerjoin(paired_account, paired_account.id == paired_tx.account_id)
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.account_id == account_id)
+        .where(Transaction.deleted_at.is_(None))
+        .where(Transaction.currency == Account.currency)
+        .where(Transaction.occurred_at <= until)
     )
     return Decimal((await db.execute(query)).scalar_one())
 

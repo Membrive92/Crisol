@@ -3,7 +3,15 @@
 import Link from 'next/link';
 
 import type { ImportJob } from '@crisol/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
+import {
+  colors,
+  fontSize,
+  fontWeight,
+  formatAmount,
+  formatDate,
+  radius,
+  spacing,
+} from '@crisol/ui';
 
 import { Button } from '../ui/button';
 import { StatusBadge } from './status-badge';
@@ -57,6 +65,27 @@ export function ResultStep({ job, onRestart }: ResultStepProps) {
           <Stat label="A revisar" value={reviews.length} tone="warning" />
         ) : null}
       </div>
+
+      {/* PHASE-39 — saldo del extracto anclado al confirmar. Los jobs
+          antiguos no traen `balance_anchor`: no se muestra nada. */}
+      {job.balance_anchor ? (
+        <div
+          style={{
+            marginBottom: spacing.lg,
+            padding: spacing.sm,
+            backgroundColor: colors.surfaceMuted,
+            borderRadius: radius.sm,
+            fontSize: fontSize.sm,
+            color: colors.text,
+          }}
+        >
+          Saldo anclado:{' '}
+          <strong style={{ fontVariantNumeric: 'tabular-nums' }}>
+            {formatAmount(job.balance_anchor.balance)}
+          </strong>{' '}
+          ({formatDate(job.balance_anchor.date)})
+        </div>
+      ) : null}
 
       {visibleErrors.length > 0 ? (
         <div style={{ marginBottom: spacing.lg }}>

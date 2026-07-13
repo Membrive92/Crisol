@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from app.modules.personal_finance.imports.models import ImportJobStatus
 
 # Campos del CSV/XLSX que el cliente puede mapear.
-TARGET_FIELDS = ("amount", "occurred_at", "description", "category_name")
+TARGET_FIELDS = ("amount", "occurred_at", "description", "category_name", "statement_balance")
 
 
 class ImportSource(enum.StrEnum):
@@ -45,6 +45,9 @@ class ImportColumnMappings(BaseModel):
     occurred_at: str = Field(min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=255)
     category_name: str | None = Field(default=None, max_length=255)
+    # PHASE-39 — columna Saldo del extracto (saldo de la cuenta tras cada
+    # movimiento). Opcional: se usa para anclar el saldo real al confirmar.
+    statement_balance: str | None = Field(default=None, max_length=255)
 
 
 class ImportPreviewRow(BaseModel):
@@ -59,6 +62,8 @@ class ImportPreviewRow(BaseModel):
     occurred_at: str
     description: str | None = None
     category_name: str | None = None
+    # PHASE-39 — saldo del extracto tras el movimiento (formato original).
+    statement_balance: str | None = None
 
 
 class ImportPreviewBankConceptGroup(BaseModel):
@@ -128,6 +133,19 @@ class ImportErrorEntry(BaseModel):
     error: str
 
 
+class ImportBalanceAnchor(BaseModel):
+    """PHASE-39 — resultado del auto-anclaje del saldo al confirmar.
+
+    Cuando el extracto trae columna Saldo, el commit ancla el saldo de la
+    cuenta al del movimiento más reciente del fichero (misma semántica que
+    "Cuadrar saldo", pero a la fecha del extracto). `balance` es el saldo
+    declarado por el banco; `date` la fecha (ISO) de ese movimiento.
+    """
+
+    balance: str
+    date: str
+
+
 class ImportJobResponse(BaseModel):
     """Respuesta pública de un job de importación."""
 
@@ -144,6 +162,9 @@ class ImportJobResponse(BaseModel):
     error_log: list[ImportErrorEntry]
     created_at: datetime
     updated_at: datetime
+    # PHASE-39 — presente sólo cuando el commit ancló el saldo (se rellena
+    # desde `preview_payload["balance_anchor"]` en el router; no es columna).
+    balance_anchor: ImportBalanceAnchor | None = None
 
     model_config = {"from_attributes": True}
 

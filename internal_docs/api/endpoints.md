@@ -311,6 +311,18 @@ PHASE-20 añade el flujo en dos pasos `preview` → `commit` con
 sugerencias por concepto del banco (saved_mapping → rule → AI
 fallback) y endpoint dedicado `/imports/{id}/ai-suggest`.
 
+PHASE-39 añade la captura de la columna **Saldo** del extracto
+(`statement_balance`, rol propio del smart-parser + campo opcional del
+mapping) y el **auto-anclaje del saldo**: al confirmar, el
+`opening_balance` de la cuenta (solo ASSET) se ancla al saldo del
+movimiento más reciente del fichero — misma semántica que "Cuadrar
+saldo", a la fecha del extracto. Un extracto más viejo que el ancla
+vigente NO la pisa (re-deriva el opening para preservar
+`saldo(fecha_ancla)`). El resultado viaja en
+`ImportJobResponse.balance_anchor { balance, date }` (null si no se
+ancló). El saldo NO entra en el hash de dedup: reimportar ficheros ya
+importados backfillea `transactions.statement_balance` sin duplicar.
+
 | Método | Ruta | Auth | Body / Query | Response |
 |--------|------|------|--------------|----------|
 | POST | `/imports` | sí | multipart: `file`, `account_id` (PHASE-21.2), `column_mappings` (JSON), `currency` (def `EUR`), `default_category_id?` | `201` `ImportJobResponse` (job ya finalizado) |
@@ -324,8 +336,8 @@ Reglas:
 - Formatos: CSV (auto-detect delimitador), XLSX y PDF (extracción de
   tablas vía `pdfplumber`; PDFs sin tablas → job `failed`). Tamaño
   máx 10 MB.
-- `column_mappings`: `{ amount, occurred_at, description?, category_name? }` —
-  obligatorios sólo `amount` y `occurred_at`.
+- `column_mappings`: `{ amount, occurred_at, description?, category_name?, statement_balance? }` —
+  obligatorios sólo `amount` y `occurred_at` (PHASE-39 añade `statement_balance`).
 - Pipeline **síncrono**: parse → map → validate → SHA-256 dedup
   intra/inter-batch → persist `source=import`.
 - Hash de dedup: SHA-256 de

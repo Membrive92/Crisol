@@ -18,6 +18,12 @@ export interface ImportPreviewRow {
   occurred_at: string;
   description: string | null;
   category_name: string | null;
+  /**
+   * PHASE-39 — saldo de la cuenta tras el movimiento, tal cual viene
+   * del fichero (mismo formato original que `amount`). `null` si el
+   * fichero no trae columna Saldo o la celda está vacía.
+   */
+  statement_balance: string | null;
 }
 
 export type ImportSuggestionSource = 'saved_mapping' | 'rule' | 'ai';
@@ -80,6 +86,8 @@ export interface ImportColumnMappings {
   occurred_at: string;
   description?: string | null;
   category_name?: string | null;
+  /** PHASE-39 — nombre de la columna del fichero con el saldo tras cada movimiento. */
+  statement_balance?: string | null;
 }
 
 export interface ImportJob {
@@ -95,6 +103,13 @@ export interface ImportJob {
   rows_skipped: number;
   column_mappings: Record<string, unknown>;
   error_log: ImportErrorEntry[];
+  /**
+   * PHASE-39 — saldo del extracto anclado al confirmar, si el fichero
+   * traía columna Saldo. `balance` es un string decimal (p. ej.
+   * "5817.76") y `date` una fecha ISO `YYYY-MM-DD`. Solo viene en la
+   * respuesta del commit y en el GET de un job concreto.
+   */
+  balance_anchor?: { balance: string; date: string } | null;
   created_at: string;
   updated_at: string;
 }

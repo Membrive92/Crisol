@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import itertools
 import re
 import uuid
 from dataclasses import dataclass
@@ -20,13 +21,17 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.ai import service as ai_service
 from app.modules.ai.exceptions import AiError
-from app.modules.personal_finance.accounts.service import ensure_account_exists
+from app.modules.personal_finance.accounts.service import (
+    anchor_account_balance_at,
+    ensure_account_exists,
+    re_anchor_from_stored,
+)
 from app.modules.personal_finance.bank_mappings.repository import (
     get_mappings_for_concepts,
     normalize_concept,
@@ -89,12 +94,14 @@ VISION_FORCED_MAPPING = ImportColumnMappings(
 )
 
 # Mapping forzado para el smart parser PDF: detecta la tabla de transacciones
-# y devuelve filas con keys fijas (incluyendo `category_name`).
+# y devuelve filas con keys fijas (incluyendo `category_name` y, desde
+# PHASE-39, `statement_balance` si el extracto trae columna Saldo).
 SMART_FORCED_MAPPING = ImportColumnMappings(
     amount="amount",
     occurred_at="occurred_at",
     description="description",
     category_name="category_name",
+    statement_balance="statement_balance",
 )
 
 DATE_FORMATS = (
@@ -121,6 +128,10 @@ class ParsedRow:
     # y la descripción. `None` = no se pudo determinar (extracto sin signo)
     # → la fila se marca para revisión.
     flow: TransactionFlow | None = None
+    # PHASE-39: saldo de la cuenta según el extracto TRAS este movimiento
+    # (columna Saldo). Informativo — `None` si el fichero no la trae o el
+    # valor no parsea; NUNCA participa en el `import_hash` (idempotencia).
+    statement_balance: Decimal | None = None
 
 
 async def run_import(
@@ -457,6 +468,73 @@ async def _load_transfer_categories(
     return ids, by_kind
 
 
+def _bank_signed_amount(p: ParsedRow) -> Decimal | None:
+    """Movimiento con el signo del BANCO (no el de la app): entrada suma,
+    salida resta. `None` si el flow quedó sin clasificar. Se usa sólo para
+    validar la cadena saldo±importe del extracto (PHASE-39)."""
+    if p.flow in (TransactionFlow.IN, TransactionFlow.TRANSFER_IN):
+        return p.amount
+    if p.flow in (TransactionFlow.OUT, TransactionFlow.TRANSFER_OUT):
+        return -p.amount
+    return None
+
+
+def _chain_matches(rows: list[ParsedRow], *, newest_first: bool) -> int:
+    """Cuántos pares consecutivos satisfacen la aritmética de la cadena de
+    saldos del extracto bajo la hipótesis de orden dada.
+
+    - newest-first (fila i es POSTERIOR a la i+1):
+        saldo[i] == saldo[i+1] + movimiento[i]
+    - oldest-first (fila i es ANTERIOR a la i+1):
+        saldo[i+1] == saldo[i] + movimiento[i+1]
+
+    Pares sin saldo o sin movimiento clasificable no puntúan.
+    """
+    matches = 0
+    for a, b in itertools.pairwise(rows):
+        if a.statement_balance is None or b.statement_balance is None:
+            continue
+        if newest_first:
+            moved = _bank_signed_amount(a)
+            if moved is not None and a.statement_balance == b.statement_balance + moved:
+                matches += 1
+        else:
+            moved = _bank_signed_amount(b)
+            if moved is not None and b.statement_balance == a.statement_balance + moved:
+                matches += 1
+    return matches
+
+
+def _pick_balance_anchor(rows: list[ParsedRow]) -> tuple[datetime, Decimal] | None:
+    """PHASE-39 — elige el ancla de saldo del lote: `(fecha, saldo)` del
+    movimiento CRONOLÓGICAMENTE más reciente que trae saldo de extracto.
+
+    Los parsers preservan el orden del fichero, pero cada banco imprime en
+    una dirección (BBVA: más reciente arriba). La dirección se detecta por
+    las fechas de la primera y última fila con saldo; si empatan (extracto
+    de un solo día), se valida la aritmética de la cadena saldo±importe en
+    ambas hipótesis y gana la que más pares satisface (empate → newest-first,
+    el formato dominante en bancos españoles).
+    """
+    cands = [p for p in rows if p.statement_balance is not None]
+    if not cands:
+        return None
+    first, last = cands[0], cands[-1]
+    if first.occurred_at > last.occurred_at:
+        newest_first = True
+    elif first.occurred_at < last.occurred_at:
+        newest_first = False
+    else:
+        newest_first = _chain_matches(cands, newest_first=True) >= _chain_matches(
+            cands, newest_first=False
+        )
+    max_date = max(p.occurred_at for p in cands)
+    same_day = [p for p in cands if p.occurred_at == max_date]
+    anchor = same_day[0] if newest_first else same_day[-1]
+    assert anchor.statement_balance is not None  # filtrado arriba
+    return anchor.occurred_at, anchor.statement_balance
+
+
 async def _process_and_persist(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -661,6 +739,25 @@ async def _process_and_persist(
 
     skipped_existing = len(deduped) - inserted - reconciled
 
+    # PHASE-39 — backfill del saldo del extracto en filas YA existentes
+    # (duplicadas por hash o reconciliadas contra `expected`). Un reimport
+    # del mismo fichero se salta las filas (dedup) pero SÍ enriquece las tx
+    # existentes con el saldo si aún no lo tenían — así reimportar el
+    # histórico rellena `statement_balance` sin duplicar nada. El filtro
+    # `IS NULL` hace la operación idempotente y no pisa valores previos.
+    balance_by_hash = {
+        p.import_hash: p.statement_balance for p in deduped if p.statement_balance is not None
+    }
+    for import_hash, balance in balance_by_hash.items():
+        await db.execute(
+            update(Transaction)
+            .where(Transaction.user_id == user_id)
+            .where(Transaction.import_hash == import_hash)
+            .where(Transaction.deleted_at.is_(None))
+            .where(Transaction.statement_balance.is_(None))
+            .values(statement_balance=balance)
+        )
+
     job.rows_ok = inserted + reconciled
     job.rows_failed = failed_count
     job.rows_skipped = skipped_in_batch + skipped_existing
@@ -670,6 +767,38 @@ async def _process_and_persist(
     # persiste igual; el usuario decide si corrige la categoría.
     job.error_log = errors + review
     job.status = ImportJobStatus.COMPLETED
+
+    # PHASE-39 — auto-anclaje del saldo real: si el extracto trae columna
+    # Saldo, anclamos el `opening_balance` de la cuenta al saldo del
+    # movimiento más reciente del fichero (misma semántica que "Cuadrar
+    # saldo", a la fecha del extracto). Best-effort: las guardas (cuenta
+    # no-ASSET, divisa distinta, ancla más reciente ya existente) lo
+    # saltan sin afectar al import.
+    anchored: dict[str, str] | None = None
+    anchor = _pick_balance_anchor(deduped)
+    if anchor is not None:
+        anchor_at, anchor_balance = anchor
+        anchored = await anchor_account_balance_at(
+            db,
+            user_id,
+            account_id,
+            balance=anchor_balance,
+            at=anchor_at,
+            currency=currency.upper(),
+        )
+    if anchored is not None:
+        # Reasignación completa (no mutación in-place): la columna JSON
+        # sólo detecta cambios cuando se asigna un objeto nuevo.
+        job.preview_payload = {**(job.preview_payload or {}), "balance_anchor": anchored}
+    elif inserted + reconciled > 0:
+        # El lote NO ancló (sin columna Saldo, o su ancla es más antigua
+        # que la existente) pero SÍ añadió movimientos. Si son anteriores
+        # a la fecha del ancla persistida, la Σmov(≤ancla) cambió y el
+        # opening quedaría desviado exactamente en la suma de esas filas.
+        # Re-derivamos desde el ancla guardada para preservar
+        # `saldo(fecha_ancla) == saldo_extracto` (no-op si nunca se ancló).
+        await re_anchor_from_stored(db, user_id, account_id)
+
     await db.flush()
     await db.refresh(job)
 
@@ -711,6 +840,7 @@ async def _flush_inserts(
             source=TransactionSource.IMPORT,
             import_hash=p.import_hash,
             flow=p.flow,
+            statement_balance=p.statement_balance,
         )
 
     # Camino rápido: añade todo y flush una vez.
@@ -1030,6 +1160,10 @@ def _parse_row(
     category_name_raw = (
         raw.get(mappings.category_name, "").strip() if mappings.category_name else ""
     )
+    # PHASE-39 — columna Saldo (opcional, tolerante: nunca tumba la fila).
+    balance_raw = (
+        raw.get(mappings.statement_balance, "").strip() if mappings.statement_balance else ""
+    )
 
     if not amount_raw:
         raise _RowError(f"columna '{mappings.amount}' vacía")
@@ -1174,6 +1308,7 @@ def _parse_row(
             category_id=category_id,
             import_hash=import_hash,
             flow=flow,
+            statement_balance=_parse_balance(balance_raw),
         ),
         review_note,
     )
@@ -1231,17 +1366,34 @@ def _parse_amount_signed(value: str) -> tuple[Decimal, int]:
         sign = 1
     # Quita cualquier signo (inicial o final) antes de parsear los dígitos.
     cleaned = cleaned.strip("+-")
+    cleaned = _normalize_decimal_separators(cleaned)
+    try:
+        amount = Decimal(cleaned)
+    except InvalidOperation as e:
+        raise _RowError(f"importe inválido: {value!r}") from e
+    amount = abs(amount)
+    if amount <= 0:
+        raise _RowError(f"importe debe ser distinto de cero: {value!r}")
+    return amount.quantize(Decimal("0.01")), sign
+
+
+def _normalize_decimal_separators(cleaned: str) -> str:
+    """Normaliza separadores de miles/decimal a punto decimal.
+
+    Compartida por `_parse_amount_signed` y `_parse_balance` (PHASE-39)
+    para que importe y saldo interpreten `1.234,56` / `1,234.56` / `1.500`
+    exactamente igual.
+    """
     has_comma = "," in cleaned
     has_dot = "." in cleaned
     if has_comma and has_dot:
         # Asume el último es decimal
         if cleaned.rfind(",") > cleaned.rfind("."):
-            cleaned = cleaned.replace(".", "").replace(",", ".")
-        else:
-            cleaned = cleaned.replace(",", "")
-    elif has_comma:
-        cleaned = cleaned.replace(",", ".")
-    elif has_dot and cleaned.count(".") == 1:
+            return cleaned.replace(".", "").replace(",", ".")
+        return cleaned.replace(",", "")
+    if has_comma:
+        return cleaned.replace(",", ".")
+    if has_dot and cleaned.count(".") == 1:
         # AUDIT finding #4: desambiguar miles vs. decimal cuando sólo hay
         # un punto y ninguna coma. "1.500" europeo son MIL QUINIENTOS, no
         # uno coma cinco. Heurística por nº de dígitos tras el separador:
@@ -1254,15 +1406,36 @@ def _parse_amount_signed(value: str) -> tuple[Decimal, int]:
         # punto-miles + coma-decimal viajan por las ramas previas).
         decimals = cleaned.split(".", 1)[1]
         if len(decimals) == 3:
-            cleaned = cleaned.replace(".", "")
+            return cleaned.replace(".", "")
+    return cleaned
+
+
+def _parse_balance(value: str | None) -> Decimal | None:
+    """PHASE-39 — parsea la columna Saldo del extracto a Decimal FIRMADO.
+
+    Diferencias deliberadas con `_parse_amount_signed`:
+    - El saldo conserva su signo (puede ser negativo — descubierto — o 0);
+      el importe se almacena como magnitud + señal de signo separada.
+    - Es TOLERANTE: el saldo es informativo, así que un valor ilegible
+      devuelve `None` en lugar de lanzar `_RowError` — nunca tumba la fila.
+    """
+    if not value or not value.strip():
+        return None
+    raw = value.strip()
+    negative_paren = raw.startswith("(") and raw.endswith(")")
+    cleaned = re.sub(r"[^\d.,+-]", "", raw)
+    negative = negative_paren or cleaned.startswith("-") or cleaned.endswith("-")
+    cleaned = cleaned.strip("+-")
+    if not cleaned:
+        return None
+    cleaned = _normalize_decimal_separators(cleaned)
     try:
-        amount = Decimal(cleaned)
-    except InvalidOperation as e:
-        raise _RowError(f"importe inválido: {value!r}") from e
-    amount = abs(amount)
-    if amount <= 0:
-        raise _RowError(f"importe debe ser distinto de cero: {value!r}")
-    return amount.quantize(Decimal("0.01")), sign
+        balance = Decimal(cleaned)
+    except InvalidOperation:
+        return None
+    if negative:
+        balance = -balance
+    return balance.quantize(Decimal("0.01"))
 
 
 def _parse_datetime(value: str) -> datetime:

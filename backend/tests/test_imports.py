@@ -679,3 +679,183 @@ async def test_import_corrects_transfer_direction_over_bad_mapping(
     # Envío: el mapping decía INGRESO, pero "REALIZADA" lo lleva a EXPENSE.
     realizada = items["TRANSFERENCIA REALIZADA A WISE"]
     assert kind_by_id[realizada["category_id"]] == "expense"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PHASE-39 — columna Saldo del extracto: captura + auto-anclaje del saldo.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_MAPPING_WITH_SALDO = {
+    "amount": "Importe",
+    "occurred_at": "Fecha",
+    "description": "Concepto",
+    "statement_balance": "Saldo",
+}
+
+
+async def _account_detail(client: AsyncClient, token: str, account_id: str) -> dict[str, object]:
+    r = await client.get(f"/accounts/{account_id}", headers=_auth(token))
+    assert r.status_code == 200, r.text
+    return r.json()  # type: ignore[no-any-return]
+
+
+async def _current_balance(client: AsyncClient, token: str, account_id: str) -> Decimal:
+    items = (await client.get("/accounts/balances", headers=_auth(token))).json()["items"]
+    return Decimal(next(b for b in items if b["account_id"] == account_id)["current_balance"])
+
+
+async def test_import_saldo_column_anchors_account_balance(client: AsyncClient) -> None:
+    """PHASE-39 — un extracto con columna Saldo ancla el `opening_balance`
+    de la cuenta al saldo del movimiento más reciente (orden viejo→nuevo).
+
+    Cadena: opening implícito 1000 → +100 (10 ene, saldo 1100) → −50
+    (20 ene, saldo 1050). El ancla es (20 ene, 1050): opening = 1050 −
+    (+100 − 50) = 1000 y el saldo mostrado pasa a ser exactamente 1050."""
+    token, account_id = await _setup_user(client, "saldo1@example.com")
+    csv_text = (
+        "Fecha,Importe,Concepto,Saldo\n"
+        "2026-01-10,+100.00,Nomina enero,1100.00\n"
+        '2026-01-20,-50.00,Compra super,"1.050,00 EUR"\n'
+    )
+    job = await _post_csv(client, token, account_id, csv_text, mapping=_MAPPING_WITH_SALDO)
+    assert job["rows_ok"] == 2, job
+    assert job["balance_anchor"] is not None, job
+    assert Decimal(str(job["balance_anchor"]["balance"])) == Decimal("1050.00")
+    assert job["balance_anchor"]["date"] == "2026-01-20"
+
+    detail = await _account_detail(client, token, account_id)
+    assert Decimal(str(detail["opening_balance"])) == Decimal("1000.00")
+    assert detail["opening_balance_date"] == "2026-01-20"
+    assert await _current_balance(client, token, account_id) == Decimal("1050.00")
+
+
+async def test_import_saldo_newest_first_picks_latest_row(client: AsyncClient) -> None:
+    """El mismo extracto impreso nuevo→viejo (formato BBVA) debe elegir la
+    MISMA ancla: la fila cronológicamente más reciente (arriba)."""
+    token, account_id = await _setup_user(client, "saldo2@example.com")
+    csv_text = (
+        "Fecha,Importe,Concepto,Saldo\n"
+        "2026-01-20,-50.00,Compra super,1050.00\n"
+        "2026-01-10,+100.00,Nomina enero,1100.00\n"
+    )
+    job = await _post_csv(client, token, account_id, csv_text, mapping=_MAPPING_WITH_SALDO)
+    assert job["rows_ok"] == 2, job
+    assert job["balance_anchor"] is not None, job
+    assert Decimal(str(job["balance_anchor"]["balance"])) == Decimal("1050.00")
+    assert await _current_balance(client, token, account_id) == Decimal("1050.00")
+
+
+async def test_reimport_with_saldo_backfills_and_reanchors(client: AsyncClient) -> None:
+    """Reimportar el mismo extracto AHORA CON columna Saldo: las filas se
+    saltan por hash (el saldo NO entra en el hash, idempotencia) pero el
+    anclaje SI se aplica — el flujo de "reimportar todo para enriquecer"."""
+    token, account_id = await _setup_user(client, "saldo3@example.com")
+    # 1a pasada SIN saldo: crea las txs, no ancla nada.
+    plain = (
+        "Fecha,Importe,Concepto\n"
+        "2026-01-10,+100.00,Nomina enero\n"
+        "2026-01-20,-50.00,Compra super\n"
+    )
+    job1 = await _post_csv(
+        client,
+        token,
+        account_id,
+        plain,
+        mapping={"amount": "Importe", "occurred_at": "Fecha", "description": "Concepto"},
+    )
+    assert job1["rows_ok"] == 2
+    assert job1["balance_anchor"] is None
+    detail = await _account_detail(client, token, account_id)
+    assert detail["opening_balance_date"] is None
+
+    # 2a pasada CON saldo: 0 filas nuevas, pero ancla.
+    with_saldo = (
+        "Fecha,Importe,Concepto,Saldo\n"
+        "2026-01-10,+100.00,Nomina enero,1100.00\n"
+        "2026-01-20,-50.00,Compra super,1050.00\n"
+    )
+    job2 = await _post_csv(client, token, account_id, with_saldo, mapping=_MAPPING_WITH_SALDO)
+    assert job2["rows_ok"] == 0
+    assert job2["rows_skipped"] == 2
+    assert job2["balance_anchor"] is not None, job2
+    assert await _current_balance(client, token, account_id) == Decimal("1050.00")
+
+
+async def test_import_older_statement_preserves_newer_anchor(client: AsyncClient) -> None:
+    """Importar un extracto MAS VIEJO tras anclar con uno reciente NO pisa
+    el ancla — pero si re-deriva el opening para que el saldo en la fecha
+    ancla siga siendo el del banco (las filas nuevas <= ancla mueven la S).
+
+    Tras añadir −200 (2 ene): opening = 1050 − (−200 +100 −50) = 1200 y el
+    saldo actual sigue clavado en 1050 (no hay movimientos post-ancla)."""
+    token, account_id = await _setup_user(client, "saldo4@example.com")
+    newer = (
+        "Fecha,Importe,Concepto,Saldo\n"
+        "2026-01-10,+100.00,Nomina enero,1100.00\n"
+        "2026-01-20,-50.00,Compra super,1050.00\n"
+    )
+    job1 = await _post_csv(client, token, account_id, newer, mapping=_MAPPING_WITH_SALDO)
+    assert job1["balance_anchor"] is not None
+
+    older = "Fecha,Importe,Concepto,Saldo\n2026-01-02,-200.00,Compra vieja,800.00\n"
+    job2 = await _post_csv(client, token, account_id, older, mapping=_MAPPING_WITH_SALDO)
+    assert job2["rows_ok"] == 1
+    # El ancla del lote viejo NO gana (fecha anterior a la vigente).
+    assert job2["balance_anchor"] is None
+
+    detail = await _account_detail(client, token, account_id)
+    assert detail["opening_balance_date"] == "2026-01-20"
+    assert Decimal(str(detail["opening_balance"])) == Decimal("1200.00")
+    assert await _current_balance(client, token, account_id) == Decimal("1050.00")
+
+
+async def test_import_without_saldo_preserves_manual_reconcile(client: AsyncClient) -> None:
+    """'Cuadrar saldo' manual persiste el ancla; importar después historia
+    vieja SIN columna Saldo re-deriva el opening y el saldo declarado se
+    mantiene (antes de PHASE-39 el import habría desviado el saldo)."""
+    token, account_id = await _setup_user(client, "saldo5@example.com")
+    r = await client.post(
+        f"/accounts/{account_id}/reconcile",
+        json={"current_balance": "500.00"},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200, r.text
+    assert await _current_balance(client, token, account_id) == Decimal("500.00")
+
+    old_rows = (
+        "Fecha,Importe,Concepto\n"
+        "2026-01-05,-75.00,Compra antigua\n"
+        "2026-01-06,+25.00,Abono antiguo\n"
+    )
+    job = await _post_csv(
+        client,
+        token,
+        account_id,
+        old_rows,
+        mapping={"amount": "Importe", "occurred_at": "Fecha", "description": "Concepto"},
+    )
+    assert job["rows_ok"] == 2
+    # El saldo declarado a dia de hoy no se mueve.
+    assert await _current_balance(client, token, account_id) == Decimal("500.00")
+
+
+async def test_import_saldo_ignored_for_liability_account(client: AsyncClient) -> None:
+    """El anclaje solo aplica a cuentas de ACTIVO: la deuda la gobierna su
+    cuadro (misma regla que el 'Cuadrar saldo' manual)."""
+    token, _ = await _setup_user(client, "saldo6@example.com")
+    acc = await client.post(
+        "/accounts",
+        json={"name": "Tarjeta", "type": "credit_card", "currency": "EUR"},
+        headers=_auth(token),
+    )
+    assert acc.status_code == 201, acc.text
+    card_id = acc.json()["id"]
+
+    csv_text = "Fecha,Importe,Concepto,Saldo\n2026-01-10,-30.00,Compra tarjeta,-30.00\n"
+    job = await _post_csv(client, token, card_id, csv_text, mapping=_MAPPING_WITH_SALDO)
+    assert job["rows_ok"] == 1
+    assert job["balance_anchor"] is None
+
+    detail = await _account_detail(client, token, card_id)
+    assert detail["opening_balance_date"] is None
+    assert Decimal(str(detail["opening_balance"])) == Decimal("0.00")

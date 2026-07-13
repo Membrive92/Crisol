@@ -105,6 +105,15 @@ class Account(Base):
         Numeric(14, 2), nullable=False, default=Decimal("0"), server_default="0"
     )
     opening_balance_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # PHASE-39 — saldo REAL declarado en el último anclaje ("Cuadrar saldo"
+    # manual o auto-anclaje desde import con columna Saldo), a fecha
+    # `opening_balance_date`. Permite RE-derivar `opening_balance` cuando
+    # llega historia anterior al ancla (reimportar extractos viejos añade
+    # movimientos ≤ fecha ancla y movería la Σ): el invariante que se
+    # preserva es `saldo(fecha_ancla) == anchored_statement_balance`.
+    anchored_statement_balance: Mapped[Decimal | None] = mapped_column(
+        Numeric(14, 2), nullable=True
+    )
     # PHASE-22.3: cuadro de amortización opcional para liabilities tipo
     # `loan` / `mortgage`. Con APR + plazo + fecha de inicio, el backend
     # genera la tabla francesa (cuota constante, intereses decrecientes,

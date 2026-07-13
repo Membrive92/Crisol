@@ -45,6 +45,7 @@ from app.modules.personal_finance.accounts.repository import (
     count_transactions_for_account,
     get_account_by_id,
     get_account_by_name,
+    get_account_movement_until,
     get_balances_for_user,
 )
 from app.modules.personal_finance.accounts.repository import (
@@ -395,9 +396,108 @@ async def reconcile_account_balance(
     movement = movements.get(account_id, Decimal("0"))
     account.opening_balance = (current_balance - movement).quantize(Decimal("0.01"))
     account.opening_balance_date = datetime.now(UTC).date()
+    # PHASE-39 — persistir el saldo declarado como ancla: si luego se
+    # importa historia anterior a hoy, `re_anchor_from_stored` re-deriva
+    # el opening preservando `saldo(hoy) == current_balance`.
+    account.anchored_statement_balance = current_balance.quantize(Decimal("0.01"))
     await db.flush()
     await db.refresh(account)
     return account
+
+
+async def anchor_account_balance_at(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    account_id: uuid.UUID,
+    *,
+    balance: Decimal,
+    at: datetime,
+    currency: str | None = None,
+) -> dict[str, str] | None:
+    """PHASE-39 — ancla el saldo de una cuenta ASSET al declarado por el
+    EXTRACTO en una fecha (pasada): `opening_balance = saldo(D) − Σmov(≤D)`.
+
+    Es la variante automática de `reconcile_account_balance` ("Cuadrar
+    saldo"): misma semántica (ajustar `opening_balance`, sellar
+    `opening_balance_date`), pero anclada a la fecha del último movimiento
+    del extracto en lugar de a hoy. La invoca el commit de imports cuando
+    el fichero trae columna Saldo.
+
+    Guardas (devuelve `None` sin tocar nada si alguna falla):
+    - Sólo cuentas de ACTIVO (la deuda la gobierna su cuadro).
+    - `currency` (si se pasa) debe coincidir con la de la cuenta.
+    - Un ancla existente MÁS RECIENTE nunca se pisa con una más vieja:
+      si `opening_balance_date > fecha del extracto`, se salta. Así un
+      import de un extracto antiguo (backfill) no degrada un anclaje
+      fresco (manual o de un extracto posterior).
+
+    A diferencia del reconcile manual, NO lanza HTTPException: el anclaje
+    es un efecto secundario best-effort del import — si no procede, el
+    import sigue siendo válido.
+    """
+    account = await get_account_by_id(db, account_id, user_id)
+    if account is None or account.nature != AccountNature.ASSET:
+        return None
+    if currency is not None and account.currency != currency.upper():
+        return None
+    anchor_date = at.date()
+    if account.opening_balance_date is not None and account.opening_balance_date > anchor_date:
+        return None
+    # Σmov hasta el FIN del día del ancla (las tx de import se guardan a
+    # las 00:00): incluye todos los movimientos de ese día, que es lo que
+    # el saldo del extracto ya refleja.
+    at_utc = at if at.tzinfo is not None else at.replace(tzinfo=UTC)
+    until = at_utc.replace(hour=23, minute=59, second=59, microsecond=999999)
+    movement = await get_account_movement_until(db, user_id, account_id, until=until)
+    account.opening_balance = (balance - movement).quantize(Decimal("0.01"))
+    account.opening_balance_date = anchor_date
+    account.anchored_statement_balance = balance.quantize(Decimal("0.01"))
+    await db.flush()
+    return {"balance": str(balance), "date": anchor_date.isoformat()}
+
+
+async def re_anchor_from_stored(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    account_id: uuid.UUID,
+) -> bool:
+    """PHASE-39 — re-deriva `opening_balance` desde el ancla PERSISTIDA.
+
+    Cuando un import añade movimientos ANTERIORES a la fecha del ancla
+    (reimportar extractos viejos, backfill de historia), la Σmov(≤ancla)
+    cambia y el `opening_balance` calculado en el anclaje original dejaría
+    el saldo desviado exactamente en la suma de las filas nuevas. Este
+    helper restaura el invariante `saldo(fecha_ancla) ==
+    anchored_statement_balance` recalculando el opening con la Σ actual.
+
+    No-op (False) si la cuenta no existe, no es ASSET o nunca fue anclada
+    (sin `opening_balance_date` o sin `anchored_statement_balance`).
+    Idempotente: recalcular dos veces seguidas da el mismo opening.
+    """
+    account = await get_account_by_id(db, account_id, user_id)
+    if (
+        account is None
+        or account.nature != AccountNature.ASSET
+        or account.opening_balance_date is None
+        or account.anchored_statement_balance is None
+    ):
+        return False
+    until = datetime(
+        account.opening_balance_date.year,
+        account.opening_balance_date.month,
+        account.opening_balance_date.day,
+        23,
+        59,
+        59,
+        999999,
+        tzinfo=UTC,
+    )
+    movement = await get_account_movement_until(db, user_id, account_id, until=until)
+    account.opening_balance = (account.anchored_statement_balance - movement).quantize(
+        Decimal("0.01")
+    )
+    await db.flush()
+    return True
 
 
 async def delete_account(db: AsyncSession, account_id: uuid.UUID, user_id: uuid.UUID) -> None:

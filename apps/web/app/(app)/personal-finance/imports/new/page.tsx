@@ -14,7 +14,16 @@ import type {
   ImportJob,
   ImportPreviewResponse,
 } from '@crisol/types';
-import { colors, fontSize, fontWeight, layout, radius, spacing } from '@crisol/ui';
+import {
+  colors,
+  fontSize,
+  fontWeight,
+  formatAmount,
+  formatDate,
+  layout,
+  radius,
+  spacing,
+} from '@crisol/ui';
 
 import { MappingStep } from '@/components/imports/mapping-step';
 import { PreviewStep } from '@/components/imports/preview-step';
@@ -164,6 +173,16 @@ export default function NewImportPage() {
           setResult(job);
           setStep('result');
           toast.success(`Importación completada: ${job.rows_ok} filas añadidas.`);
+          // PHASE-39 — si el fichero traía columna Saldo, el backend ancla
+          // el saldo real de la cuenta al del extracto.
+          if (job.balance_anchor) {
+            toast.info(
+              `Saldo de la cuenta anclado a ${formatAmount(
+                job.balance_anchor.balance,
+                uploadValue?.currency ?? 'EUR',
+              )} (${formatDate(job.balance_anchor.date)})`,
+            );
+          }
         },
         onError: (err) => {
           toast.error(

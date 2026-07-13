@@ -139,6 +139,14 @@ class Transaction(Base):
     # Ortogonal a `flow`: `flow` dice si es gasto/ingreso/transferencia;
     # `is_exceptional` sólo matiza, dentro de los gastos, si es recurrente.
     is_exceptional: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # PHASE-39 — saldo de la cuenta según el EXTRACTO tras este movimiento
+    # (columna "Saldo" del fichero importado). Decimal FIRMADO (puede ser
+    # negativo o 0). NULL para tx manuales o imports sin esa columna. Es
+    # informativo/auditable: NO participa en el cálculo del saldo (que sigue
+    # siendo `opening_balance + Σflow`), pero alimenta el auto-anclaje del
+    # `opening_balance` al confirmar un import y permitirá detectar huecos
+    # (saltos en la cadena saldo±importe) en el futuro.
+    statement_balance: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
 
     __table_args__ = (
         # Partial unique para dedup de imports — incluye `AND deleted_at

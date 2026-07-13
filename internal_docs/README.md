@@ -378,6 +378,17 @@ Solo web + backend (sin paridad móvil). No hay migraciones ni endpoints nuevos.
 > **En `main`** (commit `ac3b456`, push directo `89eea70`, 2026-07-12; sin PR).
 > Sin paridad móvil todavía y sin prueba manual previa al merge (follow-ups).
 
+### Fase 39 — Saldo del extracto como ancla del saldo real
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 39   | Columna Saldo del extracto capturada por fila (`transactions.statement_balance`) + auto-anclaje del `opening_balance` al confirmar imports (misma semántica que "Cuadrar saldo", a fecha del extracto) + `accounts.anchored_statement_balance` para re-derivar al importar historia vieja + UI (mapping, preview, toast) | 🚧 | — |
+
+> Detalle en [`phases/phase-39-statement-balance-anchor.md`](phases/phase-39-statement-balance-anchor.md).
+> Código completo y verde (BE: 666 tests · ruff · mypy · FE: 95 web + types/services).
+> Pendiente: prueba manual (reimportar extractos BBVA) + commit. Origen:
+> auditoría de integridad [`audits/2026-07-13-data-integrity-pending-check.md`](audits/2026-07-13-data-integrity-pending-check.md).
+
 ---
 
 ## Estructura de este directorio

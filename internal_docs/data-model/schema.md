@@ -55,6 +55,7 @@
 | `a4q70s2pn4r3q9` | 35   | `accounts.parent_account_id` (FK auto-ref CASCADE) + índice parcial `ix_accounts_parent_account_id`. |
 | `b5r81t3qo5s4r0` | AUDIT-2026-07 | `transactions.absorbed_as_mirror` (BOOLEAN NOT NULL DEFAULT FALSE) — cargo espejo absorbido. |
 | `c6s92u4rp6t5s1` | 37.3 | `transactions.is_exceptional` (BOOLEAN NULL) — override estructural/puntual. |
+| `d7t03v5sq7u6t2` | 39   | `transactions.statement_balance` (NUMERIC(14,2) NULL) + `accounts.anchored_statement_balance` (NUMERIC(14,2) NULL) — saldo del extracto por movimiento + ancla persistida del saldo real. |
 
 ---
 
@@ -131,7 +132,7 @@ Challenge efímero de un flujo de registro/autenticación. Migraciones
 | `role` | `ENUM('GENERIC','TRANSFER','DEBT_PAYMENT','DEBT_INTEREST')` | tipo `categoryrole`, NOT NULL, default `GENERIC` (PHASE-30.1, migración `s6i70k2gf5j3h9`). Rol semántico; los callers de deuda filtran por `role IN (DEBT_PAYMENT, DEBT_INTEREST)`. Índice parcial `ix_categories_role_debt`. Backfill deriva de `is_transfer` + nombres del seed. |
 | `created_at` / `updated_at` | `TIMESTAMPTZ` | |
 
-### `transactions` (`PHASE-2.1` + `PHASE-4.1` + `PHASE-10.1` + `PHASE-21.3` + `PHASE-34` + `PHASE-37.3`)
+### `transactions` (`PHASE-2.1` + `PHASE-4.1` + `PHASE-10.1` + `PHASE-21.3` + `PHASE-34` + `PHASE-37.3` + `PHASE-39`)
 
 | Columna | Tipo | Notas |
 |---------|------|-------|
@@ -151,6 +152,7 @@ Challenge efímero de un flujo de registro/autenticación. Migraciones
 | `flow` | `ENUM('IN','OUT','TRANSFER_IN','TRANSFER_OUT')` NULLABLE | tipo `transactionflow` (PHASE-34.1, migración `z3p58r0on2q1p7`, ADR-0004). Fuente de verdad del dinero: saldo y cashflow derivan de `flow` + `account.nature`, no de la categoría. NULL = sin clasificar (contribuye 0). Índice parcial `ix_transactions_user_flow_active`. |
 | `absorbed_as_mirror` | `BOOLEAN` | NOT NULL, default `FALSE` (AUDIT-2026-07 H-04, migración `b5r81t3qo5s4r0`). TRUE = "cargo espejo" (ADEUDO/liquidación de tarjeta) que el sistema soft-borró al convertir una compra en deuda; el dedup de imports lo trata como existente para no resucitarlo. |
 | `is_exceptional` | `BOOLEAN` NULLABLE | PHASE-37.3, migración `c6s92u4rp6t5s1`. Override manual estructural/puntual del gasto: NULL = heurística, TRUE = puntual (one-off), FALSE = estructural. |
+| `statement_balance` | `NUMERIC(14,2)` NULLABLE | PHASE-39, migración `d7t03v5sq7u6t2`. Saldo de la cuenta según el EXTRACTO tras este movimiento (columna "Saldo" del fichero). Firmado (puede ser 0 o negativo). NULL para tx manuales o imports sin esa columna. Informativo/auditable: NO participa en el cálculo del saldo; alimenta el auto-anclaje del `opening_balance` y NO entra en el `import_hash` (re-imports idempotentes que backfillean el saldo en filas duplicadas). |
 
 **Índices**:
 - `ix_transactions_user_id`.
@@ -297,7 +299,8 @@ otro campo, pero no se duplica la combinación exacta.
 | `color` | `VARCHAR(7)` | hex `#RRGGBB`, opcional. |
 | `icon` | `VARCHAR(50)` | emoji, opcional. |
 | `opening_balance` | `NUMERIC(14, 2)` | default `0`. Saldo inicial declarado. Para liabilities representa la deuda inicial (positivo = se debe). |
-| `opening_balance_date` | `DATE` | opcional. |
+| `opening_balance_date` | `DATE` | opcional. Desde PHASE-39 es la FECHA DEL ANCLA de saldo (la sella "Cuadrar saldo" manual con hoy, o el auto-anclaje de imports con la fecha del extracto). |
+| `anchored_statement_balance` | `NUMERIC(14, 2)` NULLABLE | PHASE-39, migración `d7t03v5sq7u6t2`. Saldo REAL declarado en el último anclaje, a fecha `opening_balance_date`. Permite re-derivar `opening_balance` cuando se importa historia anterior al ancla, preservando `saldo(fecha_ancla) == anchored_statement_balance`. |
 | `apr` | `NUMERIC(6, 4)` | opcional (PHASE-22). Tasa **anual** como decimal (`0.035` = 3.5%). Sólo relevante en loans/mortgages/credit_cards. |
 | `term_months` | `INTEGER` | opcional (PHASE-22). Plazo del cuadro francés. Sólo relevante en loans/mortgages. |
 | `start_date` | `DATE` | opcional (PHASE-22). Fecha de inicio del cuadro francés. Sólo relevante en loans/mortgages. |

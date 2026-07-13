@@ -244,6 +244,8 @@ def parse_xlsx_smart(payload: bytes) -> list[dict[str, str]]:
                 "occurred_at": get("occurred_at"),
                 "description": description,
                 "category_name": category_name,
+                # PHASE-39 — saldo del extracto (vacío si no hay columna).
+                "statement_balance": get("statement_balance"),
             }
         )
 
@@ -478,6 +480,14 @@ _DESCRIPTION_HEADER_HINTS = (
     "description",
     "referencia",
 )
+# PHASE-39 — columna Saldo del extracto (saldo de la cuenta TRAS cada
+# movimiento). Es un rol PROPIO, nunca `amount` (el IMPORTANT de arriba
+# sigue vigente: "saldo" jamás debe matchear importe). Se captura para
+# anclar el saldo real de la cuenta al que declara el banco.
+_BALANCE_HEADER_HINTS = (
+    "saldo",
+    "balance",
+)
 
 # Score mínimo para aceptar una tabla como "tabla de transacciones".
 _SMART_MIN_SCORE = 8
@@ -520,6 +530,11 @@ def _classify_columns(headers: list[str]) -> dict[str, int]:
         if _header_matches(header, _AMOUNT_HEADER_HINTS):
             # gana el último match
             roles["amount"] = idx
+            continue
+        # PHASE-39 — Saldo del extracto: primer match, rol independiente.
+        # No compite con `amount` (los hints no se solapan por diseño).
+        if "statement_balance" not in roles and _header_matches(header, _BALANCE_HEADER_HINTS):
+            roles["statement_balance"] = idx
             continue
         if "description" not in roles and _header_matches(header, _DESCRIPTION_HEADER_HINTS):
             roles["description"] = idx
@@ -739,6 +754,8 @@ def parse_pdf_smart(payload: bytes) -> list[dict[str, str]]:
                     "occurred_at": occurred_at,
                     "description": description,
                     "category_name": category_name,
+                    # PHASE-39 — saldo del extracto (vacío si no hay columna).
+                    "statement_balance": get("statement_balance"),
                 }
             )
 

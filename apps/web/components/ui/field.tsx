@@ -29,17 +29,26 @@ const errorStyle = {
   color: colors.danger,
 } as const;
 
+const hintStyle = {
+  marginTop: spacing.xs,
+  fontSize: fontSize.xs,
+  color: colors.textMuted,
+} as const;
+
 export interface FieldProps {
   label: string;
   error?: string | undefined;
+  /** Texto de ayuda que se muestra bajo el control. */
+  hint?: string | undefined;
   children: ReactNode;
 }
 
-export function Field({ label, error, children }: FieldProps) {
+export function Field({ label, error, hint, children }: FieldProps) {
   return (
     <label style={{ display: 'block', marginBottom: spacing.md }}>
       <span style={labelStyle}>{label}</span>
       {children}
+      {hint ? <div style={hintStyle}>{hint}</div> : null}
       {error ? <div style={errorStyle}>{error}</div> : null}
     </label>
   );
@@ -48,11 +57,12 @@ export function Field({ label, error, children }: FieldProps) {
 export interface TextInputProps extends InputHTMLAttributes<HTMLInputElement> {
   label: string;
   error?: string | undefined;
+  hint?: string | undefined;
 }
 
-export function TextInput({ label, error, style, ...rest }: TextInputProps) {
+export function TextInput({ label, error, hint, style, ...rest }: TextInputProps) {
   return (
-    <Field label={label} error={error}>
+    <Field label={label} error={error} hint={hint}>
       <input {...rest} style={{ ...controlStyle, ...style }} />
     </Field>
   );

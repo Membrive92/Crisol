@@ -42,6 +42,7 @@ describe('importsApi', () => {
         occurred_at: 'date',
         description: null,
         category_name: null,
+        statement_balance: 'Saldo',
       },
       currency: 'EUR',
       defaultCategoryId: 'cat-1',
@@ -61,6 +62,7 @@ describe('importsApi', () => {
     >;
     expect(mappings.amount).toBe('amount');
     expect(mappings.occurred_at).toBe('date');
+    expect(mappings.statement_balance).toBe('Saldo');
   });
 
   it('create omite default_category_id cuando no se pasa', async () => {

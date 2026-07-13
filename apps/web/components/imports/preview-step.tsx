@@ -216,6 +216,7 @@ export function PreviewStep({
               <th style={thStyle}>Descripción</th>
               <th style={thStyle}>Categoría (banco)</th>
               <th style={{ ...thStyle, textAlign: 'right' }}>Importe</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>Saldo</th>
             </tr>
           </thead>
           <tbody>
@@ -257,12 +258,22 @@ export function PreviewStep({
                 <td style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                   {row.amount || '—'}
                 </td>
+                <td
+                  style={{
+                    ...tdStyle,
+                    textAlign: 'right',
+                    fontVariantNumeric: 'tabular-nums',
+                    color: colors.textMuted,
+                  }}
+                >
+                  {row.statement_balance ?? '—'}
+                </td>
               </tr>
             ))}
             {visibleRows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={4}
+                  colSpan={5}
                   style={{
                     ...tdStyle,
                     textAlign: 'center',

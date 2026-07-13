@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+from datetime import datetime
 from decimal import Decimal
 
 import pytest
@@ -15,6 +16,7 @@ from reportlab.platypus import PageBreak, SimpleDocTemplate, Table, TableStyle
 from app.modules.personal_finance.imports.parser import (
     ParseError,
     SmartParseAmbiguousError,
+    _classify_columns,
     _normalize_date,
     detect_format,
     parse_csv,
@@ -22,7 +24,14 @@ from app.modules.personal_finance.imports.parser import (
     parse_pdf_smart,
     parse_xlsx,
 )
-from app.modules.personal_finance.imports.service import _parse_amount, _RowError
+from app.modules.personal_finance.imports.service import (
+    ParsedRow,
+    _parse_amount,
+    _parse_balance,
+    _pick_balance_anchor,
+    _RowError,
+)
+from app.modules.personal_finance.transactions.models import TransactionFlow
 
 
 def _build_pdf(pages: list[list[list[str]]]) -> bytes:
@@ -229,9 +238,15 @@ def test_parse_pdf_smart_detects_transactions_table() -> None:
     rows = parse_pdf_smart(_bank_statement_pdf())
     # 5 transacciones reales; los totales del resumen y el desglose se ignoran.
     assert len(rows) == 5
-    # Todas las filas usan keys fijas.
+    # Todas las filas usan keys fijas (PHASE-39 añade `statement_balance`).
     for r in rows:
-        assert set(r.keys()) == {"amount", "occurred_at", "description", "category_name"}
+        assert set(r.keys()) == {
+            "amount",
+            "occurred_at",
+            "description",
+            "category_name",
+            "statement_balance",
+        }
     # Ningún total del resumen se cuela como transacción.
     descriptions = [r["description"] for r in rows]
     assert "Total ingresos" not in descriptions
@@ -378,3 +393,116 @@ def test_parse_amount_rejects_empty_or_zero(raw: str) -> None:
 )
 def test_normalize_date_extracts_first_date(raw: str, expected: str) -> None:
     assert _normalize_date(raw, default_year=2030) == expected
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PHASE-39 — columna Saldo del extracto: rol propio + parseo + elección de ancla.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_classify_columns_assigns_saldo_role_not_amount() -> None:
+    """`Saldo` recibe su rol propio (`statement_balance`) y el importe sigue
+    siendo la columna Importe — la regla histórica ("saldo" NUNCA matchea
+    amount) se conserva intacta."""
+    roles = _classify_columns(["Fecha", "Concepto", "Importe", "Saldo"])
+    assert roles["occurred_at"] == 0
+    assert roles["category_name"] == 1
+    assert roles["amount"] == 2
+    assert roles["statement_balance"] == 3
+
+
+def test_parse_pdf_smart_emits_statement_balance() -> None:
+    """El smart parser PDF emite la columna Saldo como campo propio de la
+    fila (antes la descartaba)."""
+    payload = _build_pdf(
+        [
+            [
+                ["Fecha", "Concepto", "Importe", "Saldo"],
+                ["30/01/2026", "TRANSFERENCIA Wi", "-60,00 €", "3.317,98 €"],
+                ["30/01/2026", "PAYPAL GOOGLE", "-5,17 €", "3.312,81 €"],
+            ]
+        ]
+    )
+    rows = parse_pdf_smart(payload)
+    assert len(rows) == 2
+    assert "3.317,98" in rows[0]["statement_balance"]
+    assert "3.312,81" in rows[1]["statement_balance"]
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("3.317,98 €", Decimal("3317.98")),
+        ("1,234.56", Decimal("1234.56")),
+        ("-1.234,56", Decimal("-1234.56")),
+        ("(500,00)", Decimal("-500.00")),  # negativo contable
+        ("1.234,56-", Decimal("-1234.56")),  # signo al final
+        ("0,00", Decimal("0.00")),  # el saldo SÍ puede ser 0
+        ("+25.50", Decimal("25.50")),
+        ("", None),
+        ("   ", None),
+        ("n/a", None),  # ilegible → None, nunca error
+    ],
+)
+def test_parse_balance_signed_and_tolerant(raw: str, expected: Decimal | None) -> None:
+    """A diferencia del importe, el saldo conserva el signo, admite 0 y
+    NUNCA lanza — un valor ilegible devuelve None (es informativo)."""
+    assert _parse_balance(raw) == expected
+
+
+def _row(
+    day: int,
+    saldo: str | None,
+    amount: str,
+    flow_value: str,
+) -> ParsedRow:
+    """ParsedRow mínimo para los tests de elección de ancla."""
+    return ParsedRow(
+        amount=Decimal(amount),
+        occurred_at=datetime(2026, 1, day),
+        description=None,
+        category_id=None,
+        import_hash=f"hash-{day}-{saldo}",
+        flow=TransactionFlow(flow_value),
+        statement_balance=Decimal(saldo) if saldo is not None else None,
+    )
+
+
+def test_pick_balance_anchor_dates_decide_direction() -> None:
+    """Con fechas distintas, la dirección la dan la primera y última fila."""
+    # viejo→nuevo: el ancla es la ÚLTIMA fila.
+    oldest_first = [_row(10, "1100.00", "100.00", "IN"), _row(20, "1050.00", "50.00", "OUT")]
+    anchor = _pick_balance_anchor(oldest_first)
+    assert anchor is not None
+    assert anchor[1] == Decimal("1050.00")
+    # nuevo→viejo (BBVA): el ancla es la PRIMERA fila.
+    newest_first = list(reversed(oldest_first))
+    anchor = _pick_balance_anchor(newest_first)
+    assert anchor is not None
+    assert anchor[1] == Decimal("1050.00")
+
+
+def test_pick_balance_anchor_same_day_uses_chain_arithmetic() -> None:
+    """Extracto de un solo día: la aritmética saldo±importe decide el orden.
+
+    newest-first válido: saldo[i] == saldo[i+1] + movimiento[i].
+    Filas (nuevo→viejo): B(saldo 100, +10) encima de A(saldo 90, −5):
+    100 == 90 + 10 ✓ → ancla = fila de arriba (100)."""
+    rows = [_row(15, "100.00", "10.00", "IN"), _row(15, "90.00", "5.00", "OUT")]
+    anchor = _pick_balance_anchor(rows)
+    assert anchor is not None
+    assert anchor[1] == Decimal("100.00")
+
+    # oldest-first válido: saldo[i+1] == saldo[i] + movimiento[i+1].
+    # A(saldo 95, −5) y debajo B(saldo 195, +100): 195 == 95 + 100 ✓
+    # → ancla = fila de abajo (195).
+    rows = [_row(15, "95.00", "5.00", "OUT"), _row(15, "195.00", "100.00", "IN")]
+    anchor = _pick_balance_anchor(rows)
+    assert anchor is not None
+    assert anchor[1] == Decimal("195.00")
+
+
+def test_pick_balance_anchor_none_without_saldo() -> None:
+    """Sin ninguna fila con saldo no hay ancla."""
+    rows = [_row(10, None, "100.00", "IN")]
+    assert _pick_balance_anchor(rows) is None

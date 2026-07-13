@@ -8,7 +8,29 @@ import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 import { Button } from '../ui/button';
 import { TextInput } from '../ui/field';
 
-const FIELD_DEFS = [
+type FieldKey =
+  | 'amount'
+  | 'occurred_at'
+  | 'description'
+  | 'category_name'
+  | 'statement_balance';
+
+interface FieldDef {
+  key: FieldKey;
+  label: string;
+  required: boolean;
+  /**
+   * Nombre canónico sembrado cuando no hay cabeceras detectadas
+   * (XLSX/PDF). Vacío = no pre-rellenar (para columnas que quizá no
+   * existan en el fichero).
+   */
+  fallback: string;
+  synonyms: readonly string[];
+  /** Texto de ayuda que se muestra bajo el input. */
+  description?: string;
+}
+
+const FIELD_DEFS: readonly FieldDef[] = [
   {
     key: 'amount',
     label: 'Importe (obligatorio)',
@@ -54,9 +76,18 @@ const FIELD_DEFS = [
     fallback: 'Categoría',
     synonyms: ['category', 'categoría', 'categoria', 'tipo', 'clase'],
   },
-] as const;
-
-type FieldKey = (typeof FIELD_DEFS)[number]['key'];
+  {
+    key: 'statement_balance',
+    label: 'Saldo (opcional)',
+    required: false,
+    // Sin fallback canónico: no forzamos una columna que quizá no
+    // exista en el fichero. Vacío = no capturar saldo.
+    fallback: '',
+    synonyms: ['saldo', 'balance', 'saldo disponible'],
+    description:
+      'Columna con el saldo de la cuenta tras cada movimiento — se usa para anclar el saldo real.',
+  },
+];
 
 function normalize(value: string): string {
   return value
@@ -134,6 +165,7 @@ export function MappingStep({
       occurred_at: occurredAt,
       description: values.description.trim() || null,
       category_name: values.category_name.trim() || null,
+      statement_balance: values.statement_balance.trim() || null,
     };
 
     onSubmit(mappings);
@@ -206,6 +238,7 @@ export function MappingStep({
         <TextInput
           key={field.key}
           label={field.label}
+          hint={field.description}
           type="text"
           value={values[field.key]}
           onFocus={() => setActiveField(field.key)}

@@ -24,6 +24,7 @@ from app.modules.personal_finance.category_rules.repository import (
 from app.modules.personal_finance.imports.models import ImportJobStatus
 from app.modules.personal_finance.imports.repository import get_job_by_id, list_jobs
 from app.modules.personal_finance.imports.schemas import (
+    ImportBalanceAnchor,
     ImportColumnMappings,
     ImportCommitRequest,
     ImportJobListResponse,
@@ -44,6 +45,22 @@ router = APIRouter(prefix="/imports", tags=["imports"])
 
 # 10 MB. Suficiente para extractos bancarios típicos.
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024
+
+
+def _job_response(job: object) -> ImportJobResponse:
+    """Serializa un job adjuntando el `balance_anchor` (PHASE-39).
+
+    El anclaje no es columna del modelo — vive en
+    `preview_payload["balance_anchor"]` (lo escribe el commit cuando el
+    extracto trae columna Saldo). Aquí lo hidratamos al schema para que
+    el frontend pueda mostrar "saldo anclado a X €".
+    """
+    resp = ImportJobResponse.model_validate(job)
+    payload = getattr(job, "preview_payload", None) or {}
+    anchor_data = payload.get("balance_anchor")
+    if anchor_data:
+        resp.balance_anchor = ImportBalanceAnchor.model_validate(anchor_data)
+    return resp
 
 
 def _parse_account_id(raw: str | None) -> uuid.UUID:
@@ -130,7 +147,7 @@ async def create_import_endpoint(
         default_category_id=parsed_default_category,
     )
     await db.commit()
-    return ImportJobResponse.model_validate(job)
+    return _job_response(job)
 
 
 @router.get("", response_model=ImportJobListResponse)
@@ -143,7 +160,7 @@ async def list_imports_endpoint(
     """Lista los jobs del usuario."""
     items, total = await list_jobs(db, user.id, limit=limit, offset=offset)
     return ImportJobListResponse(
-        items=[ImportJobResponse.model_validate(j) for j in items],
+        items=[_job_response(j) for j in items],
         total=total,
         limit=limit,
         offset=offset,
@@ -268,6 +285,12 @@ async def preview_import_endpoint(
                     else None
                 )
                 or None,
+                statement_balance=(
+                    str(raw.get(effective_mappings.statement_balance) or "")
+                    if effective_mappings.statement_balance
+                    else None
+                )
+                or None,
             )
         )
 
@@ -373,7 +396,7 @@ async def commit_import_endpoint(
     overrides = body.category_overrides if body is not None else {}
     job = await run_commit(db, user.id, job_id=job_id, category_overrides=overrides)
     await db.commit()
-    return ImportJobResponse.model_validate(job)
+    return _job_response(job)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -430,4 +453,4 @@ async def get_import_endpoint(
     job = await get_job_by_id(db, job_id, user.id)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job no encontrado")
-    return ImportJobResponse.model_validate(job)
+    return _job_response(job)
