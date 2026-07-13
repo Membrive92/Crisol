@@ -49,10 +49,18 @@ export default function CategoryDetailPage() {
 
   // Default: año actual entero. El TimeSelector dejará al usuario
   // saltar a un mes concreto o limpiar el filtro (todo el histórico).
+  //
+  // AUDIT-2026-07-13 (#1): los límites se construyen en UTC (`Date.UTC`),
+  // igual que `pickYear`/`pickMonth` del TimeSelector y `boundsForAnchor`.
+  // Antes usaba `new Date(año, mes, día)` en hora LOCAL y emitía
+  // `toISOString()`: en Europe/Madrid, `new Date(2026, 0, 1)` →
+  // `2025-12-31T23:00:00Z`, así que `inferActiveRange` (que lee en UTC)
+  // detectaba el año como 2025 y "rango personalizado" → el chip del año no
+  // se marcaba y la barra de meses salía vacía ("Sin meses con datos en 2025").
   const [range, setRange] = useState<TimeSelectorRange>(() => {
-    const now = new Date();
-    const start = new Date(now.getFullYear(), 0, 1);
-    const end = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+    const year = new Date().getFullYear();
+    const start = new Date(Date.UTC(year, 0, 1, 0, 0, 0));
+    const end = new Date(Date.UTC(year, 11, 31, 23, 59, 59));
     return { dateFrom: start.toISOString(), dateTo: end.toISOString() };
   });
 
