@@ -434,6 +434,41 @@ está en ningún otro lado). Y cuando dos módulos deben coincidir en "qué es X
 (aquí clasificador de `flow` y matcher de reconciliación), comparte UNA sola
 definición del predicado, no dos que puedan divergir.
 
+### [PHASE-41] "Dos cosas que parecen duplicadas": léelas antes de fusionar; un refactor que cambia una fuente de verdad no debe mover los números del core
+**Error:** El análisis marcó los dos motores de recurrencia
+(`fixed_expenses/detector.py` y `analytics/recurrence.py`) como duplicados y
+candidatos a fusionar por una primitiva de "estimar cadencia" compartida.
+**Causa:** Se juzgó por parecido superficial ("ambos detectan recurrencia") sin
+leer los dos enteros. En realidad no comparten ni una línea ni la primitiva
+asumida: `recurrence.py` NO calcula intervalos (agrupa por CATEGORÍA y mide
+estabilidad de importe mensual); el detector agrupa por comercio+importe y mide
+regularidad temporal. Sus outputs alimentan cosas distintas (uno la tasa de
+ahorro/runway de Análisis, otro las sugerencias de gastos fijos).
+**Solución:** Cancelar la fusión. Una revisión adversarial de scoping (leer
+ambos + sus consumidores) lo destapó ANTES de tocar código.
+**Regla:** Antes de "deduplicar" dos cosas que parecen iguales, LÉELAS enteras y
+mapea qué número/consumidor depende de cada una — el mismo nombre-concepto no
+implica compartir código ni propósito. Y un refactor que cambia la FUENTE de un
+cálculo del core (aquí structural-vs-puntual) debe demostrar equivalencia
+numérica o no hacerse (generaliza PHASE-34/37).
+
+### [PHASE-41] No clasifiques código para borrar por su módulo/nombre — mapea los consumidores reales primero
+**Error:** El plan inicial agrupó `POST /transfers/link` con la "maquinaria de
+emparejado heurístico" (candidates/match/suspects/mark) para retirarla al quitar
+la pestaña de transferencias.
+**Causa:** `link` vive en el módulo transfers junto al matcher, así que por
+proximidad parecía parte de lo mismo. Pero lo usa el **asistente de pago de
+deuda** (web + móvil) para crear el par principal, y `unlink` lo usa el
+"deshacer" desde la lista de transacciones. Borrarlos habría roto los pagos de
+deuda.
+**Solución:** El scoping (grep de consumidores por endpoint/hook con cita
+`file:line`) lo detectó antes de borrar: `link`/`unlink` son load-bearing y se
+conservaron; sólo se retiró `list/candidates/match/suspects/mark`.
+**Regla:** Antes de borrar un símbolo/endpoint "porque pertenece al módulo que
+retiro", grepea TODOS sus consumidores (otras apps, móvil, wizards, tests). La
+pertenencia a un módulo no implica que el símbolo sea exclusivo de la feature
+que retiras.
+
 ---
 
 ## Ejemplos de referencia (no son lecciones reales)

@@ -389,6 +389,26 @@ Solo web + backend (sin paridad móvil). No hay migraciones ni endpoints nuevos.
 > Pendiente: prueba manual (reimportar extractos BBVA) + commit. Origen:
 > auditoría de integridad [`audits/2026-07-13-data-integrity-pending-check.md`](audits/2026-07-13-data-integrity-pending-check.md).
 
+### Fase 40 — Flag `counts_as_debt` (tarjeta revolving fuera de deuda)
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 40   | `accounts.counts_as_debt` (default true): una tarjeta pagada íntegra cada mes se excluye del módulo de deuda (deuda viva, DTI, composición, historia, movimientos) pero se mantiene en el patrimonio neto. Backend (columna + migración + debt_health/history/service) + FE (tipo + toggle en el form) | ✅ | — |
+
+> Sin doc de fase propia (documentada inline). En `main` (commit `5c1d01c`,
+> junto con PHASE-41, 2026-07-15).
+
+### Fase 41 — Simplificación del módulo Finanzas Domésticas
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 41   | Retirada de la pestaña Transferencias + maquinaria de emparejado heurístico (ADR-0005 T4) · papelera atómica del par (borrar arrastra la pareja, restaurar re-vincula) · tickets heredan auto-categoría + `flow=OUT` · `MisclassifiedSection` movido a Transacciones. Conserva load-bearing (`link`/`unlink`, `from-source`/`-debt`). NO se fusionaron los motores de recurrencia (falso positivo del análisis) | ✅ | — |
+
+> Detalle en [`phases/phase-41-module-simplification.md`](phases/phase-41-module-simplification.md).
+> Origen: análisis de utilidad financiera de las pestañas. En `main` (commits
+> `5c1d01c`…`9c9f47f`, push directo, 2026-07-15). BE 668 tests · mypy · ruff ·
+> FE typecheck · lint · web 101 + móvil 18.
+
 ---
 
 ## Estructura de este directorio
