@@ -58,6 +58,7 @@ function makeAccount(overrides: Partial<Account> = {}): Account {
     display_order: 0,
     is_archived: false,
     is_default: false,
+    counts_as_debt: true,
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     ...overrides,

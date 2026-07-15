@@ -22,6 +22,9 @@ export interface AccountCreateRequest {
   display_order?: number;
   /** PHASE-32 — Crear como cuenta principal (desmarca las demás). */
   is_default?: boolean;
+  /** PHASE-40 — `false` = tarjeta pagada íntegra cada mes (no cuenta como
+   * deuda). Default `true`. */
+  counts_as_debt?: boolean;
   /** PHASE-30.4 — Categoría de pagos vinculada. Sólo válida para
    * liabilities con role DEBT_PAYMENT o DEBT_INTEREST. */
   category_id?: string | null;
@@ -50,6 +53,8 @@ export interface AccountUpdateRequest {
   /** PHASE-32 — `true` marca como principal (desmarca las demás), `false`
    * la desmarca. */
   is_default?: boolean;
+  /** PHASE-40 — `false` = tarjeta pagada íntegra (no cuenta como deuda). */
+  counts_as_debt?: boolean;
   /** PHASE-30.4 — Vincular o desvincular categoría (null para desvincular). */
   category_id?: string | null;
 }

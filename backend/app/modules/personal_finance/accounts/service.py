@@ -273,6 +273,7 @@ async def create_account(db: AsyncSession, user_id: uuid.UUID, data: AccountCrea
         ),
         display_order=data.display_order,
         is_default=data.is_default,
+        counts_as_debt=data.counts_as_debt,
         category_id=data.category_id,
         parent_account_id=data.parent_account_id,
     )

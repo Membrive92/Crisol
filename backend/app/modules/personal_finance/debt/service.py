@@ -421,10 +421,14 @@ async def _build_daily_series(
         liabilities = [
             a
             for a in accounts
-            if a.nature == AccountNature.LIABILITY and a.currency == native_currency
+            if a.nature == AccountNature.LIABILITY
+            and a.currency == native_currency
+            and a.counts_as_debt
         ]
     else:
-        liabilities = [a for a in accounts if a.nature == AccountNature.LIABILITY]
+        liabilities = [
+            a for a in accounts if a.nature == AccountNature.LIABILITY and a.counts_as_debt
+        ]
     liability_ids = [a.id for a in liabilities]
 
     # PHASE-37 — cuadro cargado ya aquí: las categorías vinculadas a un pasivo

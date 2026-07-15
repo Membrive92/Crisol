@@ -61,6 +61,11 @@ export interface AccountFormValue {
    * se ofrece al CREAR una `credit_card`; al elegir padre, el plan de
    * financiación (capital + TIN + plazo + fecha) pasa a obligatorio. */
   parent_account_id: string;
+  /** PHASE-40 — `false` = tarjeta de crédito que se paga íntegra cada mes
+   * (revolving): fuera del módulo de deuda, dentro del patrimonio neto.
+   * `true` por defecto (la tarjeta arrastra saldo = deuda). Sólo relevante en
+   * `credit_card`. */
+  counts_as_debt: boolean;
 }
 
 export interface AccountFormErrors {
@@ -114,6 +119,7 @@ export const DEFAULT_ACCOUNT_FORM: AccountFormValue = {
   interest_only_first_payment: '',
   category_id: '',
   parent_account_id: '',
+  counts_as_debt: true,
 };
 
 function isLiabilityType(type: AccountType): boolean {
@@ -300,6 +306,51 @@ export function AccountFormFields({
             pago, y no aparece como cuenta aparte al registrar transacciones.
           </p>
         </div>
+      ) : null}
+
+      {value.type === 'credit_card' && !isInstallmentChild ? (
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: spacing.sm,
+            cursor: 'pointer',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={!value.counts_as_debt}
+            onChange={(e) => patch('counts_as_debt', !e.target.checked)}
+            style={{
+              marginTop: 3,
+              width: 16,
+              height: 16,
+              accentColor: colors.primary,
+              cursor: 'pointer',
+              flex: '0 0 auto',
+            }}
+          />
+          <span>
+            <span
+              style={{ fontSize: fontSize.sm, fontWeight: fontWeight.medium, color: colors.text }}
+            >
+              La pago íntegra cada mes (no cuenta como deuda)
+            </span>
+            <span
+              style={{
+                display: 'block',
+                fontSize: fontSize.xs,
+                color: colors.textMuted,
+                lineHeight: 1.4,
+                marginTop: 2,
+              }}
+            >
+              Márcalo si liquidas el total cada mes: el saldo es un desfase transitorio, no
+              deuda — sale del módulo de deuda (deuda viva, movimientos) pero sigue en el
+              patrimonio neto. Déjalo sin marcar si arrastras saldo (eso sí es deuda).
+            </span>
+          </span>
+        </label>
       ) : null}
 
       <div

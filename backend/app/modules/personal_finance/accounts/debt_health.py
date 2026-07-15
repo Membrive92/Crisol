@@ -708,6 +708,11 @@ async def compute_debt_health(
     installments_by_account = await _load_installments_by_account(db, user_id, liability_ids_all)
     total_assets = Decimal("0")
     total_liabilities = Decimal("0")
+    # PHASE-40 — patrimonio neto usa TODOS los pasivos (incluida la tarjeta
+    # revolving `counts_as_debt=False`, cuyo saldo compensa el efectivo aún no
+    # adeudado); `total_liabilities` (deuda viva) usa solo los que cuentan como
+    # deuda.
+    net_worth_liabilities = Decimal("0")
     liabilities: list[Account] = []
     liability_balances: dict[uuid.UUID, Decimal] = {}
     for account in accounts:
@@ -751,13 +756,17 @@ async def compute_debt_health(
                 aggregable_balance = converted
 
         if account.nature == AccountNature.LIABILITY:
-            total_liabilities += aggregable_balance
-            liabilities.append(account)
-            liability_balances[account.id] = aggregable_balance
+            net_worth_liabilities += aggregable_balance
+            # Tarjeta revolving (`counts_as_debt=False`) → cuenta en patrimonio
+            # pero NO en deuda viva / DTI / composición.
+            if account.counts_as_debt:
+                total_liabilities += aggregable_balance
+                liabilities.append(account)
+                liability_balances[account.id] = aggregable_balance
         else:
             total_assets += aggregable_balance
 
-    net_worth = total_assets - total_liabilities
+    net_worth = total_assets - net_worth_liabilities
     debt_to_assets = float(total_liabilities / total_assets) if total_assets > 0 else None
 
     # AUDIT-2026-06 (fix #3) — Las cuotas persistidas son la fuente de verdad

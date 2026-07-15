@@ -1004,3 +1004,51 @@ async def test_installment_isolation_between_users(client: AsyncClient) -> None:
         headers=_auth(token_b),
     )
     assert r.status_code == 404
+
+
+async def test_revolving_card_excluded_from_debt_but_in_net_worth(
+    client: AsyncClient,
+) -> None:
+    """PHASE-40 — una tarjeta con `counts_as_debt=False` (revolving, pagada
+    íntegra) sale de la DEUDA VIVA pero SIGUE en el patrimonio neto: su saldo
+    del ciclo compensa el efectivo aún no adeudado."""
+    token = await _register(client, "revolving-flag@example.com")
+    await _create_account(
+        client, token, name="Banco", type="bank", currency="EUR", opening_balance="1000"
+    )
+    await _create_account(
+        client,
+        token,
+        name="Visa revolving",
+        type="credit_card",
+        currency="EUR",
+        opening_balance="300",
+        counts_as_debt=False,
+    )
+    await _create_account(
+        client, token, name="Prestamo", type="loan", currency="EUR", opening_balance="500"
+    )
+
+    body = (await client.get("/accounts/debt-health", headers=_auth(token))).json()
+    # Deuda viva = solo el préstamo (500); la tarjeta revolving NO cuenta.
+    assert Decimal(body["total_liabilities"]) == Decimal("500.00")
+    # Patrimonio neto = 1000 − (500 préstamo + 300 tarjeta) = 200: la tarjeta SÍ
+    # resta del neto aunque no sea "deuda".
+    assert Decimal(body["net_worth"]) == Decimal("200.00")
+    # Composición por tipo: sin credit_card (solo el préstamo).
+    types = {s["type"] for s in body["debt_by_type"]}
+    assert "credit_card" not in types
+
+
+async def test_credit_card_counts_as_debt_by_default(client: AsyncClient) -> None:
+    """PHASE-40 — sin el flag, una tarjeta con saldo SÍ cuenta como deuda
+    (default `True`): el comportamiento previo se conserva."""
+    token = await _register(client, "card-default-debt@example.com")
+    await _create_account(
+        client, token, name="Banco", type="bank", currency="EUR", opening_balance="1000"
+    )
+    await _create_account(
+        client, token, name="Visa", type="credit_card", currency="EUR", opening_balance="300"
+    )
+    body = (await client.get("/accounts/debt-health", headers=_auth(token))).json()
+    assert Decimal(body["total_liabilities"]) == Decimal("300.00")

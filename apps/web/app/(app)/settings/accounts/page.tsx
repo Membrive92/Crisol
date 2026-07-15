@@ -106,6 +106,11 @@ function toCreatePayload(form: AccountFormValue): AccountCreateRequest {
   if (form.type === 'credit_card' && form.parent_account_id) {
     payload.parent_account_id = form.parent_account_id;
   }
+  // PHASE-40: una tarjeta normal (no compra a plazos) puede marcarse como
+  // "pagada íntegra" → no cuenta como deuda.
+  if (form.type === 'credit_card' && !form.parent_account_id) {
+    payload.counts_as_debt = form.counts_as_debt;
+  }
   return payload;
 }
 
@@ -181,6 +186,10 @@ function toUpdatePayload(
   ].includes(form.type);
   payload.category_id =
     isLiabilityForCategory && form.category_id ? form.category_id : null;
+  // PHASE-40: el flag "pagada íntegra" sólo aplica a tarjetas normales.
+  if (form.type === 'credit_card' && !form.parent_account_id) {
+    payload.counts_as_debt = form.counts_as_debt;
+  }
   return payload;
 }
 
@@ -917,5 +926,6 @@ function fromAccount(
     // PHASE-35: se conserva para no perderlo en el draft de edición, aunque
     // el backend no permite re-parentar (toUpdatePayload no lo envía).
     parent_account_id: account.parent_account_id ?? '',
+    counts_as_debt: account.counts_as_debt,
   };
 }

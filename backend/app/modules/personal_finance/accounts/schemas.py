@@ -60,6 +60,9 @@ class AccountCreate(BaseModel):
     is_default: bool = False
     """PHASE-32 — Marcar como cuenta principal al crear. Única por
     usuario: el service desmarca las demás."""
+    counts_as_debt: bool = True
+    """PHASE-40 — `False` en tarjetas de crédito que se pagan íntegras cada mes
+    (revolving): salen del módulo de deuda pero siguen en patrimonio neto."""
     category_id: uuid.UUID | None = None
     """PHASE-30.4 — Categoría de pagos vinculada (sólo liability +
     role DEBT_*). El service valida ambas condiciones; pasa por aquí
@@ -92,6 +95,8 @@ class AccountUpdate(BaseModel):
     display_order: int | None = Field(default=None, ge=0)
     is_archived: bool | None = None
     is_default: bool | None = None
+    counts_as_debt: bool | None = None
+    """PHASE-40 — Toggle "esta tarjeta la pago íntegra → no es deuda"."""
     """PHASE-32 — `true` marca esta cuenta como principal y desmarca las
     demás (lo fuerza el service). `false` la desmarca. `null` no toca."""
     category_id: uuid.UUID | None = None
@@ -134,6 +139,9 @@ class AccountResponse(BaseModel):
     is_default: bool = False
     """PHASE-32 — Cuenta principal del usuario (pre-seleccionada en
     formularios). Única por usuario."""
+    counts_as_debt: bool = True
+    """PHASE-40 — `False` en tarjetas revolving pagadas íntegras (fuera del
+    módulo de deuda, dentro del patrimonio neto)."""
     category_id: uuid.UUID | None = None
     parent_account_id: uuid.UUID | None = None
     """PHASE-35 — Tarjeta padre si esta cuenta es una compra a plazos. NULL

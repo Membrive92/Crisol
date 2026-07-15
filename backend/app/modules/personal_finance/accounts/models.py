@@ -180,6 +180,17 @@ class Account(Base):
     ingresos y gastos iteran sobre ella sin elegirla cada vez (su saldo
     refleja el ahorro neto). Única por usuario: marcar una desmarca las
     demás (lo fuerza el service)."""
+    counts_as_debt: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    """PHASE-40 — ¿Este pasivo cuenta como DEUDA (deuda viva, DTI, composición,
+    historia, movimientos de deuda)? `True` por defecto para todos los pasivos.
+    Se pone a `False` en tarjetas de crédito que el usuario PAGA ÍNTEGRAS cada
+    mes (revolving): su saldo del ciclo es un desfase transitorio, no deuda. La
+    app no puede inferirlo (una tarjeta puede arrastrar saldo real sin cuadro),
+    así que lo declara el usuario. NO afecta al PATRIMONIO NETO: el saldo del
+    ciclo sigue compensando el efectivo aún no adeudado (net-worth cuenta todos
+    los pasivos). Irrelevante en cuentas de activo."""
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

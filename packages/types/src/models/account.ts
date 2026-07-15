@@ -76,6 +76,11 @@ export interface Account {
   /** PHASE-32 — Cuenta principal del usuario: pre-seleccionada en los
    * formularios (transacción, import, ticket). Única por usuario. */
   is_default: boolean;
+  /** PHASE-40 — ¿Cuenta como DEUDA? `false` en tarjetas de crédito que se
+   * pagan íntegras cada mes (revolving): salen del módulo de deuda (deuda viva,
+   * DTI, composición, movimientos) pero siguen en el patrimonio neto. Sólo
+   * significativo en liabilities. */
+  counts_as_debt: boolean;
   /** PHASE-30.4 — Categoría de pagos vinculada (chip en Capa 2 de
    * /debt). NULL = sin vincular. Sólo significativo en liabilities. */
   category_id?: string | null;

@@ -577,10 +577,14 @@ async def compute_debt_history(
         liabilities = [
             a
             for a in accounts
-            if a.nature == AccountNature.LIABILITY and a.currency == native_currency
+            if a.nature == AccountNature.LIABILITY
+            and a.currency == native_currency
+            and a.counts_as_debt
         ]
     else:
-        liabilities = [a for a in accounts if a.nature == AccountNature.LIABILITY]
+        liabilities = [
+            a for a in accounts if a.nature == AccountNature.LIABILITY and a.counts_as_debt
+        ]
 
     if not liabilities:
         return DebtHistoryResponse(
