@@ -18,26 +18,38 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 //                  como "+ Subir ticket" desde un listado o "Cancelar".
 // - `danger`    → destructivo. Sólido rojo.
 // - `ghost`     → neutro con borde sutil. Paginación, cancelar inline.
+// Borde en longhand (borderWidth/Style/Color), NO el shorthand `border`: hay
+// callers que sobreescriben sólo `borderColor` vía `style` (p.ej. budget-row),
+// y mezclar shorthand+longhand hace que React avise al re-render cuando el
+// longhand aparece/desaparece. El render es idéntico a `1px solid X`.
 const variantStyles: Record<ButtonVariant, CSSProperties> = {
   primary: {
     backgroundColor: colors.primary,
     color: colors.onPrimary,
-    border: `1px solid ${colors.primary}`,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: colors.primary,
   },
   secondary: {
     backgroundColor: 'transparent',
     color: colors.primary,
-    border: `1px solid ${colors.primary}`,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: colors.primary,
   },
   danger: {
     backgroundColor: colors.danger,
     color: colors.onPrimary,
-    border: `1px solid ${colors.danger}`,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: colors.danger,
   },
   ghost: {
     backgroundColor: 'transparent',
     color: colors.text,
-    border: `1px solid ${colors.border}`,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: colors.border,
   },
 };
 

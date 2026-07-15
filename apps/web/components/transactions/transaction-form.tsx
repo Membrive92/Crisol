@@ -335,7 +335,12 @@ const segmentBtnStyle = {
   flex: 1,
   padding: `${spacing.sm}px ${spacing.sm}px`,
   borderRadius: radius.sm,
-  border: `1px solid ${colors.border}`,
+  // Borde en longhand (no shorthand `border`): el estado activo sólo
+  // sobreescribe `borderColor`, y mezclar shorthand+longhand hace que React
+  // avise al re-render (quita `borderColor` con `border` aún puesto).
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: colors.border,
   backgroundColor: colors.surface,
   color: colors.textMuted,
   fontSize: fontSize.sm,
