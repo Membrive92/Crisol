@@ -82,6 +82,49 @@ def _auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+async def _create_category(
+    client: AsyncClient, token: str, name: str, kind: str = "expense"
+) -> str:
+    r = await client.post(
+        "/categories", json={"name": name, "kind": kind}, headers=_auth(token)
+    )
+    assert r.status_code in (200, 201), r.text
+    return str(r.json()["id"])
+
+
+async def _extract_receipt_id(client: AsyncClient, token: str) -> str:
+    """Extrae un ticket de muestra (merchant='Mercadona') y devuelve su id."""
+    files = {"file": ("ticket.jpg", b"fake", "image/jpeg")}
+    with _mock_storage_and_ai():
+        extract = await client.post("/receipts/extract", files=files, headers=_auth(token))
+    return str(extract.json()["receipt"]["id"])
+
+
+async def _confirm(
+    client: AsyncClient,
+    token: str,
+    receipt_id: str,
+    account_id: str,
+    **extra: Any,
+) -> Any:
+    payload: dict[str, Any] = {
+        "account_id": account_id,
+        "amount": "12.34",
+        "occurred_at": "2026-04-15T13:45:00Z",
+        "currency": "EUR",
+        **extra,
+    }
+    return await client.post(
+        f"/receipts/{receipt_id}/confirm", json=payload, headers=_auth(token)
+    )
+
+
+async def _only_tx(client: AsyncClient, token: str) -> dict[str, Any]:
+    txs = (await client.get("/transactions", headers=_auth(token))).json()["items"]
+    assert len(txs) == 1
+    return dict(txs[0])
+
+
 async def test_extract_creates_pending_receipt(client: AsyncClient) -> None:
     token, _account_id = await _setup_user(client)
     files = {"file": ("ticket.jpg", b"fake-image", "image/jpeg")}
@@ -150,6 +193,12 @@ async def test_confirm_creates_transaction_and_marks_confirmed(client: AsyncClie
     assert len(txs) == 1
     assert txs[0]["source"] == "receipt"
     assert txs[0]["receipt_id"] == receipt_id
+    # PHASE-41: un ticket es gasto → flow=OUT (verdad del dinero, ADR-0004).
+    # La categoría se hereda de la cascada: el seed trae la regla
+    # MERCADONA→Supermercado (field=description) y el confirm pasa
+    # description="Mercadona", así que la tx queda categorizada (antes: None).
+    assert txs[0]["flow"] == "OUT"
+    assert txs[0]["category_id"] is not None
 
 
 async def test_confirm_twice_returns_409(client: AsyncClient) -> None:
@@ -253,6 +302,90 @@ async def test_get_blob_isolated_per_user(client: AsyncClient) -> None:
     assert r.status_code == 404
     # No debe haber tocado MinIO si el receipt no es del usuario.
     get_mock.assert_not_called()
+
+
+async def test_confirm_autocategorizes_via_bank_mapping(client: AsyncClient) -> None:
+    """PHASE-41 — el comercio extraído ("Mercadona") resuelve a categoría vía
+    una equivalencia aprendida (bank_mapping), sin que el usuario elija."""
+    token, account_id = await _setup_user(client, "rcpt_map@example.com")
+    cat = await _create_category(client, token, "Alimentación")
+    m = await client.post(
+        "/bank-mappings",
+        json={"bank_concept": "Mercadona", "category_id": cat},
+        headers=_auth(token),
+    )
+    assert m.status_code in (200, 201), m.text
+    rid = await _extract_receipt_id(client, token)
+    r = await _confirm(client, token, rid, account_id)  # sin category_id
+    assert r.status_code == 200, r.text
+    tx = await _only_tx(client, token)
+    assert tx["category_id"] == cat
+    assert tx["flow"] == "OUT"
+
+
+async def test_confirm_autocategorizes_via_exact_name(client: AsyncClient) -> None:
+    """PHASE-41 — sin mapping ni regla, el comercio casa por nombre de
+    categoría exacto (normalizado, sin acentos)."""
+    token, account_id = await _setup_user(client, "rcpt_name@example.com")
+    cat = await _create_category(client, token, "Mercadona")
+    rid = await _extract_receipt_id(client, token)
+    r = await _confirm(client, token, rid, account_id)
+    assert r.status_code == 200, r.text
+    tx = await _only_tx(client, token)
+    assert tx["category_id"] == cat
+
+
+async def test_confirm_autocategorizes_via_rule(client: AsyncClient) -> None:
+    """PHASE-41 — sin mapping ni nombre exacto, una regla `contains` resuelve
+    el comercio."""
+    token, account_id = await _setup_user(client, "rcpt_rule@example.com")
+    cat = await _create_category(client, token, "Súper")
+    rule = await client.post(
+        "/category-rules",
+        json={
+            "pattern": "mercadona",
+            "match_type": "contains",
+            "field": "both",
+            "category_id": cat,
+        },
+        headers=_auth(token),
+    )
+    assert rule.status_code in (200, 201), rule.text
+    rid = await _extract_receipt_id(client, token)
+    r = await _confirm(client, token, rid, account_id)
+    assert r.status_code == 200, r.text
+    tx = await _only_tx(client, token)
+    assert tx["category_id"] == cat
+
+
+async def test_confirm_explicit_category_overrides_cascade(client: AsyncClient) -> None:
+    """PHASE-41 — si el usuario elige categoría a mano, gana sobre la cascada
+    (no se ejecuta el autocategorizado)."""
+    token, account_id = await _setup_user(client, "rcpt_override@example.com")
+    mapped = await _create_category(client, token, "Alimentación")
+    chosen = await _create_category(client, token, "Ocio")
+    await client.post(
+        "/bank-mappings",
+        json={"bank_concept": "Mercadona", "category_id": mapped},
+        headers=_auth(token),
+    )
+    rid = await _extract_receipt_id(client, token)
+    r = await _confirm(client, token, rid, account_id, category_id=chosen)
+    assert r.status_code == 200, r.text
+    tx = await _only_tx(client, token)
+    assert tx["category_id"] == chosen  # el override, no el mapeado
+
+
+async def test_confirm_sets_flow_out_and_counts_in_balance(client: AsyncClient) -> None:
+    """PHASE-41 — el ticket confirmado sale de la cuenta (flow=OUT): su importe
+    resta del saldo. Antes quedaba flow=NULL (+ category NULL) y aportaba 0."""
+    token, account_id = await _setup_user(client, "rcpt_balance@example.com")
+    rid = await _extract_receipt_id(client, token)
+    r = await _confirm(client, token, rid, account_id)
+    assert r.status_code == 200, r.text
+    balances = (await client.get("/accounts/balances", headers=_auth(token))).json()
+    by_id = {b["account_id"]: b for b in balances["items"]}
+    assert Decimal(by_id[account_id]["movements_balance"]) == Decimal("-12.34")
 
 
 async def test_get_blob_storage_failure_returns_404(client: AsyncClient) -> None:

@@ -23,10 +23,15 @@ from app.modules.ai.exceptions import AiError
 from app.modules.ai.schemas import ReceiptExtraction
 from app.modules.personal_finance.accounts.service import ensure_account_exists
 from app.modules.personal_finance.categories.repository import get_category_by_id
+from app.modules.personal_finance.categorization import resolve_category
 from app.modules.personal_finance.receipts.models import Receipt, ReceiptStatus
 from app.modules.personal_finance.receipts.repository import create_receipt, get_receipt_by_id
 from app.modules.personal_finance.receipts.schemas import ReceiptConfirmRequest
-from app.modules.personal_finance.transactions.models import Transaction, TransactionSource
+from app.modules.personal_finance.transactions.models import (
+    Transaction,
+    TransactionFlow,
+    TransactionSource,
+)
 
 ALLOWED_IMAGE_TYPES = {
     "image/jpeg",
@@ -105,16 +110,36 @@ async def confirm_receipt(
 
     await ensure_account_exists(db, payload.account_id, user_id)
 
+    # PHASE-41: si el usuario no eligió categoría a mano, la heredamos de la
+    # MISMA cascada que imports (bank_mapping > nombre exacto > reglas), usando
+    # el comercio extraído como concepto. Antes arrancaba "Sin categoría" y
+    # divergía de la estrategia de categorización de PHASE-19+.
+    category_id = payload.category_id
+    if category_id is None:
+        merchant = (receipt.extraction or {}).get("merchant")
+        category_id = await resolve_category(
+            db,
+            user_id,
+            concept=merchant if isinstance(merchant, str) else None,
+            description=payload.description,
+        )
+
     transaction = Transaction(
         user_id=user_id,
         account_id=payload.account_id,
-        category_id=payload.category_id,
+        category_id=category_id,
         amount=payload.amount,
         currency=payload.currency.upper(),
         occurred_at=payload.occurred_at,
         description=payload.description,
         source=TransactionSource.RECEIPT,
         receipt_id=receipt.id,
+        # PHASE-41: un ticket es SIEMPRE un gasto → el dinero sale de la cuenta.
+        # `flow` es la verdad del dinero (ADR-0004), NO se deriva de la categoría
+        # resuelta (una regla mal puesta no debe invertir el signo). Además esto
+        # arregla un bug latente: sin `flow`, un ticket confirmado quedaba con
+        # flow=NULL y (si además category=NULL) aportaba 0 al saldo/cashflow.
+        flow=TransactionFlow.OUT,
     )
     db.add(transaction)
     await db.flush()
