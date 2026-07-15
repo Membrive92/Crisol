@@ -286,9 +286,13 @@ export function ConvertToDebtDialog({
               flexWrap: 'wrap',
             }}
           >
-            <div style={{ flex: '1 1 240px', minWidth: 0 }}>
+            {/* `flex-grow: 0` para que el selector NO se estire a todo el ancho
+                de la columna (que ahora es amplia) — se queda en un ancho
+                legible y el botón se coloca justo al lado. */}
+            <div style={{ flex: '0 1 340px', minWidth: 0 }}>
               <Select
                 label="Cuenta de deuda"
+                dense
                 value={destinationId}
                 onChange={(e) => setDestinationId(e.target.value)}
               >

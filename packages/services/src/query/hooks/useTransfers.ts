@@ -3,45 +3,17 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   MisclassifiedTransfer,
   ReclassifyBulkResponse,
-  TransferCandidate,
   TransferFromSourceDebtRequest,
   TransferFromSourceRequest,
   TransferLinkRequest,
-  TransferMarkRequest,
-  TransferMarkResponse,
-  TransferMatchOptions,
-  TransferMatchResponse,
   TransferPair,
-  TransferSuspect,
 } from '@crisol/types';
 
 import { transfersApi } from '../../api/endpoints/transfers';
 import { queryKeys } from '../keys';
 
-/**
- * Pares emparejados activos del usuario.
- */
-export function useTransfers() {
-  return useQuery<TransferPair[], Error>({
-    queryKey: queryKeys.transfers.list(),
-    queryFn: () => transfersApi.list(),
-    staleTime: 1000 * 60,
-  });
-}
-
-/**
- * Sugerencias del matcher heurístico — sin escribir nada en BD.
- */
-export function useTransferCandidates(windowDays = 3) {
-  return useQuery<TransferCandidate[], Error>({
-    queryKey: queryKeys.transfers.candidates(windowDays),
-    queryFn: () => transfersApi.candidates(windowDays),
-    staleTime: 1000 * 60,
-  });
-}
-
 function invalidateAll(queryClient: ReturnType<typeof useQueryClient>) {
-  // El match/link/unlink afecta a transferencias y a todos los
+  // link/unlink/from-source afectan a transferencias y a todos los
   // agregados que excluyen pares (dashboard, budgets) + a la lista
   // de transactions (transfer_pair_id cambia) + a balances.
   void queryClient.invalidateQueries({ queryKey: queryKeys.transfers.all });
@@ -60,19 +32,9 @@ function invalidateAll(queryClient: ReturnType<typeof useQueryClient>) {
 }
 
 /**
- * Ejecuta el matcher: enlaza los pares no ambiguos y devuelve los
- * ambiguos para que el usuario los confirme manualmente.
- */
-export function useMatchTransfers() {
-  const queryClient = useQueryClient();
-  return useMutation<TransferMatchResponse, Error, TransferMatchOptions | void>({
-    mutationFn: (options) => transfersApi.match(options ?? {}),
-    onSuccess: () => invalidateAll(queryClient),
-  });
-}
-
-/**
  * Enlaza dos transacciones explícitamente como par de transferencia.
+ * Load-bearing: lo usa el asistente de pago de deuda para crear el par
+ * principal (ADR-0005 T3 — `convert_to_debt` aún depende del par).
  */
 export function useLinkTransfer() {
   const queryClient = useQueryClient();
@@ -90,37 +52,6 @@ export function useUnlinkTransfer() {
   return useMutation<void, Error, string>({
     mutationFn: (transactionId) => transfersApi.unlink(transactionId),
     onSuccess: () => invalidateAll(queryClient),
-  });
-}
-
-/**
- * PHASE-23: txs sin pareja cuya descripción contiene "transfer" y
- * todavía no están marcadas como transferencia. El usuario las revisa
- * y decide cuáles marcar.
- */
-export function useTransferSuspects() {
-  return useQuery<TransferSuspect[], Error>({
-    queryKey: queryKeys.transfers.suspects(),
-    queryFn: () => transfersApi.suspects(),
-    staleTime: 1000 * 60,
-  });
-}
-
-/**
- * PHASE-23.1: marca una tx como transferencia interna (asigna
- * categoría con is_transfer=true) — la saca del cashflow agregado
- * pero conserva el signo en el saldo de la cuenta.
- */
-export function useMarkTransfer() {
-  const queryClient = useQueryClient();
-  return useMutation<TransferMarkResponse, Error, TransferMarkRequest>({
-    mutationFn: (payload) => transfersApi.mark(payload),
-    onSuccess: () => {
-      invalidateAll(queryClient);
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.categories.all,
-      });
-    },
   });
 }
 

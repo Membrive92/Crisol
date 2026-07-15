@@ -86,7 +86,10 @@ async def list_user_currencies(
         .outerjoin(Category, Category.id == Transaction.category_id)
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
-        .where(Transaction.transfer_pair_id.is_(None))
+        # ADR-0005: la exclusión la gobierna `flow` (`_is_internal_transfer`,
+        # NULL-safe). El filtro por `transfer_pair_id` era un cinturón extra del
+        # caso legacy `flow NULL` — redundante una vez `flow` está poblado
+        # (verificado: 0 filas `flow NULL AND transfer_pair_id NOT NULL`).
         .where(_is_internal_transfer().is_(False))
         .distinct()
         .order_by(Transaction.currency)
@@ -388,9 +391,10 @@ async def get_totals_by_month(
         .outerjoin(Category, Category.id == Transaction.category_id)
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
-        # PHASE-19.3 (pares emparejados) excluye del cashflow agregado pero
-        # las txs siguen impactando al saldo individual de su cuenta.
-        .where(Transaction.transfer_pair_id.is_(None))
+        # ADR-0005: la exclusión del cashflow la gobierna `flow`
+        # (`_is_internal_transfer`, NULL-safe). El filtro por `transfer_pair_id`
+        # era redundante (belt-and-suspenders del caso legacy `flow NULL`); las
+        # txs siguen impactando al saldo individual de su cuenta vía `flow`.
         .where(_is_internal_transfer().is_(False))
         .where(year_col == year)
         .where(kind_label.is_not(None))

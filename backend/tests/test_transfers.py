@@ -94,23 +94,20 @@ async def test_link_two_transactions_as_transfer(client: AsyncClient) -> None:
     assert body["out_transaction_id"] == out_id
     assert body["in_transaction_id"] == in_id
 
-    # GET /transfers ahora lista el par
-    pairs = (await client.get("/transfers", headers=_auth(token))).json()
-    assert len(pairs) == 1
-    assert pairs[0]["amount"] == "500.00"
-
-    # Las dos txs reflejan transfer_pair_id
+    # Las dos txs reflejan transfer_pair_id (PHASE-41: la verdad del par vive
+    # en la tx, ya no en un listado /transfers).
     out_tx = (await client.get(f"/transactions/{out_id}", headers=_auth(token))).json()
     assert out_tx["transfer_pair_id"] == in_id
+    in_tx = (await client.get(f"/transactions/{in_id}", headers=_auth(token))).json()
+    assert in_tx["transfer_pair_id"] == out_id
 
 
-async def test_soft_delete_unlinks_transfer_pair(client: AsyncClient) -> None:
-    """AUDIT-2026-05 — al trashear una pata del par, la pareja se
-    desvincula (no queda apuntando a una fila borrada: invisible en
-    /transfers pero excluida del cashflow)."""
-    token, _cat, acc_a, acc_b = await _setup_user_with_two_accounts(
-        client, "softdel_pair@example.com"
-    )
+async def _make_linked_pair(
+    client: AsyncClient, email: str
+) -> tuple[str, str, str]:
+    """Helper: usuario con dos cuentas + par de transferencia enlazado.
+    Devuelve (token, out_id, in_id)."""
+    token, _cat, acc_a, acc_b = await _setup_user_with_two_accounts(client, email)
     out_id = await _create_tx(
         client, token, account_id=acc_a, amount="300.00", occurred_at="2026-04-15T12:00:00Z"
     )
@@ -123,16 +120,72 @@ async def test_soft_delete_unlinks_transfer_pair(client: AsyncClient) -> None:
         headers=_auth(token),
     )
     assert link.status_code == 201
+    return token, out_id, in_id
 
-    # Soft-delete (papelera) de la pata de salida.
+
+async def test_soft_delete_cascades_partner_to_trash(client: AsyncClient) -> None:
+    """PHASE-41 — una transferencia es ATÓMICA: al trashear una pata, su
+    pareja también se mueve a la papelera (conservando el enlace para poder
+    restaurarlo). Sustituye al viejo comportamiento de desvincular la
+    superviviente (que dejaba media pareja suelta)."""
+    token, out_id, in_id = await _make_linked_pair(client, "softdel_pair@example.com")
+
     delete = await client.delete(f"/transactions/{out_id}", headers=_auth(token))
     assert delete.status_code in (200, 204), delete.text
 
-    # El par ya no aparece y la pareja superviviente quedó desvinculada.
-    pairs = (await client.get("/transfers", headers=_auth(token))).json()
-    assert pairs == []
+    trash = (await client.get("/transactions/trash", headers=_auth(token))).json()
+    assert trash["total"] == 2
+    assert {t["id"] for t in trash["items"]} == {out_id, in_id}
+
+
+async def test_restore_relinks_transfer_pair(client: AsyncClient) -> None:
+    """PHASE-41 — restaurar una pata trae de vuelta a su pareja y re-vincula
+    el par (transfer_pair_id en ambas)."""
+    token, out_id, in_id = await _make_linked_pair(client, "restore_pair@example.com")
+    await client.delete(f"/transactions/{out_id}", headers=_auth(token))
+
+    restore = await client.post(f"/transactions/{out_id}/restore", headers=_auth(token))
+    assert restore.status_code == 200, restore.text
+
+    out_tx = (await client.get(f"/transactions/{out_id}", headers=_auth(token))).json()
     in_tx = (await client.get(f"/transactions/{in_id}", headers=_auth(token))).json()
-    assert in_tx["transfer_pair_id"] is None
+    assert out_tx["transfer_pair_id"] == in_id
+    assert in_tx["transfer_pair_id"] == out_id
+    trash = (await client.get("/transactions/trash", headers=_auth(token))).json()
+    assert trash["total"] == 0
+
+
+async def test_bulk_restore_relinks_pairs(client: AsyncClient) -> None:
+    """PHASE-41 — 'Restaurar todo' reactiva ambas patas y deja el par
+    re-vinculado."""
+    token, out_id, in_id = await _make_linked_pair(client, "bulk_restore_pair@example.com")
+    await client.delete(f"/transactions/{out_id}", headers=_auth(token))
+
+    bulk = await client.post("/transactions/trash/restore", headers=_auth(token))
+    assert bulk.status_code == 200, bulk.text
+
+    out_tx = (await client.get(f"/transactions/{out_id}", headers=_auth(token))).json()
+    in_tx = (await client.get(f"/transactions/{in_id}", headers=_auth(token))).json()
+    assert out_tx["transfer_pair_id"] == in_id
+    assert in_tx["transfer_pair_id"] == out_id
+
+
+async def test_restore_leg_whose_partner_purged_comes_back_unpaired(
+    client: AsyncClient,
+) -> None:
+    """PHASE-41 — si la pareja se purgó (borrado permanente), restaurar la
+    superviviente la trae SIN pareja: el FK `ON DELETE SET NULL` limpió el
+    puntero, así que nunca queda apuntando a una fila ausente."""
+    token, out_id, in_id = await _make_linked_pair(client, "restore_purged@example.com")
+    # Trashea ambas (atómico), luego purga la pata IN.
+    await client.delete(f"/transactions/{out_id}", headers=_auth(token))
+    purge = await client.delete(f"/transactions/{in_id}/purge", headers=_auth(token))
+    assert purge.status_code == 204, purge.text
+
+    restore = await client.post(f"/transactions/{out_id}/restore", headers=_auth(token))
+    assert restore.status_code == 200, restore.text
+    out_tx = (await client.get(f"/transactions/{out_id}", headers=_auth(token))).json()
+    assert out_tx["transfer_pair_id"] is None
 
 
 async def test_link_rejects_same_account(client: AsyncClient) -> None:
@@ -221,73 +274,6 @@ async def test_unlink_breaks_pair(client: AsyncClient) -> None:
     assert in_tx["transfer_pair_id"] is None
 
 
-async def test_match_links_unambiguous_pair(client: AsyncClient) -> None:
-    """Una salida en A + una entrada en B con mismo importe y fecha
-    cercana se enlazan automáticamente."""
-    token, _cat, acc_a, acc_b = await _setup_user_with_two_accounts(client, "match1@example.com")
-    # Para que el matcher pueda distinguir kind=expense vs income,
-    # creamos una categoría income separada.
-    income_cat = await client.post(
-        "/categories",
-        json={"name": "Ingreso interno", "kind": "income"},
-        headers=_auth(token),
-    )
-    expense_cat = await client.post(
-        "/categories",
-        json={"name": "Salida interna", "kind": "expense"},
-        headers=_auth(token),
-    )
-
-    await _create_tx(
-        client,
-        token,
-        account_id=acc_a,
-        category_id=expense_cat.json()["id"],
-        amount="120.00",
-        occurred_at="2026-04-15T10:00:00Z",
-    )
-    await _create_tx(
-        client,
-        token,
-        account_id=acc_b,
-        category_id=income_cat.json()["id"],
-        amount="120.00",
-        occurred_at="2026-04-15T11:30:00Z",
-    )
-
-    r = await client.post("/transfers/match", headers=_auth(token))
-    assert r.status_code == 200
-    body = r.json()
-    assert body["linked_count"] == 1
-    assert body["pending_candidates"] == []
-
-
-async def test_match_keeps_ambiguous_for_user(client: AsyncClient) -> None:
-    """Si hay dos salidas y dos entradas idénticas, el matcher NO
-    enlaza nada y deja los candidatos para revisión manual."""
-    token, _cat, acc_a, acc_b = await _setup_user_with_two_accounts(client, "match2@example.com")
-    # Sin categoría — caen en "unknown" y el matcher las cruza por
-    # fecha + importe + cuentas.
-    await _create_tx(
-        client, token, account_id=acc_a, amount="200", occurred_at="2026-04-10T10:00:00Z"
-    )
-    await _create_tx(
-        client, token, account_id=acc_a, amount="200", occurred_at="2026-04-12T10:00:00Z"
-    )
-    await _create_tx(
-        client, token, account_id=acc_b, amount="200", occurred_at="2026-04-10T11:00:00Z"
-    )
-    await _create_tx(
-        client, token, account_id=acc_b, amount="200", occurred_at="2026-04-12T11:00:00Z"
-    )
-
-    r = await client.post("/transfers/match", headers=_auth(token))
-    body = r.json()
-    assert body["linked_count"] == 0
-    # Ambos pares (A1↔B1 y A2↔B2) son ambiguos → 2 candidatos.
-    assert len(body["pending_candidates"]) == 2
-
-
 async def test_paired_tx_excluded_from_dashboard_summary(
     client: AsyncClient,
 ) -> None:
@@ -363,17 +349,13 @@ async def test_user_isolation_in_transfers(client: AsyncClient) -> None:
         client, token_a, account_id=acc_a2, amount="50", occurred_at="2026-04-15T12:00:00Z"
     )
 
-    # B no puede enlazar
+    # B no puede enlazar txs de A (aislamiento por user_id → 404).
     r = await client.post(
         "/transfers/link",
         json={"out_transaction_id": out_a, "in_transaction_id": in_a},
         headers=_auth(token_b),
     )
     assert r.status_code == 404
-
-    # B no ve los pares de A
-    pairs_b = (await client.get("/transfers", headers=_auth(token_b))).json()
-    assert pairs_b == []
 
 
 async def test_account_balances_endpoint(client: AsyncClient) -> None:
@@ -463,285 +445,6 @@ async def test_list_transactions_filters_by_account(client: AsyncClient) -> None
 # ---------------------------------------------------------------------------
 # PHASE-23.1 — Category.is_transfer + suspects + mark + from-source
 # ---------------------------------------------------------------------------
-
-
-async def test_suspects_only_returns_unmatched_with_transfer_in_description(
-    client: AsyncClient,
-) -> None:
-    """`GET /transfers/suspects` devuelve SÓLO txs activas, sin pareja,
-    no categorizadas con is_transfer=true, cuya descripción contiene
-    "transfer" (case insensitive)."""
-    token, cat, acc_a, _acc_b = await _setup_user_with_two_accounts(client, "suspects@example.com")
-    yes_id = await _create_tx(
-        client,
-        token,
-        account_id=acc_a,
-        amount="100.00",
-        occurred_at="2026-04-15T12:00:00Z",
-        category_id=cat,
-        description="TRANSFERENCIA REALIZADA",
-    )
-    await _create_tx(
-        client,
-        token,
-        account_id=acc_a,
-        amount="50.00",
-        occurred_at="2026-04-15T12:00:00Z",
-        category_id=cat,
-        description="Compra supermercado",
-    )
-
-    r = await client.get("/transfers/suspects", headers=_auth(token))
-    assert r.status_code == 200
-    items = r.json()
-    assert len(items) == 1
-    assert items[0]["transaction_id"] == yes_id
-    assert items[0]["description"] == "TRANSFERENCIA REALIZADA"
-
-
-async def test_suspects_detects_spanish_bank_terms(client: AsyncClient) -> None:
-    """P1 (transfers-ux) — el descubrimiento cubre términos de banca
-    española (BIZUM, TRASPASO), no sólo el inglés "transfer". Antes esos
-    movimientos — los más frecuentes — quedaban invisibles a /transfers."""
-    token, cat, acc_a, _acc_b = await _setup_user_with_two_accounts(
-        client, "suspects-es@example.com"
-    )
-    bizum_id = await _create_tx(
-        client,
-        token,
-        account_id=acc_a,
-        amount="20.00",
-        occurred_at="2026-04-15T12:00:00Z",
-        category_id=cat,
-        description="BIZUM A JOSE",
-    )
-    traspaso_id = await _create_tx(
-        client,
-        token,
-        account_id=acc_a,
-        amount="500.00",
-        occurred_at="2026-04-16T12:00:00Z",
-        category_id=cat,
-        description="TRASPASO ENTRE CUENTAS",
-    )
-    # Un gasto normal NO debe aparecer (evita inundar la bandeja).
-    await _create_tx(
-        client,
-        token,
-        account_id=acc_a,
-        amount="9.00",
-        occurred_at="2026-04-17T12:00:00Z",
-        category_id=cat,
-        description="MERCADONA TORRE PACHECO",
-    )
-
-    r = await client.get("/transfers/suspects", headers=_auth(token))
-    assert r.status_code == 200
-    items = r.json()
-    ids = {it["transaction_id"] for it in items}
-    descs = {it["description"] for it in items}
-    assert bizum_id in ids
-    assert traspaso_id in ids
-    assert "MERCADONA TORRE PACHECO" not in descs
-
-
-async def test_mark_uses_seed_transfer_category_with_correct_kind(
-    client: AsyncClient,
-) -> None:
-    """Marcar una tx con descripción "REALIZADA" (saliente) usa una
-    categoría is_transfer=true + kind=EXPENSE. El seed crea
-    "Transferencias" en el registro del usuario; al marcar, la
-    asignamos sin crear duplicado."""
-    token, _cat, acc_a, _acc_b = await _setup_user_with_two_accounts(
-        client, "mark-create@example.com"
-    )
-    tx_id = await _create_tx(
-        client,
-        token,
-        account_id=acc_a,
-        amount="200.00",
-        occurred_at="2026-04-15T12:00:00Z",
-        description="TRANSFERENCIA enviada",
-    )
-
-    r = await client.post(
-        "/transfers/mark",
-        json={"transaction_id": tx_id},
-        headers=_auth(token),
-    )
-    assert r.status_code == 201
-    body = r.json()
-    assert body["transaction_id"] == tx_id
-
-    cats = await client.get("/categories", headers=_auth(token))
-    transfer_cats = [c for c in cats.json() if c["is_transfer"]]
-    # El seed crea "Transferencias" (expense, is_transfer=true). La
-    # asignación reutiliza esa categoría, no crea duplicado.
-    expense_transfer = [c for c in transfer_cats if c["kind"] == "expense"]
-    assert len(expense_transfer) == 1
-    assert body["category_id"] == expense_transfer[0]["id"]
-
-    # La tx ya no aparece como sospechosa
-    r2 = await client.get("/transfers/suspects", headers=_auth(token))
-    assert r2.json() == []
-
-
-async def test_mark_infers_income_kind_from_recibida_description(
-    client: AsyncClient,
-) -> None:
-    """Una tx con "RECIBIDA" en descripción se marca con kind=INCOME.
-    Tras PHASE-31.1 el seed trae "Transferencia a favor" (INCOME,
-    is_transfer) lista — `get_or_create_default_transfer_category`
-    devuelve esa en lugar de crear "Transferencia interna (entrada)".
-    Lo importante es que la asignación preserva +amount al saldo
-    (asset+income → +amount), no el nombre exacto.
-    """
-    token, _cat, acc_a, _acc_b = await _setup_user_with_two_accounts(
-        client, "mark-incoming@example.com"
-    )
-    tx_id = await _create_tx(
-        client,
-        token,
-        account_id=acc_a,
-        amount="300.00",
-        occurred_at="2026-04-15T12:00:00Z",
-        description="TRANSFERENCIA RECIBIDA DE Jose",
-    )
-    r = await client.post(
-        "/transfers/mark",
-        json={"transaction_id": tx_id},
-        headers=_auth(token),
-    )
-    assert r.status_code == 201
-    # La categoría asignada debe ser is_transfer=true + INCOME, sin
-    # importar si la creó el seed (PHASE-31.1) o el helper legacy.
-    body = r.json()
-    cats_all = await client.get("/categories", headers=_auth(token))
-    target_cat = next(c for c in cats_all.json() if c["id"] == body["category_id"])
-    assert target_cat["kind"] == "income"
-    assert target_cat["is_transfer"] is True
-
-    cats = await client.get("/categories", headers=_auth(token))
-    income_transfer = [c for c in cats.json() if c["is_transfer"] and c["kind"] == "income"]
-    assert len(income_transfer) == 1
-
-
-async def test_mark_409_when_tx_already_paired(client: AsyncClient) -> None:
-    """No se puede marcar una tx que ya forma parte de un par."""
-    token, _cat, acc_a, acc_b = await _setup_user_with_two_accounts(
-        client, "mark-paired@example.com"
-    )
-    out_id = await _create_tx(
-        client,
-        token,
-        account_id=acc_a,
-        amount="400.00",
-        occurred_at="2026-04-15T12:00:00Z",
-        description="transfer out",
-    )
-    in_id = await _create_tx(
-        client,
-        token,
-        account_id=acc_b,
-        amount="400.00",
-        occurred_at="2026-04-15T12:00:00Z",
-        description="transfer in",
-    )
-    link = await client.post(
-        "/transfers/link",
-        json={"out_transaction_id": out_id, "in_transaction_id": in_id},
-        headers=_auth(token),
-    )
-    assert link.status_code == 201
-
-    r = await client.post(
-        "/transfers/mark",
-        json={"transaction_id": out_id},
-        headers=_auth(token),
-    )
-    assert r.status_code == 409
-
-
-async def test_mark_excludes_tx_from_dashboard_cashflow_preserves_balance(
-    client: AsyncClient,
-) -> None:
-    """Marcar como transferencia (PHASE-23.1):
-    - Saca la tx del cashflow agregado (expenses=0).
-    - **Conserva** el signo en el saldo de la cuenta (-500 en ASSET).
-    """
-    token, expense_cat, acc_a, _acc_b = await _setup_user_with_two_accounts(
-        client, "mark-balance@example.com"
-    )
-    await _create_tx(
-        client,
-        token,
-        account_id=acc_a,
-        amount="500.00",
-        occurred_at="2026-04-15T12:00:00Z",
-        category_id=expense_cat,
-        description="TRANSFER realizada",
-    )
-    r1 = await client.get("/dashboard/summary?currency=EUR", headers=_auth(token))
-    assert Decimal(r1.json()["expenses"]) == Decimal("500.00")
-
-    # Get the actual tx_id from the list
-    tx_list = await client.get(f"/transactions?account_id={acc_a}", headers=_auth(token))
-    tx_id = tx_list.json()["items"][0]["id"]
-
-    await client.post(
-        "/transfers/mark",
-        json={"transaction_id": tx_id},
-        headers=_auth(token),
-    )
-    # Cashflow ya no la cuenta
-    r2 = await client.get("/dashboard/summary?currency=EUR", headers=_auth(token))
-    assert Decimal(r2.json()["expenses"]) == Decimal("0.00")
-
-    # Saldo SÍ refleja el movimiento: -500 (asset + expense kind)
-    balances = await client.get("/accounts/balances", headers=_auth(token))
-    acc_a_balance = next(b for b in balances.json()["items"] if b["account_id"] == acc_a)
-    assert Decimal(acc_a_balance["movements_balance"]) == Decimal("-500.00")
-
-
-async def test_matcher_skips_is_transfer_categorized_txs(
-    client: AsyncClient,
-) -> None:
-    """El matcher heurístico ignora txs ya marcadas como transferencia
-    (categoría is_transfer=true) — no necesitan emparejarse."""
-    token, _cat, acc_a, acc_b = await _setup_user_with_two_accounts(
-        client, "matcher-skip@example.com"
-    )
-    out_cat = await client.post(
-        "/categories",
-        json={"name": "TrOut", "kind": "expense", "is_transfer": True},
-        headers=_auth(token),
-    )
-    in_cat = await client.post(
-        "/categories",
-        json={"name": "TrIn", "kind": "income", "is_transfer": True},
-        headers=_auth(token),
-    )
-    await _create_tx(
-        client,
-        token,
-        account_id=acc_a,
-        amount="600.00",
-        occurred_at="2026-04-15T12:00:00Z",
-        category_id=out_cat.json()["id"],
-    )
-    await _create_tx(
-        client,
-        token,
-        account_id=acc_b,
-        amount="600.00",
-        occurred_at="2026-04-15T12:00:00Z",
-        category_id=in_cat.json()["id"],
-    )
-
-    r = await client.post("/transfers/match", headers=_auth(token))
-    assert r.status_code == 200
-    assert r.json()["linked_count"] == 0
-    assert r.json()["pending_candidates"] == []
 
 
 async def test_from_source_creates_counterpart_and_pairs(

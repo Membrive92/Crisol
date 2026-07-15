@@ -64,7 +64,7 @@ export default function EditTransactionScreen() {
               toast.success(
                 `Transferencia creada (${pair.amount} ${pair.currency}).`,
               );
-              router.replace('/(modules)/personal-finance/transfers');
+              router.back();
             }}
             onError={(err) =>
               toast.error(formatApiError(err, 'No se pudo convertir.'))

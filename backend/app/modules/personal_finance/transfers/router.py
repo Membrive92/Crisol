@@ -1,11 +1,22 @@
-"""Router del módulo transfers (PHASE-19.3)."""
+"""Router del módulo transfers (PHASE-19.3).
+
+PHASE-41 (ADR-0005) — retirado el emparejado heurístico (GET /transfers,
+/candidates, /match, /suspects, /mark). La verdad del dinero vive en
+`transactions.flow`, así que esa maquinaria ya no corrige nada. Se conserva:
+- `link`/`unlink`: load-bearing del asistente de pago de deuda y del "deshacer"
+  desde la lista de transacciones.
+- `from-source`/`from-source-debt`: convertir una tx en transferencia/deuda
+  desde el detalle de transacción.
+- `misclassified`/`reclassify-bulk`: data-hygiene de dirección, ahora
+  embebida en la pestaña Transacciones.
+"""
 
 from __future__ import annotations
 
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -14,71 +25,21 @@ from app.modules.personal_finance.transfers.schemas import (
     MisclassifiedTransfer,
     ReclassifyBulkRequest,
     ReclassifyBulkResponse,
-    TransferCandidate,
     TransferFromSourceDebtRequest,
     TransferFromSourceRequest,
     TransferLinkRequest,
-    TransferMarkRequest,
-    TransferMarkResponse,
-    TransferMatchOptions,
-    TransferMatchResponse,
     TransferPairResponse,
-    TransferSuspect,
 )
 from app.modules.personal_finance.transfers.service import (
-    auto_match,
     convert_to_debt_operation,
     convert_to_internal_transfer,
-    detect_candidates,
     link_manually,
     list_misclassified,
-    list_pairs,
-    list_suspects,
-    mark_as_transfer,
     reclassify_bulk,
     unlink,
 )
 
 router = APIRouter(prefix="/transfers", tags=["transfers"])
-
-
-@router.get("", response_model=list[TransferPairResponse])
-async def list_endpoint(
-    user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> list[TransferPairResponse]:
-    """Lista los pares emparejados activos del usuario."""
-    return await list_pairs(db, user.id)
-
-
-@router.get("/candidates", response_model=list[TransferCandidate])
-async def candidates_endpoint(
-    user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    window_days: Annotated[int, Query(ge=0, le=14)] = 3,
-) -> list[TransferCandidate]:
-    """Sugerencias de pares aún no emparejados, sin escribir nada en BD.
-
-    El frontend muestra esta lista para que el usuario confirme uno a
-    uno (vía POST /transfers/link) o dispare el match automático
-    completo (POST /transfers/match).
-    """
-    return await detect_candidates(db, user.id, window_days=window_days)
-
-
-@router.post("/match", response_model=TransferMatchResponse)
-async def match_endpoint(
-    user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    body: TransferMatchOptions | None = None,
-) -> TransferMatchResponse:
-    """Ejecuta el matcher: enlaza los pares no ambiguos y devuelve
-    los ambiguos para que el usuario los resuelva manualmente.
-    """
-    options = body or TransferMatchOptions()
-    response = await auto_match(db, user.id, window_days=options.window_days)
-    await db.commit()
-    return response
 
 
 @router.post("/link", response_model=TransferPairResponse, status_code=201)
@@ -111,17 +72,6 @@ async def unlink_endpoint(
     return Response(status_code=204)
 
 
-@router.get("/suspects", response_model=list[TransferSuspect])
-async def suspects_endpoint(
-    user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> list[TransferSuspect]:
-    """PHASE-23: txs candidatas a transferencia interna sin pareja —
-    cuya descripción contiene "transfer" y todavía no están marcadas
-    como transferencia (categoría kind=transfer)."""
-    return await list_suspects(db, user.id)
-
-
 @router.get("/misclassified", response_model=list[MisclassifiedTransfer])
 async def misclassified_endpoint(
     user: CurrentUser,
@@ -150,21 +100,6 @@ async def reclassify_bulk_endpoint(
         transaction_ids=body.transaction_ids,
         target_category_id=body.target_category_id,
     )
-    await db.commit()
-    return response
-
-
-@router.post("/mark", response_model=TransferMarkResponse, status_code=201)
-async def mark_endpoint(
-    user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    body: TransferMarkRequest,
-) -> TransferMarkResponse:
-    """PHASE-23.1: marca una tx como transferencia interna asignándole
-    una categoría con `is_transfer=true` (creándola por defecto si
-    no existe). La tx sale del cashflow agregado pero su signo sigue
-    impactando al saldo de la cuenta."""
-    response = await mark_as_transfer(db, user.id, transaction_id=body.transaction_id)
     await db.commit()
     return response
 

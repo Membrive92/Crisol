@@ -28,55 +28,6 @@ export interface TransferPair {
 }
 
 /**
- * Sugerencia del matcher heurístico — todavía no escrito en BD.
- * El usuario debe confirmar (vía POST /transfers/link) o ignorar.
- */
-export interface TransferCandidate {
-  out_transaction_id: string;
-  in_transaction_id: string;
-  amount: string;
-  currency: string;
-  out_account_id: string;
-  in_account_id: string;
-  out_occurred_at: string;
-  in_occurred_at: string;
-  delta_days: number;
-}
-
-export interface TransferMatchResponse {
-  /** Pares emparejados automáticamente por el matcher (sin ambigüedad). */
-  linked_count: number;
-  /**
-   * Candidatos ambiguos que el usuario debe resolver — varios
-   * importes coincidentes entre las mismas cuentas.
-   */
-  pending_candidates: TransferCandidate[];
-}
-
-/**
- * PHASE-23: tx sin pareja cuya descripción matchea el patrón
- * "transferencia" — candidata a ser marcada manualmente como
- * transferencia interna cuando sólo se importó una pata.
- */
-export interface TransferSuspect {
-  transaction_id: string;
-  amount: string;
-  currency: string;
-  account_id: string;
-  occurred_at: string;
-  description: string | null;
-  current_category_id: string | null;
-  current_category_name: string | null;
-}
-
-/** Resultado de marcar una tx — devuelve la categoría asignada. */
-export interface TransferMarkResponse {
-  transaction_id: string;
-  category_id: string;
-  category_name: string;
-}
-
-/**
  * PHASE-31.2 — tx con categoría is_transfer cuyo kind no encaja con
  * la dirección que indica la descripción. Candidata a recategorización
  * en bloque desde la UI.

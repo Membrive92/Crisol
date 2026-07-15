@@ -64,10 +64,9 @@ export const queryKeys = {
   },
   transfers: {
     all: ['transfers'] as const,
-    list: () => [...queryKeys.transfers.all, 'list'] as const,
-    candidates: (windowDays = 3) =>
-      [...queryKeys.transfers.all, 'candidates', windowDays] as const,
-    suspects: () => [...queryKeys.transfers.all, 'suspects'] as const,
+    // PHASE-41 (ADR-0005) — retiradas list/candidates/suspects con el
+    // emparejado heurístico. `all` sigue usándose para invalidar tras
+    // link/unlink/convert; `misclassified` alimenta la data-hygiene.
     misclassified: () => [...queryKeys.transfers.all, 'misclassified'] as const,
   },
   categories: {

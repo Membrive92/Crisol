@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, type CSSProperties } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { useCurrencyStore } from '@crisol/store';
@@ -51,6 +51,24 @@ interface TransactionRow {
 }
 
 /**
+ * Estilo del `<label>` que envuelve el checkbox de selección: a sangre
+ * completa sobre la celda. El margen negativo cancela el padding del
+ * `<td>`/`<th>` (`verticalPad` vertical, `spacing.md` horizontal) y se
+ * re-añade como padding, de modo que el área clicable cubre TODA la celda
+ * sin desplazar el checkbox de su posición centrada.
+ */
+function selectionCellStyle(verticalPad: number): CSSProperties {
+  return {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    margin: `-${verticalPad}px -${spacing.md}px`,
+    padding: `${verticalPad}px ${spacing.md}px`,
+    cursor: 'pointer',
+  };
+}
+
+/**
  * ADR-0004: el signo/color del importe lo manda `tx.flow`, no la categoría.
  * IN→income, OUT→expense, TRANSFER_*→neutro (fuera del cashflow). Devuelve
  * `undefined` si no hay flow, para que el caller use el fallback por categoría
@@ -63,6 +81,12 @@ function kindFromFlow(
   if (flow === 'OUT') return 'expense';
   if (flow === 'TRANSFER_IN' || flow === 'TRANSFER_OUT') return null;
   return undefined;
+}
+
+/** ADR-0005 — es transferencia si el `flow` lo dice (fuente de verdad), sin
+ * depender del emparejado. */
+function isTransferFlow(flow: TransactionFlow | null | undefined): boolean {
+  return flow === 'TRANSFER_IN' || flow === 'TRANSFER_OUT';
 }
 
 function amountColorFor(kind: CategoryKind | null | undefined): string {
@@ -112,29 +136,36 @@ export function TransactionList({
 
   const selectionColumn: DataTableColumn<TransactionRow> = {
     key: 'select',
+    // El checkbox va envuelto en un <label> a sangre completa que RELLENA
+    // toda la celda (incluido el padding del <td>/<th>, vía margen negativo)
+    // y detiene la propagación. Así un click en cualquier punto de la columna
+    // alterna el checkbox en vez de burbujear al onClick de la fila y abrir la
+    // transacción — antes solo el <input> de 16px era zona segura.
     header: (
-      <input
-        type="checkbox"
-        aria-label="Seleccionar todo"
-        checked={allSelected ?? false}
-        ref={(el) => {
-          if (el) el.indeterminate = !(allSelected ?? false) && (someSelected ?? false);
-        }}
-        onChange={() => onToggleSelectAll?.()}
-        onClick={(e) => e.stopPropagation()}
-        style={{ cursor: 'pointer', accentColor: colors.primary, width: 16, height: 16 }}
-      />
+      <label style={selectionCellStyle(spacing.sm)} onClick={(e) => e.stopPropagation()}>
+        <input
+          type="checkbox"
+          aria-label="Seleccionar todo"
+          checked={allSelected ?? false}
+          ref={(el) => {
+            if (el) el.indeterminate = !(allSelected ?? false) && (someSelected ?? false);
+          }}
+          onChange={() => onToggleSelectAll?.()}
+          style={{ cursor: 'pointer', accentColor: colors.primary, width: 16, height: 16 }}
+        />
+      </label>
     ),
     width: 44,
     render: ({ tx }) => (
-      <input
-        type="checkbox"
-        aria-label="Seleccionar transacción"
-        checked={selectedIds?.has(tx.id) ?? false}
-        onChange={() => onToggleSelect?.(tx.id)}
-        onClick={(e) => e.stopPropagation()}
-        style={{ cursor: 'pointer', accentColor: colors.primary, width: 16, height: 16 }}
-      />
+      <label style={selectionCellStyle(spacing.sm + 2)} onClick={(e) => e.stopPropagation()}>
+        <input
+          type="checkbox"
+          aria-label="Seleccionar transacción"
+          checked={selectedIds?.has(tx.id) ?? false}
+          onChange={() => onToggleSelect?.(tx.id)}
+          style={{ cursor: 'pointer', accentColor: colors.primary, width: 16, height: 16 }}
+        />
+      </label>
     ),
   };
 
@@ -192,7 +223,8 @@ export function TransactionList({
           >
             {tx.description ?? '(sin descripción)'}
           </span>
-          {tx.transfer_pair_id !== null ||
+          {isTransferFlow(tx.flow) ||
+          tx.transfer_pair_id !== null ||
           category?.is_transfer ||
           category?.role === 'DEBT_PAYMENT' ||
           category?.role === 'DEBT_INTEREST' ? (
@@ -337,59 +369,37 @@ export function TransactionList({
 }
 
 /**
- * P3 (transfers-ux) — el badge distingue TRES estados, que antes
- * colapsaban en un único "Transferencia":
+ * Badge de la fila. Modelo `flow` (ADR-0004 / ADR-0005): una transferencia es
+ * neutra al cashflow SIN necesidad de estar emparejada — el `flow` manda, el
+ * emparejado es metadato opcional. Por eso desaparece el antiguo estado "Sin
+ * pareja" (aviso): una transferencia sin contraparte es NORMAL (la otra pata es
+ * otra tx importada de la otra cuenta), no un error que haya que enlazar.
  *  - "Deuda": pata de una operación financiada (activo↔pasivo).
- *  - "Transferencia": par interno activo↔activo, con contraparte.
- *  - "Sin pareja" (tono aviso): categoría is_transfer pero SIN
- *    `transfer_pair_id` — está fuera del cashflow pero no enlazada a
- *    ninguna contraparte. Antes mostraba el mismo chip que un par real,
- *    así que el usuario creía "ya está" cuando faltaba enlazarla.
+ *  - "Pago de deuda": cuota de deuda categorizada (DEBT_PAYMENT/DEBT_INTEREST).
+ *  - "Transferencia": movimiento interno neutro (emparejado o no, da igual).
  */
-function badgeFor(
-  tx: Transaction,
-  category: Category | undefined,
-): {
-  label: string;
-  title: string;
-  tone: 'info' | 'warning';
-} {
+function badgeFor(tx: Transaction, category: Category | undefined): { label: string; title: string } {
   if (tx.is_debt_pair) {
-    return {
-      label: 'Deuda',
-      title: 'Operación financiada, enlazada a una cuenta de deuda.',
-      tone: 'info',
-    };
+    return { label: 'Deuda', title: 'Operación financiada, enlazada a una cuenta de deuda.' };
   }
-  // PHASE-38 — cuota de una compra a plazos / deuda categorizada
-  // (DEBT_PAYMENT/DEBT_INTEREST). Cuenta como gasto real del mes (flow OUT),
-  // pero se etiqueta para que se sepa que descuenta deuda; su contraparte es
-  // el cuadro de amortización (no una tx-pareja), así que NO es "Sin pareja".
+  // PHASE-38 — cuota de una compra a plazos / deuda categorizada. Cuenta como
+  // gasto real del mes (flow OUT); su contraparte es el cuadro de amortización.
   if (category?.role === 'DEBT_PAYMENT' || category?.role === 'DEBT_INTEREST') {
     return {
       label: 'Pago de deuda',
       title:
         'Cuota de una deuda (compra a plazos / préstamo). Cuenta como gasto del mes y descuenta del cuadro de amortización.',
-      tone: 'info',
-    };
-  }
-  if (tx.transfer_pair_id !== null) {
-    return {
-      label: 'Transferencia',
-      title: 'Movimiento entre tus cuentas, emparejado con su contraparte.',
-      tone: 'info',
     };
   }
   return {
-    label: 'Sin pareja',
-    title: 'Marcada como transferencia pero sin contraparte. Enlázala desde Transferencias.',
-    tone: 'warning',
+    label: 'Transferencia',
+    title: 'Movimiento entre tus cuentas — neutro (no cuenta como gasto ni ingreso).',
   };
 }
 
 /**
  * Chip informativo (no clicable: "Deshacer"/"Borrar" viven en la columna
- * de acciones). El tono `warning` señala una transferencia incompleta.
+ * de acciones).
  */
 function TransferBadge({
   tx,
@@ -398,17 +408,15 @@ function TransferBadge({
   tx: Transaction;
   category: Category | undefined;
 }) {
-  const { label, title, tone } = badgeFor(tx, category);
-  const bg = tone === 'warning' ? colors.warningSoft : colors.primarySoft;
-  const fg = tone === 'warning' ? colors.warning : colors.primary;
+  const { label, title } = badgeFor(tx, category);
   return (
     <span
       title={title}
       style={{
         display: 'inline-block',
         padding: `${spacing.xs / 2}px ${spacing.sm}px`,
-        backgroundColor: bg,
-        color: fg,
+        backgroundColor: colors.primarySoft,
+        color: colors.primary,
         borderRadius: radius.sm,
         fontSize: fontSize.xs,
         fontWeight: fontWeight.semibold,

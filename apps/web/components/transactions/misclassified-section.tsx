@@ -29,14 +29,17 @@ const KIND_LABEL: Record<string, string> = {
 };
 
 /**
- * PHASE-31.2 — Sección en `/transfers` que lista las tx con categoría
- * `is_transfer=true` cuya dirección (income/expense) no coincide con
- * lo que indica la descripción. Permite reclasificar en bloque al
- * kind opuesto. La sección sólo aparece cuando hay tx detectadas.
+ * PHASE-31.2 / PHASE-41 — Banner de data-hygiene en Transacciones que
+ * lista las tx con categoría `is_transfer=true` cuya dirección
+ * (income/expense) no coincide con lo que indica la descripción, y
+ * permite reclasificarlas en bloque al kind opuesto. Vivía en la
+ * pestaña `/transfers`; al retirarse esa pestaña (ADR-0005) la
+ * corrección de dirección se hace desde aquí, junto al resto de la
+ * higiene del libro mayor. La sección sólo aparece cuando hay tx
+ * detectadas (devuelve `null` en caso contrario → cero ruido).
  *
- * Diseño: card con tono `warning-soft` para distinguirla del bloque
- * principal de transferencias; checklist con sugerencia individual;
- * acciones inferiores [Seleccionar todas] / [Re-categorizar].
+ * Diseño: card con tono `warning-soft`; checklist con sugerencia
+ * individual; acciones inferiores [Seleccionar todas] / [Re-categorizar].
  */
 export function MisclassifiedSection() {
   const { data, isLoading } = useMisclassifiedTransfers();

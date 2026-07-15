@@ -8,7 +8,6 @@ import type { AppModule, ModuleSection } from '@crisol/types';
 import { colors, fontWeight, scaleFont, spacing } from '@crisol/ui';
 
 import {
-  ArrowLeftRightIcon,
   BarChart3Icon,
   ReceiptIcon,
   RepeatIcon,
@@ -36,7 +35,6 @@ const SECTION_ICONS: Record<string, ComponentType<IconProps>> = {
   transactions: ReceiptIcon,
   budgets: TargetIcon,
   'fixed-expenses': RepeatIcon,
-  transfers: ArrowLeftRightIcon,
 };
 
 /**

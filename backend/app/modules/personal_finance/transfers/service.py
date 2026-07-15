@@ -40,13 +40,9 @@ from app.modules.personal_finance.transfers.repository import (
     assign_category as repo_assign_category,
 )
 from app.modules.personal_finance.transfers.repository import (
-    filter_unambiguous,
-    find_candidate_pairs,
     find_mirror_charge,
     get_or_create_default_transfer_category,
     list_misclassified_transfers,
-    list_suspect_transactions,
-    list_unmatched_active_transactions,
 )
 from app.modules.personal_finance.transfers.repository import (
     get_pair as repo_get_pair,
@@ -58,39 +54,18 @@ from app.modules.personal_finance.transfers.repository import (
     link_pair as repo_link_pair,
 )
 from app.modules.personal_finance.transfers.repository import (
-    list_pairs as repo_list_pairs,
-)
-from app.modules.personal_finance.transfers.repository import (
     unlink_pair as repo_unlink_pair,
 )
 from app.modules.personal_finance.transfers.schemas import (
     MisclassifiedTransfer,
     NewLiabilityForDebt,
     ReclassifyBulkResponse,
-    TransferCandidate,
-    TransferMarkResponse,
-    TransferMatchResponse,
     TransferPairResponse,
-    TransferSuspect,
 )
 
 
 def _delta_days(tx_a: Transaction, tx_b: Transaction) -> int:
     return abs((tx_a.occurred_at - tx_b.occurred_at).days)
-
-
-def _candidate_to_schema(out_tx: Transaction, in_tx: Transaction, delta: int) -> TransferCandidate:
-    return TransferCandidate(
-        out_transaction_id=out_tx.id,
-        in_transaction_id=in_tx.id,
-        amount=out_tx.amount,
-        currency=out_tx.currency,
-        out_account_id=out_tx.account_id,
-        in_account_id=in_tx.account_id,
-        out_occurred_at=out_tx.occurred_at,
-        in_occurred_at=in_tx.occurred_at,
-        delta_days=delta,
-    )
 
 
 def _pair_to_schema(
@@ -110,54 +85,6 @@ def _pair_to_schema(
         in_occurred_at=in_tx.occurred_at,
         delta_days=_delta_days(out_tx, in_tx),
         absorbed_mirror_amount=absorbed_mirror_amount,
-    )
-
-
-async def list_pairs(db: AsyncSession, user_id: uuid.UUID) -> list[TransferPairResponse]:
-    """Pares emparejados activos del usuario, en orden cronológico."""
-    pairs = await repo_list_pairs(db, user_id)
-    return [_pair_to_schema(out_tx, in_tx) for out_tx, in_tx in pairs]
-
-
-async def detect_candidates(
-    db: AsyncSession, user_id: uuid.UUID, *, window_days: int = 3
-) -> list[TransferCandidate]:
-    """Devuelve TODOS los pares candidatos del matcher sin enlazar nada.
-
-    Útil para previsualizar antes de un match automático, o para que la
-    UI muestre sólo "sugerencias" sin escribir en BD.
-    """
-    items = await list_unmatched_active_transactions(db, user_id)
-    pairs = find_candidate_pairs(items, window_days=window_days)
-    return [_candidate_to_schema(out_tx, in_tx, d) for out_tx, in_tx, d in pairs]
-
-
-async def auto_match(
-    db: AsyncSession, user_id: uuid.UUID, *, window_days: int = 3
-) -> TransferMatchResponse:
-    """Ejecuta el matcher: enlaza los pares sin ambigüedad y devuelve
-    los ambiguos para que el usuario decida.
-
-    Política conservadora: si hay >1 par con la misma huella
-    (amount + currency + cuentas), NO enlaza ninguno automáticamente
-    — el usuario revisa y resuelve. Esto evita emparejar mal cuando
-    hay varios cargos del mismo importe entre las mismas dos cuentas.
-    """
-    items = await list_unmatched_active_transactions(db, user_id)
-    pairs = find_candidate_pairs(items, window_days=window_days)
-    unambiguous, ambiguous = filter_unambiguous(pairs)
-
-    for out_tx, in_tx, _ in unambiguous:
-        # PHASE-34: al emparejar, ambas patas son transferencia interna.
-        out_tx.flow = TransactionFlow.TRANSFER_OUT
-        in_tx.flow = TransactionFlow.TRANSFER_IN
-        await repo_link_pair(db, out_tx, in_tx)
-
-    return TransferMatchResponse(
-        linked_count=len(unambiguous),
-        pending_candidates=[
-            _candidate_to_schema(out_tx, in_tx, d) for out_tx, in_tx, d in ambiguous
-        ],
     )
 
 
@@ -231,27 +158,6 @@ async def unlink(
         )
     tx_a, tx_b = pair
     await repo_unlink_pair(db, tx_a, tx_b)
-
-
-async def list_suspects(db: AsyncSession, user_id: uuid.UUID) -> list[TransferSuspect]:
-    """PHASE-23: txs candidatas a transferencia interna sin pareja
-    (descripción contiene "transfer"). El usuario revisa y marca las
-    que correspondan via /transfers/mark.
-    """
-    rows = await list_suspect_transactions(db, user_id)
-    return [
-        TransferSuspect(
-            transaction_id=tx.id,
-            amount=tx.amount,
-            currency=tx.currency,
-            account_id=tx.account_id,
-            occurred_at=tx.occurred_at,
-            description=tx.description,
-            current_category_id=cat_id,
-            current_category_name=cat_name,
-        )
-        for tx, cat_id, cat_name in rows
-    ]
 
 
 async def list_misclassified(db: AsyncSession, user_id: uuid.UUID) -> list[MisclassifiedTransfer]:
@@ -554,69 +460,6 @@ def classify_import_flow(
     if is_transfer:
         return TransactionFlow.TRANSFER_IN if income else TransactionFlow.TRANSFER_OUT
     return TransactionFlow.IN if income else TransactionFlow.OUT
-
-
-async def mark_as_transfer(
-    db: AsyncSession, user_id: uuid.UUID, *, transaction_id: uuid.UUID
-) -> TransferMarkResponse:
-    """PHASE-23.1: marca una tx como transferencia interna.
-
-    Asigna una categoría `is_transfer=true` con el `kind` adecuado para
-    preservar el signo de la tx en el saldo de la cuenta:
-    - El kind se infiere por descripción (REALIZADA → EXPENSE, RECIBIDA
-      → INCOME) o se hereda del kind actual si la tx ya tenía categoría.
-    - Si el usuario no tiene categoría is_transfer del kind necesario,
-      se crea "Transferencia interna (salida|entrada)" automáticamente.
-
-    Errores: 404 si la tx no existe / no es del usuario; 409 si ya
-    forma parte de un par (debe desenlazar antes).
-    """
-    tx = await repo_get_tx(db, transaction_id, user_id)
-    if tx is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="La transacción no existe o no es tuya.",
-        )
-    if tx.transfer_pair_id is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "La transacción ya forma parte de un par. Deshaz el "
-                "enlace antes de marcarla como transferencia individual."
-            ),
-        )
-    # PHASE-31.5 — pasamos la categoría preexistente como señal primaria
-    # para no sobrescribirla con la heurística de descripción.
-    existing_kind: CategoryKind | None = None
-    if tx.category_id is not None:
-        existing_cat = await get_category_by_id(db, tx.category_id, user_id)
-        if existing_cat is not None:
-            existing_kind = existing_cat.kind
-    target_kind = _infer_transfer_kind(tx.description, existing_category_kind=existing_kind)
-    if target_kind is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "No podemos determinar si esta transferencia es entrante o "
-                "saliente desde la descripción. Edita la categoría "
-                "manualmente o usa 'Convertir en transferencia' "
-                "especificando las dos cuentas."
-            ),
-        )
-    category = await get_or_create_default_transfer_category(db, user_id, kind=target_kind)
-    # PHASE-34: marcar como transferencia fija el flow (la dirección la
-    # da el kind inferido) — ya no depende sólo de la categoría.
-    tx.flow = (
-        TransactionFlow.TRANSFER_IN
-        if target_kind == CategoryKind.INCOME
-        else TransactionFlow.TRANSFER_OUT
-    )
-    await repo_assign_category(db, tx, category.id)
-    return TransferMarkResponse(
-        transaction_id=tx.id,
-        category_id=category.id,
-        category_name=category.name,
-    )
 
 
 async def convert_to_internal_transfer(

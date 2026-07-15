@@ -54,11 +54,7 @@ export type {
 export type {
   MisclassifiedTransfer,
   ReclassifyBulkResponse,
-  TransferCandidate,
-  TransferMarkResponse,
-  TransferMatchResponse,
   TransferPair,
-  TransferSuspect,
 } from './models/transfer';
 export type { Category, CategoryKind, CategoryRole } from './models/category';
 export type {
@@ -131,8 +127,6 @@ export type {
   TransferFromSourceDebtRequest,
   TransferFromSourceRequest,
   TransferLinkRequest,
-  TransferMarkRequest,
-  TransferMatchOptions,
 } from './dto/transfer.dto';
 
 export type {

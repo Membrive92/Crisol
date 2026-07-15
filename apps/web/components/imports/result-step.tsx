@@ -195,8 +195,8 @@ export function ResultStep({ job, onRestart }: ResultStepProps) {
             </div>
           ) : null}
           <div style={{ marginTop: spacing.sm }}>
-            <Link href="/personal-finance/transfers">
-              <Button variant="secondary">Revisar transferencias</Button>
+            <Link href="/personal-finance/transactions">
+              <Button variant="secondary">Revisar en transacciones</Button>
             </Link>
           </div>
         </div>

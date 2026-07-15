@@ -22,6 +22,7 @@ import { toast, useCurrencyStore } from '@crisol/store';
 import type { TransactionListQuery } from '@crisol/types';
 import { colors, fontSize, fontWeight, layout, pluralize, radius, spacing } from '@crisol/ui';
 
+import { MisclassifiedSection } from '@/components/transactions/misclassified-section';
 import { StitchSearchToolbar } from '@/components/transactions/stitch-search-toolbar';
 import { StitchTransactionsKpiRow } from '@/components/transactions/stitch-transactions-kpi-row';
 import { TransactionList } from '@/components/transactions/transaction-list';
@@ -405,6 +406,11 @@ export default function TransactionsPage() {
             setFilters({ limit: PAGE_SIZE, offset: 0, uncategorized: true });
           }}
         />
+
+        {/* PHASE-41 — data-hygiene de dirección de transferencias, movida
+            aquí desde la retirada pestaña /transfers. Sólo se pinta si hay
+            tx mal direccionadas. */}
+        <MisclassifiedSection />
 
         <StitchSearchToolbar
           value={filters}

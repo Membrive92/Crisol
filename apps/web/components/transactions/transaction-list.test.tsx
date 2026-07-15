@@ -91,17 +91,20 @@ describe('TransactionList — pata de deuda / transferencia', () => {
     expect(container.textContent).not.toContain('+');
   });
 
-  it('una categoría is_transfer SIN pareja muestra el badge "Sin pareja" (no "Transferencia")', () => {
-    const orphan = makeTx({
+  it('una transferencia SIN pareja muestra "Transferencia" (ADR-0005: el par ya no es obligatorio)', () => {
+    // Antes se marcaba "Sin pareja" (estado de aviso). Con `flow` como fuente
+    // de verdad, una transferencia sin emparejar es un estado normal, no un
+    // error → un único badge "Transferencia".
+    const unpaired = makeTx({
       category_id: 'cat-income', // is_transfer: true en las categorías del test
       transfer_pair_id: null,
       is_debt_pair: false,
     });
     render(
-      <TransactionList items={[orphan]} categories={categories} onDelete={vi.fn()} />,
+      <TransactionList items={[unpaired]} categories={categories} onDelete={vi.fn()} />,
     );
-    expect(screen.getByText('Sin pareja')).toBeDefined();
-    expect(screen.queryByText('Transferencia')).toBeNull();
+    expect(screen.getByText('Transferencia')).toBeDefined();
+    expect(screen.queryByText('Sin pareja')).toBeNull();
     expect(screen.queryByText('Deuda')).toBeNull();
   });
 

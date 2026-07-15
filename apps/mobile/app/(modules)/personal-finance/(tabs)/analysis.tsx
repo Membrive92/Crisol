@@ -196,11 +196,6 @@ export default function AnalysisScreen() {
                 <Text style={styles.headerButtonText}>Cuentas</Text>
               </Pressable>
             </Link>
-            <Link href="/(modules)/personal-finance/transfers" asChild>
-              <Pressable style={styles.headerButton}>
-                <Text style={styles.headerButtonText}>Transferencias</Text>
-              </Pressable>
-            </Link>
             <Pressable onPress={handleLogout} style={styles.logoutButton}>
               <Text style={styles.logoutText}>Salir</Text>
             </Pressable>

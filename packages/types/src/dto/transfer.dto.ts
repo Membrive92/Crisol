@@ -3,16 +3,6 @@ export interface TransferLinkRequest {
   in_transaction_id: string;
 }
 
-export interface TransferMatchOptions {
-  /** Tolerancia (en días) entre `occurred_at` de salida y entrada. 0..14. */
-  window_days?: number;
-}
-
-/** PHASE-23.1: marcar una tx como transferencia interna (is_transfer). */
-export interface TransferMarkRequest {
-  transaction_id: string;
-}
-
 /**
  * PHASE-23.1: convertir una tx en transferencia interna marcando
  * explícitamente la cuenta **ordenante** (de la que sale el dinero)

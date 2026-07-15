@@ -1,42 +1,21 @@
 import type {
   MisclassifiedTransfer,
   ReclassifyBulkResponse,
-  TransferCandidate,
   TransferFromSourceDebtRequest,
   TransferFromSourceRequest,
   TransferLinkRequest,
-  TransferMarkRequest,
-  TransferMarkResponse,
-  TransferMatchOptions,
-  TransferMatchResponse,
   TransferPair,
-  TransferSuspect,
 } from '@crisol/types';
 
 import { apiClient } from '../client';
 
+// PHASE-41 (ADR-0005) — retirado el emparejado heurístico (list/candidates/
+// match/suspects/mark). La verdad del dinero vive en `transactions.flow`, así
+// que esa maquinaria ya no corrige nada. Se conserva: `link`/`unlink`
+// (load-bearing del asistente de pago de deuda + deshacer desde la lista),
+// `fromSource`/`fromSourceDebt` (convertir tx en transferencia/deuda desde el
+// detalle) y `misclassified`/`reclassifyBulk` (data-hygiene en Transacciones).
 export const transfersApi = {
-  async list(): Promise<TransferPair[]> {
-    const response = await apiClient.get<TransferPair[]>('/transfers');
-    return response.data;
-  },
-
-  async candidates(windowDays = 3): Promise<TransferCandidate[]> {
-    const response = await apiClient.get<TransferCandidate[]>(
-      '/transfers/candidates',
-      { params: { window_days: windowDays } },
-    );
-    return response.data;
-  },
-
-  async match(options: TransferMatchOptions = {}): Promise<TransferMatchResponse> {
-    const response = await apiClient.post<TransferMatchResponse>(
-      '/transfers/match',
-      options,
-    );
-    return response.data;
-  },
-
   async link(payload: TransferLinkRequest): Promise<TransferPair> {
     const response = await apiClient.post<TransferPair>(
       '/transfers/link',
@@ -47,21 +26,6 @@ export const transfersApi = {
 
   async unlink(transactionId: string): Promise<void> {
     await apiClient.delete(`/transfers/${transactionId}`);
-  },
-
-  async suspects(): Promise<TransferSuspect[]> {
-    const response = await apiClient.get<TransferSuspect[]>(
-      '/transfers/suspects',
-    );
-    return response.data;
-  },
-
-  async mark(payload: TransferMarkRequest): Promise<TransferMarkResponse> {
-    const response = await apiClient.post<TransferMarkResponse>(
-      '/transfers/mark',
-      payload,
-    );
-    return response.data;
   },
 
   async fromSource(payload: TransferFromSourceRequest): Promise<TransferPair> {
