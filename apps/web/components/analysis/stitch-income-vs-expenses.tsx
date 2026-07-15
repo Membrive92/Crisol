@@ -38,6 +38,12 @@ export interface StitchIncomeVsExpensesProps {
    */
   period?: PeriodKey;
   anchorMonth?: string;
+  /**
+   * Al hacer clic en un mes del chart, se invoca con su `YYYY-MM` para que el
+   * caller navegue a ese mes (fija el mes ancla + período mensual). Sin este
+   * prop, el chart no es clicable.
+   */
+  onSelectMonth?: (month: string) => void;
 }
 
 /** Meses (1-12) que caen dentro del período que contiene `anchorMonth`. */
@@ -70,6 +76,7 @@ export function StitchIncomeVsExpenses({
   isLoading,
   period,
   anchorMonth,
+  onSelectMonth,
 }: StitchIncomeVsExpensesProps) {
   // Sólo atenuamos cuando el período es Mes/Trimestre (Año resalta los 12).
   const highlight = period != null && anchorMonth != null && period !== 'year';
@@ -91,6 +98,19 @@ export function StitchIncomeVsExpenses({
   const dim = (row: ChartRow) => (highlight && !row.active ? 0.22 : 1);
   const periodCaption =
     highlight && period != null ? `Resaltado: ${PERIOD_NAMES[period]} navegado` : null;
+  // Con período navegado mostramos el resaltado; en año (sin resaltado) y si el
+  // chart es clicable, invitamos a hacer clic en un mes.
+  const caption = periodCaption ?? (onSelectMonth ? 'Haz clic en un mes' : null);
+
+  // Clic en una barra → navegar a ese mes. Usamos el ÍNDICE del dato (fiable,
+  // igual que el donut) en vez del `activePayload` del chart, que no siempre
+  // llega poblado. Ignoramos meses sin datos (columnas vacías de meses futuros).
+  function handleBarClick(index: number): void {
+    if (!onSelectMonth) return;
+    const row = chartData[index];
+    if (!row || (row.income === 0 && row.expenses === 0)) return;
+    onSelectMonth(row.month);
+  }
 
   return (
     <Card style={{ padding: spacing.lg }}>
@@ -103,7 +123,7 @@ export function StitchIncomeVsExpenses({
         }}
       >
         <CardTitle>Ingresos vs Gastos</CardTitle>
-        {periodCaption ? (
+        {caption ? (
           <span
             style={{
               fontSize: fontSize.xs,
@@ -111,7 +131,7 @@ export function StitchIncomeVsExpenses({
               fontWeight: fontWeight.medium,
             }}
           >
-            {periodCaption}
+            {caption}
           </span>
         ) : null}
       </header>
@@ -127,6 +147,7 @@ export function StitchIncomeVsExpenses({
             margin={{ top: 8, right: 8, bottom: 0, left: 8 }}
             barCategoryGap="20%"
             barGap={2}
+            {...(onSelectMonth ? { style: { cursor: 'pointer' } } : {})}
           >
             <CartesianGrid strokeDasharray="3 3" stroke={colors.border} vertical={false} />
             <XAxis
@@ -179,6 +200,7 @@ export function StitchIncomeVsExpenses({
               fill={colors.success}
               radius={[3, 3, 0, 0]}
               animationDuration={400}
+              onClick={(_, index) => handleBarClick(index)}
             >
               {chartData.map((row) => (
                 <Cell key={`inc-${row.month}`} fillOpacity={dim(row)} />
@@ -190,6 +212,7 @@ export function StitchIncomeVsExpenses({
               fill={colors.danger}
               radius={[3, 3, 0, 0]}
               animationDuration={400}
+              onClick={(_, index) => handleBarClick(index)}
             >
               {chartData.map((row) => (
                 <Cell key={`exp-${row.month}`} fillOpacity={dim(row)} />

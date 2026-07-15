@@ -40,12 +40,18 @@ export interface FieldProps {
   error?: string | undefined;
   /** Texto de ayuda que se muestra bajo el control. */
   hint?: string | undefined;
+  /**
+   * Sin margen inferior. Para campos colocados en una fila inline junto a
+   * un botón (`alignItems: flex-end`): el margen del campo desalinearía el
+   * botón, que quedaría por debajo del control.
+   */
+  dense?: boolean | undefined;
   children: ReactNode;
 }
 
-export function Field({ label, error, hint, children }: FieldProps) {
+export function Field({ label, error, hint, dense, children }: FieldProps) {
   return (
-    <label style={{ display: 'block', marginBottom: spacing.md }}>
+    <label style={{ display: 'block', marginBottom: dense ? 0 : spacing.md }}>
       <span style={labelStyle}>{label}</span>
       {children}
       {hint ? <div style={hintStyle}>{hint}</div> : null}
@@ -58,11 +64,12 @@ export interface TextInputProps extends InputHTMLAttributes<HTMLInputElement> {
   label: string;
   error?: string | undefined;
   hint?: string | undefined;
+  dense?: boolean | undefined;
 }
 
-export function TextInput({ label, error, hint, style, ...rest }: TextInputProps) {
+export function TextInput({ label, error, hint, dense, style, ...rest }: TextInputProps) {
   return (
-    <Field label={label} error={error} hint={hint}>
+    <Field label={label} error={error} hint={hint} dense={dense}>
       <input {...rest} style={{ ...controlStyle, ...style }} />
     </Field>
   );
@@ -84,12 +91,13 @@ export function TextArea({ label, error, style, ...rest }: TextAreaProps) {
 export interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   label: string;
   error?: string | undefined;
+  dense?: boolean | undefined;
   children: ReactNode;
 }
 
-export function Select({ label, error, children, style, ...rest }: SelectProps) {
+export function Select({ label, error, dense, children, style, ...rest }: SelectProps) {
   return (
-    <Field label={label} error={error}>
+    <Field label={label} error={error} dense={dense}>
       <select {...rest} style={{ ...controlStyle, ...style }}>
         {children}
       </select>

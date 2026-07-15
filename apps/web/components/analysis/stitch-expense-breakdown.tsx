@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
 
 import type { AnalyticsCategoryAmount, CategoryBreakdownItem } from '@crisol/types';
@@ -18,19 +18,25 @@ export interface StitchExpenseBreakdownProps {
   items: CategoryBreakdownItem[];
   currency: string;
   isLoading: boolean;
-  topN?: number | undefined;
+  /**
+   * Rango del periodo activo (ISO). Se propaga al drill-down de categoría vía
+   * query `?from&to` para que el detalle herede el MISMO periodo (mes/trimestre)
+   * en vez de caer a su default anual.
+   */
+  dateFrom?: string | undefined;
+  dateTo?: string | undefined;
   /**
    * PHASE-37.3 — gasto puntual por categoría. Cuando se pasa, se habilita
-   * el control `[Todo | Estructural | Puntual]`: "Puntual" usa esta lista y
-   * "Estructural" se deriva restándola del total por categoría.
+   * el control `[Todo | Fijo | Variable]`: "Variable" (excepcional) usa esta
+   * lista y "Fijo" (estructural) se deriva restándola del total por categoría.
    */
   exceptionalByCategory?: AnalyticsCategoryAmount[] | undefined;
 }
 
 const STRUCTURE_LABELS: Record<StructureFilter, string> = {
   all: 'Todo',
-  structural: 'Estructural',
-  exceptional: 'Puntual',
+  structural: 'Fijo',
+  exceptional: 'Variable',
 };
 
 /** Clave de emparejamiento entre datasets: id real o el bucket sin categoría. */
@@ -86,27 +92,45 @@ interface Slice {
   categoryId: string | null;
   /** PHASE-25: categorías agregadas dentro del "Otros" — null si no es Otros. */
   groupedItems: CategoryBreakdownItem[] | null;
+  /**
+   * Id del slice del DONUT al que pertenece esta entrada de la leyenda: su
+   * propio id si está en el top-N, o `'_other'` si cae en la cola agrupada.
+   * Sincroniza el hover leyenda↔donut cuando ambos están desacoplados (la
+   * leyenda lista todas las categorías, el donut agrupa la cola).
+   */
+  donutId: string;
 }
 
 /**
- * Donut de gastos por categoría — Recharts (PHASE-18.1). Top N + "Otros"
- * agrupado, leyenda lateral con icono + amount + porcentaje, centro con
- * el total. Hover resalta el slice y aumenta su radio.
+ * Donut de gastos por categoría — Recharts (PHASE-18.1). Donut y LEYENDA
+ * muestran el MISMO conjunto: TODAS las categorías individualmente (sin agrupar
+ * en "Otros", que confundía al aparecer en el donut pero no en la lista). La
+ * leyenda las reparte en columnas para llenar la card. Centro con el total; el
+ * hover sincroniza donut↔fila 1:1 vía `donutId`.
  */
 export function StitchExpenseBreakdown({
   items,
   currency,
   isLoading,
-  // PHASE-37.2 — top-6 (antes 5): el "Otros" agrupaba demasiadas categorías
-  // (la queja era "Otros (39%)"). La fila "Otros (n)" sigue siendo clicable
-  // para desplegar la lista completa inline (`otherExpanded`).
-  topN = 6,
   exceptionalByCategory,
+  dateFrom,
+  dateTo,
 }: StitchExpenseBreakdownProps) {
   const router = useRouter();
+  // `activeId` = slice del DONUT resaltado (dim del donut + centro).
+  // `hoveredLegendId` = fila CONCRETA de la leyenda bajo el cursor. Se separan
+  // porque las categorías de la cola comparten `donutId='_other'`: si el
+  // resaltado de la fila usara `donutId`, pasar por una encendería todas.
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [otherExpanded, setOtherExpanded] = useState(false);
+  const [hoveredLegendId, setHoveredLegendId] = useState<string | null>(null);
   const [filter, setFilter] = useState<StructureFilter>('all');
+  // Paginación SÓLO de la leyenda (el donut nunca se pagina).
+  const [page, setPage] = useState(0);
+  // Al cambiar de filtro cambia el nº de categorías → a la primera página para
+  // no quedar en una página inexistente.
+  useEffect(() => {
+    setPage(0);
+  }, [filter]);
 
   const canFilter = exceptionalByCategory != null;
   const exceptionalItems = useMemo(
@@ -126,55 +150,62 @@ export function StitchExpenseBreakdown({
 
   const sorted = [...displayItems].sort((a, b) => Number(b.total) - Number(a.total));
   const total = sorted.reduce((acc, x) => acc + Number(x.total), 0);
-  // Si el usuario ha desplegado "Otros", mostramos TODAS las categorías
-  // y se omite el bucket agrupado. Si no, top N + Otros (PHASE-25).
-  const top = otherExpanded ? sorted : sorted.slice(0, topN);
-  const rest = otherExpanded ? [] : sorted.slice(topN);
-  const restTotal = rest.reduce((acc, x) => acc + Number(x.total), 0);
   const empty = !isLoading && total === 0;
 
-  const slices: Slice[] = [
-    ...top.map((item, idx) => ({
-      id: item.category_id ?? `_no_cat_${item.category_name}`,
-      label: item.category_name,
-      value: Number(item.total),
-      color:
-        item.category_color ??
-        SLICE_PALETTE[idx % SLICE_PALETTE.length] ??
-        colors.primary,
-      emoji: item.category_icon,
-      pct: total > 0 ? (Number(item.total) / total) * 100 : 0,
-      isOther: false,
-      categoryId: item.category_id,
-      groupedItems: null,
-    })),
-  ];
-  if (rest.length > 0) {
-    slices.push({
-      id: '_other',
-      label: `Otros (${rest.length})`,
-      value: restTotal,
-      color: colors.borderStrong,
-      emoji: null,
-      pct: total > 0 ? (restTotal / total) * 100 : 0,
-      isOther: true,
-      categoryId: null,
-      groupedItems: rest,
-    });
-  }
+  const sliceId = (item: CategoryBreakdownItem): string =>
+    item.category_id ?? `_no_cat_${item.category_name}`;
+  const sliceColor = (item: CategoryBreakdownItem, idx: number): string =>
+    item.category_color ?? SLICE_PALETTE[idx % SLICE_PALETTE.length] ?? colors.primary;
+
+  // TODAS las categorías individualmente, MISMO conjunto en donut y leyenda
+  // (coherentes: si la leyenda las lista todas, el donut también, sin un "Otros"
+  // que luego no aparezca en la lista). `donutId` = id propio → el hover
+  // sincroniza donut↔fila 1:1.
+  const allSlices: Slice[] = sorted.map((item, idx) => ({
+    id: sliceId(item),
+    label: item.category_name,
+    value: Number(item.total),
+    color: sliceColor(item, idx),
+    emoji: item.category_icon,
+    pct: total > 0 ? (Number(item.total) / total) * 100 : 0,
+    isOther: false,
+    categoryId: item.category_id,
+    groupedItems: null,
+    donutId: sliceId(item),
+  }));
+  const donutSlices = allSlices;
+  const legendItems = allSlices;
+
+  // Paginación SÓLO de la leyenda (el donut nunca se pagina). Umbral alto: con
+  // la card ancha casi todos ven todas sus categorías de una vez; el pager es el
+  // fallback para catálogos enormes (>40).
+  const LEGEND_PAGE_SIZE = 40;
+  const pageCount = Math.max(1, Math.ceil(legendItems.length / LEGEND_PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const legendSlices =
+    pageCount > 1
+      ? legendItems.slice(currentPage * LEGEND_PAGE_SIZE, (currentPage + 1) * LEGEND_PAGE_SIZE)
+      : legendItems;
 
   function handleSliceClick(slice: Slice) {
-    if (slice.isOther) {
-      setOtherExpanded(true);
-      return;
-    }
+    // La porción "Otros" del donut ya no expande nada: la leyenda lista todas
+    // las categorías individualmente, así que no hay lista oculta que desplegar.
+    if (slice.isOther) return;
     if (slice.categoryId) {
-      router.push(`/personal-finance/analysis/category/${slice.categoryId}` as never);
+      // Propaga el periodo activo para que el drill-down herede el mismo
+      // rango (mes/trimestre/año) en vez de su default anual.
+      const params = new URLSearchParams();
+      if (dateFrom) params.set('from', dateFrom);
+      if (dateTo) params.set('to', dateTo);
+      const qs = params.toString();
+      router.push(
+        `/personal-finance/analysis/category/${slice.categoryId}${qs ? `?${qs}` : ''}` as never,
+      );
     }
   }
 
   return (
-    <Card style={{ padding: spacing.lg }}>
+    <Card style={{ padding: spacing.lg, display: 'flex', flexDirection: 'column' }}>
       <header
         style={{
           display: 'flex',
@@ -197,7 +228,7 @@ export function StitchExpenseBreakdown({
           <StructureSegmented value={filter} onChange={setFilter} />
         ) : (
           <span style={{ fontSize: fontSize.xs, color: colors.textMuted }}>
-            {slices.length} {slices.length === 1 ? 'categoría' : 'categorías'}
+            {sorted.length} {sorted.length === 1 ? 'categoría' : 'categorías'}
           </span>
         )}
       </header>
@@ -205,45 +236,61 @@ export function StitchExpenseBreakdown({
       {empty ? (
         <p style={{ margin: 0, fontSize: fontSize.sm, color: colors.textMuted }}>
           {filter === 'exceptional'
-            ? 'Sin gastos puntuales en el periodo.'
+            ? 'Sin gastos variables en el periodo.'
             : filter === 'structural'
-              ? 'Sin gastos estructurales en el periodo.'
+              ? 'Sin gastos fijos en el periodo.'
               : 'Sin gastos en el periodo.'}
         </p>
       ) : (
         <div
           style={{
+            // Masonry: el cuerpo (donut + leyenda) toma su altura de contenido,
+            // top-aligned. La card ya no se estira a la de deuda.
             display: 'flex',
             gap: spacing.lg,
-            alignItems: 'center',
+            alignItems: 'flex-start',
             flexWrap: 'wrap',
           }}
         >
-          <div style={{ position: 'relative', width: 220, height: 220, flex: '0 0 auto' }}>
+          <div
+            style={{
+              position: 'relative',
+              width: 220,
+              height: 220,
+              flex: '0 0 auto',
+            }}
+          >
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
-                  data={slices}
+                  data={donutSlices}
                   dataKey="value"
                   nameKey="label"
                   cx="50%"
                   cy="50%"
                   innerRadius={62}
                   outerRadius={92}
-                  paddingAngle={2}
+                  // Sin paddingAngle: con muchas porciones las minúsculas serían
+                  // más pequeñas que el padding y Recharts dejaría huecos (el
+                  // donut "no cerraba"). `minAngle` garantiza que TODA categoría
+                  // no-cero pinte un mínimo visible (el tooltip mantiene el valor
+                  // real); así ninguna se queda sin dibujar. Separación por el
+                  // `stroke` fino de 1px.
+                  paddingAngle={0}
+                  minAngle={3}
                   isAnimationActive
                   animationDuration={500}
-                  onMouseEnter={(_, idx) => setActiveId(slices[idx]?.id ?? null)}
+                  onMouseEnter={(_, idx) => setActiveId(donutSlices[idx]?.id ?? null)}
                   onMouseLeave={() => setActiveId(null)}
                   onClick={(_, idx) => {
-                    const s = slices[idx];
+                    const s = donutSlices[idx];
                     if (s) handleSliceClick(s);
                   }}
                   cursor="pointer"
                   stroke={colors.surface}
-                  strokeWidth={2}
+                  strokeWidth={1}
                 >
-                  {slices.map((s) => (
+                  {donutSlices.map((s) => (
                     <Cell
                       key={s.id}
                       fill={s.color}
@@ -273,7 +320,7 @@ export function StitchExpenseBreakdown({
                   para evitar el salto duro. */}
               <DonutCenter
                 activeSlice={
-                  activeId ? slices.find((s) => s.id === activeId) ?? null : null
+                  activeId ? donutSlices.find((s) => s.id === activeId) ?? null : null
                 }
                 total={total}
                 currency={currency}
@@ -281,31 +328,112 @@ export function StitchExpenseBreakdown({
             </div>
           </div>
 
-          <ul
-            style={{
-              flex: '1 1 220px',
-              listStyle: 'none',
-              margin: 0,
-              padding: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: spacing.sm,
-            }}
-          >
-            {slices.map((s) => (
-              <LegendRow
-                key={s.id}
-                slice={s}
-                currency={currency}
-                hovered={activeId === s.id}
-                onHover={(hovered) => setActiveId(hovered ? s.id : null)}
-                onClick={() => handleSliceClick(s)}
+          <div style={{ flex: '1 1 320px', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+            <ul
+              style={{
+                listStyle: 'none',
+                margin: 0,
+                padding: 0,
+                // Multi-columna: fluye las categorías en 1-3 columnas según el
+                // ancho disponible (aprovecha el espacio en vez de una única
+                // columna larguísima).
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+                columnGap: spacing.md,
+                // Espaciado cómodo y fijo entre filas; la lista toma su altura de
+                // contenido (masonry) — sin repartir sobre un alto forzado.
+                rowGap: spacing.md,
+              }}
+            >
+              {legendSlices.map((s) => (
+                <LegendRow
+                  key={s.id}
+                  slice={s}
+                  currency={currency}
+                  // Resaltado por `donutId`: al pasar por una fila de la cola se
+                  // resalta la porción "Otros" del donut (y todas sus hermanas);
+                  // al pasar por el donut, la porción resalta sus filas.
+                  hovered={hoveredLegendId === s.id}
+                  onHover={(hovered) => {
+                    setHoveredLegendId(hovered ? s.id : null);
+                    setActiveId(hovered ? s.donutId : null);
+                  }}
+                  onClick={() => handleSliceClick(s)}
+                />
+              ))}
+            </ul>
+            {pageCount > 1 ? (
+              <LegendPager
+                page={currentPage}
+                pageCount={pageCount}
+                onPage={(next) => setPage(next)}
               />
-            ))}
-          </ul>
+            ) : null}
+          </div>
         </div>
       )}
     </Card>
+  );
+}
+
+/** Pager de la leyenda (client-side). No afecta al donut. */
+function LegendPager({
+  page,
+  pageCount,
+  onPage,
+}: {
+  page: number;
+  pageCount: number;
+  onPage: (next: number) => void;
+}) {
+  const btnStyle = (disabled: boolean) => ({
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 28,
+    height: 28,
+    borderRadius: radius.sm,
+    border: `1px solid ${colors.border}`,
+    backgroundColor: colors.surface,
+    color: disabled ? colors.textSubtle : colors.text,
+    cursor: disabled ? 'default' : 'pointer',
+    fontSize: fontSize.md,
+    lineHeight: 1,
+  });
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: spacing.sm,
+        marginTop: spacing.md,
+      }}
+    >
+      <button
+        type="button"
+        aria-label="Página anterior"
+        disabled={page === 0}
+        onClick={() => onPage(Math.max(0, page - 1))}
+        style={btnStyle(page === 0)}
+      >
+        ‹
+      </button>
+      <span
+        style={{ fontSize: fontSize.xs, color: colors.textMuted, fontVariantNumeric: 'tabular-nums' }}
+      >
+        Página {page + 1} de {pageCount}
+      </span>
+      <button
+        type="button"
+        aria-label="Página siguiente"
+        disabled={page >= pageCount - 1}
+        onClick={() => onPage(Math.min(pageCount - 1, page + 1))}
+        style={btnStyle(page >= pageCount - 1)}
+      >
+        ›
+      </button>
+    </div>
   );
 }
 
@@ -495,9 +623,11 @@ function LegendRow({
           fontSize: fontSize.sm,
           fontWeight: fontWeight.medium,
           color: slice.isOther ? colors.textMuted : colors.text,
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
+          // Sin truncado: si el nombre no cabe, envuelve en 2 líneas en vez de
+          // cortarse con "…" (preferencia del usuario: paginar/envolver >
+          // truncar). `overflowWrap` parte palabras muy largas si hace falta.
+          lineHeight: 1.25,
+          overflowWrap: 'anywhere',
         }}
       >
         {slice.label}

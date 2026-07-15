@@ -34,23 +34,28 @@ export default function NewTransactionPage() {
   }
 
   return (
-    <div style={{ maxWidth: layout.pageNarrow, margin: '0 auto', padding: spacing.lg }}>
+    <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
       <h1 style={{ fontSize: fontSize.xl, color: colors.text, marginBottom: spacing.lg }}>
         Nueva transacción
       </h1>
-      <Card>
-        <TransactionForm
-          submitLabel="Crear"
-          submitting={mutation.isPending}
-          onSubmit={(payload) => handleSubmit(payload as TransactionCreateRequest)}
-          onCancel={() => router.back()}
-        />
-        {mutation.isError ? (
-          <p style={{ color: colors.danger, marginTop: spacing.sm }}>
-            {mutation.error instanceof Error ? mutation.error.message : 'Error al crear'}
-          </p>
-        ) : null}
-      </Card>
+      {/* Contenedor `pageWide` como el resto de vistas; el form se mantiene en
+          una columna de ancho legible anclada a la izquierda (mismo borde que
+          la columna del formulario en la edición). */}
+      <div style={{ maxWidth: layout.pageNarrow }}>
+        <Card>
+          <TransactionForm
+            submitLabel="Crear"
+            submitting={mutation.isPending}
+            onSubmit={(payload) => handleSubmit(payload as TransactionCreateRequest)}
+            onCancel={() => router.back()}
+          />
+          {mutation.isError ? (
+            <p style={{ color: colors.danger, marginTop: spacing.sm }}>
+              {mutation.error instanceof Error ? mutation.error.message : 'Error al crear'}
+            </p>
+          ) : null}
+        </Card>
+      </div>
     </div>
   );
 }

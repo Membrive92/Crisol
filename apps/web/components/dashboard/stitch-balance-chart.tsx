@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import {
   Bar,
   BarChart,
@@ -20,9 +20,9 @@ import { Card } from '@/components/ui/card';
 
 const SPANISH_MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
-type RangeKey = '6M' | '1Y' | 'ALL';
-
 export interface StitchBalanceChartProps {
+  /** Buckets mensuales YA acotados al periodo navegado por el caller (el
+   * dashboard filtra por rango). El chart sólo los pinta. */
   data: MonthlyBucket[];
   currency: string;
   isLoading: boolean;
@@ -42,17 +42,12 @@ interface ChartRow {
  * 6M/1Y/ALL filtra el rango.
  */
 export function StitchBalanceChart({ data, currency, isLoading }: StitchBalanceChartProps) {
-  const [range, setRange] = useState<RangeKey>('1Y');
-
-  const monthsToShow = range === '6M' ? 6 : 12;
-  const filtered = range === 'ALL' ? data : data.slice(-monthsToShow);
-
   const currentMonthIso = useMemo(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   }, []);
 
-  const chartData: ChartRow[] = filtered.map((b) => {
+  const chartData: ChartRow[] = data.map((b) => {
     const monthIdx = parseInt(b.month.slice(5, 7), 10) - 1;
     return {
       month: b.month,
@@ -62,7 +57,7 @@ export function StitchBalanceChart({ data, currency, isLoading }: StitchBalanceC
     };
   });
 
-  const empty = !isLoading && filtered.every((b) => Number(b.balance) === 0);
+  const empty = !isLoading && data.every((b) => Number(b.balance) === 0);
 
   return (
     <Card style={{ padding: spacing.lg, display: 'flex', flexDirection: 'column' }}>
@@ -87,10 +82,9 @@ export function StitchBalanceChart({ data, currency, isLoading }: StitchBalanceC
             Evolución del balance
           </h2>
           <p style={{ margin: 0, marginTop: 4, fontSize: fontSize.xs, color: colors.textMuted }}>
-            Saldo neto por mes ({range === '6M' ? 'últimos 6 meses' : range === '1Y' ? 'año actual' : 'todo el histórico'})
+            Saldo neto por mes del periodo seleccionado
           </p>
         </div>
-        <RangeToggle value={range} onChange={setRange} />
       </header>
 
       {empty ? (
@@ -196,51 +190,6 @@ function BalanceTooltip({ row, currency }: { row: ChartRow; currency: string }) 
       >
         {formatAmount(String(row.balance.toFixed(2)), currency)}
       </div>
-    </div>
-  );
-}
-
-function RangeToggle({
-  value,
-  onChange,
-}: {
-  value: RangeKey;
-  onChange: (next: RangeKey) => void;
-}) {
-  return (
-    <div
-      style={{
-        display: 'inline-flex',
-        backgroundColor: colors.surfaceMuted,
-        padding: 2,
-        borderRadius: radius.md,
-        border: `1px solid ${colors.border}`,
-      }}
-    >
-      {(['6M', '1Y', 'ALL'] as RangeKey[]).map((opt) => {
-        const active = opt === value;
-        return (
-          <button
-            key={opt}
-            type="button"
-            onClick={() => onChange(opt)}
-            style={{
-              padding: `4px 10px`,
-              backgroundColor: active ? colors.surface : 'transparent',
-              color: active ? colors.text : colors.textMuted,
-              border: active ? `1px solid ${colors.border}` : '1px solid transparent',
-              borderRadius: radius.sm,
-              fontSize: 11,
-              fontWeight: fontWeight.semibold,
-              cursor: 'pointer',
-              letterSpacing: '0.04em',
-              minWidth: 36,
-            }}
-          >
-            {opt}
-          </button>
-        );
-      })}
     </div>
   );
 }

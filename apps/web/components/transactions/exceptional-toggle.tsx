@@ -3,7 +3,11 @@
 import { colors, fontSize, fontWeight, radius } from '@crisol/ui';
 
 export interface ExceptionalToggleProps {
-  /** `null` = automático (heurística), `false` = estructural, `true` = puntual. */
+  /**
+   * `null` = automático (heurística), `false` = fijo (recurrente),
+   * `true` = variable (irregular / puntual). El valor interno sigue siendo
+   * `is_exceptional`; sólo cambia la etiqueta a lenguaje financiero.
+   */
   value: boolean | null;
   pending: boolean;
   onChange: (next: boolean | null) => void;
@@ -11,15 +15,16 @@ export interface ExceptionalToggleProps {
 
 const OPTIONS: { key: string; label: string; val: boolean | null; hint: string }[] = [
   { key: 'auto', label: 'Automático', val: null, hint: 'Decide la heurística' },
-  { key: 'structural', label: 'Estructural', val: false, hint: 'Gasto recurrente' },
-  { key: 'exceptional', label: 'Puntual', val: true, hint: 'Gasto one-off' },
+  { key: 'fixed', label: 'Fijo', val: false, hint: 'Gasto recurrente y predecible' },
+  { key: 'variable', label: 'Variable', val: true, hint: 'Gasto irregular / puntual' },
 ];
 
 /**
- * Control tri-estado de la clasificación estructural/puntual del gasto
- * (PHASE-37.3): Automático (`null`) · Estructural (`false`) · Puntual (`true`).
- * El estado activo se deshabilita para no reenviar el mismo valor; `pending`
- * bloquea todo el grupo durante la mutación.
+ * Control tri-estado de la clasificación del gasto (PHASE-37.3): Automático
+ * (`null`) · Fijo (`false`) · Variable (`true`). El valor persiste como
+ * `is_exceptional` (variable = excepcional); sólo la etiqueta usa lenguaje
+ * financiero. El estado activo se deshabilita para no reenviar el mismo
+ * valor; `pending` bloquea todo el grupo durante la mutación.
  */
 export function ExceptionalToggle({ value, pending, onChange }: ExceptionalToggleProps) {
   return (

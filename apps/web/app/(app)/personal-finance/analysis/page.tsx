@@ -33,7 +33,6 @@ import {
 } from '@/components/analysis/stitch-period-toggle';
 import { StitchSmartInsights } from '@/components/analysis/stitch-smart-insights';
 import { PeriodNavigator } from '@/components/debt/period-navigator';
-import { Card } from '@/components/ui/card';
 import { ErrorState } from '@/components/ui/error-state';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -153,8 +152,6 @@ export default function AnalysisPage() {
     savingsStructuralPct != null && savingsRate != null
       ? savingsStructuralPct - savingsRate
       : null;
-
-  const monthlyNets = monthly.map((m) => Number(m.income) - Number(m.expenses));
 
   const hasError =
     summaryQuery.isError || monthlyQuery.isError || expensesByCategoryQuery.isError;
@@ -283,7 +280,7 @@ export default function AnalysisPage() {
             deltaText={savingsDeltaPp != null ? `${savingsDeltaPp >= 0 ? '+' : ''}${savingsDeltaPp.toFixed(1)} pp` : undefined}
             subtitle={
               savingsStructuralPct != null
-                ? `Estructural ${savingsStructuralPct.toFixed(0)} %`
+                ? `Solo fijos ${savingsStructuralPct.toFixed(0)} %`
                 : 'vs periodo anterior'
             }
             badge={
@@ -293,7 +290,7 @@ export default function AnalysisPage() {
             }
             title={
               savingsStructuralPct != null
-                ? `Excluyendo gastos puntuales (impuestos, one-offs), tu tasa de ahorro sería ${savingsStructuralPct.toFixed(0)} %.`
+                ? `Excluyendo gastos variables (impuestos, puntuales), tu tasa de ahorro sería ${savingsStructuralPct.toFixed(0)} %.`
                 : undefined
             }
           />
@@ -315,6 +312,10 @@ export default function AnalysisPage() {
           isLoading={monthlyQuery.isLoading}
           period={period}
           anchorMonth={anchorMonth}
+          onSelectMonth={(month) => {
+            setAnchorMonth(month);
+            setPeriod('month');
+          }}
         />
         <NetworthEvolutionCard
           points={position?.points ?? []}
@@ -323,11 +324,16 @@ export default function AnalysisPage() {
         />
       </div>
 
-      {/* Fila 2: Desglose de gastos + Deuda (resumen). */}
+      {/* Desglose de gastos y Deuda, cada uno a ANCHO COMPLETO y apilados. Iban
+          emparejados (8/4) pero la card de deuda es intrínsecamente más alta (su
+          número + KPIs ya miden casi como toda la card de desglose), así que
+          nunca cuadraban de altura. A ancho completo, cada una reparte su
+          contenido en varias columnas (categorías / movimientos) y queda corta,
+          sin desajuste. */}
       <div
         style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0, 7fr) minmax(0, 5fr)',
+          display: 'flex',
+          flexDirection: 'column',
           gap: spacing.md,
           marginBottom: spacing.md,
         }}
@@ -337,15 +343,17 @@ export default function AnalysisPage() {
           currency={currency}
           isLoading={expensesByCategoryQuery.isLoading}
           exceptionalByCategory={structure?.exceptional_by_category}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
         />
-        <DebtSummaryCard />
+        <DebtSummaryCard dateFrom={dateFrom} dateTo={dateTo} />
       </div>
 
-      {/* Fila 3: Flujo neto mensual + Fin de mes (outlook) + Smart Insights. */}
+      {/* Fila 3: Fin de mes (outlook) + Smart Insights. */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+          gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
           gap: spacing.md,
           marginBottom: spacing.md,
         }}
@@ -355,28 +363,6 @@ export default function AnalysisPage() {
           currency={refCurrency}
           isLoading={outlookQuery.isLoading}
         />
-        <Card style={{ padding: spacing.lg }}>
-          <h3
-            style={{
-              margin: `0 0 ${spacing.sm}px 0`,
-              fontSize: fontSize.md,
-              fontWeight: fontWeight.semibold,
-              color: colors.text,
-            }}
-          >
-            Flujo neto mensual
-          </h3>
-          {monthlyNets.length >= 2 ? (
-            <MiniSparkline
-              values={monthlyNets}
-              up={(monthlyNets[monthlyNets.length - 1] ?? 0) >= 0}
-            />
-          ) : (
-            <p style={{ margin: 0, fontSize: fontSize.sm, color: colors.textMuted }}>
-              Necesitas al menos 2 meses con datos.
-            </p>
-          )}
-        </Card>
         <StitchSmartInsights
           summary={summary}
           expensesByCategory={expensesByCategory}

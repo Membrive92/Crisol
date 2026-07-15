@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 
 import {
+  useAccountBalances,
   useDashboardByCategory,
   useDashboardByMonth,
   useDashboardSummary,
@@ -11,11 +12,8 @@ import {
 import { useCurrencyStore } from '@crisol/store';
 import { colors, fontSize, fontWeight, layout, spacing } from '@crisol/ui';
 
-import {
-  StitchPeriodToggle,
-  rangeForPeriod,
-  type PeriodKey,
-} from '@/components/analysis/stitch-period-toggle';
+import { boundsForAnchor, type PeriodKey } from '@/components/analysis/stitch-period-toggle';
+import { PeriodNavigator } from '@/components/debt/period-navigator';
 import { StitchKpiRow } from '@/components/dashboard/stitch-kpi-row';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -31,10 +29,24 @@ import { StitchTipCard } from '@/components/dashboard/stitch-tip-card';
 export default function DashboardPage() {
   const currency = useCurrencyStore((s) => s.currency);
   const convertAll = useCurrencyStore((s) => s.convertAll);
+  // Toggle "incluir deuda en patrimonio" (menú de divisa del header): ON →
+  // net_worth (activos − deuda); OFF → sólo activos. El mismo que gobierna
+  // Análisis. Aquí alimenta el nuevo KPI de patrimonio.
+  const includeDebt = useCurrencyStore((s) => s.includeDebtInNetWorth);
+  const targetCurrency = convertAll ? currency : undefined;
   const [period, setPeriod] = useState<PeriodKey>('year');
+  // Navegación de periodo (mismo patrón que Análisis): el ancla es el mes
+  // contextual; las flechas del `PeriodNavigator` la mueven dentro de los datos.
+  const [anchorMonth, setAnchorMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
 
-  const { dateFrom, dateTo } = useMemo(() => rangeForPeriod(period), [period]);
-  const currentYear = new Date().getFullYear();
+  const { dateFrom, dateTo } = useMemo(
+    () => boundsForAnchor(period, anchorMonth),
+    [period, anchorMonth],
+  );
+  const anchorYear = Number(anchorMonth.split('-')[0]);
 
   // PHASE-8.3: una sola petición por endpoint, el backend convierte
   // per-transaction usando la tasa del día de cada `occurred_at`.
@@ -43,9 +55,11 @@ export default function DashboardPage() {
   const summaryParams = convertAll
     ? { target_currency: currency, date_from: dateFrom, date_to: dateTo }
     : { currency, date_from: dateFrom, date_to: dateTo };
+  // El gráfico mensual sigue el AÑO ANCLADO (antes fijo a currentYear → no
+  // reaccionaba al periodo navegado).
   const monthlyParams = convertAll
-    ? { target_currency: currency, year: currentYear }
-    : { currency, year: currentYear };
+    ? { target_currency: currency, year: anchorYear }
+    : { currency, year: anchorYear };
   const byCategoryParams = convertAll
     ? {
         target_currency: currency,
@@ -58,9 +72,23 @@ export default function DashboardPage() {
   const summaryQuery = useDashboardSummary(summaryParams);
   const monthlyQuery = useDashboardByMonth(monthlyParams);
   const expensesByCategoryQuery = useDashboardByCategory(byCategoryParams);
+  // Patrimonio (stock, no depende del periodo — es una foto a fecha, igual
+  // que en Análisis). Alimenta el nuevo KPI + hace que el toggle del header
+  // tenga efecto aquí.
+  const balancesQuery = useAccountBalances(targetCurrency ? { targetCurrency } : {});
+  const balances = balancesQuery.data;
+  const netWorth = balances ? balances[includeDebt ? 'net_worth' : 'total_assets'] : null;
 
   const summary = summaryQuery.data;
   const monthly = monthlyQuery.data ?? [];
+  // El gráfico muestra SÓLO los meses del periodo navegado (Año=12, Trim=3,
+  // Mes=1). `monthly` trae los 12 del año anclado; filtramos por el rango
+  // `[dateFrom, dateTo]` comparando el `YYYY-MM` del bucket.
+  const chartMonths = useMemo(() => {
+    const fromYM = dateFrom.slice(0, 7);
+    const toYM = dateTo.slice(0, 7);
+    return monthly.filter((b) => b.month >= fromYM && b.month <= toYM);
+  }, [monthly, dateFrom, dateTo]);
   const byCategory = expensesByCategoryQuery.data ?? [];
   const anyError =
     summaryQuery.isError || monthlyQuery.isError || expensesByCategoryQuery.isError;
@@ -114,11 +142,24 @@ export default function DashboardPage() {
             </p>
           ) : null}
         </div>
-        <StitchPeriodToggle value={period} onChange={setPeriod} />
+        <PeriodNavigator
+          range={period}
+          onRangeChange={setPeriod}
+          anchor={anchorMonth}
+          onAnchorChange={setAnchorMonth}
+          availableFrom={summary?.available_from ?? null}
+          availableTo={summary?.available_to ?? null}
+        />
       </header>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg }}>
-        <StitchKpiRow summary={summary} isLoading={summaryQuery.isLoading} />
+        <StitchKpiRow
+          summary={summary}
+          isLoading={summaryQuery.isLoading}
+          netWorth={netWorth}
+          includeDebt={includeDebt}
+          netWorthLoading={balancesQuery.isLoading}
+        />
 
         <div
           style={{
@@ -130,7 +171,7 @@ export default function DashboardPage() {
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
             <StitchBalanceChart
-              data={monthly}
+              data={chartMonths}
               currency={currency}
               isLoading={monthlyQuery.isLoading}
             />

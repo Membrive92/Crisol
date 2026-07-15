@@ -12,20 +12,33 @@ import {
   MoreHorizontalIcon,
   TrendingDownIcon,
   TrendingUpIcon,
+  WalletIcon,
 } from '@/components/ui/icons';
 
 export interface StitchKpiRowProps {
   summary: DashboardSummary | undefined;
   isLoading: boolean;
+  /** PHASE — Patrimonio neto (stock). `net_worth` o `total_assets` según el
+   * toggle `includeDebtInNetWorth` del header. `null` mientras carga o sin datos. */
+  netWorth?: string | null | undefined;
+  includeDebt?: boolean | undefined;
+  netWorthLoading?: boolean | undefined;
 }
 
 /**
- * Fila de 3 KPIs del dashboard al estilo Stitch:
- * - Saldo Total con icono y delta vs periodo previo.
+ * Fila de KPIs del dashboard al estilo Stitch:
+ * - Patrimonio neto (stock) — reacciona al toggle de deuda del header.
+ * - Saldo Total (flujo del periodo) con delta vs periodo previo.
  * - Ingresos con badge "RECURRENTE" cuando hay transactions del periodo.
  * - Gastos con barra de presupuesto + caption de % gastado.
  */
-export function StitchKpiRow({ summary, isLoading }: StitchKpiRowProps) {
+export function StitchKpiRow({
+  summary,
+  isLoading,
+  netWorth,
+  includeDebt,
+  netWorthLoading,
+}: StitchKpiRowProps) {
   const currency = summary?.currency ?? 'EUR';
   const balance = summary ? Number(summary.balance) : 0;
   const balanceColor = balance >= 0 ? colors.text : colors.danger;
@@ -50,6 +63,29 @@ export function StitchKpiRow({ summary, isLoading }: StitchKpiRowProps) {
         gap: spacing.md,
       }}
     >
+      {/* Patrimonio neto (stock) — reacciona al toggle de deuda del header. */}
+      <Card style={{ display: 'flex', flexDirection: 'column', gap: spacing.xs, padding: spacing.md }}>
+        <Header
+          label="Patrimonio neto"
+          trailing={<WalletIcon size={18} style={{ color: colors.textSubtle }} />}
+        />
+        <span
+          style={{
+            fontSize: fontSize.xxl,
+            fontWeight: fontWeight.bold,
+            color: colors.text,
+            letterSpacing: '-0.01em',
+            fontVariantNumeric: 'tabular-nums',
+            lineHeight: 1.15,
+          }}
+        >
+          {netWorth != null && !netWorthLoading ? formatAmount(netWorth, currency) : '—'}
+        </span>
+        <span style={{ fontSize: fontSize.xs, color: colors.textSubtle }}>
+          {includeDebt ? 'Activos − deuda' : 'Solo activos'}
+        </span>
+      </Card>
+
       {/* Saldo Total */}
       <Card style={{ display: 'flex', flexDirection: 'column', gap: spacing.xs, padding: spacing.md }}>
         <Header

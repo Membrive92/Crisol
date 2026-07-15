@@ -49,16 +49,16 @@ describe('StructureSegmented', () => {
     render(<StructureSegmented value="all" onChange={vi.fn()} />);
     const todo = screen.getByRole('tab', { name: 'Todo' });
     expect(todo.getAttribute('aria-selected')).toBe('true');
-    expect(screen.getByRole('tab', { name: 'Estructural' })).toBeTruthy();
-    expect(screen.getByRole('tab', { name: 'Puntual' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Fijo' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Variable' })).toBeTruthy();
   });
 
   it('al pulsar una opción llama onChange con su clave', () => {
     const onChange = vi.fn();
     render(<StructureSegmented value="all" onChange={onChange} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Puntual' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Variable' }));
     expect(onChange).toHaveBeenCalledWith('exceptional');
-    fireEvent.click(screen.getByRole('tab', { name: 'Estructural' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Fijo' }));
     expect(onChange).toHaveBeenCalledWith('structural');
   });
 });

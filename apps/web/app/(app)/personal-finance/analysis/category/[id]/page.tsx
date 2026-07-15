@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import {
   CartesianGrid,
@@ -44,20 +44,26 @@ import {
 export default function CategoryDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params?.id;
+  const searchParams = useSearchParams();
   const currency = useCurrencyStore((s) => s.currency);
   const convertAll = useCurrencyStore((s) => s.convertAll);
 
-  // Default: año actual entero. El TimeSelector dejará al usuario
-  // saltar a un mes concreto o limpiar el filtro (todo el histórico).
+  // Rango inicial: si venimos del desglose de Análisis, hereda su periodo
+  // (query `?from&to`) para no perder el mes/trimestre que el usuario tenía
+  // activo. Sin esos params, default al año actual entero. El TimeSelector
+  // deja saltar a otro mes o limpiar el filtro.
   //
-  // AUDIT-2026-07-13 (#1): los límites se construyen en UTC (`Date.UTC`),
-  // igual que `pickYear`/`pickMonth` del TimeSelector y `boundsForAnchor`.
-  // Antes usaba `new Date(año, mes, día)` en hora LOCAL y emitía
-  // `toISOString()`: en Europe/Madrid, `new Date(2026, 0, 1)` →
+  // AUDIT-2026-07-13 (#1): los límites del default se construyen en UTC
+  // (`Date.UTC`), igual que `pickYear`/`pickMonth` del TimeSelector y
+  // `boundsForAnchor`. Antes usaba `new Date(año, mes, día)` en hora LOCAL y
+  // emitía `toISOString()`: en Europe/Madrid, `new Date(2026, 0, 1)` →
   // `2025-12-31T23:00:00Z`, así que `inferActiveRange` (que lee en UTC)
   // detectaba el año como 2025 y "rango personalizado" → el chip del año no
   // se marcaba y la barra de meses salía vacía ("Sin meses con datos en 2025").
   const [range, setRange] = useState<TimeSelectorRange>(() => {
+    const from = searchParams?.get('from');
+    const to = searchParams?.get('to');
+    if (from && to) return { dateFrom: from, dateTo: to };
     const year = new Date().getFullYear();
     const start = new Date(Date.UTC(year, 0, 1, 0, 0, 0));
     const end = new Date(Date.UTC(year, 11, 31, 23, 59, 59));

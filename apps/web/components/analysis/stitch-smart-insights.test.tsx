@@ -62,7 +62,7 @@ describe('computeInsights (Smart Insights v2)', () => {
   it('emite impacto de puntuales cuando el ahorro bruto es negativo pero el estructural positivo', () => {
     const out = computeInsights(undefined, [], structure(-0.1, 0.2), undefined, 'EUR');
     expect(out).toHaveLength(1);
-    expect(out[0]!.title).toMatch(/puntuales/i);
+    expect(out[0]!.title).toMatch(/variables/i);
     expect(out[0]!.body).toContain('+20%');
   });
 
@@ -101,9 +101,9 @@ describe('computeInsights (Smart Insights v2)', () => {
       'EUR',
     );
     expect(out).toHaveLength(3);
-    // Prioridad: concentración (1) → puntuales (2) → cargo próximo (3).
+    // Prioridad: concentración (1) → variables (2) → cargo próximo (3).
     expect(out[0]!.title).toContain('Alquiler');
-    expect(out[1]!.title).toMatch(/puntuales/i);
+    expect(out[1]!.title).toMatch(/variables/i);
     expect(out[2]!.title).toContain('Préstamo');
   });
 

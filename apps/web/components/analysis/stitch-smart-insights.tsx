@@ -124,7 +124,7 @@ export function computeInsights(
           kind: 'info',
           priority: 1,
           title: `${top.category_name} concentra el ${ratio.toFixed(0)}% de tus gastos`,
-          body: 'Una sola categoría se lleva más de un tercio del gasto del periodo. Si es puntual, márcala como gasto puntual; si es estructural, un presupuesto ayuda a contenerla.',
+          body: 'Una sola categoría se lleva más de un tercio del gasto del periodo. Si es variable, márcala como gasto variable; si es fija, un presupuesto ayuda a contenerla.',
         });
       }
     }
@@ -144,8 +144,8 @@ export function computeInsights(
     out.push({
       kind: 'info',
       priority: 2,
-      title: 'Los gastos puntuales marcan el periodo',
-      body: `Sin los gastos puntuales (impuestos, one-offs) tu tasa de ahorro sería +${struct.toFixed(0)}% en vez de ${gross.toFixed(0)}%. Tu coste estructural está bajo control.`,
+      title: 'Los gastos variables marcan el periodo',
+      body: `Sin los gastos variables (impuestos, puntuales) tu tasa de ahorro sería +${struct.toFixed(0)}% en vez de ${gross.toFixed(0)}%. Tu coste fijo está bajo control.`,
     });
   }
 

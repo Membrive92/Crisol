@@ -13,17 +13,17 @@ describe('ExceptionalToggle', () => {
 
   it('envía null / false / true según la opción pulsada', () => {
     const onChange = vi.fn();
-    // value=true → "Puntual" activo; las otras dos son pulsables.
+    // value=true → "Variable" activo; las otras dos son pulsables.
     render(<ExceptionalToggle value={true} pending={false} onChange={onChange} />);
     fireEvent.click(screen.getByRole('radio', { name: 'Automático' }));
     expect(onChange).toHaveBeenCalledWith(null);
-    fireEvent.click(screen.getByRole('radio', { name: 'Estructural' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Fijo' }));
     expect(onChange).toHaveBeenCalledWith(false);
   });
 
   it('pending deshabilita todo el grupo', () => {
     render(<ExceptionalToggle value={null} pending onChange={vi.fn()} />);
-    for (const name of ['Automático', 'Estructural', 'Puntual']) {
+    for (const name of ['Automático', 'Fijo', 'Variable']) {
       expect((screen.getByRole('radio', { name }) as HTMLButtonElement).disabled).toBe(true);
     }
   });

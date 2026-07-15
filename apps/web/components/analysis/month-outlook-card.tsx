@@ -68,11 +68,11 @@ export function MonthOutlookCard({ data, currency, isLoading }: MonthOutlookCard
                 <>
                   Colchón:{' '}
                   <strong>{runway > 99 ? '99+' : runway.toFixed(1)} meses</strong> de gasto
-                  estructural <span style={{ color: colors.textMuted }}>({tone?.label})</span>
+                  fijo <span style={{ color: colors.textMuted }}>({tone?.label})</span>
                 </>
               ) : (
                 <span style={{ color: colors.textMuted }}>
-                  Colchón no disponible — sin gasto estructural o saldo líquido en negativo.
+                  Colchón no disponible — sin gasto fijo o saldo líquido en negativo.
                 </span>
               )}
             </span>

@@ -27,6 +27,12 @@ export function Card({ compact, style, ...rest }: CardProps) {
     <div
       {...rest}
       style={{
+        // `border-box` para que `height: 100%` (cards que se estiran en un
+        // grid) incluya el padding y el borde. Sin esto (content-box, el
+        // default, no hay reset global) una card `height:100%` mide
+        // celda + 2×padding + borde y DESBORDA ~50px sobre la card de abajo,
+        // solapando su cabecera.
+        boxSizing: 'border-box',
         backgroundColor: colors.surface,
         border: `1px solid ${colors.border}`,
         borderRadius: radius.md,
