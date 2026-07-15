@@ -19,6 +19,18 @@
 
 ---
 
+## Refactor propuesto — Simplificar transferencias (ADR-0005)
+
+Modelo simple dirigido por `flow`: el emparejado (`transfer_pair_id`) pasa a
+metadato opcional de display, los 3 estados colapsan a 1, y la deuda deja de
+depender del par. Habilitado por "todas las cuentas importadas". Plan
+incremental en 5 fases (T1–T5), sin migración destructiva, en
+[`decisions/0005-simplify-transfers-flow-driven.md`](decisions/0005-simplify-transfers-flow-driven.md).
+**Propuesta — no implementada.** Riesgo: refactor de zona muy curada
+(PHASE-23→34); mitigado con golden tests de equivalencia por fase.
+
+---
+
 ## AUDIT-2026-07-13 — integridad de datos (pendiente de verificar)
 
 Hallazgos de la auditoría de integridad de datos sobre la BD del usuario

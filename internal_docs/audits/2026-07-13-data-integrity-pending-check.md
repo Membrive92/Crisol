@@ -260,6 +260,14 @@ pinta a 0.
 **Acción:** fijar `opening_balance` real de BBVA y Wise con "Cuadrar saldo";
 emparejar o revisar las patas huérfanas de Wise.
 
+> **✅ Patas huérfanas Wise resueltas (2026-07-14):** tras el reimport eran **6**
+> movimientos "Transferencia realizada Wi…" (categoría *SCL*, 30–60 €, 330 € total),
+> `TRANSFER_OUT` sin contraparte. Decisión del usuario: son **gasto real a un
+> tercero externo**, no traspaso a su Wise. Reclasificados `flow TRANSFER_OUT → OUT`
+> (data-fix auditado, ver [ADR-0005](../decisions/0005-simplify-transfers-flow-driven.md)).
+> Ahora cuentan como gasto en análisis y presupuesto (antes se contradecían). El
+> `opening_balance` de Wise y la transferencia de 5.000 € de enero siguen aparte.
+
 > **🚧 En curso vía PHASE-39 (2026-07-13):** en lugar de cuadrar a mano, se
 > implementó la captura de la columna Saldo del extracto + auto-anclaje del
 > `opening_balance` al confirmar imports (ver
