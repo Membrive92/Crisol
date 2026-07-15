@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 import {
   useAccountBalances,
@@ -31,6 +32,7 @@ import {
   boundsForAnchor,
   type PeriodKey,
 } from '@/components/analysis/stitch-period-toggle';
+import type { StructureFilter } from '@/components/analysis/stitch-expense-breakdown';
 import { StitchSmartInsights } from '@/components/analysis/stitch-smart-insights';
 import { PeriodNavigator } from '@/components/debt/period-navigator';
 import { ErrorState } from '@/components/ui/error-state';
@@ -63,12 +65,50 @@ function fmtSignedAmount(value: string | number, currency: string): string {
   return `${n >= 0 ? '+' : ''}${formatAmount(String(n.toFixed(2)), currency)}`;
 }
 
+// PHASE-41 — período/ancla/filtro del desglose viajan en la URL para que al
+// entrar en una categoría y volver (link "← Análisis" o el botón atrás del
+// navegador) se restaure el estado en vez de caer al default anual.
+function currentMonth(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+function parsePeriod(v: string | null): PeriodKey {
+  return v === 'month' || v === 'quarter' || v === 'year' ? v : 'year';
+}
+function parseFilter(v: string | null): StructureFilter {
+  return v === 'structural' || v === 'exceptional' ? v : 'all';
+}
+function analysisQuery(p: PeriodKey, a: string, f: StructureFilter): string {
+  const sp = new URLSearchParams();
+  sp.set('period', p);
+  sp.set('anchor', a);
+  if (f !== 'all') sp.set('filter', f);
+  return sp.toString();
+}
+
 export default function AnalysisPage() {
-  const [period, setPeriod] = useState<PeriodKey>('year');
-  const [anchorMonth, setAnchorMonth] = useState(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  });
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [period, setPeriodState] = useState<PeriodKey>(() =>
+    parsePeriod(searchParams.get('period')),
+  );
+  const [anchorMonth, setAnchorMonthState] = useState<string>(
+    () => searchParams.get('anchor') ?? currentMonth(),
+  );
+  const [filter, setFilterState] = useState<StructureFilter>(() =>
+    parseFilter(searchParams.get('filter')),
+  );
+  // Un único escritor de la URL (evita carreras entre setters). Recibe los tres
+  // valores explícitos; los setters mergean con el estado actual antes de llamar.
+  function apply(next: { period?: PeriodKey; anchor?: string; filter?: StructureFilter }): void {
+    const p = next.period ?? period;
+    const a = next.anchor ?? anchorMonth;
+    const f = next.filter ?? filter;
+    if (next.period !== undefined) setPeriodState(p);
+    if (next.anchor !== undefined) setAnchorMonthState(a);
+    if (next.filter !== undefined) setFilterState(f);
+    router.replace(`/personal-finance/analysis?${analysisQuery(p, a, f)}`, { scroll: false });
+  }
   const currency = useCurrencyStore((s) => s.currency);
   const convertAll = useCurrencyStore((s) => s.convertAll);
   // El toggle "Incluir deuda en el patrimonio neto" (menú de divisa del
@@ -214,9 +254,9 @@ export default function AnalysisPage() {
       >
         <PeriodNavigator
           range={period}
-          onRangeChange={setPeriod}
+          onRangeChange={(p) => apply({ period: p })}
           anchor={anchorMonth}
-          onAnchorChange={setAnchorMonth}
+          onAnchorChange={(a) => apply({ anchor: a })}
           availableFrom={summary?.available_from ?? null}
           availableTo={summary?.available_to ?? null}
         />
@@ -312,10 +352,7 @@ export default function AnalysisPage() {
           isLoading={monthlyQuery.isLoading}
           period={period}
           anchorMonth={anchorMonth}
-          onSelectMonth={(month) => {
-            setAnchorMonth(month);
-            setPeriod('month');
-          }}
+          onSelectMonth={(month) => apply({ period: 'month', anchor: month })}
         />
         <NetworthEvolutionCard
           points={position?.points ?? []}
@@ -345,6 +382,9 @@ export default function AnalysisPage() {
           exceptionalByCategory={structure?.exceptional_by_category}
           dateFrom={dateFrom}
           dateTo={dateTo}
+          filter={filter}
+          onFilterChange={(f) => apply({ filter: f })}
+          backQuery={analysisQuery(period, anchorMonth, filter)}
         />
         <DebtSummaryCard dateFrom={dateFrom} dateTo={dateTo} />
       </div>

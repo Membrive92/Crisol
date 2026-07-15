@@ -82,6 +82,11 @@ export default function CategoryDetailPage() {
 
   const { data, isLoading, isError, error } = useCategoryDetail(id, query);
 
+  // PHASE-41 — "← Análisis" vuelve restaurando el período/filtro que traía el
+  // desglose (query `?back=period&anchor&filter`), no al default anual.
+  const backParams = searchParams?.get('back');
+  const backHref = `/personal-finance/analysis${backParams ? `?${backParams}` : ''}`;
+
   if (!id) {
     return (
       <div style={{ padding: spacing.lg }}>
@@ -93,7 +98,7 @@ export default function CategoryDetailPage() {
   return (
     <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
       <Link
-        href="/personal-finance/analysis"
+        href={backHref as never}
         style={{
           fontSize: fontSize.sm,
           color: colors.textMuted,

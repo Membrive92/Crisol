@@ -31,6 +31,18 @@ export interface StitchExpenseBreakdownProps {
    * lista y "Fijo" (estructural) se deriva restándola del total por categoría.
    */
   exceptionalByCategory?: AnalyticsCategoryAmount[] | undefined;
+  /**
+   * PHASE-41 — filtro controlado desde la página (para persistirlo en la URL).
+   * Si no se pasa, el componente lo gestiona internamente (default `all`).
+   */
+  filter?: StructureFilter | undefined;
+  onFilterChange?: ((next: StructureFilter) => void) | undefined;
+  /**
+   * PHASE-41 — query string del estado de Análisis (`period&anchor&filter`).
+   * Se adjunta como `?back=` al drill-down para que el detalle de categoría
+   * pueda volver restaurando el mismo período/filtro.
+   */
+  backQuery?: string | undefined;
 }
 
 const STRUCTURE_LABELS: Record<StructureFilter, string> = {
@@ -115,6 +127,9 @@ export function StitchExpenseBreakdown({
   exceptionalByCategory,
   dateFrom,
   dateTo,
+  filter: filterProp,
+  onFilterChange,
+  backQuery,
 }: StitchExpenseBreakdownProps) {
   const router = useRouter();
   // `activeId` = slice del DONUT resaltado (dim del donut + centro).
@@ -123,7 +138,11 @@ export function StitchExpenseBreakdown({
   // resaltado de la fila usara `donutId`, pasar por una encendería todas.
   const [activeId, setActiveId] = useState<string | null>(null);
   const [hoveredLegendId, setHoveredLegendId] = useState<string | null>(null);
-  const [filter, setFilter] = useState<StructureFilter>('all');
+  // PHASE-41 — filtro controlado por la página cuando llega `filterProp`
+  // (para persistirlo en la URL); si no, estado interno.
+  const [internalFilter, setInternalFilter] = useState<StructureFilter>('all');
+  const filter = filterProp ?? internalFilter;
+  const setFilter = onFilterChange ?? setInternalFilter;
   // Paginación SÓLO de la leyenda (el donut nunca se pagina).
   const [page, setPage] = useState(0);
   // Al cambiar de filtro cambia el nº de categorías → a la primera página para
@@ -197,6 +216,9 @@ export function StitchExpenseBreakdown({
       const params = new URLSearchParams();
       if (dateFrom) params.set('from', dateFrom);
       if (dateTo) params.set('to', dateTo);
+      // PHASE-41 — arrastra el estado de Análisis para que "← Análisis" lo
+      // restaure (período + filtro estructural/variable).
+      if (backQuery) params.set('back', backQuery);
       const qs = params.toString();
       router.push(
         `/personal-finance/analysis/category/${slice.categoryId}${qs ? `?${qs}` : ''}` as never,
