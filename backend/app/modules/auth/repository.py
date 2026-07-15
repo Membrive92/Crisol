@@ -88,4 +88,4 @@ async def purge_expired_tokens(db: AsyncSession) -> int:
     await db.flush()
     # SQLAlchemy tipa execute() como Result (sin `rowcount`); en un DML el
     # runtime devuelve CursorResult, que sí lo expone.
-    return result.rowcount or 0  # type: ignore[attr-defined]
+    return result.rowcount or 0

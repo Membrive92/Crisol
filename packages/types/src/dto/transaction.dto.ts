@@ -53,6 +53,13 @@ export interface TransactionListQuery {
    * equivalente en moneda activa sin lanzar fetches por fecha.
    */
   target_currency?: string;
+  /**
+   * Restringe a transacciones de deuda (rol de categoría `DEBT_PAYMENT`/
+   * `DEBT_INTEREST` o pata de par de conversión a deuda). La card de deuda del
+   * análisis lo usa para traer TODOS los movimientos de deuda del periodo sin
+   * que el tope de `limit` deje fuera los antiguos.
+   */
+  debt_only?: boolean;
   limit?: number;
   offset?: number;
 }

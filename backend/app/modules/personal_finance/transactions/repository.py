@@ -12,9 +12,41 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.modules.personal_finance.accounts.models import Account, AccountNature
-from app.modules.personal_finance.categories.models import Category, CategoryKind
+from app.modules.personal_finance.categories.models import (
+    Category,
+    CategoryKind,
+    CategoryRole,
+)
 from app.modules.personal_finance.dashboard.conversion import converted_amount_expr
 from app.modules.personal_finance.transactions.models import Transaction, TransactionFlow
+
+
+def _debt_only_condition(own_account: Any, partner_account: Any) -> Any:
+    """Condición 'la tx es de deuda': su categoría tiene rol de deuda (un PAGO)
+    o es pata de un par de conversión a deuda (activo↔pasivo — dinero prestado).
+    EXCLUYE los movimientos de una cuenta que NO cuenta como deuda
+    (`counts_as_debt=False`, tarjeta revolving pagada íntegra): su cuenta O su
+    pareja tiene el flag apagado → adeudo/liquidación, no deuda real.
+
+    Requiere que la query tenga joins a `Category` (por `category_id`), a
+    `own_account` (la cuenta propia) y a `partner_account` (la de la pareja).
+    Misma señal que la columna `is_debt_pair` del listado, más el rol.
+    """
+    is_debt = Category.role.in_(
+        [CategoryRole.DEBT_PAYMENT, CategoryRole.DEBT_INTEREST]
+    ) | (
+        Transaction.transfer_pair_id.is_not(None)
+        & (
+            (own_account.nature == AccountNature.LIABILITY)
+            | (partner_account.nature == AccountNature.LIABILITY)
+        )
+    )
+    # Excluir si la cuenta propia o la pareja es una cuenta no-deuda (revolving).
+    # `partner_account` viene de un outerjoin (NULL sin pareja) → coalesce a True.
+    from_non_debt = (own_account.counts_as_debt.is_(False)) | (
+        func.coalesce(partner_account.counts_as_debt, True).is_(False)
+    )
+    return is_debt & ~from_non_debt
 
 # `active`  → `deleted_at IS NULL`  (default — listado normal, dashboard).
 # `trashed` → `deleted_at IS NOT NULL` (endpoint /trash, restore, purge).
@@ -78,12 +110,18 @@ async def list_transactions(
     date_to: datetime | None = None,
     search: str | None = None,
     target_currency: str | None = None,
+    debt_only: bool = False,
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[tuple[Transaction, Decimal | None, bool]], int]:
     """Lista transacciones activas filtradas + total count.
 
     Las soft-deleted no aparecen — para verlas usar `list_trashed_transactions`.
+
+    `debt_only=True` restringe a transacciones de deuda (rol de categoría
+    `DEBT_PAYMENT`/`DEBT_INTEREST` o pata de par de conversión a deuda). Sirve
+    para listar los movimientos de deuda de un periodo SIN que el tope de
+    `limit` deje fuera los antiguos (son pocos, caben sin truncar).
 
     Cuando se pasa `target_currency`, cada fila incluye el importe
     convertido a esa moneda con la tasa **del día de su `occurred_at`**
@@ -100,6 +138,19 @@ async def list_transactions(
     de transferencia interna activo↔activo da `False`.
     """
     count_query = select(func.count()).select_from(Transaction)
+    if debt_only:
+        # Mismos joins que el items_query para poder aplicar la condición de
+        # deuda también al recuento (si no, `total` no cuadraría con las filas).
+        own_c = aliased(Account)
+        partner_tx_c = aliased(Transaction)
+        partner_account_c = aliased(Account)
+        count_query = (
+            count_query.join(own_c, own_c.id == Transaction.account_id)
+            .outerjoin(partner_tx_c, partner_tx_c.id == Transaction.transfer_pair_id)
+            .outerjoin(partner_account_c, partner_account_c.id == partner_tx_c.account_id)
+            .outerjoin(Category, Category.id == Transaction.category_id)
+            .where(_debt_only_condition(own_c, partner_account_c))
+        )
     count_query = _scope(
         count_query,
         user_id,
@@ -146,6 +197,10 @@ async def list_transactions(
         .outerjoin(partner_tx, partner_tx.id == Transaction.transfer_pair_id)
         .outerjoin(partner_account, partner_account.id == partner_tx.account_id)
     )
+    if debt_only:
+        items_query = items_query.outerjoin(
+            Category, Category.id == Transaction.category_id
+        ).where(_debt_only_condition(own_account, partner_account))
     items_query = _scope(
         items_query,
         user_id,
@@ -267,20 +322,25 @@ async def soft_delete_transaction(db: AsyncSession, transaction: Transaction) ->
     diferencia de microsegundos vs server-clock es irrelevante para el
     uso de papelera (ordenar deleted_at desc).
 
-    AUDIT-2026-05: si la tx es una pata de un par de transferencia
-    interna, deshacemos el par al trashearla. Antes, la pareja quedaba
-    apuntando a una fila trasheada: invisible en `/transfers`
-    (list_pairs descarta el par cuyo partner está borrado) pero seguía
-    excluida del cashflow por tener `transfer_pair_id` no nulo — una
-    discrepancia silenciosa. Al desvincular, la pareja vuelve a ser un
-    movimiento normal y visible.
+    PHASE-41: una transferencia interna es ATÓMICA. Al trashear una pata
+    trasheamos también su pareja y CONSERVAMOS `transfer_pair_id` en ambas.
+    Así restaurar re-vincula el par gratis (`restore_transaction`) y NUNCA
+    queda una pata activa apuntando a una fila borrada — la discrepancia
+    silenciosa que AUDIT-2026-05 intentó resolver anulando el enlace: las dos
+    activas se excluyen del cashflow por estar emparejadas; las dos borradas,
+    por `deleted_at`. Para borrar UNA sola pata, deshaz el enlace antes (mismo
+    contrato que editar una pata emparejada).
     """
-    transaction.deleted_at = datetime.now(UTC)
+    now = datetime.now(UTC)
+    transaction.deleted_at = now
     if transaction.transfer_pair_id is not None:
         partner = await db.get(Transaction, transaction.transfer_pair_id)
-        if partner is not None and partner.user_id == transaction.user_id:
-            partner.transfer_pair_id = None
-        transaction.transfer_pair_id = None
+        if (
+            partner is not None
+            and partner.user_id == transaction.user_id
+            and partner.deleted_at is None
+        ):
+            partner.deleted_at = now
     await db.flush()
     await db.refresh(transaction)
     return transaction
@@ -308,11 +368,11 @@ async def bulk_soft_delete_transactions(
     que "borrar todo" con el listado filtrado por una cuenta trasheaba TODAS
     las cuentas — el alcance real no coincidía con el prometido en el diálogo.
     """
-    # AUDIT-2026-05: capturamos los ids que ESTE bulk va a trashear ANTES
-    # de hacerlo, para desvincular sólo las parejas de las filas que
-    # acabamos de mover a la papelera. (Una versión anterior usaba
-    # "todas las trasheadas del usuario", lo que desvinculaba parejas
-    # huérfanas preexistentes aunque no matchearan el filtro del bulk.)
+    # AUDIT-2026-05 / PHASE-41: capturamos los ids que ESTE bulk va a trashear
+    # ANTES de hacerlo, para propagar la papelera SÓLO a las parejas de las
+    # filas que acabamos de mover. (Una versión anterior usaba "todas las
+    # trasheadas del usuario", lo que afectaba a parejas preexistentes aunque
+    # no matchearan el filtro del bulk.)
     select_ids = _scope(
         select(Transaction.id),
         user_id,
@@ -338,21 +398,23 @@ async def bulk_soft_delete_transactions(
     )
     result = await db.execute(stmt)
 
-    # Desvincula sólo las patas activas cuya pareja se acaba de trashear
-    # en este bulk (mismo motivo que en `soft_delete_transaction`).
+    # PHASE-41: propaga la papelera a la pareja ACTIVA de cualquier pata recién
+    # trasheada (transferencia atómica). Conservamos los punteros para que
+    # restaurar re-vincule. Sustituye al antiguo `orphan_unlink`, que anulaba
+    # el superviviente (dejaba media pareja suelta y perdía el enlace).
     if to_delete_ids:
-        orphan_unlink = (
+        cascade_trash = (
             update(Transaction)
             .where(Transaction.user_id == user_id)
             .where(Transaction.deleted_at.is_(None))
             .where(Transaction.transfer_pair_id.in_(to_delete_ids))
-            .values(transfer_pair_id=None)
+            .values(deleted_at=datetime.now(UTC))
         )
-        await db.execute(orphan_unlink)
+        await db.execute(cascade_trash)
     await db.flush()
     # SQLAlchemy tipa execute() como Result (sin `rowcount`); en un DML el
     # runtime devuelve CursorResult, que sí lo expone.
-    return result.rowcount or 0  # type: ignore[attr-defined]
+    return result.rowcount or 0
 
 
 async def bulk_update_category(
@@ -414,7 +476,7 @@ async def bulk_update_category(
     await db.flush()
     # SQLAlchemy tipa execute() como Result (sin `rowcount`); en un DML el
     # runtime devuelve CursorResult, que sí lo expone.
-    return result.rowcount or 0  # type: ignore[attr-defined]
+    return result.rowcount or 0
 
 
 async def bulk_reassign_account(
@@ -464,7 +526,7 @@ async def bulk_reassign_account(
     await db.flush()
     # SQLAlchemy tipa execute() como Result (sin `rowcount`); en un DML el
     # runtime devuelve CursorResult, que sí lo expone.
-    return result.rowcount or 0  # type: ignore[attr-defined]
+    return result.rowcount or 0
 
 
 async def count_reassignable_skipped_by_currency(
@@ -508,14 +570,37 @@ async def bulk_restore_trashed(db: AsyncSession, user_id: uuid.UUID) -> int:
 
     Devuelve cuántas se restauraron. Idempotente: si la papelera está
     vacía, devuelve 0 sin tocar nada.
+
+    PHASE-41: tras restaurar, sanea medias-parejas heredadas — anula
+    `transfer_pair_id` en cualquier tx activa cuya pareja no esté activa y
+    apuntando de vuelta. No-op para pares creados tras el borrado atómico
+    (siempre simétricos); evita dejar una pata excluida del cashflow cuya
+    contrapartida ya no existe.
     """
     stmt = update(Transaction).values(deleted_at=None)
     stmt = _scope(stmt, user_id, deleted="trashed")
     result = await db.execute(stmt)
+    partner = aliased(Transaction)
+    healthy_partner = (
+        select(partner.id)
+        .where(partner.id == Transaction.transfer_pair_id)
+        .where(partner.deleted_at.is_(None))
+        .where(partner.transfer_pair_id == Transaction.id)
+        .exists()
+    )
+    heal = (
+        update(Transaction)
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.deleted_at.is_(None))
+        .where(Transaction.transfer_pair_id.is_not(None))
+        .where(~healthy_partner)
+        .values(transfer_pair_id=None)
+    )
+    await db.execute(heal)
     await db.flush()
     # SQLAlchemy tipa execute() como Result (sin `rowcount`); en un DML el
     # runtime devuelve CursorResult, que sí lo expone.
-    return result.rowcount or 0  # type: ignore[attr-defined]
+    return result.rowcount or 0
 
 
 async def bulk_purge_trashed(db: AsyncSession, user_id: uuid.UUID) -> int:
@@ -546,8 +631,29 @@ async def bulk_purge_trashed(db: AsyncSession, user_id: uuid.UUID) -> int:
 
 
 async def restore_transaction(db: AsyncSession, transaction: Transaction) -> Transaction:
-    """Quita la marca de borrado (saca de papelera)."""
+    """Quita la marca de borrado (saca de papelera).
+
+    PHASE-41: si la tx es pata de una transferencia, restaura también su
+    contrapartida y re-vincula el par (atómico). Si la pareja fue purgada o
+    re-emparejada en otro sitio, la tx vuelve SIN pareja — nunca dejamos una
+    pata activa apuntando a una fila ausente.
+    """
     transaction.deleted_at = None
+    pair_id = transaction.transfer_pair_id
+    if pair_id is not None:
+        partner = await db.get(Transaction, pair_id)
+        if (
+            partner is not None
+            and partner.user_id == transaction.user_id
+            # La pareja sigue apuntando de vuelta, o está suelta (asimetría
+            # heredada) → seguro (re)establecer el enlace bidireccional.
+            and partner.transfer_pair_id in (transaction.id, None)
+        ):
+            partner.deleted_at = None
+            partner.transfer_pair_id = transaction.id
+            transaction.transfer_pair_id = partner.id
+        else:
+            transaction.transfer_pair_id = None
     await db.flush()
     await db.refresh(transaction)
     return transaction

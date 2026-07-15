@@ -791,3 +791,46 @@ async def test_update_rederives_flow_when_category_changes(client: AsyncClient) 
     )
     assert updated.status_code == 200, updated.text
     assert updated.json()["flow"] == "OUT"
+
+
+async def test_list_debt_only_filters_to_debt_transactions(client: AsyncClient) -> None:
+    """`debt_only=true` devuelve sólo las tx de deuda (rol DEBT_*), no las
+    normales — así la card de deuda no las pierde por el tope de `limit`. El
+    `total` cuadra con las filas (no falsea el aviso de truncado del cliente)."""
+    token, gen_cat, account_id = await _setup_user(client, "debtonly@example.com")
+    debt_cat = await client.post(
+        "/categories",
+        json={"name": "Préstamo", "kind": "expense", "role": "DEBT_PAYMENT"},
+        headers=_auth(token),
+    )
+    debt_cat_id = debt_cat.json()["id"]
+
+    async def _post(cat_id: str, amount: str) -> None:
+        r = await client.post(
+            "/transactions",
+            json={
+                "account_id": account_id,
+                "category_id": cat_id,
+                "amount": amount,
+                "currency": "EUR",
+                "occurred_at": "2026-03-10T12:00:00Z",
+            },
+            headers=_auth(token),
+        )
+        assert r.status_code == 201, r.text
+
+    await _post(gen_cat, "20.00")  # normal → fuera
+    await _post(debt_cat_id, "232.27")  # deuda → dentro
+
+    all_tx = await client.get("/transactions", headers=_auth(token))
+    assert all_tx.json()["total"] == 2
+
+    r = await client.get(
+        "/transactions", params={"debt_only": "true"}, headers=_auth(token)
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["total"] == 1
+    assert len(body["items"]) == 1
+    assert body["items"][0]["category_id"] == debt_cat_id
+    assert body["items"][0]["amount"] == "232.27"

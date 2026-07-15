@@ -153,6 +153,7 @@ async def list_endpoint(
     date_to: datetime | None = None,
     search: str | None = None,
     target_currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
+    debt_only: bool = False,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> TransactionListResponse:
@@ -178,6 +179,7 @@ async def list_endpoint(
         date_to=date_to,
         search=search,
         target_currency=target_currency,
+        debt_only=debt_only,
         limit=limit,
         offset=offset,
     )

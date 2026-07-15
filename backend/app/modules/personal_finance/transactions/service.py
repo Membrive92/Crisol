@@ -71,6 +71,7 @@ async def list_transactions(
     date_to: datetime | None = None,
     search: str | None = None,
     target_currency: str | None = None,
+    debt_only: bool = False,
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[tuple[Transaction, Decimal | None, bool]], int]:
@@ -101,6 +102,7 @@ async def list_transactions(
         date_to=date_to,
         search=search,
         target_currency=target_currency,
+        debt_only=debt_only,
         limit=limit,
         offset=offset,
     )
