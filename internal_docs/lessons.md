@@ -19,6 +19,29 @@
 
 ## Lecciones
 
+### [PHASE-41] Reutilizar una expresión SQL que referencia otra tabla exige replicar SUS joins (o sale un producto cartesiano que infla la suma en silencio)
+**Error:** El nuevo `compute_position_as_of` (patrimonio a fecha) reutilizó
+`signed_amount_expr(Account, paired_account)` pero su query sólo unía
+`Account`, `paired_tx` y `paired_account`. El primer test dio
+`net_worth=16400 €` en vez de `1700 €` (con `SAWarning: cartesian product
+between "categories" and "transactions_1"`).
+**Causa:** `signed_amount_expr` cae a `Category.kind` cuando `flow` es NULL
+(vía `is_inflow()`/`is_outflow()`). Al no unir `categories`, SQLAlchemy la mete
+en el FROM como producto cartesiano: cada tx se multiplica por TODAS las
+categorías del usuario → la `SUM` se dispara. La serie histórica
+(`compute_position_history`) ya unía `Category` con
+`.outerjoin(Category, Category.id == Transaction.category_id)`; el nuevo código
+copió la expresión pero no el join.
+**Solución:** Añadir el mismo `.outerjoin(Category, ...)` a la query nueva. Un
+test con importes conocidos lo cazó al instante (el warning de cartesian product
+es la señal inequívoca).
+**Regla:** Cuando reutilices una expresión SQL compartida (un `case`, un
+`signed_amount_expr`) que referencia columnas de OTRA tabla, replica TODOS los
+joins que esa expresión necesita, no sólo los de tu SELECT. Si SQLAlchemy avisa
+de "cartesian product between X and Y", falta el join a X o Y y la agregación
+está inflada. Escribe el test con importes concretos (no sólo "≥0"): un
+cartesiano multiplica, no descuadra por poco.
+
 ### [tech-debt] CSS vars en design tokens → hidratación SSR consistente vía detección de RN
 **Error:** Pensé en activar/desactivar `var(--color-…)` según `typeof document`, pero
 Next.js SSR (Node) **también** tiene `document` undefined, igual que React Native. El

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -30,9 +30,18 @@ async def category_summary_endpoint(
             description=(
                 "Cualquier día (YYYY-MM-DD) dentro del período a mostrar. "
                 "La granularidad la fija `range`; `anchor` decide CUÁL "
-                "mes/trimestre/año. Si se omite, el período en curso."
+                "mes/año. Si se omite, el período en curso. Se ignora con "
+                "`range=custom`."
             ),
         ),
+    ] = None,
+    date_from: Annotated[
+        date | None,
+        Query(description="Inicio del rango libre (obligatorio con `range=custom`)."),
+    ] = None,
+    date_to: Annotated[
+        date | None,
+        Query(description="Fin del rango libre (obligatorio con `range=custom`)."),
     ] = None,
     target_currency: Annotated[
         str | None,
@@ -60,6 +69,23 @@ async def category_summary_endpoint(
     con la tasa de su `occurred_at`. Txs sin tasa quedan excluidas
     silenciosamente.
     """
+    if range == "custom":
+        if date_from is None or date_to is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="range=custom requiere date_from y date_to.",
+            )
+        if date_from > date_to:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="date_from no puede ser posterior a date_to.",
+            )
     return await compute_category_summary(
-        db, user.id, range_=range, anchor=anchor, target_currency=target_currency
+        db,
+        user.id,
+        range_=range,
+        anchor=anchor,
+        date_from=date_from,
+        date_to=date_to,
+        target_currency=target_currency,
     )

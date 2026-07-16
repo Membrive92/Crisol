@@ -23,10 +23,11 @@ Alcance / limitaciones (ver PHASE-37 doc):
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import Row, Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -46,6 +47,7 @@ from app.modules.personal_finance.accounts.models import (
 )
 from app.modules.personal_finance.accounts.repository import signed_amount_expr
 from app.modules.personal_finance.accounts.schemas import (
+    PositionAsOfResponse,
     PositionHistoryResponse,
     PositionPoint,
 )
@@ -147,6 +149,116 @@ async def compute_position_history(
         points=points,
         delta_period=delta_period,
         delta_period_pct=delta_period_pct,
+    )
+
+
+async def compute_position_as_of(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    date_from: datetime,
+    date_to: datetime,
+) -> PositionAsOfResponse:
+    """PHASE-41 — Patrimonio (activos/pasivos/neto) A FECHA `date_to` + Δ del
+    patrimonio DURANTE `[date_from, date_to]`.
+
+    Reutiliza `signed_amount_expr` (misma verdad de saldo que
+    `get_balances_for_user` / `compute_position_history`): patrimonio a fecha =
+    `opening + Σ(movimientos firmados ≤ date_to)`; Δ = `Σ(movimientos firmados
+    en el rango)`. Mono-divisa (referencia), misma limitación que la serie.
+    """
+    accounts = list(
+        (
+            await db.execute(
+                select(Account)
+                .where(Account.user_id == user_id)
+                .where(Account.is_archived.is_(False))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    zero = PositionAsOfResponse(
+        reference_currency=DEFAULT_REFERENCE_CURRENCY,
+        total_assets=Decimal("0"),
+        total_liabilities=Decimal("0"),
+        net_worth=Decimal("0"),
+        delta_assets=Decimal("0"),
+        delta_net_worth=Decimal("0"),
+    )
+    if not accounts:
+        return zero
+    accounts_sorted = sorted(accounts, key=lambda a: (a.display_order, a.name))
+    reference_currency = accounts_sorted[0].currency
+    included = [
+        a
+        for a in accounts
+        if a.currency == reference_currency and a.type not in UNVALUED_ACCOUNT_TYPES
+    ]
+    if not included:
+        return zero.model_copy(update={"reference_currency": reference_currency})
+    included_ids = [a.id for a in included]
+    asset_opening = sum(
+        (a.opening_balance for a in included if a.nature == AccountNature.ASSET), Decimal("0")
+    )
+    liab_opening = sum(
+        (a.opening_balance for a in included if a.nature == AccountNature.LIABILITY), Decimal("0")
+    )
+
+    paired_tx = aliased(Transaction)
+    paired_account = aliased(Account)
+
+    def _base() -> Select[tuple[AccountNature, Decimal]]:
+        return (
+            select(
+                Account.nature,
+                func.coalesce(func.sum(signed_amount_expr(Account, paired_account)), 0),
+            )
+            .select_from(Transaction)
+            .join(Account, Account.id == Transaction.account_id)
+            # `signed_amount_expr` cae a `Category.kind` cuando `flow` es NULL:
+            # el join es obligatorio o SA mete `categories` como producto
+            # cartesiano e infla la suma (misma unión que la serie histórica).
+            .outerjoin(Category, Category.id == Transaction.category_id)
+            .outerjoin(paired_tx, paired_tx.id == Transaction.transfer_pair_id)
+            .outerjoin(paired_account, paired_account.id == paired_tx.account_id)
+            .where(Transaction.user_id == user_id)
+            .where(Transaction.deleted_at.is_(None))
+            .where(Transaction.account_id.in_(included_ids))
+            .where(Transaction.currency == reference_currency)
+            .group_by(Account.nature)
+        )
+
+    def _split(rows: Sequence[Row[tuple[AccountNature, Decimal]]]) -> tuple[Decimal, Decimal]:
+        a = Decimal("0")
+        li = Decimal("0")
+        for nature, total in rows:
+            if nature == AccountNature.ASSET:
+                a = Decimal(total)
+            else:
+                li = Decimal(total)
+        return a, li
+
+    asof_rows = (await db.execute(_base().where(Transaction.occurred_at <= date_to))).all()
+    range_rows = (
+        await db.execute(
+            _base()
+            .where(Transaction.occurred_at >= date_from)
+            .where(Transaction.occurred_at <= date_to)
+        )
+    ).all()
+    asof_a, asof_l = _split(asof_rows)
+    rng_a, rng_l = _split(range_rows)
+
+    total_assets = (asset_opening + asof_a).quantize(Decimal("0.01"))
+    total_liabilities = (liab_opening + asof_l).quantize(Decimal("0.01"))
+    return PositionAsOfResponse(
+        reference_currency=reference_currency,
+        total_assets=total_assets,
+        total_liabilities=total_liabilities,
+        net_worth=(total_assets - total_liabilities).quantize(Decimal("0.01")),
+        delta_assets=rng_a.quantize(Decimal("0.01")),
+        delta_net_worth=(rng_a - rng_l).quantize(Decimal("0.01")),
     )
 
 

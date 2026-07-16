@@ -221,36 +221,6 @@ async def test_summary_linked_account_type_overrides_name_match(
     assert "loan" not in by_type_map
 
 
-async def test_summary_quarter_returns_three_monthly_buckets(
-    client: AsyncClient,
-) -> None:
-    """PHASE-30.7 — `range=quarter` siempre devuelve 3 puntos (los
-    meses del trimestre natural en curso), incluso si solo hay
-    actividad en uno de ellos."""
-    token = await _register(client, "summary_quarter@example.com")
-    cte = await _create_account(
-        client,
-        token,
-        name="Cte",
-        type="bank",
-        currency="EUR",
-        opening_balance="5000",
-    )
-    cap_id = await _create_category(client, token, "Préstamos e hipotecas", role="DEBT_PAYMENT")
-    today = datetime.now(UTC)
-    await _post_tx(
-        client,
-        token,
-        cte["id"],
-        cap_id,
-        "100.00",
-        f"{today.year:04d}-{today.month:02d}-01T12:00:00Z",
-    )
-    r = await client.get("/debt/category-summary?range=quarter", headers=_auth(token))
-    body = r.json()
-    assert len(body["monthly_series"]) == 3
-
-
 async def test_summary_year_returns_ytd_buckets(client: AsyncClient) -> None:
     """`range=year` devuelve `today.month` puntos (enero..mes actual)."""
     token = await _register(client, "summary_year@example.com")
@@ -687,11 +657,6 @@ def test_resolve_range_past_and_current_periods() -> None:
     assert (start, end) == (date(2024, 4, 1), date(2024, 4, 30))
     assert buckets == [date(2024, 4, 1)]
 
-    # Trimestre pasado completo (Q2 2024 = abr-may-jun).
-    start, end, buckets = _resolve_range("quarter", date(2024, 5, 3), today)
-    assert (start, end) == (date(2024, 4, 1), date(2024, 6, 30))
-    assert buckets == [date(2024, 4, 1), date(2024, 5, 1), date(2024, 6, 1)]
-
     # Año pasado completo → 12 buckets.
     start, end, buckets = _resolve_range("year", date(2024, 8, 1), today)
     assert (start, end) == (date(2024, 1, 1), date(2024, 12, 31))
@@ -701,12 +666,6 @@ def test_resolve_range_past_and_current_periods() -> None:
     start, end, buckets = _resolve_range("year", None, today)
     assert (start, end) == (date(2026, 1, 1), today)
     assert len(buckets) == 5  # Ene..May
-
-    # Trimestre en curso → 3 buckets naturales, end recortado a hoy
-    # (idéntico al comportamiento previo a PHASE-30.8).
-    start, end, buckets = _resolve_range("quarter", None, today)
-    assert (start, end) == (date(2026, 4, 1), today)
-    assert buckets == [date(2026, 4, 1), date(2026, 5, 1), date(2026, 6, 1)]
 
 
 def test_resolve_period_end() -> None:
@@ -718,7 +677,6 @@ def test_resolve_period_end() -> None:
     assert resolve_period_end("year", date(2024, 3, 1), today) == date(2024, 12, 31)
     assert resolve_period_end("year", None, today) == today  # actual → recortado
     assert resolve_period_end("month", date(2024, 2, 9), today) == date(2024, 2, 29)
-    assert resolve_period_end("quarter", None, today) == today
 
 
 async def test_summary_anchor_targets_past_month(client: AsyncClient) -> None:
@@ -933,3 +891,45 @@ async def test_effort_ratio_scoped_to_anchor_period(client: AsyncClient) -> None
     assert body["monthly_income_avg"] == "2000.00"
     assert body["effort_ratio_strict"] is not None
     assert abs(body["effort_ratio_strict"] - 0.20) < 0.001
+
+
+# ── range=custom (PHASE-41) ──────────────────────────────────────────────────
+
+
+async def test_summary_custom_range_is_day_exact_on_both_ends(client: AsyncClient) -> None:
+    """`range=custom` usa `date_from`/`date_to` day-exact: excluye pagos
+    ANTERIORES a `date_from` y POSTERIORES a `date_to`, aunque caigan en un
+    mes tocado por el rango."""
+    token = await _register(client, "custom_dayexact@example.com")
+    cte = await _create_account(
+        client, token, name="Cte", type="bank", currency="EUR", opening_balance="5000"
+    )
+    cap_id = await _create_category(client, token, "Préstamos e hipotecas", role="DEBT_PAYMENT")
+    await _post_tx(client, token, cte["id"], cap_id, "50.00", "2024-04-05T12:00:00Z")  # antes
+    await _post_tx(client, token, cte["id"], cap_id, "200.00", "2024-04-20T12:00:00Z")  # dentro
+    await _post_tx(client, token, cte["id"], cap_id, "300.00", "2024-05-10T12:00:00Z")  # después
+
+    r = await client.get(
+        "/debt/category-summary?range=custom&date_from=2024-04-10&date_to=2024-05-05",
+        headers=_auth(token),
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["range_start"] == "2024-04-10"
+    assert body["range_end"] == "2024-05-05"
+    # Sólo el pago del 20-abr entra en la ventana [10-abr, 05-may].
+    assert body["total_payments"] == "200.00"
+    # El rango toca abril y mayo → 2 buckets mensuales.
+    assert [p["month"] for p in body["monthly_series"]] == ["2024-04", "2024-05"]
+
+
+async def test_summary_custom_requires_date_from_and_to(client: AsyncClient) -> None:
+    """`range=custom` sin `date_from`/`date_to` → 422."""
+    token = await _register(client, "custom_missing@example.com")
+    r = await client.get("/debt/category-summary?range=custom", headers=_auth(token))
+    assert r.status_code == 422, r.text
+    r2 = await client.get(
+        "/debt/category-summary?range=custom&date_from=2024-05-10&date_to=2024-04-01",
+        headers=_auth(token),
+    )
+    assert r2.status_code == 422, r2.text

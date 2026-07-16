@@ -72,20 +72,12 @@ def _period_bounds(range_: DebtTimeRange, anchor: date) -> tuple[date, date]:
     sin recortar a hoy.
 
     - `month`   → 1º…último día del mes de `anchor`.
-    - `quarter` → trimestre natural (Q1=Ene-Mar … Q4=Oct-Dic).
     - `year`    → 1-ene…31-dic del año de `anchor`.
     """
     if range_ == "month":
         start = date(anchor.year, anchor.month, 1)
         last_day = calendar.monthrange(anchor.year, anchor.month)[1]
         return start, date(anchor.year, anchor.month, last_day)
-    if range_ == "quarter":
-        q_index = (anchor.month - 1) // 3
-        first_month = q_index * 3 + 1
-        last_month = first_month + 2
-        start = date(anchor.year, first_month, 1)
-        last_day = calendar.monthrange(anchor.year, last_month)[1]
-        return start, date(anchor.year, last_month, last_day)
     # year
     return date(anchor.year, 1, 1), date(anchor.year, 12, 31)
 
@@ -113,6 +105,8 @@ def _resolve_range(
     range_: DebtTimeRange,
     anchor: date | None = None,
     today: date | None = None,
+    *,
+    custom_bounds: tuple[date, date] | None = None,
 ) -> tuple[date, date, list[date]]:
     """Devuelve `(range_start, range_end, monthly_buckets)`.
 
@@ -121,11 +115,16 @@ def _resolve_range(
     se recorta a hoy (`min(period_end, today)`): los períodos pasados
     salen completos, el actual parcial.
 
+    PHASE-41 — `range_='custom'` usa `custom_bounds=(from, to)` day-exact tal
+    cual (sin recortar a hoy: el usuario elige el fin). Los `monthly_buckets`
+    abarcan los meses tocados; los KPIs usan la ventana day-exact (bordes
+    parciales), pero las barras mensuales de los meses frontera salen a mes
+    completo (limitación conocida de la serie, gráfico secundario).
+
     `monthly_buckets` (meses sin actividad incluidos, longitud
     determinista):
-    - `month`/`quarter` → siempre los meses naturales **completos** del
-      período (1 y 3) → eje estable al navegar entre períodos del mismo
-      tipo; los meses futuros del trimestre en curso salen a 0.
+    - `month` → siempre el mes natural **completo** → eje estable al
+      navegar entre meses.
     - `year` → YTD para el año en curso (no pintamos meses futuros, que
       serían barras vacías) y los 12 meses para años pasados.
 
@@ -133,11 +132,23 @@ def _resolve_range(
     PHASE-30.8.
     """
     today = today or _today_utc()
+    buckets: list[date] = []
+    if range_ == "custom":
+        if custom_bounds is None:
+            # Defensa: el router valida y rechaza custom sin from/to antes de
+            # llegar aquí. Cae al mes en curso para no romper.
+            return _resolve_range("month", anchor, today)
+        start, range_end = custom_bounds
+        month = _start_of_month(start)
+        last_bucket = _start_of_month(range_end)
+        while month <= last_bucket:
+            buckets.append(month)
+            month = _add_month(month, 1)
+        return start, range_end, buckets
     anchor = anchor or today
     start, period_end = _period_bounds(range_, anchor)
     range_end = min(period_end, today)
     last_bucket = _start_of_month(range_end) if range_ == "year" else _start_of_month(period_end)
-    buckets: list[date] = []
     month = start
     while month <= last_bucket:
         buckets.append(month)
@@ -147,6 +158,12 @@ def _resolve_range(
 
 def _month_start_utc(d: date) -> datetime:
     return datetime(d.year, d.month, 1, tzinfo=UTC)
+
+
+def _day_start_utc(d: date) -> datetime:
+    """00:00:00 UTC del día `d`. Para `month`/`year` `d` es el 1º de mes, así
+    que coincide con `_month_start_utc`; para `custom` respeta el día exacto."""
+    return datetime(d.year, d.month, d.day, tzinfo=UTC)
 
 
 def _range_end_utc(d: date) -> datetime:
@@ -575,6 +592,8 @@ async def compute_category_summary(
     range_: DebtTimeRange = "year",
     *,
     anchor: date | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
     target_currency: str | None = None,
 ) -> DebtCategorySummary:
     """Calcula el snapshot completo de Capa 1 para `range_`.
@@ -585,13 +604,22 @@ async def compute_category_summary(
     El `reference_currency` de la respuesta se sobreescribe con
     `target_currency`. Cuando no se pasa, devuelve la moneda nativa
     del usuario (primera cuenta no archivada por display_order).
+
+    PHASE-41 — `range_='custom'` usa `date_from`/`date_to` (rango libre
+    day-exact). Los KPIs y la composición se calculan sobre la ventana
+    exacta `[date_from 00:00, date_to 23:59:59]`.
     """
     today = _today_utc()
-    range_start, range_end, monthly_buckets = _resolve_range(range_, anchor, today)
+    custom_bounds = (
+        (date_from, date_to) if range_ == "custom" and date_from and date_to else None
+    )
+    range_start, range_end, monthly_buckets = _resolve_range(
+        range_, anchor, today, custom_bounds=custom_bounds
+    )
     native_currency = await _resolve_reference_currency(db, user_id)
     effective_currency = (target_currency or native_currency).upper()
 
-    start_dt = _month_start_utc(range_start)
+    start_dt = _day_start_utc(range_start)
     end_dt = _range_end_utc(range_end)
 
     # ── 0. Pasivos con cuadro (PHASE-37) ─────────────────────────────

@@ -15,6 +15,7 @@ preferido. Si no llega ninguno, se asume legacy con `_DEFAULT_CURRENCY`.
 
 from __future__ import annotations
 
+import calendar
 import uuid
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -108,6 +109,59 @@ async def list_user_currencies(
     return await repository.list_user_currencies(db, user_id)
 
 
+def _previous_period(date_from: datetime, date_to: datetime) -> tuple[datetime, datetime]:
+    """PHASE-41 — Período EQUIVALENTE anterior para el Δ "vs período anterior".
+
+    - MES natural completo (1º 00:00 … último día 23:59:59) → el mes natural
+      anterior exacto.
+    - AÑO natural completo (1-ene 00:00 … 31-dic 23:59:59) → el año anterior.
+    - Cualquier otro rango (custom, parcial) → ventana de igual longitud justo
+      antes, con el límite superior EXCLUSIVO (−1 µs) para no solapar la
+      frontera con el período actual (intervalo cerrado en el repositorio).
+
+    Antes SIEMPRE se usaba la ventana de igual longitud, lo que para meses de
+    distinta duración desplazaba el "anterior" ~1 día (p.ej. mayo → [31-mar…
+    30-abr] en vez de abril natural).
+    """
+    tz = date_from.tzinfo
+    same_year_month = date_from.year == date_to.year and date_from.month == date_to.month
+    at_month_start = (
+        date_from.day == 1
+        and (date_from.hour, date_from.minute, date_from.second, date_from.microsecond) == (0, 0, 0, 0)
+    )
+    at_month_end = (
+        date_to.day == calendar.monthrange(date_to.year, date_to.month)[1]
+        and (date_to.hour, date_to.minute, date_to.second) == (23, 59, 59)
+    )
+    if same_year_month and at_month_start and at_month_end:
+        y, m = (date_from.year, date_from.month - 1)
+        if m == 0:
+            y, m = y - 1, 12
+        last = calendar.monthrange(y, m)[1]
+        return (
+            datetime(y, m, 1, 0, 0, 0, tzinfo=tz),
+            datetime(y, m, last, 23, 59, 59, tzinfo=tz),
+        )
+    at_year_start = (
+        date_from.month == 1
+        and date_from.day == 1
+        and (date_from.hour, date_from.minute, date_from.second, date_from.microsecond) == (0, 0, 0, 0)
+    )
+    at_year_end = (
+        date_to.month == 12
+        and date_to.day == 31
+        and (date_to.hour, date_to.minute, date_to.second) == (23, 59, 59)
+    )
+    if date_from.year == date_to.year and at_year_start and at_year_end:
+        y = date_from.year - 1
+        return (
+            datetime(y, 1, 1, 0, 0, 0, tzinfo=tz),
+            datetime(y, 12, 31, 23, 59, 59, tzinfo=tz),
+        )
+    period_length = date_to - date_from
+    return (date_from - period_length, date_from - timedelta(microseconds=1))
+
+
 async def get_summary(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -142,16 +196,12 @@ async def get_summary(
     prev_expenses: Decimal | None = None
     prev_balance: Decimal | None = None
     if date_from is not None and date_to is not None:
-        period_length = date_to - date_from
-        # AUDIT — get-summary-prev-period-solape-frontera: el repositorio filtra
-        # con intervalo CERRADO [date_from, date_to] (`>=` y `<=`). Si el
-        # periodo previo terminara exactamente en `date_from`, una tx con
-        # `occurred_at == date_from` caería en AMBOS periodos (cuenta doble en
-        # la frontera). Hacemos el límite superior del periodo previo
-        # exclusivo restando 1 microsegundo → [prev_from, date_from) sin
-        # solape con el periodo actual [date_from, date_to].
-        prev_to = date_from - timedelta(microseconds=1)
-        prev_from = date_from - period_length
+        # PHASE-41 — período equivalente anterior: mes/año natural anterior para
+        # un rango que ES un mes/año completo; ventana de igual longitud (límite
+        # superior exclusivo, sin solape en la frontera cerrada del repositorio)
+        # para custom/parcial. Antes usaba siempre la ventana, que en meses de
+        # distinta duración desplazaba el "anterior" ~1 día.
+        prev_from, prev_to = _previous_period(date_from, date_to)
         prev_totals = await repository.get_totals_by_kind(
             db,
             user_id,
@@ -254,9 +304,44 @@ async def get_monthly_breakdown(
     year: int,
     currency: str | None = None,
     target_currency: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
 ) -> list[MonthlyBucket]:
-    """12 buckets mensuales para el año."""
+    """12 buckets mensuales para el año, o —si se pasa `[date_from, date_to]`
+    (PHASE-41, período custom)— un bucket por cada mes tocado por el rango, con
+    los meses de borde PARCIALES para que las barras cuadren con los KPIs de
+    flujo del mismo rango."""
     legacy, target, _ = _resolve_mode(currency, target_currency)
+    if date_from is not None and date_to is not None:
+        if target is not None:
+            await ensure_rates_for_user_scope(
+                db, user_id, target_currency=target, date_from=date_from, date_to=date_to
+            )
+        rows_range = await repository.get_totals_by_month_in_range(
+            db, user_id, date_from=date_from, date_to=date_to, currency=legacy, target_currency=target
+        )
+        income_r: dict[tuple[int, int], Decimal] = {}
+        expenses_r: dict[tuple[int, int], Decimal] = {}
+        for y, m, kind, total in rows_range:
+            if kind == CategoryKind.INCOME:
+                income_r[(y, m)] = total
+            elif kind == CategoryKind.EXPENSE:
+                expenses_r[(y, m)] = total
+        buckets: list[MonthlyBucket] = []
+        cy, cm = date_from.year, date_from.month
+        while (cy, cm) <= (date_to.year, date_to.month):
+            inc = income_r.get((cy, cm), Decimal("0"))
+            exp = expenses_r.get((cy, cm), Decimal("0"))
+            buckets.append(
+                MonthlyBucket(
+                    month=f"{cy:04d}-{cm:02d}", income=inc, expenses=exp, balance=inc - exp
+                )
+            )
+            cm += 1
+            if cm > 12:
+                cm = 1
+                cy += 1
+        return buckets
     if target is not None:
         # `by-month` cubre el año completo, así que el rango es ese.
         await ensure_rates_for_user_scope(

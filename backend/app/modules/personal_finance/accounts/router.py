@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response
@@ -13,7 +14,10 @@ from app.core.deps import CurrentUser
 from app.modules.personal_finance.accounts.debt_health import compute_debt_health
 from app.modules.personal_finance.accounts.debt_history import compute_debt_history
 from app.modules.personal_finance.accounts.debt_reconciliation import reconcile_debt_payments
-from app.modules.personal_finance.accounts.position_history import compute_position_history
+from app.modules.personal_finance.accounts.position_history import (
+    compute_position_as_of,
+    compute_position_history,
+)
 from app.modules.personal_finance.accounts.schemas import (
     AccountBalancesResponse,
     AccountCreate,
@@ -27,6 +31,7 @@ from app.modules.personal_finance.accounts.schemas import (
     InstallmentBulkPayResponse,
     InstallmentPayRequest,
     InstallmentUpdateRequest,
+    PositionAsOfResponse,
     PositionHistoryResponse,
     ReconcileBalanceRequest,
     ReconcilePlanResponse,
@@ -149,6 +154,19 @@ async def position_history_endpoint(
         months_back=months_back,
         months_forward=months_forward,
     )
+
+
+@router.get("/position-as-of", response_model=PositionAsOfResponse)
+async def position_as_of_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    date_from: Annotated[datetime, Query()],
+    date_to: Annotated[datetime, Query()],
+) -> PositionAsOfResponse:
+    """PHASE-41 — Patrimonio a fecha `date_to` + Δ del patrimonio durante
+    `[date_from, date_to]`. Para que las cards de patrimonio del Análisis
+    reflejen el período elegido (no una foto de hoy). Mono-divisa."""
+    return await compute_position_as_of(db, user.id, date_from=date_from, date_to=date_to)
 
 
 @router.post("/reconcile-debt", response_model=ReconcilePlanResponse)

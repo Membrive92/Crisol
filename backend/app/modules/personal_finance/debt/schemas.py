@@ -9,7 +9,9 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-DebtTimeRange = Literal["month", "quarter", "year"]
+# PHASE-41 — se eliminó "quarter" (sin sentido para un particular); "custom" es
+# el rango libre from/to que define el usuario (p. ej. de día 15 a día 15).
+DebtTimeRange = Literal["month", "year", "custom"]
 EffortStatus = Literal["healthy", "caution", "stressed", "unknown"]
 DebtTypeBucket = Literal["mortgage", "loan", "credit_card", "other"]
 
@@ -123,13 +125,13 @@ class DebtCategorySummary(BaseModel):
 
     monthly_series: list[MonthlyDebtPoint]
     """Un punto por mes del período (meses sin actividad en 0): 1 para
-    `month`, hasta 3 para `quarter`, hasta 12 para `year`. El período
-    en curso sólo incluye los meses transcurridos."""
+    `month`, hasta 12 para `year`. El período en curso sólo incluye los
+    meses transcurridos."""
 
     daily_series: list[DailyDebtPoint] | None = None
     """Sólo poblado cuando `range='month'`: un punto por día del mes con
     la evolución del saldo de deuda (emisión ↑ / amortización ↓) + el
-    saldo acumulado. `None` para `quarter`/`year` (se usa `monthly_series`)."""
+    saldo acumulado. `None` para `year` (se usa `monthly_series`)."""
 
     monthly_income_avg: Decimal
     """Ingreso medio mensual de la categoría INCOME (sin transferencias

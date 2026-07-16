@@ -407,6 +407,49 @@ async def get_totals_by_month(
     return [(int(month), CategoryKind(kind), Decimal(total)) for month, kind, total in result.all()]
 
 
+async def get_totals_by_month_in_range(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    date_from: datetime,
+    date_to: datetime,
+    currency: str | None = None,
+    target_currency: str | None = None,
+) -> list[tuple[int, int, CategoryKind, Decimal]]:
+    """PHASE-41 — Totales income/expense por (año, mes) dentro de
+    `[date_from, date_to]`, con los meses de borde PARCIALES (sólo las tx del
+    rango). Para el período `custom`: así las barras del chart mensual cuadran
+    con los KPIs de flujo del mismo rango. Misma semántica `flow` que
+    `get_totals_by_month`."""
+    _occurred_utc = func.timezone("UTC", Transaction.occurred_at)
+    month_col = extract("month", _occurred_utc)
+    year_col = extract("year", _occurred_utc)
+    amount = _amount_expr(target_currency)
+    kind_label = case(
+        (_is_income(), literal(CategoryKind.INCOME.value)),
+        (_is_expense(), literal(CategoryKind.EXPENSE.value)),
+    )
+    query = (
+        select(year_col, month_col, kind_label.label("kind"), func.coalesce(func.sum(amount), 0))
+        .select_from(Transaction)
+        .outerjoin(Category, Category.id == Transaction.category_id)
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.deleted_at.is_(None))
+        .where(_is_internal_transfer().is_(False))
+        .where(Transaction.occurred_at >= date_from)
+        .where(Transaction.occurred_at <= date_to)
+        .where(kind_label.is_not(None))
+        .group_by(year_col, month_col, kind_label)
+    )
+    if currency is not None:
+        query = query.where(Transaction.currency == currency)
+
+    result = await db.execute(query)
+    return [
+        (int(y), int(m), CategoryKind(kind), Decimal(total)) for y, m, kind, total in result.all()
+    ]
+
+
 async def get_top_expenses(
     db: AsyncSession,
     user_id: uuid.UUID,

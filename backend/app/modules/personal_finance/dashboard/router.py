@@ -118,10 +118,21 @@ async def by_month_endpoint(
     year: int = Query(default_factory=lambda: datetime.now().year, ge=1970, le=2999),
     currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
     target_currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
+    date_from: Annotated[datetime | None, Query()] = None,
+    date_to: Annotated[datetime | None, Query()] = None,
 ) -> list[MonthlyBucket]:
-    """12 buckets mensuales para el año."""
+    """12 buckets mensuales para el año, o —con `date_from`+`date_to` (período
+    custom)— un bucket por mes del rango, con bordes parciales."""
     cur, target = _resolve_currency_params(currency, target_currency)
-    return await get_monthly_breakdown(db, user.id, year=year, currency=cur, target_currency=target)
+    return await get_monthly_breakdown(
+        db,
+        user.id,
+        year=year,
+        currency=cur,
+        target_currency=target,
+        date_from=date_from,
+        date_to=date_to,
+    )
 
 
 @router.get(

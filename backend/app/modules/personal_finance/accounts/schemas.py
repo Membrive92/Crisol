@@ -477,6 +477,22 @@ class PositionHistoryResponse(BaseModel):
     delta_period_pct: float | None = None
 
 
+class PositionAsOfResponse(BaseModel):
+    """PHASE-41 — Patrimonio A FECHA `date_to` + Δ del patrimonio DURANTE
+    `[date_from, date_to]`, para que las cards de patrimonio del Análisis
+    reflejen el período seleccionado (no una foto de hoy). Mono-divisa
+    (`reference_currency`), misma limitación que `compute_position_history`."""
+
+    reference_currency: str
+    # Saldos AGREGADOS a fecha `date_to`.
+    total_assets: Decimal
+    total_liabilities: Decimal
+    net_worth: Decimal
+    # Δ DURANTE el período (Σ movimientos firmados en el rango).
+    delta_assets: Decimal
+    delta_net_worth: Decimal
+
+
 class AccountBalancesResponse(BaseModel):
     """Snapshot de patrimonio del usuario por cuenta (PHASE-19.4).
 

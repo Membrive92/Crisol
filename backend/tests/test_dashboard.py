@@ -447,6 +447,48 @@ async def test_by_month_returns_12_buckets_with_zero_fill(client: AsyncClient) -
     assert by_month["2026-12"]["balance"] == "0"
 
 
+async def test_by_month_custom_range_partial_boundary_months(client: AsyncClient) -> None:
+    """PHASE-41 — `date_from`+`date_to` devuelve un bucket por mes del rango con
+    los bordes PARCIALES (excluye las tx del mes-borde fuera del rango), para que
+    las barras cuadren con el flujo del mismo rango."""
+    token, account_id = await _register(client, "dash-custom@example.com")
+    income = await _make_category(client, token, name="Salario", kind="income")
+    expense = await _make_category(client, token, name="Comida", kind="expense")
+
+    # Mayo: una ANTES del 15 (fuera) + una DESPUÉS del 15 (dentro).
+    await _make_tx(
+        client, token, account_id, amount="500.00", occurred_at="2026-05-10T10:00:00Z",
+        category_id=expense,
+    )
+    await _make_tx(
+        client, token, account_id, amount="200.00", occurred_at="2026-05-20T10:00:00Z",
+        category_id=expense,
+    )
+    # Junio: una ANTES del 15 (dentro) + una DESPUÉS del 15 (fuera).
+    await _make_tx(
+        client, token, account_id, amount="1000.00", occurred_at="2026-06-05T10:00:00Z",
+        category_id=income,
+    )
+    await _make_tx(
+        client, token, account_id, amount="9999.00", occurred_at="2026-06-20T10:00:00Z",
+        category_id=income,
+    )
+
+    r = await client.get(
+        "/dashboard/by-month?date_from=2026-05-15T00:00:00&date_to=2026-06-15T23:59:59",
+        headers=_auth(token),
+    )
+    by_month = {b["month"]: b for b in r.json()}
+    # Sólo los 2 meses del rango (no 12).
+    assert set(by_month) == {"2026-05", "2026-06"}
+    # Mayo PARCIAL: sólo la tx del día 20 (200); la del 10 queda fuera.
+    assert by_month["2026-05"]["expenses"] == "200.00"
+    assert by_month["2026-05"]["income"] == "0"
+    # Junio PARCIAL: sólo la tx del día 5 (1000); la del 20 queda fuera.
+    assert by_month["2026-06"]["income"] == "1000.00"
+    assert by_month["2026-06"]["expenses"] == "0"
+
+
 async def test_by_month_ignores_other_years(client: AsyncClient) -> None:
     token, account_id = await _register(client, "dash-year@example.com")
     cat = await _make_category(client, token, name="Salario", kind="income")
@@ -681,6 +723,40 @@ async def test_summary_previous_period_computed_with_date_range(
     assert body["previous_period_income"] == "80.00"
     assert body["previous_period_expenses"] == "30.00"
     assert body["previous_period_balance"] == "50.00"
+
+
+async def test_summary_previous_period_is_exact_calendar_month(client: AsyncClient) -> None:
+    """PHASE-41 — para un MES natural completo, 'período anterior' = el mes
+    natural anterior EXACTO. Una tx del 31-ene NO cuenta como 'febrero' (el
+    período anterior de marzo); la ventana de igual longitud sí la colaba."""
+    token, account_id = await _register(client, "dash-prev-cal@example.com")
+    income_cat = await _make_category(client, token, name="Salario", kind="income")
+
+    # Período actual: marzo 2026.
+    await _make_tx(
+        client, token, account_id, amount="100.00", occurred_at="2026-03-10T10:00:00Z",
+        category_id=income_cat,
+    )
+    # Febrero (período anterior natural): SÍ cuenta.
+    await _make_tx(
+        client, token, account_id, amount="70.00", occurred_at="2026-02-15T10:00:00Z",
+        category_id=income_cat,
+    )
+    # 31-ene: la ventana de igual longitud [~29-ene … 28-feb] la colaba, pero
+    # NO es febrero → con el mes natural NO cuenta.
+    await _make_tx(
+        client, token, account_id, amount="999.00", occurred_at="2026-01-31T10:00:00Z",
+        category_id=income_cat,
+    )
+
+    r = await client.get(
+        "/dashboard/summary",
+        params={"date_from": "2026-03-01T00:00:00Z", "date_to": "2026-03-31T23:59:59Z"},
+        headers=_auth(token),
+    )
+    body = r.json()
+    assert body["income"] == "100.00"
+    assert body["previous_period_income"] == "70.00"  # sólo febrero (no el 31-ene)
 
 
 async def test_summary_previous_period_zero_when_no_prior_data(

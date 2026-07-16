@@ -137,3 +137,59 @@ async def test_position_history_excludes_brokerage(client: AsyncClient) -> None:
     ).json()
     # El patrimonio refleja solo el banco (1000), no el brokerage (5000).
     assert Decimal(pos["points"][-1]["total_assets"]) == Decimal("1000.00")
+
+
+# ── /accounts/position-as-of (PHASE-41) ──────────────────────────────────────
+
+
+async def test_position_as_of_reflects_range_end_not_today(client: AsyncClient) -> None:
+    """El patrimonio A FECHA de fin de rango ignora movimientos POSTERIORES a
+    `date_to` (es una foto del período, no de hoy) y el Δ cuenta solo los
+    movimientos DENTRO de `[date_from, date_to]`."""
+    token = await _register(client, "asof_end@example.com")
+    bank = await _create_account(
+        client, token, name="BBVA", type="bank", opening_balance="1000.00"
+    )
+    await _post_tx(client, token, account_id=bank, amount="400.00", flow="IN", when="2026-04-10T12:00:00Z")
+    # Movimiento POSTERIOR al rango: no debe entrar en la foto a fecha.
+    await _post_tx(client, token, account_id=bank, amount="100.00", flow="OUT", when="2026-06-20T12:00:00Z")
+
+    r = await client.get(
+        "/accounts/position-as-of",
+        params={"date_from": "2026-04-01T00:00:00Z", "date_to": "2026-04-30T23:59:59Z"},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # Foto a 30-abr: 1000 + 400 = 1400 (el cargo de junio queda fuera).
+    assert Decimal(body["total_assets"]) == Decimal("1400.00")
+    assert Decimal(body["total_liabilities"]) == Decimal("0.00")
+    assert Decimal(body["net_worth"]) == Decimal("1400.00")
+    # Δ del rango = solo el ingreso de abril.
+    assert Decimal(body["delta_assets"]) == Decimal("400.00")
+    assert Decimal(body["delta_net_worth"]) == Decimal("400.00")
+    # Prueba de que NO es la foto de hoy (hoy el neto sería 1300).
+    assert Decimal(body["net_worth"]) != Decimal("1300.00")
+
+
+async def test_position_as_of_delta_excludes_movements_before_range(client: AsyncClient) -> None:
+    """Un movimiento ANTERIOR a `date_from` entra en la base (valor a fecha)
+    pero NO en el Δ del rango."""
+    token = await _register(client, "asof_before@example.com")
+    bank = await _create_account(
+        client, token, name="BBVA", type="bank", opening_balance="1000.00"
+    )
+    await _post_tx(client, token, account_id=bank, amount="200.00", flow="IN", when="2026-03-05T12:00:00Z")
+    await _post_tx(client, token, account_id=bank, amount="500.00", flow="IN", when="2026-05-15T12:00:00Z")
+
+    r = await client.get(
+        "/accounts/position-as-of",
+        params={"date_from": "2026-05-01T00:00:00Z", "date_to": "2026-05-31T23:59:59Z"},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # Valor a 31-may = 1000 + 200 (marzo) + 500 (mayo) = 1700.
+    assert Decimal(body["net_worth"]) == Decimal("1700.00")
+    # Δ de mayo = solo el ingreso de mayo (el de marzo queda en la base).
+    assert Decimal(body["delta_net_worth"]) == Decimal("500.00")
