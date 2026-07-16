@@ -17,16 +17,29 @@ function point(month: string, net: number): PositionPoint {
 
 describe('NetworthEvolutionCard', () => {
   it('muestra empty state con menos de 2 puntos y no crashea', () => {
-    render(<NetworthEvolutionCard points={[]} currency="EUR" isLoading={false} />);
+    render(
+      <NetworthEvolutionCard points={[]} currency="EUR" isLoading={false} includeDebt />,
+    );
     expect(screen.getByText(/al menos 2 meses/i)).toBeTruthy();
   });
 
-  it('renderiza el título y la leyenda con una serie válida', () => {
+  it('con deuda (ON): leyenda Neto + Activos + Pasivos', () => {
     const points = Array.from({ length: 12 }, (_, i) => point(`2026-${String(i + 1).padStart(2, '0')}-01`, 1000 + i * 100));
-    render(<NetworthEvolutionCard points={points} currency="EUR" isLoading={false} />);
+    render(<NetworthEvolutionCard points={points} currency="EUR" isLoading={false} includeDebt />);
     expect(screen.getByText('Evolución del patrimonio')).toBeTruthy();
     expect(screen.getByText('Neto')).toBeTruthy();
     expect(screen.getByText('Activos')).toBeTruthy();
     expect(screen.getByText('Pasivos')).toBeTruthy();
+  });
+
+  it('sin deuda (OFF): leyenda Patrimonio + Pasivos, sin Activos redundante', () => {
+    const points = Array.from({ length: 12 }, (_, i) => point(`2026-${String(i + 1).padStart(2, '0')}-01`, 1000 + i * 100));
+    render(
+      <NetworthEvolutionCard points={points} currency="EUR" isLoading={false} includeDebt={false} />,
+    );
+    expect(screen.getByText('Patrimonio')).toBeTruthy();
+    expect(screen.getByText('Pasivos')).toBeTruthy();
+    expect(screen.queryByText('Activos')).toBeNull();
+    expect(screen.queryByText('Neto')).toBeNull();
   });
 });

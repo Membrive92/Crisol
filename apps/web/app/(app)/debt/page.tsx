@@ -57,6 +57,16 @@ const DebtTrendChart = dynamic(
  * cuotas + chart de evolución del saldo. Empty state pide vincular
  * cuando hay cuotas recurrentes pero ningún liability declarado.
  */
+/** PHASE-41 — etiqueta corta `dd/mm – dd/mm` del rango libre para el título. */
+function formatRangeLabel(from: string | null, to: string | null): string {
+  if (!(from && to)) return 'Rango';
+  const short = (d: string): string => {
+    const [, mo, da] = d.split('-');
+    return `${da}/${mo}`;
+  };
+  return `${short(from)} – ${short(to)}`;
+}
+
 export default function DebtPage() {
   const [range, setRange] = useState<DebtTimeRange>('year');
   // PHASE-30.8 — Mes ancla `YYYY-MM` del período mostrado. Por defecto
@@ -66,6 +76,39 @@ export default function DebtPage() {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
+  // PHASE-41 — rango libre (`range='custom'`): day-strings `YYYY-MM-DD`. Se
+  // siembran desde el período actual al conmutar a "Personalizado" para que
+  // los date-pickers no salgan vacíos.
+  const [customFrom, setCustomFrom] = useState<string | null>(null);
+  const [customTo, setCustomTo] = useState<string | null>(null);
+
+  function seedCustomFromPeriod(): { from: string; to: string } {
+    const [y, m] = anchorMonth.split('-').map(Number);
+    const yy = y ?? new Date().getFullYear();
+    if (range === 'year') {
+      return { from: `${yy}-01-01`, to: `${yy}-12-31` };
+    }
+    const mm = m ?? 1;
+    const lastDay = new Date(Date.UTC(yy, mm, 0)).getUTCDate();
+    return {
+      from: `${anchorMonth}-01`,
+      to: `${anchorMonth}-${String(lastDay).padStart(2, '0')}`,
+    };
+  }
+
+  function handleRangeChange(next: DebtTimeRange): void {
+    if (next === 'custom' && !(customFrom && customTo)) {
+      const seed = seedCustomFromPeriod();
+      setCustomFrom(seed.from);
+      setCustomTo(seed.to);
+    }
+    setRange(next);
+  }
+
+  function handleCustomRangeChange(from: string, to: string): void {
+    if (from) setCustomFrom(from);
+    if (to) setCustomTo(to);
+  }
   // PHASE-30.6 — el selector global de divisa del header pasa por aquí
   // como `target_currency` a los tres endpoints de deuda. Sin `convertAll`
   // (modo legacy del dashboard) volvemos al comportamiento native:
@@ -76,6 +119,8 @@ export default function DebtPage() {
 
   const summaryQuery = useDebtCategorySummary(range, {
     anchor: `${anchorMonth}-01`,
+    ...(customFrom ? { dateFrom: customFrom } : {}),
+    ...(customTo ? { dateTo: customTo } : {}),
     ...(targetCurrency ? { targetCurrency } : {}),
   });
   const healthQuery = useDebtHealth(
@@ -147,11 +192,15 @@ export default function DebtPage() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
         <PeriodNavigator
           range={range}
-          onRangeChange={setRange}
+          onRangeChange={handleRangeChange}
           anchor={anchorMonth}
           onAnchorChange={setAnchorMonth}
           availableFrom={summary?.available_from ?? null}
           availableTo={summary?.available_to ?? null}
+          allowCustom
+          customFrom={customFrom}
+          customTo={customTo}
+          onCustomRangeChange={handleCustomRangeChange}
         />
         {summaryQuery.isError ? (
           <ErrorState
@@ -174,7 +223,11 @@ export default function DebtPage() {
         />
 
         <PaymentsSummaryCard
-          title={`Pagos a deuda — ${periodLabel(range, anchorMonth)}`}
+          title={`Pagos a deuda — ${
+            range === 'custom'
+              ? formatRangeLabel(customFrom, customTo)
+              : periodLabel(range, anchorMonth)
+          }`}
           totalPayments={summary?.total_payments ?? '0'}
           interestsAndFees={summary?.interests_and_fees ?? '0'}
           capitalAmortized={summary?.capital_amortized ?? '0'}

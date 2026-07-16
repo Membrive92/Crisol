@@ -12,7 +12,11 @@ import {
 import { useCurrencyStore } from '@crisol/store';
 import { colors, fontSize, fontWeight, layout, spacing } from '@crisol/ui';
 
-import { boundsForAnchor, type PeriodKey } from '@/components/analysis/stitch-period-toggle';
+import {
+  boundsForAnchor,
+  boundsForCustomRange,
+  type PeriodKey,
+} from '@/components/analysis/stitch-period-toggle';
 import { PeriodNavigator } from '@/components/debt/period-navigator';
 import { StitchKpiRow } from '@/components/dashboard/stitch-kpi-row';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -41,12 +45,29 @@ export default function DashboardPage() {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
+  // PHASE-41 — rango libre `custom` (`YYYY-MM-DD`); estado local (sin URL).
+  const [customFrom, setCustomFrom] = useState<string | null>(null);
+  const [customTo, setCustomTo] = useState<string | null>(null);
+  // Al conmutar a "Personalizado", siembra los pickers desde el período actual.
+  function handleRangeChange(next: PeriodKey): void {
+    setPeriod(next);
+    if (next === 'custom' && !(customFrom && customTo)) {
+      const seed = boundsForAnchor(period === 'custom' ? 'year' : period, anchorMonth);
+      setCustomFrom(seed.dateFrom.slice(0, 10));
+      setCustomTo(seed.dateTo.slice(0, 10));
+    }
+  }
 
   const { dateFrom, dateTo } = useMemo(
-    () => boundsForAnchor(period, anchorMonth),
-    [period, anchorMonth],
+    () =>
+      period === 'custom' && customFrom && customTo
+        ? boundsForCustomRange(customFrom, customTo)
+        : boundsForAnchor(period === 'custom' ? 'year' : period, anchorMonth),
+    [period, anchorMonth, customFrom, customTo],
   );
-  const anchorYear = Number(anchorMonth.split('-')[0]);
+  const anchorYear = Number(
+    (period === 'custom' && customFrom ? customFrom : anchorMonth).slice(0, 4),
+  );
 
   // PHASE-8.3: una sola petición por endpoint, el backend convierte
   // per-transaction usando la tasa del día de cada `occurred_at`.
@@ -57,9 +78,16 @@ export default function DashboardPage() {
     : { currency, date_from: dateFrom, date_to: dateTo };
   // El gráfico mensual sigue el AÑO ANCLADO (antes fijo a currentYear → no
   // reaccionaba al periodo navegado).
-  const monthlyParams = convertAll
-    ? { target_currency: currency, year: anchorYear }
-    : { currency, year: anchorYear };
+  // PHASE-41 — en custom el chart mensual se acota al rango (bordes parciales);
+  // en mes/año, por año (y `chartMonths` recorta a los meses del período).
+  const monthlyParams =
+    period === 'custom'
+      ? convertAll
+        ? { target_currency: currency, date_from: dateFrom, date_to: dateTo }
+        : { currency, date_from: dateFrom, date_to: dateTo }
+      : convertAll
+        ? { target_currency: currency, year: anchorYear }
+        : { currency, year: anchorYear };
   const byCategoryParams = convertAll
     ? {
         target_currency: currency,
@@ -81,9 +109,10 @@ export default function DashboardPage() {
 
   const summary = summaryQuery.data;
   const monthly = monthlyQuery.data ?? [];
-  // El gráfico muestra SÓLO los meses del periodo navegado (Año=12, Trim=3,
-  // Mes=1). `monthly` trae los 12 del año anclado; filtramos por el rango
-  // `[dateFrom, dateTo]` comparando el `YYYY-MM` del bucket.
+  // El gráfico muestra SÓLO los meses del periodo (Año=12, Mes=1, custom=meses
+  // del rango). En mes/año `monthly` trae los 12 del año anclado y aquí
+  // filtramos por `[dateFrom, dateTo]`; en custom ya viene acotado y el filtro
+  // es no-op.
   const chartMonths = useMemo(() => {
     const fromYM = dateFrom.slice(0, 7);
     const toYM = dateTo.slice(0, 7);
@@ -144,11 +173,18 @@ export default function DashboardPage() {
         </div>
         <PeriodNavigator
           range={period}
-          onRangeChange={setPeriod}
+          onRangeChange={handleRangeChange}
           anchor={anchorMonth}
           onAnchorChange={setAnchorMonth}
           availableFrom={summary?.available_from ?? null}
           availableTo={summary?.available_to ?? null}
+          allowCustom
+          customFrom={customFrom}
+          customTo={customTo}
+          onCustomRangeChange={(from, to) => {
+            setCustomFrom(from);
+            setCustomTo(to);
+          }}
         />
       </header>
 

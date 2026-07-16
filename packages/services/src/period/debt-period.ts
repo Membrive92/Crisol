@@ -1,5 +1,3 @@
-import type { DebtTimeRange } from '@crisol/types';
-
 /**
  * PHASE-30.8 — Helpers PUROS del navegador de período del módulo deuda.
  *
@@ -9,7 +7,15 @@ import type { DebtTimeRange } from '@crisol/types';
  * que la navegación —etiqueta, paso ±1 período, clamp a los límites con
  * datos— sea idéntica en ambas plataformas. Tests en
  * `debt-period.test.ts`.
+ *
+ * PHASE-41 — Operan sólo sobre los períodos NAVEGABLES (`month`/`year`).
+ * El período `custom` (rango libre `from/to`) NO navega —sin flechas, sin
+ * anchor— y nunca llega a estos helpers; el compilador lo garantiza vía
+ * `NavigableRange`. Se eliminó `quarter`.
  */
+
+/** Períodos con navegación por flechas (subconjunto de `DebtTimeRange`). */
+export type NavigableRange = 'month' | 'year';
 
 const SPANISH_MONTHS = [
   'Enero',
@@ -26,9 +32,8 @@ const SPANISH_MONTHS = [
   'Diciembre',
 ] as const;
 
-const PERIOD_MONTHS: Record<DebtTimeRange, number> = {
+const PERIOD_MONTHS: Record<NavigableRange, number> = {
   month: 1,
-  quarter: 3,
   year: 12,
 };
 
@@ -56,23 +61,20 @@ function fromIndex(idx: number): YearMonth {
 }
 
 /** Mes inicial (1-12) del período que contiene `month`. */
-function periodStartMonth(range: DebtTimeRange, month: number): number {
-  if (range === 'month') return month;
-  if (range === 'quarter') return Math.floor((month - 1) / 3) * 3 + 1;
-  return 1; // year
+function periodStartMonth(range: NavigableRange, month: number): number {
+  return range === 'month' ? month : 1; // year
 }
 
 /** Índice absoluto del PRIMER mes del período que contiene `anchor`. */
-function periodStartIndex(range: DebtTimeRange, anchor: string): number {
+function periodStartIndex(range: NavigableRange, anchor: string): number {
   const { year, month } = parseAnchor(anchor);
   return toIndex({ year, month: periodStartMonth(range, month) });
 }
 
-/** Etiqueta legible del período: "Abril 2025" / "Q2 2025" / "2025". */
-export function periodLabel(range: DebtTimeRange, anchor: string): string {
+/** Etiqueta legible del período: "Abril 2025" / "2025". */
+export function periodLabel(range: NavigableRange, anchor: string): string {
   const { year, month } = parseAnchor(anchor);
   if (range === 'month') return `${SPANISH_MONTHS[month - 1]} ${year}`;
-  if (range === 'quarter') return `Q${Math.floor((month - 1) / 3) + 1} ${year}`;
   return `${year}`;
 }
 
@@ -81,7 +83,7 @@ export function periodLabel(range: DebtTimeRange, anchor: string): string {
  * mes inicial del nuevo período (`YYYY-MM`).
  */
 export function stepAnchor(
-  range: DebtTimeRange,
+  range: NavigableRange,
   anchor: string,
   direction: 1 | -1,
 ): string {
@@ -96,7 +98,7 @@ export function stepAnchor(
  * límites, sólo normaliza.
  */
 export function clampAnchor(
-  range: DebtTimeRange,
+  range: NavigableRange,
   anchor: string,
   availableFrom: string | null,
   availableTo: string | null,
@@ -109,7 +111,7 @@ export function clampAnchor(
 
 /** ¿Hay un período anterior con datos? (flecha ◀ habilitada). */
 export function canStepPrev(
-  range: DebtTimeRange,
+  range: NavigableRange,
   anchor: string,
   availableFrom: string | null,
 ): boolean {
@@ -119,10 +121,28 @@ export function canStepPrev(
 
 /** ¿Hay un período posterior con datos? (flecha ▶ habilitada). */
 export function canStepNext(
-  range: DebtTimeRange,
+  range: NavigableRange,
   anchor: string,
   availableTo: string | null,
 ): boolean {
   if (!availableTo) return false;
   return periodStartIndex(range, anchor) < periodStartIndex(range, availableTo);
+}
+
+/**
+ * PHASE-41 — Convierte dos day-strings `YYYY-MM-DD` (rango libre `custom`) en
+ * los bounds ISO `[from 00:00:00Z, to 23:59:59Z]` para las queries. En UTC a
+ * propósito (no `new Date('YYYY-MM-DD')`, que interpreta local y desplaza el
+ * día en Europe/Madrid). Compartido web+móvil para que el rango libre sea
+ * idéntico en ambas plataformas.
+ */
+export function boundsForCustomRange(
+  fromDay: string,
+  toDay: string,
+): { dateFrom: string; dateTo: string } {
+  const [fy, fm, fd] = fromDay.split('-').map(Number);
+  const [ty, tm, td] = toDay.split('-').map(Number);
+  const start = new Date(Date.UTC(fy ?? 1970, (fm ?? 1) - 1, fd ?? 1, 0, 0, 0));
+  const end = new Date(Date.UTC(ty ?? 1970, (tm ?? 1) - 1, td ?? 1, 23, 59, 59));
+  return { dateFrom: start.toISOString(), dateTo: end.toISOString() };
 }

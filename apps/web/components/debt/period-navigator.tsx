@@ -11,6 +11,7 @@ import type { DebtTimeRange } from '@crisol/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import { StitchPeriodToggle } from '@/components/analysis/stitch-period-toggle';
+import { DatePicker } from '@/components/ui/date-picker';
 
 export interface PeriodNavigatorProps {
   range: DebtTimeRange;
@@ -20,13 +21,22 @@ export interface PeriodNavigatorProps {
   onAnchorChange: (anchor: string) => void;
   availableFrom: string | null;
   availableTo: string | null;
+  /**
+   * PHASE-41 — expone la opción "Personalizado" (rango libre `from/to`).
+   * Off por defecto: sólo donde el consumidor sabe manejar `range='custom'`.
+   */
+  allowCustom?: boolean;
+  /** Rango libre activo (day-strings `YYYY-MM-DD`), sólo con `range='custom'`. */
+  customFrom?: string | null;
+  customTo?: string | null;
+  onCustomRangeChange?: (from: string, to: string) => void;
 }
 
 /**
- * PHASE-30.8 — Navegador de período del módulo deuda: granularidad
- * (Mes / Trimestre / Año, vía `StitchPeriodToggle`) + flechas ◀ ▶ que
- * recorren períodos concretos, limitadas al rango con datos
- * (`availableFrom`/`availableTo`). Gobierna toda la página `/debt`.
+ * PHASE-30.8 / PHASE-41 — Navegador de período: granularidad (Mes / Año /
+ * Personalizado, vía `StitchPeriodToggle`) + flechas ◀ ▶ para los períodos
+ * navegables, o dos date-pickers para el rango libre `custom`. Limitado al
+ * rango con datos (`availableFrom`/`availableTo`).
  */
 export function PeriodNavigator({
   range,
@@ -35,17 +45,27 @@ export function PeriodNavigator({
   onAnchorChange,
   availableFrom,
   availableTo,
+  allowCustom = false,
+  customFrom = null,
+  customTo = null,
+  onCustomRangeChange,
 }: PeriodNavigatorProps) {
-  const prevEnabled = canStepPrev(range, anchor, availableFrom);
-  const nextEnabled = canStepNext(range, anchor, availableTo);
+  // PHASE-41 — `custom` (rango libre) no navega: las flechas/label sólo
+  // aplican a los períodos navegables (month/year). Los guards estrechan
+  // el tipo a `NavigableRange` para los helpers puros.
+  const prevEnabled = range !== 'custom' && canStepPrev(range, anchor, availableFrom);
+  const nextEnabled = range !== 'custom' && canStepNext(range, anchor, availableTo);
 
   function handleRangeChange(next: DebtTimeRange) {
     onRangeChange(next);
-    // Re-snap + re-clamp el ancla a la nueva granularidad.
-    onAnchorChange(clampAnchor(next, anchor, availableFrom, availableTo));
+    // Re-snap + re-clamp el ancla a la nueva granularidad (custom no navega).
+    if (next !== 'custom') {
+      onAnchorChange(clampAnchor(next, anchor, availableFrom, availableTo));
+    }
   }
 
   function step(direction: 1 | -1) {
+    if (range === 'custom') return;
     onAnchorChange(
       clampAnchor(
         range,
@@ -66,27 +86,53 @@ export function PeriodNavigator({
         flexWrap: 'wrap',
       }}
     >
-      <StitchPeriodToggle value={range} onChange={handleRangeChange} />
-      <div
-        style={{ display: 'inline-flex', alignItems: 'center', gap: spacing.xs }}
-        role="group"
-        aria-label="Navegar período"
-      >
-        <ArrowButton direction="prev" disabled={!prevEnabled} onClick={() => step(-1)} />
-        <span
-          style={{
-            minWidth: 124,
-            textAlign: 'center',
-            fontSize: fontSize.sm,
-            fontWeight: fontWeight.semibold,
-            color: colors.text,
-            fontVariantNumeric: 'tabular-nums',
-          }}
+      <StitchPeriodToggle
+        value={range}
+        onChange={handleRangeChange}
+        options={allowCustom ? ['month', 'year', 'custom'] : ['month', 'year']}
+      />
+      {range === 'custom' ? (
+        <div
+          style={{ display: 'inline-flex', alignItems: 'center', gap: spacing.xs }}
+          role="group"
+          aria-label="Rango de fechas"
         >
-          {periodLabel(range, anchor)}
-        </span>
-        <ArrowButton direction="next" disabled={!nextEnabled} onClick={() => step(1)} />
-      </div>
+          <DatePicker
+            value={customFrom}
+            max={customTo}
+            onChange={(from) => onCustomRangeChange?.(from, customTo ?? '')}
+            ariaLabel="Desde"
+          />
+          <span style={{ color: colors.textMuted, fontSize: fontSize.sm }}>–</span>
+          <DatePicker
+            value={customTo}
+            min={customFrom}
+            onChange={(to) => onCustomRangeChange?.(customFrom ?? '', to)}
+            ariaLabel="Hasta"
+          />
+        </div>
+      ) : (
+        <div
+          style={{ display: 'inline-flex', alignItems: 'center', gap: spacing.xs }}
+          role="group"
+          aria-label="Navegar período"
+        >
+          <ArrowButton direction="prev" disabled={!prevEnabled} onClick={() => step(-1)} />
+          <span
+            style={{
+              minWidth: 124,
+              textAlign: 'center',
+              fontSize: fontSize.sm,
+              fontWeight: fontWeight.semibold,
+              color: colors.text,
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            {periodLabel(range, anchor)}
+          </span>
+          <ArrowButton direction="next" disabled={!nextEnabled} onClick={() => step(1)} />
+        </div>
+      )}
     </div>
   );
 }

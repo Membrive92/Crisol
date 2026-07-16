@@ -20,13 +20,21 @@ export interface NetworthEvolutionCardProps {
   points: PositionPoint[];
   currency: string;
   isLoading: boolean;
+  /**
+   * PHASE-41 — respeta el toggle "incluir deuda en el patrimonio neto", igual
+   * que las tiles del strip: ON → línea = neto (activos − pasivos); OFF → línea
+   * = solo activos (y se oculta la línea "Activos", redundante). Sin esto, la
+   * card contaba una historia distinta a la tile (neto negativo vs activos).
+   */
+  includeDebt: boolean;
 }
 
 const SHORT_MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
 interface Row {
   label: string;
-  net: number;
+  /** Serie principal según el toggle: neto (con deuda) o activos (sin deuda). */
+  worth: number;
   assets: number;
   liabilities: number;
   projection: boolean;
@@ -41,15 +49,23 @@ function monthLabel(iso: string): string {
  * PHASE-37.2 — Evolución del patrimonio: área de neto + líneas de activos y
  * pasivos. Consume `usePositionHistory`.
  */
-export function NetworthEvolutionCard({ points, currency, isLoading }: NetworthEvolutionCardProps) {
+export function NetworthEvolutionCard({
+  points,
+  currency,
+  isLoading,
+  includeDebt,
+}: NetworthEvolutionCardProps) {
   const data: Row[] = points.map((p) => ({
     label: monthLabel(p.month),
-    net: Number(p.net_worth),
+    worth: Number(includeDebt ? p.net_worth : p.total_assets),
     assets: Number(p.total_assets),
     liabilities: Number(p.total_liabilities),
     projection: p.is_projection,
   }));
   const empty = !isLoading && data.length < 2;
+  // Etiqueta de la serie principal: "neto" sólo tiene sentido cuando se resta
+  // la deuda; sin deuda es el patrimonio en activos (igual que la tile).
+  const worthLabel = includeDebt ? 'Patrimonio neto' : 'Patrimonio';
 
   return (
     <Card style={{ padding: spacing.lg, height: '100%' }}>
@@ -89,27 +105,31 @@ export function NetworthEvolutionCard({ points, currency, isLoading }: NetworthE
                 if (!active || !payload || payload.length === 0) return null;
                 const row = payload[0]?.payload as Row | undefined;
                 if (!row) return null;
-                return <NetworthTooltip row={row} currency={currency} />;
+                return (
+                  <NetworthTooltip row={row} currency={currency} includeDebt={includeDebt} />
+                );
               }}
             />
             <Area
               type="monotone"
-              dataKey="net"
-              name="Patrimonio neto"
+              dataKey="worth"
+              name={worthLabel}
               stroke={colors.primary}
               strokeWidth={2}
               fill="url(#nw-fill)"
               dot={false}
             />
-            <Line
-              type="monotone"
-              dataKey="assets"
-              name="Activos"
-              stroke={colors.success}
-              strokeWidth={1.3}
-              strokeDasharray="4 3"
-              dot={false}
-            />
+            {includeDebt ? (
+              <Line
+                type="monotone"
+                dataKey="assets"
+                name="Activos"
+                stroke={colors.success}
+                strokeWidth={1.3}
+                strokeDasharray="4 3"
+                dot={false}
+              />
+            ) : null}
             <Line
               type="monotone"
               dataKey="liabilities"
@@ -133,8 +153,8 @@ export function NetworthEvolutionCard({ points, currency, isLoading }: NetworthE
           flexWrap: 'wrap',
         }}
       >
-        <Legend color={colors.primary} label="Neto" solid />
-        <Legend color={colors.success} label="Activos" />
+        <Legend color={colors.primary} label={includeDebt ? 'Neto' : 'Patrimonio'} solid />
+        {includeDebt ? <Legend color={colors.success} label="Activos" /> : null}
         <Legend color={colors.danger} label="Pasivos" />
       </div>
     </Card>
@@ -159,7 +179,15 @@ function Legend({ color, label, solid = false }: { color: string; label: string;
   );
 }
 
-function NetworthTooltip({ row, currency }: { row: Row; currency: string }) {
+function NetworthTooltip({
+  row,
+  currency,
+  includeDebt,
+}: {
+  row: Row;
+  currency: string;
+  includeDebt: boolean;
+}) {
   return (
     <div
       style={{
@@ -176,8 +204,19 @@ function NetworthTooltip({ row, currency }: { row: Row; currency: string }) {
         {row.label}
         {row.projection ? ' · proyección' : ''}
       </div>
-      <Row2 label="Neto" value={formatAmount(String(row.net.toFixed(2)), currency)} color={colors.text} bold />
-      <Row2 label="Activos" value={formatAmount(String(row.assets.toFixed(2)), currency)} color={colors.success} />
+      <Row2
+        label={includeDebt ? 'Neto' : 'Patrimonio'}
+        value={formatAmount(String(row.worth.toFixed(2)), currency)}
+        color={colors.text}
+        bold
+      />
+      {includeDebt ? (
+        <Row2
+          label="Activos"
+          value={formatAmount(String(row.assets.toFixed(2)), currency)}
+          color={colors.success}
+        />
+      ) : null}
       <Row2
         label="Pasivos"
         value={formatAmount(String(row.liabilities.toFixed(2)), currency)}

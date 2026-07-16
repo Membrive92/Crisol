@@ -27,6 +27,8 @@ export const queryKeys = {
       [...queryKeys.accounts.all, 'balances', targetCurrency ?? 'native'] as const,
     positionHistory: (monthsBack = 12, monthsForward = 0) =>
       [...queryKeys.accounts.all, 'position-history', monthsBack, monthsForward] as const,
+    positionAsOf: (dateFrom: string, dateTo: string) =>
+      [...queryKeys.accounts.all, 'position-as-of', dateFrom, dateTo] as const,
     amortization: (id: string) =>
       [...queryKeys.accounts.all, 'amortization', id] as const,
   },
@@ -37,12 +39,15 @@ export const queryKeys = {
   debt: {
     all: ['debt'] as const,
     categorySummary: (
-      range: 'month' | 'quarter' | 'year' = 'year',
+      range: 'month' | 'year' | 'custom' = 'year',
       targetCurrency?: string,
       // PHASE-30.8 — `anchor` (YYYY-MM-DD) del período; `'current'`
       // como sentinel cuando se omite, para no invalidar las keys
       // existentes que no navegan en el tiempo.
       anchor?: string,
+      // PHASE-41 — bounds del rango libre (`range='custom'`).
+      dateFrom?: string,
+      dateTo?: string,
     ) =>
       [
         ...queryKeys.debt.all,
@@ -50,6 +55,8 @@ export const queryKeys = {
         range,
         targetCurrency ?? 'native',
         anchor ?? 'current',
+        dateFrom ?? 'none',
+        dateTo ?? 'none',
       ] as const,
     health: (targetCurrency?: string) =>
       [...queryKeys.debt.all, 'health', targetCurrency ?? 'native'] as const,

@@ -12,6 +12,7 @@ import {
   useDebtHealth,
   useExpenseStructure,
   useMonthOutlook,
+  usePositionAsOf,
   usePositionHistory,
 } from '@crisol/services';
 import { useCurrencyStore } from '@crisol/store';
@@ -30,6 +31,7 @@ import { MonthOutlookCard } from '@/components/analysis/month-outlook-card';
 import { NetworthEvolutionCard } from '@/components/analysis/networth-evolution-card';
 import {
   boundsForAnchor,
+  boundsForCustomRange,
   type PeriodKey,
 } from '@/components/analysis/stitch-period-toggle';
 import type { StructureFilter } from '@/components/analysis/stitch-expense-breakdown';
@@ -73,16 +75,26 @@ function currentMonth(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 function parsePeriod(v: string | null): PeriodKey {
-  return v === 'month' || v === 'quarter' || v === 'year' ? v : 'year';
+  return v === 'month' || v === 'year' || v === 'custom' ? v : 'year';
 }
 function parseFilter(v: string | null): StructureFilter {
   return v === 'structural' || v === 'exceptional' ? v : 'all';
 }
-function analysisQuery(p: PeriodKey, a: string, f: StructureFilter): string {
+function analysisQuery(
+  p: PeriodKey,
+  a: string,
+  f: StructureFilter,
+  cf?: string | null,
+  ct?: string | null,
+): string {
   const sp = new URLSearchParams();
   sp.set('period', p);
   sp.set('anchor', a);
   if (f !== 'all') sp.set('filter', f);
+  if (p === 'custom' && cf && ct) {
+    sp.set('from', cf);
+    sp.set('to', ct);
+  }
   return sp.toString();
 }
 
@@ -98,16 +110,52 @@ export default function AnalysisPage() {
   const [filter, setFilterState] = useState<StructureFilter>(() =>
     parseFilter(searchParams.get('filter')),
   );
-  // Un único escritor de la URL (evita carreras entre setters). Recibe los tres
+  // PHASE-41 — rango libre `custom` (`YYYY-MM-DD`), en la URL como `from`/`to`.
+  const [customFrom, setCustomFromState] = useState<string | null>(() =>
+    searchParams.get('from'),
+  );
+  const [customTo, setCustomToState] = useState<string | null>(() =>
+    searchParams.get('to'),
+  );
+  // Un único escritor de la URL (evita carreras entre setters). Recibe los
   // valores explícitos; los setters mergean con el estado actual antes de llamar.
-  function apply(next: { period?: PeriodKey; anchor?: string; filter?: StructureFilter }): void {
+  function apply(next: {
+    period?: PeriodKey;
+    anchor?: string;
+    filter?: StructureFilter;
+    customFrom?: string | null;
+    customTo?: string | null;
+  }): void {
     const p = next.period ?? period;
     const a = next.anchor ?? anchorMonth;
     const f = next.filter ?? filter;
+    const cf = next.customFrom !== undefined ? next.customFrom : customFrom;
+    const ct = next.customTo !== undefined ? next.customTo : customTo;
     if (next.period !== undefined) setPeriodState(p);
     if (next.anchor !== undefined) setAnchorMonthState(a);
     if (next.filter !== undefined) setFilterState(f);
-    router.replace(`/personal-finance/analysis?${analysisQuery(p, a, f)}`, { scroll: false });
+    if (next.customFrom !== undefined) setCustomFromState(next.customFrom);
+    if (next.customTo !== undefined) setCustomToState(next.customTo);
+    router.replace(
+      `/personal-finance/analysis?${analysisQuery(p, a, f, cf, ct)}`,
+      { scroll: false },
+    );
+  }
+  // Al conmutar a "Personalizado", siembra los date-pickers con el MES ancla
+  // (no el año): así el rango arranca estrecho y el cambio es visible de
+  // inmediato (sembrar el año entero hacía que la vista custom saliera idéntica
+  // a "Año" y pareciera que no se actualizaba). Si ya hay from/to, se respetan.
+  function handleRangeChange(next: PeriodKey): void {
+    if (next === 'custom' && !(customFrom && customTo)) {
+      const seed = boundsForAnchor('month', anchorMonth);
+      apply({
+        period: 'custom',
+        customFrom: seed.dateFrom.slice(0, 10),
+        customTo: seed.dateTo.slice(0, 10),
+      });
+    } else {
+      apply({ period: next });
+    }
   }
   const currency = useCurrencyStore((s) => s.currency);
   const convertAll = useCurrencyStore((s) => s.convertAll);
@@ -118,17 +166,30 @@ export default function AnalysisPage() {
   const targetCurrency = convertAll ? currency : undefined;
 
   const { dateFrom, dateTo } = useMemo(
-    () => boundsForAnchor(period, anchorMonth),
-    [period, anchorMonth],
+    () =>
+      period === 'custom' && customFrom && customTo
+        ? boundsForCustomRange(customFrom, customTo)
+        : boundsForAnchor(period === 'custom' ? 'year' : period, anchorMonth),
+    [period, anchorMonth, customFrom, customTo],
   );
-  const anchorYear = Number(anchorMonth.split('-')[0]);
+  // Para las series por-mes usamos el año del rango custom (su inicio).
+  const anchorYear = Number(
+    (period === 'custom' && customFrom ? customFrom : anchorMonth).slice(0, 4),
+  );
 
   const summaryParams = convertAll
     ? { target_currency: currency, date_from: dateFrom, date_to: dateTo }
     : { currency, date_from: dateFrom, date_to: dateTo };
-  const monthlyParams = convertAll
-    ? { target_currency: currency, year: anchorYear }
-    : { currency, year: anchorYear };
+  // PHASE-41 — en custom, el chart mensual se acota al rango (bordes parciales)
+  // para que las barras cuadren con los KPIs de flujo; en mes/año, por año.
+  const monthlyParams =
+    period === 'custom'
+      ? convertAll
+        ? { target_currency: currency, date_from: dateFrom, date_to: dateTo }
+        : { currency, date_from: dateFrom, date_to: dateTo }
+      : convertAll
+        ? { target_currency: currency, year: anchorYear }
+        : { currency, year: anchorYear };
   const byCategoryParams = convertAll
     ? { target_currency: currency, date_from: dateFrom, date_to: dateTo, kind: 'expense' as const }
     : { currency, date_from: dateFrom, date_to: dateTo, kind: 'expense' as const };
@@ -150,6 +211,10 @@ export default function AnalysisPage() {
   // serie y el Δ, no el filtro de rango.
   const balancesQuery = useAccountBalances(targetCurrency ? { targetCurrency } : {});
   const positionQuery = usePositionHistory(12, 0);
+  // PHASE-41 — patrimonio A FECHA de fin del período elegido + Δ durante el
+  // rango, para que el valor y el Δ reflejen el período (incluido el rango
+  // libre) y no una foto de hoy. Mono-divisa (divisa de referencia).
+  const positionAsOfQuery = usePositionAsOf(dateFrom, dateTo);
   const debtQuery = useDebtHealth(targetCurrency ? { targetCurrency } : {});
 
   const summary = summaryQuery.data;
@@ -158,22 +223,44 @@ export default function AnalysisPage() {
   const unconvertible = summary?.unconvertible_count ?? 0;
   const balances = balancesQuery.data;
   const position = positionQuery.data;
+  const positionAsOf = positionAsOfQuery.data;
   const debt = debtQuery.data;
   const refCurrency = summary?.currency ?? currency;
 
   // ── Tiles del strip ──────────────────────────────────────────────────
-  // El patrimonio (valor + Δ + sparkline) respeta el toggle: `net_worth`
-  // (con deuda) o `total_assets` (sin deuda). La serie trae ambas métricas.
+  // El patrimonio (valor + Δ) respeta el toggle: `net_worth` (con deuda) o
+  // `total_assets` (sin deuda). PHASE-41: valor A FECHA de fin del período y Δ
+  // DURANTE el rango (foto del período, no de hoy). Fallback a la foto actual
+  // (`balances`) mientras carga. El sparkline sigue siendo la serie de 12
+  // meses como contexto de tendencia (decorativo, no acotado al rango).
   const worthKey = includeDebt ? 'net_worth' : 'total_assets';
-  const netWorth = balances ? balances[worthKey] : null;
+  const deltaKey = includeDebt ? 'delta_net_worth' : 'delta_assets';
+  const netWorth = positionAsOf
+    ? positionAsOf[worthKey]
+    : balances
+      ? balances[worthKey]
+      : null;
   const worthSeries = (position?.points ?? []).map((p) => Number(p[worthKey]));
-  const deltaPeriod =
-    worthSeries.length >= 2 ? worthSeries[worthSeries.length - 1]! - worthSeries[0]! : null;
+  const deltaPeriod = positionAsOf
+    ? Number(positionAsOf[deltaKey])
+    : worthSeries.length >= 2
+      ? worthSeries[worthSeries.length - 1]! - worthSeries[0]!
+      : null;
+  // Base del % = patrimonio al INICIO del rango ≈ valor a fecha − Δ del rango.
+  const worthStart =
+    positionAsOf && netWorth != null && deltaPeriod != null
+      ? Number(netWorth) - deltaPeriod
+      : worthSeries.length >= 2
+        ? worthSeries[0]!
+        : null;
   const deltaPeriodPct =
-    deltaPeriod != null && worthSeries[0] !== 0
-      ? (deltaPeriod / Math.abs(worthSeries[0]!)) * 100
+    deltaPeriod != null && worthStart != null && worthStart !== 0
+      ? (deltaPeriod / Math.abs(worthStart)) * 100
       : null;
   const sparkValues = worthSeries;
+  // El patrimonio a fecha es mono-divisa (referencia); etiqueta el valor con SU
+  // divisa para que no se muestre un importe en referencia rotulado en target.
+  const worthCurrency = positionAsOf?.reference_currency ?? refCurrency;
   const effort = debt?.dti_ratio ?? null;
   const effortStatus: KpiStatus = debt ? EFFORT_STATUS[debt.dti_status] : 'neutral';
   const cashflow = summary?.balance ?? null;
@@ -254,11 +341,15 @@ export default function AnalysisPage() {
       >
         <PeriodNavigator
           range={period}
-          onRangeChange={(p) => apply({ period: p })}
+          onRangeChange={handleRangeChange}
           anchor={anchorMonth}
           onAnchorChange={(a) => apply({ anchor: a })}
           availableFrom={summary?.available_from ?? null}
           availableTo={summary?.available_to ?? null}
+          allowCustom
+          customFrom={customFrom}
+          customTo={customTo}
+          onCustomRangeChange={(from, to) => apply({ customFrom: from, customTo: to })}
         />
         {isShowingStale ? (
           <span style={{ fontSize: fontSize.xs, color: colors.textMuted, fontWeight: fontWeight.medium }}>
@@ -283,7 +374,7 @@ export default function AnalysisPage() {
         <KpiStrip>
           <KpiTile
             label="Patrimonio neto"
-            value={netWorth != null ? formatAmount(netWorth, refCurrency) : '—'}
+            value={netWorth != null ? formatAmount(netWorth, worthCurrency) : '—'}
             sparkline={
               sparkValues.length >= 2 ? (
                 <MiniSparkline
@@ -295,7 +386,7 @@ export default function AnalysisPage() {
           />
           <KpiTile
             label="Δ patrimonio"
-            value={deltaPeriod != null ? fmtSignedAmount(deltaPeriod, refCurrency) : '—'}
+            value={deltaPeriod != null ? fmtSignedAmount(deltaPeriod, worthCurrency) : '—'}
             delta={deltaPeriod}
             deltaText={deltaPeriodPct != null ? `${deltaPeriodPct.toFixed(1)} %` : undefined}
             subtitle="vs inicio del rango"
@@ -352,12 +443,15 @@ export default function AnalysisPage() {
           isLoading={monthlyQuery.isLoading}
           period={period}
           anchorMonth={anchorMonth}
+          {...(customFrom ? { customFrom } : {})}
+          {...(customTo ? { customTo } : {})}
           onSelectMonth={(month) => apply({ period: 'month', anchor: month })}
         />
         <NetworthEvolutionCard
           points={position?.points ?? []}
           currency={position?.reference_currency ?? refCurrency}
           isLoading={positionQuery.isLoading}
+          includeDebt={includeDebt}
         />
       </div>
 
@@ -384,7 +478,7 @@ export default function AnalysisPage() {
           dateTo={dateTo}
           filter={filter}
           onFilterChange={(f) => apply({ filter: f })}
-          backQuery={analysisQuery(period, anchorMonth, filter)}
+          backQuery={analysisQuery(period, anchorMonth, filter, customFrom, customTo)}
         />
         <DebtSummaryCard dateFrom={dateFrom} dateTo={dateTo} />
       </div>

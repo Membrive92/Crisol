@@ -20,20 +20,39 @@ import { queryKeys } from '../keys';
  *
  * PHASE-30.8 — Acepta `anchor` (`YYYY-MM-DD`) para mostrar un período
  * pasado concreto; si se omite, el período en curso.
+ *
+ * PHASE-41 — `range='custom'` usa `dateFrom`/`dateTo` (rango libre). La query
+ * sólo se dispara cuando ambos están presentes en modo custom.
  */
 export function useDebtCategorySummary(
   range: DebtTimeRange = 'year',
-  options: { targetCurrency?: string; anchor?: string } = {},
+  options: {
+    targetCurrency?: string;
+    anchor?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  } = {},
 ) {
-  const { targetCurrency, anchor } = options;
+  const { targetCurrency, anchor, dateFrom, dateTo } = options;
+  const isCustom = range === 'custom';
   return useQuery<DebtCategorySummary, Error>({
-    queryKey: queryKeys.debt.categorySummary(range, targetCurrency, anchor),
+    queryKey: queryKeys.debt.categorySummary(
+      range,
+      targetCurrency,
+      anchor,
+      dateFrom,
+      dateTo,
+    ),
     queryFn: () =>
       debtApi.categorySummary({
         range,
         ...(anchor ? { anchor } : {}),
+        ...(isCustom && dateFrom ? { date_from: dateFrom } : {}),
+        ...(isCustom && dateTo ? { date_to: dateTo } : {}),
         ...(targetCurrency ? { target_currency: targetCurrency } : {}),
       }),
+    // En custom, esperar a tener ambos bounds para no pegar un 422.
+    enabled: !isCustom || (Boolean(dateFrom) && Boolean(dateTo)),
     staleTime: 60_000,
   });
 }

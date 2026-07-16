@@ -103,12 +103,11 @@ select:focus {
   outline-offset: 1px;
 }
 
-/* Date input: el icono nativo en dark se ve negro contra fondos oscuros.
-   Lo invertimos sólo cuando el tema es dark. */
-[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator {
-  filter: invert(1);
-  opacity: 0.75;
-}
+/* Date input: el icono nativo lo pinta el navegador según `color-scheme`
+   (light → oscuro sobre fondo claro; dark → claro sobre fondo oscuro), que
+   ya conmutamos en `:root`/`[data-theme="dark"]`. NO invertir el indicador:
+   bajo `color-scheme: dark` el icono ya es claro y `invert()` lo oscurecía,
+   dejándolo invisible sobre superficies oscuras (PHASE-41). */
 
 /* Auth submit button spinner. */
 @keyframes auth-spinner {

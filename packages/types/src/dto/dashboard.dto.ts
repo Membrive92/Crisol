@@ -24,6 +24,13 @@ export interface DashboardByMonthQuery {
   year?: number;
   currency?: string;
   target_currency?: string;
+  /**
+   * PHASE-41 — período custom: si vienen ambos (ISO), el backend devuelve un
+   * bucket por mes del rango con los bordes PARCIALES (en vez de los 12 del
+   * año), para que las barras cuadren con los KPIs de flujo del mismo rango.
+   */
+  date_from?: string;
+  date_to?: string;
 }
 
 export interface DashboardTopExpensesQuery {

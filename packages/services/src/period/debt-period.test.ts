@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  boundsForCustomRange,
   canStepNext,
   canStepPrev,
   clampAnchor,
@@ -12,13 +13,6 @@ describe('periodLabel', () => {
   it('mes → nombre + año', () => {
     expect(periodLabel('month', '2025-04')).toBe('Abril 2025');
     expect(periodLabel('month', '2025-12')).toBe('Diciembre 2025');
-  });
-
-  it('trimestre → Q + año (ignora el mes concreto dentro del trimestre)', () => {
-    expect(periodLabel('quarter', '2025-04')).toBe('Q2 2025');
-    expect(periodLabel('quarter', '2025-06')).toBe('Q2 2025');
-    expect(periodLabel('quarter', '2025-01')).toBe('Q1 2025');
-    expect(periodLabel('quarter', '2025-12')).toBe('Q4 2025');
   });
 
   it('año → año', () => {
@@ -33,14 +27,6 @@ describe('stepAnchor', () => {
     expect(stepAnchor('month', '2025-01', -1)).toBe('2024-12');
   });
 
-  it('trimestre ±3 meses, snapeado al inicio del trimestre', () => {
-    // Q2 (abril) → Q1 (enero) hacia atrás, Q3 (julio) hacia delante.
-    expect(stepAnchor('quarter', '2025-05', -1)).toBe('2025-01');
-    expect(stepAnchor('quarter', '2025-05', 1)).toBe('2025-07');
-    // Q1 → Q4 del año anterior.
-    expect(stepAnchor('quarter', '2025-02', -1)).toBe('2024-10');
-  });
-
   it('año ±12 meses, snapeado a enero', () => {
     expect(stepAnchor('year', '2025-07', -1)).toBe('2024-01');
     expect(stepAnchor('year', '2025-07', 1)).toBe('2026-01');
@@ -50,7 +36,6 @@ describe('stepAnchor', () => {
 describe('clampAnchor', () => {
   it('sin límites, normaliza al inicio del período', () => {
     expect(clampAnchor('year', '2025-07', null, null)).toBe('2025-01');
-    expect(clampAnchor('quarter', '2025-05', null, null)).toBe('2025-04');
     expect(clampAnchor('month', '2025-05', null, null)).toBe('2025-05');
   });
 
@@ -63,7 +48,6 @@ describe('clampAnchor', () => {
 
   it('recorta al período que contiene availableFrom (límite inferior)', () => {
     expect(clampAnchor('year', '2020-06', '2023-01', '2025-05')).toBe('2023-01');
-    expect(clampAnchor('quarter', '2022-11', '2023-04', '2025-05')).toBe('2023-04');
   });
 });
 
@@ -83,7 +67,19 @@ describe('canStepPrev / canStepNext', () => {
   it('next habilitado mientras haya un período posterior con datos', () => {
     expect(canStepNext('year', '2023-05', '2025-12')).toBe(true);
     expect(canStepNext('year', '2025-05', '2025-12')).toBe(false); // ya en el último año
-    expect(canStepNext('quarter', '2025-01', '2025-12')).toBe(true); // Q1 < Q4
-    expect(canStepNext('quarter', '2025-11', '2025-12')).toBe(false); // ambos Q4
+  });
+});
+
+describe('boundsForCustomRange', () => {
+  it('convierte from/to a bounds UTC [00:00:00Z, 23:59:59Z]', () => {
+    const { dateFrom, dateTo } = boundsForCustomRange('2026-05-15', '2026-06-15');
+    expect(dateFrom).toBe('2026-05-15T00:00:00.000Z');
+    expect(dateTo).toBe('2026-06-15T23:59:59.000Z');
+  });
+
+  it('usa UTC (no hora local) para no desplazar el día en Europe/Madrid', () => {
+    // El día 1 a las 00:00 UTC no debe caer en el mes anterior.
+    const { dateFrom } = boundsForCustomRange('2026-01-01', '2026-01-31');
+    expect(dateFrom.startsWith('2026-01-01')).toBe(true);
   });
 });

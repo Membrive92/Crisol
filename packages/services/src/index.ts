@@ -48,6 +48,7 @@ export {
   useDeleteAccount,
   usePayInstallment,
   usePayInstallments,
+  usePositionAsOf,
   usePositionHistory,
   useReconcileAccount,
   useRegenerateAmortization,
@@ -77,7 +78,9 @@ export {
   clampAnchor,
   canStepPrev,
   canStepNext,
+  boundsForCustomRange,
 } from './period/debt-period';
+export type { NavigableRange } from './period/debt-period';
 export {
   useTransactions,
   useTransaction,

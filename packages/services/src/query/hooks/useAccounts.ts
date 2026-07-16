@@ -11,6 +11,7 @@ import type {
   InstallmentBulkPayResponse,
   InstallmentPayRequest,
   InstallmentUpdateRequest,
+  PositionAsOf,
   PositionHistoryResponse,
 } from '@crisol/types';
 
@@ -122,6 +123,21 @@ export function usePositionHistory(monthsBack = 12, monthsForward = 0) {
         months_back: monthsBack,
         months_forward: monthsForward,
       }),
+    staleTime: 1000 * 60,
+    placeholderData: (previous) => previous,
+  });
+}
+
+/**
+ * PHASE-41 — Patrimonio A FECHA `dateTo` + Δ del patrimonio durante
+ * `[dateFrom, dateTo]`. Alimenta las cards de patrimonio del Análisis para que
+ * reflejen el período elegido (incluido el rango libre) y no una foto de hoy.
+ */
+export function usePositionAsOf(dateFrom: string, dateTo: string) {
+  return useQuery<PositionAsOf, Error>({
+    queryKey: queryKeys.accounts.positionAsOf(dateFrom, dateTo),
+    queryFn: () =>
+      accountsApi.positionAsOf({ date_from: dateFrom, date_to: dateTo }),
     staleTime: 1000 * 60,
     placeholderData: (previous) => previous,
   });

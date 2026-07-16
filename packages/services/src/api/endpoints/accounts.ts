@@ -9,6 +9,7 @@ import type {
   InstallmentBulkPayResponse,
   InstallmentPayRequest,
   InstallmentUpdateRequest,
+  PositionAsOf,
   PositionHistoryResponse,
 } from '@crisol/types';
 
@@ -62,6 +63,22 @@ export const accountsApi = {
   ): Promise<PositionHistoryResponse> {
     const response = await apiClient.get<PositionHistoryResponse>(
       '/accounts/position-history',
+      { params: query },
+    );
+    return response.data;
+  },
+
+  /**
+   * Patrimonio A FECHA `date_to` + Δ del patrimonio en `[date_from, date_to]`.
+   * Mono-divisa (divisa de referencia). Alimenta las cards de patrimonio del
+   * Análisis para que reflejen el período elegido (no una foto de hoy).
+   */
+  async positionAsOf(query: {
+    date_from: string;
+    date_to: string;
+  }): Promise<PositionAsOf> {
+    const response = await apiClient.get<PositionAsOf>(
+      '/accounts/position-as-of',
       { params: query },
     );
     return response.data;

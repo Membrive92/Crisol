@@ -22,8 +22,8 @@ const SHORT_MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'S
 
 const PERIOD_NAMES: Record<PeriodKey, string> = {
   month: 'Mes',
-  quarter: 'Trimestre',
   year: 'Año',
+  custom: 'Personalizado',
 };
 
 export interface StitchIncomeVsExpensesProps {
@@ -31,30 +31,49 @@ export interface StitchIncomeVsExpensesProps {
   currency: string;
   isLoading: boolean;
   /**
-   * AUDIT-2026-07 — período y mes ancla navegados. El chart siempre pinta los
-   * 12 meses del año (para dar contexto anual), pero RESALTA los meses del
-   * período activo y atenúa el resto, de modo que togglear Mes/Trimestre
-   * produzca un cambio visible. Sin estas props (o con `year`) no atenúa nada.
+   * AUDIT-2026-07 — período y mes ancla navegados. En `month`/`year` el chart
+   * pinta los 12 meses del año y RESALTA los del período activo (atenúa el
+   * resto) para que togglear produzca un cambio visible.
+   *
+   * PHASE-41 — En `custom` NO se pinta la desagregación mensual (un rango
+   * arbitrario parte en meses parciales y confunde): se muestran los TOTALES
+   * REALES del rango (Ingresos vs Gastos + Neto), que reconcilian con los KPIs
+   * day-exact porque son la Σ de los mismos buckets ya acotados al rango.
    */
   period?: PeriodKey;
   anchorMonth?: string;
+  /** PHASE-41 — rango libre activo (`YYYY-MM-DD`): alimenta el caption del período. */
+  customFrom?: string;
+  customTo?: string;
   /**
    * Al hacer clic en un mes del chart, se invoca con su `YYYY-MM` para que el
    * caller navegue a ese mes (fija el mes ancla + período mensual). Sin este
-   * prop, el chart no es clicable.
+   * prop (o en `custom`, sin barras mensuales), el chart no es clicable.
    */
   onSelectMonth?: (month: string) => void;
 }
 
-/** Meses (1-12) que caen dentro del período que contiene `anchorMonth`. */
+/**
+ * Meses (1-12) resaltados, sólo para `month`/`year`. `month` resalta el mes
+ * ancla; `year` los 12.
+ */
 function activeMonthsFor(period: PeriodKey, anchorMonth: string): Set<number> {
-  const month = Number(anchorMonth.split('-')[1]); // 1-12
-  if (period === 'month') return new Set([month]);
-  if (period === 'quarter') {
-    const start = Math.floor((month - 1) / 3) * 3 + 1;
-    return new Set([start, start + 1, start + 2]);
-  }
+  if (period === 'month') return new Set([Number(anchorMonth.split('-')[1])]);
   return new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+}
+
+/** `15 may` / con año si se pide (`15 dic 2025`) — parseo puro, sin `new Date`. */
+function fmtDay(day: string, withYear: boolean): string {
+  const [y, m, d] = day.split('-');
+  const mon = (SHORT_MONTHS[Number(m) - 1] ?? '').toLowerCase();
+  const base = `${Number(d)} ${mon}`;
+  return withYear ? `${base} ${y}` : base;
+}
+
+/** Caption del rango libre: `15 may – 15 jun 2026` (año a la izda si difiere). */
+function customRangeCaption(from: string, to: string): string {
+  const crossYear = from.slice(0, 4) !== to.slice(0, 4);
+  return `${fmtDay(from, crossYear)} – ${fmtDay(to, true)}`;
 }
 
 interface ChartRow {
@@ -66,9 +85,9 @@ interface ChartRow {
 }
 
 /**
- * Bar chart agrupado Ingresos vs Gastos — Recharts (PHASE-18.1).
- * Dos barras por mes lado a lado, eje Y formateado, leyenda persistente
- * y tooltip pulido.
+ * Ingresos vs Gastos (PHASE-18.1). En `month`/`year` es un bar chart agrupado
+ * por mes (Recharts); en `custom` (PHASE-41) es la comparación de TOTALES del
+ * rango, que es lo que el usuario quiere ver de un periodo arbitrario.
  */
 export function StitchIncomeVsExpenses({
   data,
@@ -76,14 +95,21 @@ export function StitchIncomeVsExpenses({
   isLoading,
   period,
   anchorMonth,
+  customFrom,
+  customTo,
   onSelectMonth,
 }: StitchIncomeVsExpensesProps) {
-  // Sólo atenuamos cuando el período es Mes/Trimestre (Año resalta los 12).
-  const highlight = period != null && anchorMonth != null && period !== 'year';
+  const isCustom = period === 'custom' && customFrom != null && customTo != null;
+
+  // Totales del periodo = Σ de los buckets (ya acotados al rango en custom):
+  // reconcilian al céntimo con los KPIs day-exact (mismo `date_from/date_to`).
+  const totalIncome = data.reduce((sum, b) => sum + Number(b.income), 0);
+  const totalExpenses = data.reduce((sum, b) => sum + Number(b.expenses), 0);
+
+  // Sólo atenuamos en 'month' (resaltar el mes ancla dentro del año).
+  const highlight = period === 'month' && anchorMonth != null;
   const activeMonths =
-    period != null && anchorMonth != null
-      ? activeMonthsFor(period, anchorMonth)
-      : null;
+    period != null && anchorMonth != null ? activeMonthsFor(period, anchorMonth) : null;
   const chartData: ChartRow[] = data.map((b) => {
     const monthNum = parseInt(b.month.slice(5, 7), 10); // 1-12
     return {
@@ -94,13 +120,19 @@ export function StitchIncomeVsExpenses({
       active: activeMonths == null || activeMonths.has(monthNum),
     };
   });
-  const empty = !isLoading && chartData.every((b) => b.income === 0 && b.expenses === 0);
+  const empty =
+    !isLoading && data.every((b) => Number(b.income) === 0 && Number(b.expenses) === 0);
   const dim = (row: ChartRow) => (highlight && !row.active ? 0.22 : 1);
+  // Caption: en custom anuncia el rango exacto que resumen los totales; en month
+  // el mes resaltado; en year/omitido (con barras clicables), invita a clicar.
+  const customCaption =
+    isCustom && customFrom != null && customTo != null
+      ? customRangeCaption(customFrom, customTo)
+      : null;
   const periodCaption =
     highlight && period != null ? `Resaltado: ${PERIOD_NAMES[period]} navegado` : null;
-  // Con período navegado mostramos el resaltado; en año (sin resaltado) y si el
-  // chart es clicable, invitamos a hacer clic en un mes.
-  const caption = periodCaption ?? (onSelectMonth ? 'Haz clic en un mes' : null);
+  const caption =
+    customCaption ?? periodCaption ?? (!isCustom && onSelectMonth ? 'Haz clic en un mes' : null);
 
   // Clic en una barra → navegar a ese mes. Usamos el ÍNDICE del dato (fiable,
   // igual que el donut) en vez del `activePayload` del chart, que no siempre
@@ -113,7 +145,15 @@ export function StitchIncomeVsExpenses({
   }
 
   return (
-    <Card style={{ padding: spacing.lg }}>
+    <Card
+      style={{
+        padding: spacing.lg,
+        // Sólo en custom: flex-column para que los totales se centren y rellenen
+        // el alto cuando la card se estira junto a la de patrimonio (más alta).
+        // En month/year la card sigue siendo un bloque normal (chart intacto).
+        ...(isCustom ? { display: 'flex', flexDirection: 'column' as const } : {}),
+      }}
+    >
       <header
         style={{
           display: 'flex',
@@ -140,6 +180,17 @@ export function StitchIncomeVsExpenses({
         <p style={{ margin: 0, fontSize: fontSize.sm, color: colors.textMuted }}>
           Sin datos en el periodo.
         </p>
+      ) : isCustom ? (
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+          }}
+        >
+          <PeriodTotals income={totalIncome} expenses={totalExpenses} currency={currency} />
+        </div>
       ) : (
         <ResponsiveContainer width="100%" height={280}>
           <BarChart
@@ -222,6 +273,111 @@ export function StitchIncomeVsExpenses({
         </ResponsiveContainer>
       )}
     </Card>
+  );
+}
+
+interface PeriodTotalsProps {
+  income: number;
+  expenses: number;
+  currency: string;
+}
+
+/**
+ * PHASE-41 — Comparación de TOTALES del rango libre: dos barras proporcionales
+ * (Ingresos / Gastos) + Neto. Es la vista de `custom`: muestra los ingresos y
+ * gastos REALES del periodo sin la desagregación mensual (que en un rango
+ * arbitrario parte en meses parciales y confunde).
+ */
+function PeriodTotals({ income, expenses, currency }: PeriodTotalsProps) {
+  const net = income - expenses;
+  const max = Math.max(income, expenses, 1);
+  const rows = [
+    { label: 'Ingresos', value: income, color: colors.success },
+    { label: 'Gastos', value: expenses, color: colors.danger },
+  ] as const;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
+        {rows.map((r) => (
+          <div key={r.label} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'baseline',
+                fontSize: fontSize.sm,
+              }}
+            >
+              <span style={{ color: colors.textMuted, fontWeight: fontWeight.medium }}>
+                {r.label}
+              </span>
+              <span
+                style={{
+                  color: r.color,
+                  fontWeight: fontWeight.semibold,
+                  fontSize: fontSize.md,
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {formatAmount(String(r.value.toFixed(2)), currency)}
+              </span>
+            </div>
+            <div
+              style={{
+                height: 12,
+                borderRadius: radius.sm,
+                backgroundColor: colors.surfaceMuted,
+                overflow: 'hidden',
+              }}
+            >
+              <div
+                style={{
+                  height: '100%',
+                  width: `${(r.value / max) * 100}%`,
+                  minWidth: r.value > 0 ? 3 : 0,
+                  backgroundColor: r.color,
+                  borderRadius: radius.sm,
+                  transition: 'width 300ms ease',
+                }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+      {/* Neto como bloque-resultado destacado (no una línea suelta). */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: `${spacing.sm}px ${spacing.md}px`,
+          borderRadius: radius.md,
+          backgroundColor: colors.surfaceMuted,
+          border: `1px solid ${colors.border}`,
+        }}
+      >
+        <span
+          style={{
+            fontSize: fontSize.sm,
+            fontWeight: fontWeight.semibold,
+            color: colors.text,
+          }}
+        >
+          Neto del periodo
+        </span>
+        <span
+          style={{
+            fontSize: fontSize.lg,
+            fontWeight: fontWeight.semibold,
+            color: net >= 0 ? colors.income : colors.danger,
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          {net >= 0 ? '+' : ''}
+          {formatAmount(String(net.toFixed(2)), currency)}
+        </span>
+      </div>
+    </div>
   );
 }
 

@@ -2,21 +2,32 @@
 
 import { colors, fontSize, fontWeight, radius } from '@crisol/ui';
 
-export type PeriodKey = 'month' | 'quarter' | 'year';
+// PHASE-41 — `custom` = rango libre `from/to` (sin navegación); se eliminó
+// `quarter` (sin sentido para un particular).
+export type PeriodKey = 'month' | 'year' | 'custom';
 
 export interface StitchPeriodToggleProps {
   value: PeriodKey;
   onChange: (next: PeriodKey) => void;
+  /**
+   * Opciones a mostrar. Por defecto `['month','year']`; pasa
+   * `['month','year','custom']` donde el rango libre esté soportado.
+   */
+  options?: readonly PeriodKey[];
 }
 
 const LABELS: Record<PeriodKey, string> = {
   month: 'Mes',
-  quarter: 'Trimestre',
   year: 'Año',
+  custom: 'Personalizado',
 };
 
-/** Toggle Mes / Trimestre / Año al estilo Stitch (segmented). */
-export function StitchPeriodToggle({ value, onChange }: StitchPeriodToggleProps) {
+/** Toggle Mes / Año / Personalizado al estilo Stitch (segmented). */
+export function StitchPeriodToggle({
+  value,
+  onChange,
+  options = ['month', 'year'],
+}: StitchPeriodToggleProps) {
   return (
     <div
       style={{
@@ -27,7 +38,7 @@ export function StitchPeriodToggle({ value, onChange }: StitchPeriodToggleProps)
         border: `1px solid ${colors.border}`,
       }}
     >
-      {(['month', 'quarter', 'year'] as PeriodKey[]).map((opt) => {
+      {options.map((opt) => {
         const active = opt === value;
         return (
           <button
@@ -43,7 +54,6 @@ export function StitchPeriodToggle({ value, onChange }: StitchPeriodToggleProps)
               fontSize: fontSize.sm,
               fontWeight: fontWeight.semibold,
               cursor: 'pointer',
-              minWidth: 70,
             }}
           >
             {LABELS[opt]}
@@ -54,7 +64,9 @@ export function StitchPeriodToggle({ value, onChange }: StitchPeriodToggleProps)
   );
 }
 
-export function rangeForPeriod(period: PeriodKey): { dateFrom: string; dateTo: string } {
+export function rangeForPeriod(
+  period: Exclude<PeriodKey, 'custom'>,
+): { dateFrom: string; dateTo: string } {
   const now = new Date();
   return boundsForAnchor(
     period,
@@ -78,20 +90,20 @@ export function rangeForPeriod(period: PeriodKey): { dateFrom: string; dateTo: s
  * mes anterior). Con UTC-midnight el rango coincide con el criterio del backend.
  */
 export function boundsForAnchor(
-  period: PeriodKey,
+  period: Exclude<PeriodKey, 'custom'>,
   anchor: string,
 ): { dateFrom: string; dateTo: string } {
   const parts = anchor.split('-');
   const year = Number(parts[0]);
   const month = Number(parts[1]); // 1-12
-  const startMonthIdx =
-    period === 'month'
-      ? month - 1
-      : period === 'quarter'
-        ? Math.floor((month - 1) / 3) * 3
-        : 0; // year
-  const monthsInPeriod = period === 'month' ? 1 : period === 'quarter' ? 3 : 12;
+  const startMonthIdx = period === 'month' ? month - 1 : 0; // year
+  const monthsInPeriod = period === 'month' ? 1 : 12;
   const start = new Date(Date.UTC(year, startMonthIdx, 1));
   const end = new Date(Date.UTC(year, startMonthIdx + monthsInPeriod, 0, 23, 59, 59));
   return { dateFrom: start.toISOString(), dateTo: end.toISOString() };
 }
+
+// PHASE-41 — `boundsForCustomRange` (rango libre `custom`) vive ahora en
+// `@crisol/services` (compartido web+móvil). Se reexporta aquí para no romper
+// los imports existentes de este módulo.
+export { boundsForCustomRange } from '@crisol/services';

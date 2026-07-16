@@ -11,10 +11,14 @@ export interface CategorySummaryQuery {
   range?: DebtTimeRange;
   /**
    * PHASE-30.8 — Cualquier día (`YYYY-MM-DD`) dentro del período a
-   * mostrar. `range` fija el tipo (mes/trimestre/año); `anchor` decide
-   * cuál. Si se omite, el período en curso.
+   * mostrar. `range` fija el tipo (mes/año); `anchor` decide cuál. Si se
+   * omite, el período en curso. Se ignora con `range='custom'`.
    */
   anchor?: string;
+  /** PHASE-41 — Inicio del rango libre (`YYYY-MM-DD`), obligatorio con `range='custom'`. */
+  date_from?: string;
+  /** PHASE-41 — Fin del rango libre (`YYYY-MM-DD`), obligatorio con `range='custom'`. */
+  date_to?: string;
   /** PHASE-30.6 — Convierte todos los importes a esta divisa (per-tx). */
   target_currency?: string;
 }
@@ -49,6 +53,12 @@ export const debtApi = {
     };
     if (query.anchor) {
       params['anchor'] = query.anchor;
+    }
+    if (query.date_from) {
+      params['date_from'] = query.date_from;
+    }
+    if (query.date_to) {
+      params['date_to'] = query.date_to;
     }
     if (query.target_currency) {
       params['target_currency'] = query.target_currency;

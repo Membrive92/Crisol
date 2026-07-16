@@ -130,11 +130,12 @@ export interface DebtHistoryResponse {
  * categorías marcadas como deuda. Cubre /debt/category-summary. */
 
 /**
- * PHASE-30.7 — Alineado con `PeriodKey` de `StitchPeriodToggle`
- * (dashboard + análisis) para que el selector de período sea
- * coherente en todo el producto.
+ * PHASE-30.7 / PHASE-41 — Alineado con `PeriodKey` de `StitchPeriodToggle`
+ * (dashboard + análisis) para que el selector de período sea coherente en
+ * todo el producto. `custom` = rango libre `from/to` (sin navegación por
+ * flechas); `month`/`year` son los períodos navegables. Se eliminó `quarter`.
  */
-export type DebtTimeRange = 'month' | 'quarter' | 'year';
+export type DebtTimeRange = 'month' | 'year' | 'custom';
 
 export type EffortStatus = 'healthy' | 'caution' | 'stressed' | 'unknown';
 
@@ -201,7 +202,7 @@ export interface DebtCategorySummary {
   monthly_series: MonthlyDebtPoint[];
   /**
    * PHASE-30.9 — Sólo para `range='month'`: un punto por día del mes con
-   * la evolución del saldo de deuda. `null` en `quarter`/`year`.
+   * la evolución del saldo de deuda. `null` en `year`/`custom`.
    */
   daily_series: DailyDebtPoint[] | null;
   monthly_income_avg: string;
