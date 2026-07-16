@@ -409,6 +409,18 @@ Solo web + backend (sin paridad móvil). No hay migraciones ni endpoints nuevos.
 > `5c1d01c`…`9c9f47f`, push directo, 2026-07-15). BE 668 tests · mypy · ruff ·
 > FE typecheck · lint · web 101 + móvil 18.
 
+### Fase 42 — Rango de fechas personalizado (fuera trimestral)
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 42   | Fuera `quarter`; dentro rango libre `custom` (from/to) end-to-end (Análisis + Dashboard + Deuda, web + móvil) · backend `date_from/date_to` en `by-month` y `debt/category-summary` (day-exact, bordes parciales) + nuevo `GET /accounts/position-as-of` · consistencia: Ingresos vs Gastos = totales del periodo, patrimonio a fecha de fin de rango, chart de patrimonio respeta el toggle "incluir deuda" | ✅ | — |
+
+> Detalle en [`phases/phase-42-custom-date-range.md`](phases/phase-42-custom-date-range.md).
+> En `main` (commits `209b31a` · `c22fc94` · `693fad0`, push directo,
+> 2026-07-16). BE 673 tests · mypy · ruff · FE typecheck · lint · web 106 +
+> móvil 18. Datos del periodo validados al céntimo contra `transactions`.
+> Follow-up: paridad móvil de "Ingresos vs Gastos" (totales de periodo).
+
 ---
 
 ## Estructura de este directorio
