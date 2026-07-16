@@ -174,7 +174,7 @@ gana `target_currency` si llegan ambos. Sin ninguno, default a
 | GET | `/dashboard/currencies` | — | `string[]` con las monedas distintas presentes en las transacciones del usuario (ordenadas alfabéticamente). |
 | GET | `/dashboard/summary` | `currency` (def `USD` legacy), `target_currency?` (cross-currency), `date_from?`, `date_to?` | `{ income, expenses, balance, transaction_count, currency, unconvertible_count, previous_period_income, previous_period_expenses, previous_period_balance }` |
 | GET | `/dashboard/by-category` | `currency` o `target_currency`, `date_from?`, `date_to?`, `kind?` (`income\|expense`) | `[{ category_id, category_name, category_kind, total, count }]` |
-| GET | `/dashboard/by-month` | `year` (def actual), `currency` o `target_currency` | `[{ month: "YYYY-MM", income, expenses, balance }]` (12 buckets) |
+| GET | `/dashboard/by-month` | `year` (def actual), `currency` o `target_currency`, `date_from?`/`date_to?` (PHASE-42) | `[{ month: "YYYY-MM", income, expenses, balance }]` — 12 buckets del año, o (con `date_from`+`date_to`) **un bucket por mes tocado por el rango**, con los meses de borde PARCIALES para cuadrar con los KPIs de flujo del mismo rango |
 | GET | `/dashboard/top-expenses` | `currency` o `target_currency`, `date_from?`, `date_to?`, `limit` (1..50, def 10) | `[{ transaction_id, description, amount, occurred_at, category_id, category_name, original_amount, original_currency }]` (PHASE-8.4: `original_*` siempre presentes; `amount` es el convertido en cross-currency, original en legacy) |
 | GET | `/dashboard/category/{category_id}` | `currency` o `target_currency`, `date_from?`, `date_to?`, `months_back` (1..36, def 12) | `200 CategoryDetailResponse` — drill-down de una categoría: KPIs del rango + evolución mensual + top 10 tx (PHASE-25) |
 | GET | `/dashboard/category/{category_id}/available-periods` | — | `200 CategoryAvailablePeriodsResponse` — años + meses con tx activas de la categoría, para el selector temporal del drill-down (PHASE-27) |
@@ -188,10 +188,11 @@ Reglas relevantes:
   legacy; en modo cross-currency cuenta las transacciones sin tasa
   histórica disponible (ni exacta ni en ventana de 14 días).
 - `summary.previous_period_*` se computa cuando llegan `date_from` y
-  `date_to`. Es el rango previo de igual longitud, terminando justo
-  antes de `date_from` (rango actual `[2026-02-01, 2026-02-28]` →
-  rango previo `[2026-01-04, 2026-02-01]`). Si no llega rango, los
-  tres campos son `null` y el frontend no pinta delta.
+  `date_to` (PHASE-42, `_previous_period`): si el rango es un **mes
+  natural** completo → el mes natural anterior; si es un **año** completo
+  → el año anterior; en otro caso (rango libre) → una **ventana de igual
+  longitud** inmediatamente anterior. Si no llega rango, los tres campos
+  son `null` y el frontend no pinta delta.
 - `currencies` permite al frontend hidratar el selector de moneda con
   valores reales del usuario en lugar de hardcodear `USD`/`EUR`.
 - `by-category` incluye un bucket `{ category_id: null, category_name:
@@ -432,6 +433,7 @@ Reglas:
 | GET    | `/accounts/debt-health` | sí | `?target_currency=` (opc, PHASE-30.6) | `200 DebtHealthKpis { total_liabilities, total_assets, net_worth, debt_to_assets_ratio, dti_ratio, dti_status, monthly_debt_payment, monthly_income_avg, debt_by_type[], interest_paid_ytd, interest_scheduled_total, interest_remaining, weighted_apr, time_to_payoff_months, reference_currency }` (PHASE-22; PHASE-37: `debt_by_type` = deuda viva por tipo para el donut, `interest_paid_ytd` sale del cuadro —MUX por pasivo, no de tx—, `interest_scheduled_total`/`interest_remaining` = interés contractual total y pendiente) |
 | GET    | `/accounts/debt-history` | sí | `months_back` (1..36, def 12), `months_ahead` (0..36, def 12), `?target_currency=` (opc, PHASE-30.6) | `200 DebtHistoryResponse { items[], reference_currency, months_historical, months_projected }` — serie mensual de deuda: histórico (meses cerrados) + proyección por cuadro; cada punto `{ month, total_debt, principal_paid, interest_paid, kind }` (PHASE-22.1) |
 | GET    | `/accounts/position-history` | sí | `months_back` (1..36, def 12), `months_forward` (0..36, def 0) | `200 PositionHistoryResponse { reference_currency, points[], delta_period, delta_period_pct }` — serie mensual de patrimonio (activos/pasivos/neto), histórico + proyección; mono-divisa. `delta_period` = Δ neto del rango (PHASE-37.1) |
+| GET    | `/accounts/position-as-of` | sí | `date_from`, `date_to` (obligatorios) | `200 PositionAsOfResponse { reference_currency, total_assets, total_liabilities, net_worth, delta_assets, delta_net_worth }` — patrimonio **a fecha `date_to`** (apertura + Σ mov. firmados ≤ `date_to`) + Δ de activos/neto **durante** `[date_from, date_to]`; excluye archivadas y brokerage/crypto; mono-divisa de referencia; mismo `signed_amount_expr` que balances/position-history (PHASE-42) |
 | POST   | `/accounts/reconcile-debt` | sí | `?dry_run=` (bool, def `true`) | `200 ReconcilePlanResponse` — reconcilia aportaciones (amortización de préstamo, cuotas de op. financiada) contra el cuadro de cada deuda: genera el cuadro que falte, ancla cuotas previas y marca pagadas las que cada aportación liquida. `dry_run=true` sólo devuelve el plan; `false` lo aplica (idempotente) (PHASE-36) |
 | GET    | `/accounts/{id}/amortization-schedule` | sí | — | `200 AmortizationScheduleResponse { account_id, principal, apr, term_months, start_date, monthly_payment, total_interest, total_paid, rows[] }` (`400` si la cuenta no es loan/mortgage, falta APR/plazo/start_date o `opening_balance <= 0`) (PHASE-22) |
 | POST   | `/accounts/{id}/amortization-schedule/regenerate` | sí | — | `200 AmortizationScheduleResponse` — borra y regenera el cuadro con `apr`/`term`/`start` actuales. PIERDE el estado de pago (`paid_at`) de las cuotas (PHASE-24.3) |
@@ -494,7 +496,7 @@ Reglas:
 
 | Método | Ruta | Auth | Body / Query | Response |
 |--------|------|------|--------------|----------|
-| GET    | `/debt/category-summary` | sí | `?range=month|quarter|year` (def `year`, PHASE-30.7), `?anchor=YYYY-MM-DD` (opc, PHASE-30.8: día dentro del período objetivo para navegar a períodos pasados), `?target_currency=` (opc, PHASE-30.6) | `200 DebtCategorySummary { reference_currency, range, range_start, range_end, total_payments, interests_and_fees, capital_amortized, by_type[], monthly_series[], daily_series[]?, monthly_income_avg, monthly_debt_payment_avg, effort_ratio_strict, effort_ratio_strict_status, effort_ratio_extended, effort_ratio_extended_status, recurring_quotas[] }` (`daily_series` sólo con `range=month`, PHASE-30.9: `{ day, emitida, amortizado, interest, balance? }` por día) |
+| GET    | `/debt/category-summary` | sí | `?range=month|year|custom` (def `year`; `quarter` retirado en PHASE-42), `?anchor=YYYY-MM-DD` (opc, PHASE-30.8: día dentro del período objetivo para navegar a períodos pasados; se ignora con `custom`), `?date_from=`/`?date_to=` (obligatorios con `range=custom`, PHASE-42: rango libre day-exact; 422 si faltan o están cruzados), `?target_currency=` (opc, PHASE-30.6) | `200 DebtCategorySummary { reference_currency, range, range_start, range_end, total_payments, interests_and_fees, capital_amortized, by_type[], monthly_series[], daily_series[]?, monthly_income_avg, monthly_debt_payment_avg, effort_ratio_strict, effort_ratio_strict_status, effort_ratio_extended, effort_ratio_extended_status, recurring_quotas[] }` (`daily_series` sólo con `range=month`, PHASE-30.9: `{ day, emitida, amortizado, interest, balance? }` por día) |
 
 Reglas:
 - Capa 1 = KPIs derivados del flujo de transacciones con
