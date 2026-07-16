@@ -4,6 +4,7 @@ import { Link } from 'expo-router';
 
 import {
   authApi,
+  boundsForCustomRange,
   useDashboardByCategory,
   useDashboardByMonth,
   useDashboardSummary,
@@ -34,6 +35,7 @@ import {
 import { SavingsRateCard } from '../../../../components/dashboard/savings-rate-card';
 import { SmartInsights } from '../../../../components/dashboard/smart-insights';
 import { TopExpensesList } from '../../../../components/dashboard/top-expenses-list';
+import { DateInput } from '../../../../components/ui/date-input';
 import { ErrorState } from '../../../../components/ui/error-state';
 import { FabLink } from '../../../../components/ui/fab';
 
@@ -42,7 +44,7 @@ const FALLBACK_CURRENCY = 'EUR';
 
 /**
  * Pantalla **Análisis** — paridad con `apps/web/app/(app)/personal-finance/analysis`.
- * Período toggleable Mes/Trimestre/Año, tasa de ahorro, smart insights.
+ * Período toggleable Mes/Año, tasa de ahorro, smart insights.
  * El gráfico mensual sigue ligado al año en curso (`useDashboardByMonth`
  * sólo acepta `year`).
  */
@@ -60,7 +62,40 @@ export default function AnalysisScreen() {
   const convertAll = useCurrencyStore((s) => s.convertAll);
   const setConvertAll = useCurrencyStore((s) => s.setConvertAll);
   const [period, setPeriod] = useState<PeriodKey>('year');
+  // PHASE-41 — rango libre (`period='custom'`): day-strings `YYYY-MM-DD`,
+  // sembrados desde el período actual al conmutar a "Rango".
+  const [customFrom, setCustomFrom] = useState<string | null>(null);
+  const [customTo, setCustomTo] = useState<string | null>(null);
   const [donutKind, setDonutKind] = useState<DonutKindFilter>('all');
+
+  function seedCustom(): { from: string; to: string } {
+    const now = new Date();
+    const y = now.getFullYear();
+    if (period === 'year') {
+      return { from: `${y}-01-01`, to: `${y}-12-31` };
+    }
+    const m = now.getMonth() + 1;
+    const mm = String(m).padStart(2, '0');
+    const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    return {
+      from: `${y}-${mm}-01`,
+      to: `${y}-${mm}-${String(lastDay).padStart(2, '0')}`,
+    };
+  }
+
+  function handlePeriodChange(next: PeriodKey): void {
+    if (next === 'custom' && !(customFrom && customTo)) {
+      const seed = seedCustom();
+      setCustomFrom(seed.from);
+      setCustomTo(seed.to);
+    }
+    setPeriod(next);
+  }
+
+  function handleCustomRangeChange(from: string, to: string): void {
+    if (from) setCustomFrom(from);
+    if (to) setCustomTo(to);
+  }
   const [currencyHydrated, setCurrencyHydrated] = useState(false);
 
   const currenciesQuery = useUserCurrencies();
@@ -81,7 +116,13 @@ export default function AnalysisScreen() {
     setCurrencyHydrated(true);
   }, [currenciesQuery.data, currencyHydrated, currency, setCurrency]);
 
-  const { dateFrom, dateTo } = useMemo(() => rangeForPeriod(period), [period]);
+  const { dateFrom, dateTo } = useMemo(
+    () =>
+      period === 'custom' && customFrom && customTo
+        ? boundsForCustomRange(customFrom, customTo)
+        : rangeForPeriod(period === 'custom' ? 'year' : period),
+    [period, customFrom, customTo],
+  );
   const currentYear = new Date().getFullYear();
 
   // PHASE-14.4: cuando convertAll=true pedimos `target_currency` y el
@@ -90,9 +131,16 @@ export default function AnalysisScreen() {
   const summaryParams = convertAll
     ? { target_currency: currency, date_from: dateFrom, date_to: dateTo }
     : { currency, date_from: dateFrom, date_to: dateTo };
-  const monthlyParams = convertAll
-    ? { target_currency: currency, year: currentYear }
-    : { currency, year: currentYear };
+  // PHASE-41 — en custom, el chart mensual se acota al rango (bordes parciales)
+  // para cuadrar con los KPIs; en mes/año, por año natural.
+  const monthlyParams =
+    period === 'custom'
+      ? convertAll
+        ? { target_currency: currency, date_from: dateFrom, date_to: dateTo }
+        : { currency, date_from: dateFrom, date_to: dateTo }
+      : convertAll
+        ? { target_currency: currency, year: currentYear }
+        : { currency, year: currentYear };
   const byCategoryParams = convertAll
     ? {
         target_currency: currency,
@@ -228,7 +276,26 @@ export default function AnalysisScreen() {
             </Text>
           </Pressable>
         </View>
-        <PeriodToggle value={period} onChange={setPeriod} />
+        <PeriodToggle
+          value={period}
+          onChange={handlePeriodChange}
+          options={['month', 'year', 'custom']}
+        />
+        {period === 'custom' ? (
+          <View style={styles.customRow}>
+            <DateInput
+              value={customFrom ?? ''}
+              maximumDate={customTo ? new Date(customTo) : undefined}
+              onChange={(from) => handleCustomRangeChange(from, customTo ?? '')}
+            />
+            <Text style={styles.customDash}>–</Text>
+            <DateInput
+              value={customTo ?? ''}
+              minimumDate={customFrom ? new Date(customFrom) : undefined}
+              onChange={(to) => handleCustomRangeChange(customFrom ?? '', to)}
+            />
+          </View>
+        ) : null}
 
         {hasError ? (
           <View style={{ marginBottom: spacing.md }}>
@@ -284,6 +351,13 @@ export default function AnalysisScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.md, paddingBottom: spacing.xl },
+  customRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginBottom: spacing.md,
+  },
+  customDash: { color: colors.textMuted, fontSize: fontSize.sm },
   header: {
     flexDirection: 'row',
     alignItems: 'flex-start',

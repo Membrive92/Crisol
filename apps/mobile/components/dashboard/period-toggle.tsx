@@ -2,31 +2,39 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
-export type PeriodKey = 'month' | 'quarter' | 'year';
+// PHASE-41 — se eliminó `quarter` (sin sentido para un particular). `custom`
+// es el rango libre `from/to` que define el usuario.
+export type PeriodKey = 'month' | 'year' | 'custom';
 
 export interface PeriodToggleProps {
   value: PeriodKey;
   onChange: (next: PeriodKey) => void;
+  /** Opciones a mostrar; por defecto sin `custom` (opt-in del consumidor). */
+  options?: readonly PeriodKey[];
 }
 
 const LABELS: Record<PeriodKey, string> = {
   month: 'Mes',
-  quarter: 'Trimestre',
   year: 'Año',
+  custom: 'Rango',
 };
 
-const OPTIONS: PeriodKey[] = ['month', 'quarter', 'year'];
+const DEFAULT_OPTIONS: readonly PeriodKey[] = ['month', 'year'];
 
 /**
- * Segmented Mes/Trimestre/Año equivalente a `StitchPeriodToggle` en
- * web pero con `Pressable` nativo. Los rangos los calcula
- * `rangeForPeriod` aquí mismo — duplicado consciente respecto a la
- * versión web (15 líneas). Si crece, mover a `packages/ui`.
+ * Segmented Mes/Año/Rango equivalente a `StitchPeriodToggle` en
+ * web pero con `Pressable` nativo. Los rangos month/year los calcula
+ * `rangeForPeriod` aquí mismo; el rango libre `custom` usa
+ * `boundsForCustomRange` (compartido en `@crisol/services`).
  */
-export function PeriodToggle({ value, onChange }: PeriodToggleProps) {
+export function PeriodToggle({
+  value,
+  onChange,
+  options = DEFAULT_OPTIONS,
+}: PeriodToggleProps) {
   return (
     <View style={styles.row}>
-      {OPTIONS.map((opt) => {
+      {options.map((opt) => {
         const active = opt === value;
         return (
           <Pressable
@@ -44,17 +52,13 @@ export function PeriodToggle({ value, onChange }: PeriodToggleProps) {
   );
 }
 
-export function rangeForPeriod(period: PeriodKey): { dateFrom: string; dateTo: string } {
+export function rangeForPeriod(
+  period: Exclude<PeriodKey, 'custom'>,
+): { dateFrom: string; dateTo: string } {
   const now = new Date();
   if (period === 'month') {
     const start = new Date(now.getFullYear(), now.getMonth(), 1);
     const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
-    return { dateFrom: start.toISOString(), dateTo: end.toISOString() };
-  }
-  if (period === 'quarter') {
-    const q = Math.floor(now.getMonth() / 3);
-    const start = new Date(now.getFullYear(), q * 3, 1);
-    const end = new Date(now.getFullYear(), q * 3 + 3, 0, 23, 59, 59);
     return { dateFrom: start.toISOString(), dateTo: end.toISOString() };
   }
   const start = new Date(now.getFullYear(), 0, 1);

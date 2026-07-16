@@ -15,11 +15,11 @@ import {
   spacing,
 } from '@crisol/ui';
 
-type PeriodKey = 'month' | 'quarter' | 'year';
+// PHASE-41 — se eliminó `quarter`.
+type PeriodKey = 'month' | 'year';
 
 const PERIOD_LABEL: Record<PeriodKey, string> = {
   month: 'Mes',
-  quarter: 'Trim.',
   year: 'Año',
 };
 
@@ -51,7 +51,6 @@ function rangeForPeriod(period: PeriodKey): {
   const to = now.toISOString();
   const start = new Date(now);
   if (period === 'month') start.setMonth(start.getMonth() - 1);
-  else if (period === 'quarter') start.setMonth(start.getMonth() - 3);
   else start.setFullYear(start.getFullYear() - 1);
   return { dateFrom: start.toISOString(), dateTo: to };
 }
@@ -84,7 +83,7 @@ export default function CategoryDetailScreen() {
       />
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.periodToggle}>
-          {(['month', 'quarter', 'year'] as const).map((p) => (
+          {(['month', 'year'] as const).map((p) => (
             <Pressable
               key={p}
               onPress={() => setPeriod(p)}

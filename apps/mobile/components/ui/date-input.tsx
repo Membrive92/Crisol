@@ -16,9 +16,9 @@ export interface DateInputProps {
   /** Placeholder cuando no hay valor (rara vez visible). */
   placeholder?: string;
   /** Mínima fecha seleccionable. */
-  minimumDate?: Date;
+  minimumDate?: Date | undefined;
   /** Máxima fecha seleccionable. */
-  maximumDate?: Date;
+  maximumDate?: Date | undefined;
 }
 
 function todayISO(): string {
