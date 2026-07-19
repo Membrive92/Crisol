@@ -7,15 +7,32 @@ import type {
   DashboardSummary,
   DashboardSummaryQuery,
   DashboardTopExpensesQuery,
+  ModuleDashboardSummary,
   MonthlyBucket,
   TopExpenseItem,
 } from '@crisol/types';
 
 import { apiClient } from '../client';
 
+/** Divisa + rango de la tarjeta de módulo (mismo patrón que el resto). */
+export interface ModuleSummaryQuery {
+  currency?: string;
+  target_currency?: string;
+  date_from?: string;
+  date_to?: string;
+}
+
 export const dashboardApi = {
   async currencies(): Promise<string[]> {
     const response = await apiClient.get<string[]>('/dashboard/currencies');
+    return response.data;
+  },
+
+  async moduleSummary(query: ModuleSummaryQuery = {}): Promise<ModuleDashboardSummary> {
+    const response = await apiClient.get<ModuleDashboardSummary>(
+      '/dashboard/module-summary',
+      { params: query },
+    );
     return response.data;
   },
 

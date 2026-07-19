@@ -19,8 +19,8 @@ import {
 } from '@/components/ui/icons';
 
 export const SIDEBAR_WIDTH = 240;
-export const HEADER_ROW = 56;
-export const TABS_ROW = 48;
+const HEADER_ROW = 56;
+const TABS_ROW = 48;
 export const HEADER_HEIGHT = HEADER_ROW + TABS_ROW; // con tabs (módulos con sections)
 export const HEADER_HEIGHT_BARE = HEADER_ROW; // sin tabs (módulos planos como Dashboard)
 

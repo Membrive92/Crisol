@@ -60,6 +60,14 @@ export const queryKeys = {
       ] as const,
     health: (targetCurrency?: string) =>
       [...queryKeys.debt.all, 'health', targetCurrency ?? 'native'] as const,
+    dashboardSummary: (targetCurrency?: string, dateFrom?: string, dateTo?: string) =>
+      [
+        ...queryKeys.debt.all,
+        'dashboard-summary',
+        targetCurrency ?? 'native',
+        dateFrom ?? 'none',
+        dateTo ?? 'none',
+      ] as const,
     history: (monthsBack = 12, monthsAhead = 12, targetCurrency?: string) =>
       [
         ...queryKeys.debt.all,
@@ -96,6 +104,14 @@ export const queryKeys = {
     all: ['dashboard'] as const,
     summary: (query: DashboardSummaryQuery = {}) =>
       [...queryKeys.dashboard.all, 'summary', normalizeQuery(query)] as const,
+    moduleSummary: (
+      query: {
+        currency?: string;
+        target_currency?: string;
+        date_from?: string;
+        date_to?: string;
+      } = {},
+    ) => [...queryKeys.dashboard.all, 'module-summary', normalizeQuery(query)] as const,
     byCategory: (query: DashboardByCategoryQuery = {}) =>
       [...queryKeys.dashboard.all, 'by-category', normalizeQuery(query)] as const,
     byMonth: (query: DashboardByMonthQuery = {}) =>
@@ -121,6 +137,8 @@ export const queryKeys = {
     all: ['analytics'] as const,
     expenseStructure: (query: ExpenseStructureQuery = {}) =>
       [...queryKeys.analytics.all, 'expense-structure', normalizeQuery(query)] as const,
+    expenseStructureExplain: (query: ExpenseStructureQuery = {}) =>
+      [...queryKeys.analytics.all, 'expense-structure-explain', normalizeQuery(query)] as const,
     monthOutlook: (query: MonthOutlookQuery = {}) =>
       [...queryKeys.analytics.all, 'month-outlook', normalizeQuery(query)] as const,
   },

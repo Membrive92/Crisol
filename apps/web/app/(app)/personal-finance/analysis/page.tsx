@@ -5,30 +5,16 @@ import dynamic from 'next/dynamic';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import {
-  useAccountBalances,
   useDashboardByCategory,
   useDashboardByMonth,
   useDashboardSummary,
-  useDebtHealth,
   useExpenseStructure,
-  useMonthOutlook,
-  usePositionAsOf,
-  usePositionHistory,
+  useExpenseStructureExplain,
 } from '@crisol/services';
 import { useCurrencyStore } from '@crisol/store';
-import type { DtiStatus } from '@crisol/types';
 import { colors, fontSize, fontWeight, formatAmount, layout, spacing } from '@crisol/ui';
 
-import { AccountsSection } from '@/components/analysis/accounts-section';
-import { DebtSummaryCard } from '@/components/analysis/debt-summary-card';
-import {
-  KpiStrip,
-  KpiTile,
-  MiniSparkline,
-  type KpiStatus,
-} from '@/components/analysis/kpi-strip';
-import { MonthOutlookCard } from '@/components/analysis/month-outlook-card';
-import { NetworthEvolutionCard } from '@/components/analysis/networth-evolution-card';
+import { KpiStrip, KpiTile } from '@/components/analysis/kpi-strip';
 import {
   boundsForAnchor,
   boundsForCustomRange,
@@ -36,7 +22,9 @@ import {
 } from '@/components/analysis/stitch-period-toggle';
 import type { StructureFilter } from '@/components/analysis/stitch-expense-breakdown';
 import { StitchSmartInsights } from '@/components/analysis/stitch-smart-insights';
+import { TopMovementsCard } from '@/components/analysis/top-movements-card';
 import { PeriodNavigator } from '@/components/debt/period-navigator';
+import { todayDayStr } from '@/components/ui/date-picker';
 import { ErrorState } from '@/components/ui/error-state';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -54,13 +42,6 @@ const StitchExpenseBreakdown = dynamic(
     ),
   { ssr: false, loading: () => <Skeleton height={340} /> },
 );
-
-const EFFORT_STATUS: Record<DtiStatus, KpiStatus> = {
-  healthy: 'success',
-  caution: 'warning',
-  stressed: 'danger',
-  unknown: 'neutral',
-};
 
 function fmtSignedAmount(value: string | number, currency: string): string {
   const n = Number(value);
@@ -148,10 +129,12 @@ export default function AnalysisPage() {
   function handleRangeChange(next: PeriodKey): void {
     if (next === 'custom' && !(customFrom && customTo)) {
       const seed = boundsForAnchor('month', anchorMonth);
+      const today = todayDayStr();
+      const to = seed.dateTo.slice(0, 10);
       apply({
         period: 'custom',
         customFrom: seed.dateFrom.slice(0, 10),
-        customTo: seed.dateTo.slice(0, 10),
+        customTo: to > today ? today : to,
       });
     } else {
       apply({ period: next });
@@ -159,11 +142,6 @@ export default function AnalysisPage() {
   }
   const currency = useCurrencyStore((s) => s.currency);
   const convertAll = useCurrencyStore((s) => s.convertAll);
-  // El toggle "Incluir deuda en el patrimonio neto" (menú de divisa del
-  // header): ON → patrimonio = activos − pasivos; OFF → sólo activos (la deuda
-  // no resta del neto). Es la palanca para ver el patrimonio "de caja".
-  const includeDebt = useCurrencyStore((s) => s.includeDebtInNetWorth);
-  const targetCurrency = convertAll ? currency : undefined;
 
   const { dateFrom, dateTo } = useMemo(
     () =>
@@ -202,83 +180,41 @@ export default function AnalysisPage() {
   const monthlyQuery = useDashboardByMonth(monthlyParams);
   const expensesByCategoryQuery = useDashboardByCategory(byCategoryParams);
   const structureQuery = useExpenseStructure(structureParams);
-  // PHASE-37.4 — proyección fin de mes + runway (sin rango: siempre el mes
-  // en curso). Sólo modo de divisa.
-  const outlookParams = convertAll ? { target_currency: currency } : { currency };
-  const outlookQuery = useMonthOutlook(outlookParams);
-  // PHASE-37 — patrimonio (stock): posición actual + serie + salud de deuda.
-  // No dependen del período (son fotos a fecha); su dimensión temporal es la
-  // serie y el Δ, no el filtro de rango.
-  const balancesQuery = useAccountBalances(targetCurrency ? { targetCurrency } : {});
-  const positionQuery = usePositionHistory(12, 0);
-  // PHASE-41 — patrimonio A FECHA de fin del período elegido + Δ durante el
-  // rango, para que el valor y el Δ reflejen el período (incluido el rango
-  // libre) y no una foto de hoy. Mono-divisa (divisa de referencia).
-  const positionAsOfQuery = usePositionAsOf(dateFrom, dateTo);
-  const debtQuery = useDebtHealth(targetCurrency ? { targetCurrency } : {});
+  // PHASE-43.2 — explicabilidad por categoría (por qué es fija/variable). Mismo
+  // rango que el desglose; alimenta el tooltip de cada fila de la leyenda.
+  const explainQuery = useExpenseStructureExplain(structureParams);
 
   const summary = summaryQuery.data;
   const monthly = monthlyQuery.data ?? [];
   const expensesByCategory = expensesByCategoryQuery.data ?? [];
   const unconvertible = summary?.unconvertible_count ?? 0;
-  const balances = balancesQuery.data;
-  const position = positionQuery.data;
-  const positionAsOf = positionAsOfQuery.data;
-  const debt = debtQuery.data;
   const refCurrency = summary?.currency ?? currency;
 
-  // ── Tiles del strip ──────────────────────────────────────────────────
-  // El patrimonio (valor + Δ) respeta el toggle: `net_worth` (con deuda) o
-  // `total_assets` (sin deuda). PHASE-41: valor A FECHA de fin del período y Δ
-  // DURANTE el rango (foto del período, no de hoy). Fallback a la foto actual
-  // (`balances`) mientras carga. El sparkline sigue siendo la serie de 12
-  // meses como contexto de tendencia (decorativo, no acotado al rango).
-  const worthKey = includeDebt ? 'net_worth' : 'total_assets';
-  const deltaKey = includeDebt ? 'delta_net_worth' : 'delta_assets';
-  const netWorth = positionAsOf
-    ? positionAsOf[worthKey]
-    : balances
-      ? balances[worthKey]
-      : null;
-  const worthSeries = (position?.points ?? []).map((p) => Number(p[worthKey]));
-  const deltaPeriod = positionAsOf
-    ? Number(positionAsOf[deltaKey])
-    : worthSeries.length >= 2
-      ? worthSeries[worthSeries.length - 1]! - worthSeries[0]!
-      : null;
-  // Base del % = patrimonio al INICIO del rango ≈ valor a fecha − Δ del rango.
-  const worthStart =
-    positionAsOf && netWorth != null && deltaPeriod != null
-      ? Number(netWorth) - deltaPeriod
-      : worthSeries.length >= 2
-        ? worthSeries[0]!
-        : null;
-  const deltaPeriodPct =
-    deltaPeriod != null && worthStart != null && worthStart !== 0
-      ? (deltaPeriod / Math.abs(worthStart)) * 100
-      : null;
-  const sparkValues = worthSeries;
-  // El patrimonio a fecha es mono-divisa (referencia); etiqueta el valor con SU
-  // divisa para que no se muestre un importe en referencia rotulado en target.
-  const worthCurrency = positionAsOf?.reference_currency ?? refCurrency;
-  const effort = debt?.dti_ratio ?? null;
-  const effortStatus: KpiStatus = debt ? EFFORT_STATUS[debt.dti_status] : 'neutral';
+  // ── Tiles del strip (PHASE-43.3: Análisis = flujos) ───────────────────
+  // Dos tiles, no cinco: el patrimonio (stock) y la tasa de esfuerzo (deuda)
+  // se fueron al dashboard (ADR-0006). Aquí sólo el flujo de caja del periodo
+  // (con la tasa de ahorro como sub-valor) y el coste de vida estructural/mes.
+  const structure = structureQuery.data;
   const cashflow = summary?.balance ?? null;
   const cashflowDelta = summary?.cashflow_delta ?? null;
   const savingsRate =
     summary && Number(summary.income) > 0
       ? (Number(summary.balance) / Number(summary.income)) * 100
       : null;
-  const savingsDeltaPp = summary?.savings_rate_delta_pp ?? null;
   // PHASE-37.3 — tasa de ahorro estructural (excluye gastos puntuales). Si
   // difiere >10pp de la bruta, un badge en el tile invita a fijarse.
-  const structure = structureQuery.data;
   const savingsStructuralPct =
     structure?.savings_rate_structural != null ? structure.savings_rate_structural * 100 : null;
   const savingsDiffPp =
     savingsStructuralPct != null && savingsRate != null
       ? savingsStructuralPct - savingsRate
       : null;
+  // PHASE-43.3 — coste de vida estructural mensual (nuevo tile) + aviso si la
+  // ventana de recurrencia no tiene histórico suficiente para clasificar.
+  const structuralMonthlyAvg = structure?.structural_monthly_avg ?? null;
+  const recurrenceAvailable = structure?.recurrence_available ?? true;
+  const windowMonths = structure?.window_months_with_data ?? 0;
+  const topMovements = structure?.top_exceptional ?? [];
 
   const hasError =
     summaryQuery.isError || monthlyQuery.isError || expensesByCategoryQuery.isError;
@@ -321,7 +257,7 @@ export default function AnalysisPage() {
           Análisis financiero
         </h1>
         <p style={{ margin: `${spacing.xs}px 0 0 0`, color: colors.textMuted, fontSize: fontSize.sm }}>
-          Patrones de ingresos, gastos y patrimonio · cómputos client-side, sin enviar datos fuera de tu equipo.
+          Ingresos, gastos y ahorro del periodo · cómputos client-side, sin enviar datos fuera de tu equipo.
         </p>
         {convertAll && unconvertible > 0 ? (
           <p style={{ margin: `${spacing.xs}px 0 0 0`, color: colors.warning, fontSize: fontSize.xs }}>
@@ -369,54 +305,22 @@ export default function AnalysisPage() {
         </div>
       ) : null}
 
-      {/* KPI STRIP — patrimonio (stock + Δ) + esfuerzo + flujo + ahorro. */}
+      {/* KPI STRIP (PHASE-43.3) — 2 tiles de FLUJO: caja neta (con tasa de
+          ahorro) + coste de vida estructural/mes. Patrimonio y esfuerzo viven
+          en el dashboard (ADR-0006). */}
       <div style={{ marginBottom: spacing.md }}>
         <KpiStrip>
-          <KpiTile
-            label="Patrimonio neto"
-            value={netWorth != null ? formatAmount(netWorth, worthCurrency) : '—'}
-            sparkline={
-              sparkValues.length >= 2 ? (
-                <MiniSparkline
-                  values={sparkValues}
-                  up={sparkValues[sparkValues.length - 1]! >= sparkValues[0]!}
-                />
-              ) : undefined
-            }
-          />
-          <KpiTile
-            label="Δ patrimonio"
-            value={deltaPeriod != null ? fmtSignedAmount(deltaPeriod, worthCurrency) : '—'}
-            delta={deltaPeriod}
-            deltaText={deltaPeriodPct != null ? `${deltaPeriodPct.toFixed(1)} %` : undefined}
-            subtitle="vs inicio del rango"
-          />
-          <KpiTile
-            label="Tasa de esfuerzo"
-            value={effort != null ? `${(effort * 100).toFixed(1)} %` : '—'}
-            status={effortStatus}
-            subtitle="BdE < 35%"
-          />
           <KpiTile
             label="Flujo de caja neto"
             value={cashflow != null ? fmtSignedAmount(cashflow, refCurrency) : '—'}
             delta={cashflowDelta != null ? Number(cashflowDelta) : null}
             deltaText={cashflowDelta != null ? fmtSignedAmount(cashflowDelta, refCurrency) : undefined}
-            subtitle="vs periodo anterior"
-          />
-          <KpiTile
-            label="Tasa de ahorro"
-            value={savingsRate != null ? `${savingsRate.toFixed(1)} %` : '—'}
-            delta={savingsDeltaPp}
-            deltaText={savingsDeltaPp != null ? `${savingsDeltaPp >= 0 ? '+' : ''}${savingsDeltaPp.toFixed(1)} pp` : undefined}
             subtitle={
-              savingsStructuralPct != null
-                ? `Solo fijos ${savingsStructuralPct.toFixed(0)} %`
-                : 'vs periodo anterior'
+              savingsRate != null ? `Tasa de ahorro ${savingsRate.toFixed(0)} %` : 'vs periodo anterior'
             }
             badge={
               savingsDiffPp != null && Math.abs(savingsDiffPp) > 10
-                ? `${savingsDiffPp >= 0 ? '+' : ''}${savingsDiffPp.toFixed(0)} pp`
+                ? `Fijo ${savingsStructuralPct!.toFixed(0)} %`
                 : undefined
             }
             title={
@@ -425,18 +329,42 @@ export default function AnalysisPage() {
                 : undefined
             }
           />
+          <KpiTile
+            label="Gasto estructural / mes"
+            value={structuralMonthlyAvg != null ? formatAmount(structuralMonthlyAvg, refCurrency) : '—'}
+            subtitle={
+              recurrenceAvailable
+                ? 'Tu coste de vida fijo, sin puntuales'
+                : `Historia insuficiente (${windowMonths}/6 meses)`
+            }
+            status={recurrenceAvailable ? 'neutral' : 'warning'}
+          />
         </KpiStrip>
       </div>
 
-      {/* Fila 1: Ingresos vs Gastos + Evolución del patrimonio. */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0, 8fr) minmax(0, 4fr)',
-          gap: spacing.md,
-          marginBottom: spacing.md,
-        }}
-      >
+      {recurrenceAvailable ? null : (
+        <div style={{ marginBottom: spacing.md }}>
+          <p
+            style={{
+              margin: 0,
+              padding: spacing.sm,
+              fontSize: fontSize.xs,
+              color: colors.warning,
+              backgroundColor: colors.warningSoft,
+              borderRadius: 8,
+              lineHeight: 1.4,
+            }}
+          >
+            ⚠ Historia insuficiente ({windowMonths}/6 meses completos): la
+            clasificación fijo/variable usa sólo tus gastos fijos confirmados y
+            de deuda. La tasa de ahorro estructural puede no ser representativa
+            hasta acumular más histórico.
+          </p>
+        </div>
+      )}
+
+      {/* Fila 1: Ingresos vs Gastos — a ancho completo (Análisis es flujos). */}
+      <div style={{ marginBottom: spacing.md }}>
         <StitchIncomeVsExpenses
           data={monthly}
           currency={currency}
@@ -447,43 +375,25 @@ export default function AnalysisPage() {
           {...(customTo ? { customTo } : {})}
           onSelectMonth={(month) => apply({ period: 'month', anchor: month })}
         />
-        <NetworthEvolutionCard
-          points={position?.points ?? []}
-          currency={position?.reference_currency ?? refCurrency}
-          isLoading={positionQuery.isLoading}
-          includeDebt={includeDebt}
-        />
       </div>
 
-      {/* Desglose de gastos y Deuda, cada uno a ANCHO COMPLETO y apilados. Iban
-          emparejados (8/4) pero la card de deuda es intrínsecamente más alta (su
-          número + KPIs ya miden casi como toda la card de desglose), así que
-          nunca cuadraban de altura. A ancho completo, cada una reparte su
-          contenido en varias columnas (categorías / movimientos) y queda corta,
-          sin desajuste. */}
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: spacing.md,
-          marginBottom: spacing.md,
-        }}
-      >
+      {/* Fila 2: Desglose de gastos a ancho completo. */}
+      <div style={{ marginBottom: spacing.md }}>
         <StitchExpenseBreakdown
           items={expensesByCategory}
           currency={currency}
           isLoading={expensesByCategoryQuery.isLoading}
           exceptionalByCategory={structure?.exceptional_by_category}
+          explain={explainQuery.data}
           dateFrom={dateFrom}
           dateTo={dateTo}
           filter={filter}
           onFilterChange={(f) => apply({ filter: f })}
           backQuery={analysisQuery(period, anchorMonth, filter, customFrom, customTo)}
         />
-        <DebtSummaryCard dateFrom={dateFrom} dateTo={dateTo} />
       </div>
 
-      {/* Fila 3: Fin de mes (outlook) + Smart Insights. */}
+      {/* Fila 3: Top movimientos del periodo + Smart Insights. */}
       <div
         style={{
           display: 'grid',
@@ -492,22 +402,17 @@ export default function AnalysisPage() {
           marginBottom: spacing.md,
         }}
       >
-        <MonthOutlookCard
-          data={outlookQuery.data}
-          currency={refCurrency}
-          isLoading={outlookQuery.isLoading}
+        <TopMovementsCard
+          items={topMovements}
+          currency={currency}
+          isLoading={structureQuery.isLoading}
         />
         <StitchSmartInsights
           summary={summary}
           expensesByCategory={expensesByCategory}
           structure={structure}
-          outlook={outlookQuery.data}
-          currency={currency}
         />
       </div>
-
-      {/* Cuentas — sección colapsable a ancho completo. */}
-      <AccountsSection />
     </div>
   );
 }

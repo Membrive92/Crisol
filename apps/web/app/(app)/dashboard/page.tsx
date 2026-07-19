@@ -1,60 +1,64 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import dynamic from 'next/dynamic';
 
 import {
   useAccountBalances,
-  useDashboardByCategory,
-  useDashboardByMonth,
   useDashboardSummary,
+  useDebtDashboardSummary,
+  useModuleSummary,
+  useMonthOutlook,
+  usePositionAsOf,
+  usePositionHistory,
 } from '@crisol/services';
 import { useCurrencyStore } from '@crisol/store';
-import { colors, fontSize, fontWeight, layout, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, formatAmount, layout, spacing } from '@crisol/ui';
 
+import { AccountsSection } from '@/components/analysis/accounts-section';
+import { KpiStrip, KpiTile, MiniSparkline } from '@/components/analysis/kpi-strip';
+import { MonthOutlookCard } from '@/components/analysis/month-outlook-card';
+import { NetworthEvolutionCard } from '@/components/analysis/networth-evolution-card';
 import {
   boundsForAnchor,
   boundsForCustomRange,
   type PeriodKey,
 } from '@/components/analysis/stitch-period-toggle';
+import { ModuleCard } from '@/components/dashboard/module-card';
 import { PeriodNavigator } from '@/components/debt/period-navigator';
-import { StitchKpiRow } from '@/components/dashboard/stitch-kpi-row';
-import { Skeleton } from '@/components/ui/skeleton';
+import { todayDayStr } from '@/components/ui/date-picker';
 
-// AUDIT-2026-05: chart con recharts en chunk diferido (ssr:false).
-const StitchBalanceChart = dynamic(
-  () => import('@/components/dashboard/stitch-balance-chart').then((m) => m.StitchBalanceChart),
-  { ssr: false, loading: () => <Skeleton height={300} /> },
-);
-import { StitchRecentActivity } from '@/components/dashboard/stitch-recent-activity';
-import { StitchSecondaryMetrics } from '@/components/dashboard/stitch-secondary-metrics';
-import { StitchTipCard } from '@/components/dashboard/stitch-tip-card';
+function fmtSignedAmount(value: string | number, currency: string): string {
+  const n = Number(value);
+  return `${n >= 0 ? '+' : ''}${formatAmount(String(n.toFixed(2)), currency)}`;
+}
 
+/**
+ * PHASE-43.4 (ADR-0006) — Dashboard = STOCKS. Responde *"¿cuánto valgo?"*:
+ * patrimonio consolidado (la única métrica que cruza módulos), resiliencia y
+ * una tarjeta-resumen por módulo (`veredicto + número + link`). Los flujos
+ * (gastos, ahorro, evolución mensual) viven en Análisis.
+ */
 export default function DashboardPage() {
   const currency = useCurrencyStore((s) => s.currency);
   const convertAll = useCurrencyStore((s) => s.convertAll);
-  // Toggle "incluir deuda en patrimonio" (menú de divisa del header): ON →
-  // net_worth (activos − deuda); OFF → sólo activos. El mismo que gobierna
-  // Análisis. Aquí alimenta el nuevo KPI de patrimonio.
   const includeDebt = useCurrencyStore((s) => s.includeDebtInNetWorth);
   const targetCurrency = convertAll ? currency : undefined;
+
   const [period, setPeriod] = useState<PeriodKey>('year');
-  // Navegación de periodo (mismo patrón que Análisis): el ancla es el mes
-  // contextual; las flechas del `PeriodNavigator` la mueven dentro de los datos.
   const [anchorMonth, setAnchorMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
-  // PHASE-41 — rango libre `custom` (`YYYY-MM-DD`); estado local (sin URL).
   const [customFrom, setCustomFrom] = useState<string | null>(null);
   const [customTo, setCustomTo] = useState<string | null>(null);
-  // Al conmutar a "Personalizado", siembra los pickers desde el período actual.
   function handleRangeChange(next: PeriodKey): void {
     setPeriod(next);
     if (next === 'custom' && !(customFrom && customTo)) {
       const seed = boundsForAnchor(period === 'custom' ? 'year' : period, anchorMonth);
+      const today = todayDayStr();
+      const to = seed.dateTo.slice(0, 10);
       setCustomFrom(seed.dateFrom.slice(0, 10));
-      setCustomTo(seed.dateTo.slice(0, 10));
+      setCustomTo(to > today ? today : to);
     }
   }
 
@@ -65,63 +69,65 @@ export default function DashboardPage() {
         : boundsForAnchor(period === 'custom' ? 'year' : period, anchorMonth),
     [period, anchorMonth, customFrom, customTo],
   );
-  const anchorYear = Number(
-    (period === 'custom' && customFrom ? customFrom : anchorMonth).slice(0, 4),
+
+  // Metadata para acotar el navegador de período (mes min/max con datos).
+  const summaryQuery = useDashboardSummary(
+    convertAll
+      ? { target_currency: currency, date_from: dateFrom, date_to: dateTo }
+      : { currency, date_from: dateFrom, date_to: dateTo },
   );
-
-  // PHASE-8.3: una sola petición por endpoint, el backend convierte
-  // per-transaction usando la tasa del día de cada `occurred_at`.
-  // Modo legacy (toggle OFF) sigue filtrando por moneda activa sin
-  // conversión.
-  const summaryParams = convertAll
-    ? { target_currency: currency, date_from: dateFrom, date_to: dateTo }
-    : { currency, date_from: dateFrom, date_to: dateTo };
-  // El gráfico mensual sigue el AÑO ANCLADO (antes fijo a currentYear → no
-  // reaccionaba al periodo navegado).
-  // PHASE-41 — en custom el chart mensual se acota al rango (bordes parciales);
-  // en mes/año, por año (y `chartMonths` recorta a los meses del período).
-  const monthlyParams =
-    period === 'custom'
-      ? convertAll
-        ? { target_currency: currency, date_from: dateFrom, date_to: dateTo }
-        : { currency, date_from: dateFrom, date_to: dateTo }
-      : convertAll
-        ? { target_currency: currency, year: anchorYear }
-        : { currency, year: anchorYear };
-  const byCategoryParams = convertAll
-    ? {
-        target_currency: currency,
-        date_from: dateFrom,
-        date_to: dateTo,
-        kind: 'expense' as const,
-      }
-    : { currency, date_from: dateFrom, date_to: dateTo, kind: 'expense' as const };
-
-  const summaryQuery = useDashboardSummary(summaryParams);
-  const monthlyQuery = useDashboardByMonth(monthlyParams);
-  const expensesByCategoryQuery = useDashboardByCategory(byCategoryParams);
-  // Patrimonio (stock, no depende del periodo — es una foto a fecha, igual
-  // que en Análisis). Alimenta el nuevo KPI + hace que el toggle del header
-  // tenga efecto aquí.
-  const balancesQuery = useAccountBalances(targetCurrency ? { targetCurrency } : {});
-  const balances = balancesQuery.data;
-  const netWorth = balances ? balances[includeDebt ? 'net_worth' : 'total_assets'] : null;
-
   const summary = summaryQuery.data;
-  const monthly = monthlyQuery.data ?? [];
-  // El gráfico muestra SÓLO los meses del periodo (Año=12, Mes=1, custom=meses
-  // del rango). En mes/año `monthly` trae los 12 del año anclado y aquí
-  // filtramos por `[dateFrom, dateTo]`; en custom ya viene acotado y el filtro
-  // es no-op.
-  const chartMonths = useMemo(() => {
-    const fromYM = dateFrom.slice(0, 7);
-    const toYM = dateTo.slice(0, 7);
-    return monthly.filter((b) => b.month >= fromYM && b.month <= toYM);
-  }, [monthly, dateFrom, dateTo]);
-  const byCategory = expensesByCategoryQuery.data ?? [];
-  const anyError =
-    summaryQuery.isError || monthlyQuery.isError || expensesByCategoryQuery.isError;
-  const unconvertible = summary?.unconvertible_count ?? 0;
+
+  // Patrimonio (stock): foto a fecha de fin del período + Δ durante el rango +
+  // serie de 12 meses (tendencia). Salud de deuda y flujo del mes llegan como
+  // tarjetas de módulo (contrato de agregación).
+  const balancesQuery = useAccountBalances(targetCurrency ? { targetCurrency } : {});
+  const positionQuery = usePositionHistory(12, 0);
+  const positionAsOfQuery = usePositionAsOf(dateFrom, dateTo);
+  const outlookQuery = useMonthOutlook(convertAll ? { target_currency: currency } : { currency });
+  const moduleQuery = useModuleSummary(
+    convertAll
+      ? { target_currency: currency, date_from: dateFrom, date_to: dateTo }
+      : { currency, date_from: dateFrom, date_to: dateTo },
+  );
+  // PHASE-43.x — la deuda viva de la tarjeta es period-scoped (al cierre del
+  // rango), coherente con el Patrimonio Neto. Pasamos la PARTE FECHA del rango.
+  const debtSummaryQuery = useDebtDashboardSummary({
+    ...(targetCurrency ? { targetCurrency } : {}),
+    dateFrom: dateFrom.slice(0, 10),
+    dateTo: dateTo.slice(0, 10),
+  });
+
+  const balances = balancesQuery.data;
+  const position = positionQuery.data;
+  const positionAsOf = positionAsOfQuery.data;
+
+  const worthKey = includeDebt ? 'net_worth' : 'total_assets';
+  const deltaKey = includeDebt ? 'delta_net_worth' : 'delta_assets';
+  const netWorth = positionAsOf
+    ? positionAsOf[worthKey]
+    : balances
+      ? balances[worthKey]
+      : null;
+  const worthSeries = (position?.points ?? []).map((p) => Number(p[worthKey]));
+  const deltaPeriod = positionAsOf
+    ? Number(positionAsOf[deltaKey])
+    : worthSeries.length >= 2
+      ? worthSeries[worthSeries.length - 1]! - worthSeries[0]!
+      : null;
+  const worthStart =
+    positionAsOf && netWorth != null && deltaPeriod != null
+      ? Number(netWorth) - deltaPeriod
+      : worthSeries.length >= 2
+        ? worthSeries[0]!
+        : null;
+  const deltaPeriodPct =
+    deltaPeriod != null && worthStart != null && worthStart !== 0
+      ? (deltaPeriod / Math.abs(worthStart)) * 100
+      : null;
+  const worthCurrency = positionAsOf?.reference_currency ?? currency;
+
+  const anyError = summaryQuery.isError || balancesQuery.isError;
 
   return (
     <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
@@ -147,29 +153,9 @@ export default function DashboardPage() {
           >
             Dashboard
           </h1>
-          <p
-            style={{
-              margin: `${spacing.xs}px 0 0 0`,
-              color: colors.textMuted,
-              fontSize: fontSize.sm,
-            }}
-          >
-            {convertAll
-              ? `Vista cross-currency · todas las transacciones convertidas a ${currency} con la tasa del día.`
-              : 'Vista general de ingresos, gastos y categorías.'}
+          <p style={{ margin: `${spacing.xs}px 0 0 0`, color: colors.textMuted, fontSize: fontSize.sm }}>
+            Tu patrimonio y la salud de cada módulo, de un vistazo.
           </p>
-          {convertAll && unconvertible > 0 ? (
-            <p
-              style={{
-                margin: `${spacing.xs}px 0 0 0`,
-                color: colors.warning,
-                fontSize: fontSize.xs,
-              }}
-            >
-              ⚠ {unconvertible} {unconvertible === 1 ? 'transacción' : 'transacciones'} sin
-              tasa disponible — quedan fuera del total.
-            </p>
-          ) : null}
         </div>
         <PeriodNavigator
           range={period}
@@ -188,43 +174,84 @@ export default function DashboardPage() {
         />
       </header>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg }}>
-        <StitchKpiRow
-          summary={summary}
-          isLoading={summaryQuery.isLoading}
-          netWorth={netWorth}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
+        {/* PATRIMONIO — el número que cruza módulos + su evolución. */}
+        <KpiStrip>
+          <KpiTile
+            label="Patrimonio neto"
+            value={netWorth != null ? formatAmount(netWorth, worthCurrency) : '—'}
+            sparkline={
+              worthSeries.length >= 2 ? (
+                <MiniSparkline
+                  values={worthSeries}
+                  up={worthSeries[worthSeries.length - 1]! >= worthSeries[0]!}
+                />
+              ) : undefined
+            }
+          />
+          <KpiTile
+            label="Δ patrimonio"
+            value={deltaPeriod != null ? fmtSignedAmount(deltaPeriod, worthCurrency) : '—'}
+            delta={deltaPeriod}
+            deltaText={deltaPeriodPct != null ? `${deltaPeriodPct.toFixed(1)} %` : undefined}
+            subtitle="vs inicio del rango"
+          />
+        </KpiStrip>
+
+        <NetworthEvolutionCard
+          points={position?.points ?? []}
+          currency={position?.reference_currency ?? currency}
+          isLoading={positionQuery.isLoading}
           includeDebt={includeDebt}
-          netWorthLoading={balancesQuery.isLoading}
         />
 
+        {/* MÓDULOS + RESILIENCIA. */}
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)',
+            gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
             gap: spacing.md,
             alignItems: 'start',
           }}
         >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
-            <StitchBalanceChart
-              data={chartMonths}
-              currency={currency}
-              isLoading={monthlyQuery.isLoading}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: fontSize.sm,
+                fontWeight: fontWeight.semibold,
+                color: colors.textMuted,
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+              }}
+            >
+              Módulos
+            </h2>
+            <ModuleCard
+              label="Finanzas Domésticas"
+              emoji="🏠"
+              summary={moduleQuery.data}
+              isLoading={moduleQuery.isLoading}
             />
-            <StitchSecondaryMetrics
-              summary={summary}
-              expensesByCategory={byCategory}
-              currency={currency}
+            <ModuleCard
+              label="Deuda"
+              emoji="💳"
+              summary={debtSummaryQuery.data}
+              isLoading={debtSummaryQuery.isLoading}
             />
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
-            <StitchRecentActivity />
-            <StitchTipCard summary={summary} />
-          </div>
+          <MonthOutlookCard
+            data={outlookQuery.data}
+            currency={outlookQuery.data?.reference_currency ?? currency}
+            isLoading={outlookQuery.isLoading}
+          />
         </div>
+
+        {/* CUENTAS (composición del patrimonio, colapsable). */}
+        <AccountsSection />
       </div>
 
-      {anyError && (
+      {anyError ? (
         <p
           style={{
             color: colors.danger,
@@ -235,7 +262,7 @@ export default function DashboardPage() {
         >
           Error cargando alguna sección del dashboard.
         </p>
-      )}
+      ) : null}
     </div>
   );
 }

@@ -36,9 +36,14 @@ from app.modules.personal_finance.accounts.debt_history import (
     _add_month,
     _end_of_month,
     _format_month,
+    _scheduled_remaining_at,
     _start_of_month,
     _today_utc,
     compute_debt_history,
+)
+from app.modules.personal_finance.accounts.installments_model import LiabilityInstallment
+from app.modules.personal_finance.accounts.installments_repository import (
+    installments_by_account,
 )
 from app.modules.personal_finance.accounts.models import (
     UNVALUED_ACCOUNT_TYPES,
@@ -60,6 +65,30 @@ def _pct(delta: Decimal, base: Decimal) -> float | None:
     if base == 0:
         return None
     return float(delta / abs(base) * Decimal("100"))
+
+
+def _scheduled_outstanding_as_of(
+    insts: list[LiabilityInstallment], as_of: date, today: date
+) -> Decimal:
+    """PHASE-43.x — Deuda viva NATIVA de un pasivo CON cuadro a fecha `as_of`,
+    dirigida por el cuadro (paid_at-based). Σ del `principal` de las cuotas NO
+    pagadas a esa fecha. Idéntica lógica que `debt/service._outstanding_at`, para
+    que el patrimonio y el módulo de deuda coincidan período a período:
+    - `as_of >= hoy` (período en curso): sólo cuotas con `paid_at IS NULL` — una
+      cuota del mes en curso con `paid_at` futuro (reconciliada a su vencimiento)
+      ya está pagada. Coincide con `schedule_outstanding` de get_balances/debt-health.
+    - `as_of` pasado: cuenta también las pagadas DESPUÉS de esa fecha (a fin de
+      mayo aún debías la cuota que pagas en junio).
+    """
+    past = as_of < today
+    return sum(
+        (
+            i.principal
+            for i in insts
+            if i.paid_at is None or (past and i.paid_at.date() > as_of)
+        ),
+        Decimal("0"),
+    )
 
 
 async def compute_position_history(
@@ -105,14 +134,25 @@ async def compute_position_history(
             delta_period=None,
             delta_period_pct=None,
         )
-    included_ids = [a.id for a in included]
+
+    # PHASE-43.x — pasivos CON cuadro dirigidos por la CURVA del cuadro (igual
+    # que el chart de deuda y que get_balances/debt-health); activos y pasivos
+    # SIN cuadro, por movimientos. Sin esto la línea de patrimonio no amortizaba
+    # la deuda y no cuadraba con el KPI ni con el módulo de Deuda.
+    liab_accounts = [a for a in included if a.nature == AccountNature.LIABILITY]
+    insts_by_acc = await installments_by_account(db, user_id, [a.id for a in liab_accounts])
+    sched_liabs = [a for a in liab_accounts if insts_by_acc.get(a.id)]
+    nonsched_liab_ids = {a.id for a in liab_accounts if not insts_by_acc.get(a.id)}
+    tx_ids = [
+        a.id for a in included if a.nature == AccountNature.ASSET or a.id in nonsched_liab_ids
+    ]
 
     asset_opening = sum(
         (a.opening_balance for a in included if a.nature == AccountNature.ASSET),
         Decimal("0"),
     )
-    liab_opening = sum(
-        (a.opening_balance for a in included if a.nature == AccountNature.LIABILITY),
+    nonsched_liab_opening = sum(
+        (a.opening_balance for a in included if a.id in nonsched_liab_ids),
         Decimal("0"),
     )
 
@@ -122,11 +162,13 @@ async def compute_position_history(
         history = await _historical_points(
             db,
             user_id,
-            included_ids=included_ids,
+            tx_ids=tx_ids,
             reference_currency=reference_currency,
             months_back=months_back,
             asset_opening=asset_opening,
-            liab_opening=liab_opening,
+            nonsched_liab_opening=nonsched_liab_opening,
+            sched_liabs=sched_liabs,
+            insts_by_acc=insts_by_acc,
         )
 
     projection = (
@@ -197,13 +239,27 @@ async def compute_position_as_of(
     ]
     if not included:
         return zero.model_copy(update={"reference_currency": reference_currency})
-    included_ids = [a.id for a in included]
+    today = _today_utc()
+    # PHASE-43.x — "el cuadro manda" también en el patrimonio: los pasivos CON
+    # cuadro derivan su deuda viva de las cuotas (paid_at), no de los
+    # movimientos —igual que get_balances/debt-health—. Sin esto un préstamo se
+    # quedaba clavado en su apertura (nunca amortizaba en el patrimonio) y el
+    # neto no cuadraba con el módulo de Deuda. Sólo activos + pasivos SIN cuadro
+    # pasan por la suma de movimientos; los CON cuadro se agregan aparte.
+    liab_accounts = [a for a in included if a.nature == AccountNature.LIABILITY]
+    insts_by_acc = await installments_by_account(db, user_id, [a.id for a in liab_accounts])
+    sched_liabs = [a for a in liab_accounts if insts_by_acc.get(a.id)]
+    nonsched_liab_ids = {a.id for a in liab_accounts if not insts_by_acc.get(a.id)}
     asset_opening = sum(
         (a.opening_balance for a in included if a.nature == AccountNature.ASSET), Decimal("0")
     )
-    liab_opening = sum(
-        (a.opening_balance for a in included if a.nature == AccountNature.LIABILITY), Decimal("0")
+    nonsched_liab_opening = sum(
+        (a.opening_balance for a in included if a.id in nonsched_liab_ids), Decimal("0")
     )
+    # IDs que pasan por la suma de movimientos: activos + pasivos sin cuadro.
+    tx_ids = [
+        a.id for a in included if a.nature == AccountNature.ASSET or a.id in nonsched_liab_ids
+    ]
 
     paired_tx = aliased(Transaction)
     paired_account = aliased(Account)
@@ -224,7 +280,7 @@ async def compute_position_as_of(
             .outerjoin(paired_account, paired_account.id == paired_tx.account_id)
             .where(Transaction.user_id == user_id)
             .where(Transaction.deleted_at.is_(None))
-            .where(Transaction.account_id.in_(included_ids))
+            .where(Transaction.account_id.in_(tx_ids))
             .where(Transaction.currency == reference_currency)
             .group_by(Account.nature)
         )
@@ -239,26 +295,48 @@ async def compute_position_as_of(
                 li = Decimal(total)
         return a, li
 
-    asof_rows = (await db.execute(_base().where(Transaction.occurred_at <= date_to))).all()
-    range_rows = (
-        await db.execute(
-            _base()
-            .where(Transaction.occurred_at >= date_from)
-            .where(Transaction.occurred_at <= date_to)
-        )
-    ).all()
-    asof_a, asof_l = _split(asof_rows)
-    rng_a, rng_l = _split(range_rows)
+    if tx_ids:
+        asof_rows = (await db.execute(_base().where(Transaction.occurred_at <= date_to))).all()
+        range_rows = (
+            await db.execute(
+                _base()
+                .where(Transaction.occurred_at >= date_from)
+                .where(Transaction.occurred_at <= date_to)
+            )
+        ).all()
+    else:
+        asof_rows = []
+        range_rows = []
+    asof_a, asof_nonsched_l = _split(asof_rows)
+    rng_a, rng_nonsched_l = _split(range_rows)
+
+    # Deuda viva de los pasivos CON cuadro a fin de rango y justo antes del
+    # inicio (para el Δ). Los helpers del cuadro comparan por día.
+    end_day = date_to.date()
+    start_day = date_from.date() - timedelta(days=1)
+    sched_end = sum(
+        (_scheduled_outstanding_as_of(insts_by_acc[a.id], end_day, today) for a in sched_liabs),
+        Decimal("0"),
+    )
+    sched_start = sum(
+        (_scheduled_outstanding_as_of(insts_by_acc[a.id], start_day, today) for a in sched_liabs),
+        Decimal("0"),
+    )
 
     total_assets = (asset_opening + asof_a).quantize(Decimal("0.01"))
-    total_liabilities = (liab_opening + asof_l).quantize(Decimal("0.01"))
+    total_liabilities = (nonsched_liab_opening + asof_nonsched_l + sched_end).quantize(
+        Decimal("0.01")
+    )
+    delta_assets = rng_a
+    # Δ pasivos = movimientos de los sin-cuadro en el rango + variación del cuadro.
+    delta_liabilities = rng_nonsched_l + (sched_end - sched_start)
     return PositionAsOfResponse(
         reference_currency=reference_currency,
         total_assets=total_assets,
         total_liabilities=total_liabilities,
         net_worth=(total_assets - total_liabilities).quantize(Decimal("0.01")),
-        delta_assets=rng_a.quantize(Decimal("0.01")),
-        delta_net_worth=(rng_a - rng_l).quantize(Decimal("0.01")),
+        delta_assets=delta_assets.quantize(Decimal("0.01")),
+        delta_net_worth=(delta_assets - delta_liabilities).quantize(Decimal("0.01")),
     )
 
 
@@ -266,11 +344,13 @@ async def _historical_points(
     db: AsyncSession,
     user_id: uuid.UUID,
     *,
-    included_ids: list[uuid.UUID],
+    tx_ids: list[uuid.UUID],
     reference_currency: str,
     months_back: int,
     asset_opening: Decimal,
-    liab_opening: Decimal,
+    nonsched_liab_opening: Decimal,
+    sched_liabs: list[Account],
+    insts_by_acc: dict[uuid.UUID, list[LiabilityInstallment]],
 ) -> list[PositionPoint]:
     today = _today_utc()
     last_closed = _start_of_month(today) - timedelta(days=1)
@@ -291,36 +371,38 @@ async def _historical_points(
         assert isinstance(value, datetime)
         return f"{value.year:04d}-{value.month:02d}"
 
-    paired_tx = aliased(Transaction)
-    paired_account = aliased(Account)
-    # Σ firmado por (naturaleza, mes) sobre TODO el histórico ≤ último cierre.
-    query = (
-        select(
-            Account.nature,
-            month_bucket.label("bucket"),
-            func.coalesce(func.sum(signed_amount_expr(Account, paired_account)), 0),
-        )
-        .select_from(Transaction)
-        .join(Account, Account.id == Transaction.account_id)
-        .outerjoin(Category, Category.id == Transaction.category_id)
-        .outerjoin(paired_tx, paired_tx.id == Transaction.transfer_pair_id)
-        .outerjoin(paired_account, paired_account.id == paired_tx.account_id)
-        .where(Transaction.user_id == user_id)
-        .where(Transaction.deleted_at.is_(None))
-        .where(Transaction.account_id.in_(included_ids))
-        .where(Transaction.currency == reference_currency)
-        .where(Transaction.occurred_at <= last_month_end)
-        .group_by(Account.nature, month_bucket)
-    )
-    rows = (await db.execute(query)).all()
+    # Σ firmado por (naturaleza, mes) para activos + pasivos SIN cuadro. Los
+    # pasivos CON cuadro se excluyen de `tx_ids` — su saldo lo manda la curva.
     asset_by_month: dict[str, Decimal] = {}
-    liab_by_month: dict[str, Decimal] = {}
-    for nature, bucket, total in rows:
-        key = _fmt(bucket)
-        if nature == AccountNature.ASSET:
-            asset_by_month[key] = Decimal(total)
-        else:
-            liab_by_month[key] = Decimal(total)
+    nonsched_liab_by_month: dict[str, Decimal] = {}
+    if tx_ids:
+        paired_tx = aliased(Transaction)
+        paired_account = aliased(Account)
+        query = (
+            select(
+                Account.nature,
+                month_bucket.label("bucket"),
+                func.coalesce(func.sum(signed_amount_expr(Account, paired_account)), 0),
+            )
+            .select_from(Transaction)
+            .join(Account, Account.id == Transaction.account_id)
+            .outerjoin(Category, Category.id == Transaction.category_id)
+            .outerjoin(paired_tx, paired_tx.id == Transaction.transfer_pair_id)
+            .outerjoin(paired_account, paired_account.id == paired_tx.account_id)
+            .where(Transaction.user_id == user_id)
+            .where(Transaction.deleted_at.is_(None))
+            .where(Transaction.account_id.in_(tx_ids))
+            .where(Transaction.currency == reference_currency)
+            .where(Transaction.occurred_at <= last_month_end)
+            .group_by(Account.nature, month_bucket)
+        )
+        rows = (await db.execute(query)).all()
+        for nature, bucket, total in rows:
+            key = _fmt(bucket)
+            if nature == AccountNature.ASSET:
+                asset_by_month[key] = Decimal(total)
+            else:
+                nonsched_liab_by_month[key] = Decimal(total)
 
     def _cumulative(series: dict[str, Decimal]) -> dict[str, Decimal]:
         running = Decimal("0")
@@ -331,7 +413,7 @@ async def _historical_points(
         return out
 
     asset_cum = _cumulative(asset_by_month)
-    liab_cum = _cumulative(liab_by_month)
+    nonsched_liab_cum = _cumulative(nonsched_liab_by_month)
 
     def _at(cum: dict[str, Decimal], month_key: str) -> Decimal:
         value = Decimal("0")
@@ -346,7 +428,12 @@ async def _historical_points(
     for month in window_months:
         key = _format_month(month)
         assets = asset_opening + _at(asset_cum, key)
-        liabilities = liab_opening + _at(liab_cum, key)
+        # Pasivos: sin-cuadro por movimientos + con-cuadro por la curva del mes.
+        liabilities = nonsched_liab_opening + _at(nonsched_liab_cum, key)
+        liabilities += sum(
+            (_scheduled_remaining_at(insts_by_acc[a.id], month) for a in sched_liabs),
+            Decimal("0"),
+        )
         points.append(
             PositionPoint(
                 month=month,

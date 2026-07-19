@@ -17,6 +17,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.modules.personal_finance.accounts.debt_health import compute_debt_health
+from app.modules.personal_finance.accounts.installments_model import LiabilityInstallment
 from app.modules.personal_finance.accounts.installments_repository import (
     generate_installments_for_account,
     list_installments,
@@ -99,6 +100,70 @@ async def test_debt_movement_bounds_include_schedule(session_factory) -> None:  
     assert lo is not None and hi is not None
     assert lo.year == _YEAR  # arranca en el año del préstamo
     assert hi <= today  # no empuja el navegador a cuotas futuras
+
+
+async def test_debt_movement_bounds_excludes_unpaid_due_installments(
+    session_factory,  # type: ignore[no-untyped-def]
+) -> None:
+    """PHASE-43.x — una cuota sólo VENCIDA pero impaga (p. ej. el mes en curso
+    aún sin importar el extracto) NO extiende el navegador: el límite superior
+    es la última cuota PAGADA, no la última vencida. Así no se puede seleccionar
+    un mes sin datos reales. Fechas del año pasado → siempre <= hoy, sin que el
+    test dependa de la fecha de ejecución."""
+    uid = uuid.uuid4()
+    aid = uuid.uuid4()
+    last_year = _YEAR - 1
+    async with session_factory() as db:
+        db.add(
+            User(id=uid, email=f"b_{uid.hex[:8]}@example.com", password_hash="x", display_name="B")
+        )
+        await db.flush()
+        db.add(
+            Account(
+                id=aid,
+                user_id=uid,
+                name="Préstamo",
+                nature=AccountNature.LIABILITY,
+                type=AccountType.LOAN,
+                currency="EUR",
+                opening_balance=Decimal("1000"),
+                apr=Decimal("0.05"),
+                term_months=2,
+                start_date=date(last_year, 1, 1),
+            )
+        )
+        await db.flush()
+        db.add(
+            LiabilityInstallment(
+                user_id=uid,
+                account_id=aid,
+                installment_index=1,
+                due_date=date(last_year, 3, 1),
+                payment=Decimal("100"),
+                interest=Decimal("5"),
+                principal=Decimal("95"),
+                remaining_balance=Decimal("905"),
+                paid_at=datetime(last_year, 3, 1, tzinfo=UTC),  # PAGADA
+            )
+        )
+        db.add(
+            LiabilityInstallment(
+                user_id=uid,
+                account_id=aid,
+                installment_index=2,
+                due_date=date(last_year, 6, 1),  # posterior y <= hoy…
+                payment=Decimal("100"),
+                interest=Decimal("4"),
+                principal=Decimal("96"),
+                remaining_balance=Decimal("809"),
+                paid_at=None,  # …pero IMPAGA → no debe contar
+            )
+        )
+        await db.commit()
+    async with session_factory() as db:
+        _lo, hi = await debt_movement_bounds(db, uid, "EUR")
+    # La cuota impaga de junio (posterior) queda excluida → el límite es marzo.
+    assert hi == date(last_year, 3, 1)
 
 
 async def test_interest_tx_on_scheduled_liability_not_double_counted(

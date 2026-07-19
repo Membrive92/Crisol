@@ -3,6 +3,7 @@ import type {
   DebtHealthKpis,
   DebtHistoryResponse,
   DebtTimeRange,
+  ModuleDashboardSummary,
 } from '@crisol/types';
 
 import { apiClient } from '../client';
@@ -37,6 +38,13 @@ export interface DebtHealthQuery {
   target_currency?: string;
 }
 
+export interface DebtDashboardSummaryQuery extends DebtHealthQuery {
+  /** PHASE-43.x — deuda viva al cierre del rango (`YYYY-MM-DD`). Con ambos, la
+   * tarjeta es period-scoped (como el Patrimonio Neto); sin ellos, "a hoy". */
+  date_from?: string;
+  date_to?: string;
+}
+
 /**
  * Endpoints del módulo deuda. AUDIT-2026-05 — Capa 1
  * (`/debt/category-summary`) + Capa 2 (`/accounts/debt-health`,
@@ -65,6 +73,20 @@ export const debtApi = {
     }
     const response = await apiClient.get<DebtCategorySummary>(
       '/debt/category-summary',
+      { params },
+    );
+    return response.data;
+  },
+
+  async dashboardSummary(
+    query: DebtDashboardSummaryQuery = {},
+  ): Promise<ModuleDashboardSummary> {
+    const params: Record<string, string> = {};
+    if (query.target_currency) params['target_currency'] = query.target_currency;
+    if (query.date_from) params['date_from'] = query.date_from;
+    if (query.date_to) params['date_to'] = query.date_to;
+    const response = await apiClient.get<ModuleDashboardSummary>(
+      '/debt/dashboard-summary',
       { params },
     );
     return response.data;

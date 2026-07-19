@@ -393,12 +393,14 @@ async def debt_movement_bounds(
     Capa 1 tras PHASE-37 (interés/capital del cuadro):
     - Transacciones en categorías de deuda (mismo set de predicados que los
       agregados: papelera, transferencias, roles de deuda y, en nativo, moneda).
-    - El CUADRO de amortización: `due_date` de las cuotas de las liabilities
-      no archivadas, acotado a hoy (las cuotas futuras no deben empujar el
-      navegador a meses sin histórico). Sin esto, un usuario cuyo pago de deuda
-      va por transferencia (interés implícito, sin tx de deuda) se quedaba con
-      el navegador anclado a la última tx categorizada aunque el cuadro tuviera
-      actividad posterior. `(None, None)` si no hay ninguna de las dos.
+    - El CUADRO de amortización: `due_date` de las cuotas PAGADAS (`paid_at`
+      no nulo) de las liabilities no archivadas, acotado a hoy. Sin esto, un
+      usuario cuyo pago de deuda va por transferencia (interés implícito, sin
+      tx de deuda) se quedaba con el navegador anclado a la última tx
+      categorizada aunque el cuadro tuviera actividad posterior. Se exige
+      `paid_at` para que una cuota sólo vencida (mes en curso sin importar aún)
+      no arrastre el navegador a un mes sin datos reales. `(None, None)` si no
+      hay ninguna de las dos.
     """
     tx_query = (
         select(
@@ -428,6 +430,12 @@ async def debt_movement_bounds(
         .where(Account.nature == AccountNature.LIABILITY)
         .where(Account.is_archived.is_(False))
         .where(LiabilityInstallment.due_date <= today)
+        # Sólo cuotas PAGADAS: una cuota meramente vencida-pero-impaga (p. ej.
+        # el mes en curso aún sin importar el extracto) no es "actividad" — las
+        # cards de flujo salen vacías. Sin este filtro, esas cuotas empujaban el
+        # navegador a un mes sin datos reales. Las pagadas por transferencia
+        # (interés implícito, sin tx de deuda) sí cuentan → conserva PHASE-30.8.
+        .where(LiabilityInstallment.paid_at.is_not(None))
     )
     sched_min, sched_max = (await db.execute(sched_query)).one()
 

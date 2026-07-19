@@ -35,7 +35,7 @@ const hintStyle = {
   color: colors.textMuted,
 } as const;
 
-export interface FieldProps {
+interface FieldProps {
   label: string;
   error?: string | undefined;
   /** Texto de ayuda que se muestra bajo el control. */
@@ -49,7 +49,7 @@ export interface FieldProps {
   children: ReactNode;
 }
 
-export function Field({ label, error, hint, dense, children }: FieldProps) {
+function Field({ label, error, hint, dense, children }: FieldProps) {
   return (
     <label style={{ display: 'block', marginBottom: dense ? 0 : spacing.md }}>
       <span style={labelStyle}>{label}</span>

@@ -39,6 +39,10 @@ const MONTHS_LONG = [
 const WEEKDAYS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const;
 
 const DAY_MS = 86_400_000;
+/** Ancho fijo del popover del calendario (px). */
+const POPOVER_WIDTH = 252;
+/** Margen de seguridad al borde del viewport antes de voltear la alineación. */
+const VIEWPORT_MARGIN = 8;
 
 function pad2(n: number): string {
   return String(n).padStart(2, '0');
@@ -51,9 +55,33 @@ function formatDisplay(value: string | null): string {
   return `${d}/${m}/${y}`;
 }
 
-function todayStr(): string {
+/** Día de HOY como `YYYY-MM-DD` en hora local. Exportado para que otros
+ * controles (navegador de período, seeds de rango) usen el mismo tope y no
+ * dejen elegir fechas futuras. */
+export function todayDayStr(): string {
   const now = new Date();
   return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+}
+
+/**
+ * Último día SELECCIONABLE del rango personalizado: fin del último mes con
+ * datos (`availableTo`, `YYYY-MM`), nunca posterior a hoy. Sin datos → hoy.
+ * Así el calendario no deja elegir días sin datos (p. ej. el mes en curso
+ * aún sin importar).
+ */
+export function dataMaxDayStr(availableTo: string | null | undefined): string {
+  const today = todayDayStr();
+  if (!availableTo) return today;
+  const [y, m] = availableTo.split('-').map(Number);
+  const lastDay = new Date(Date.UTC(y ?? 1970, m ?? 1, 0)).getUTCDate();
+  const endOfMonth = `${availableTo}-${pad2(lastDay)}`;
+  return endOfMonth < today ? endOfMonth : today;
+}
+
+/** Primer día SELECCIONABLE: inicio del primer mes con datos (`availableFrom`,
+ * `YYYY-MM`). Sin datos → `null` (sin tope inferior). */
+export function dataMinDayStr(availableFrom: string | null | undefined): string | null {
+  return availableFrom ? `${availableFrom}-01` : null;
 }
 
 interface Cell {
@@ -75,21 +103,31 @@ interface Cell {
  */
 export function DatePicker({ value, onChange, min, max, ariaLabel }: DatePickerProps) {
   const [open, setOpen] = useState(false);
+  // El popover se ancla a la izq. del disparador por defecto; si abriéndose así
+  // se saldría del viewport (picker pegado al borde derecho), se ancla a la
+  // derecha. Se decide al ABRIR midiendo la posición del disparador.
+  const [alignRight, setAlignRight] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Mes visible: el del valor, o el de hoy si no hay valor.
-  const initial = value ?? todayStr();
+  const initial = value ?? todayDayStr();
   const [view, setView] = useState<{ year: number; month: number }>(() => ({
     year: Number(initial.slice(0, 4)),
     month: Number(initial.slice(5, 7)),
   }));
 
-  // Al reabrir con un valor nuevo, re-centrar el mes visible en él.
+  // Al reabrir: re-centrar el mes visible en el valor y decidir la alineación
+  // horizontal del popover según el espacio disponible en el viewport.
   useEffect(() => {
-    if (open && value) {
+    if (!open) return;
+    if (value) {
       setView({ year: Number(value.slice(0, 4)), month: Number(value.slice(5, 7)) });
     }
-    // Sólo re-centrar el mes visible al ABRIR (deps intencionadamente `[open]`).
+    if (containerRef.current) {
+      const { left } = containerRef.current.getBoundingClientRect();
+      setAlignRight(left + POPOVER_WIDTH > window.innerWidth - VIEWPORT_MARGIN);
+    }
+    // Sólo al ABRIR (deps intencionadamente `[open]`).
   }, [open]);
 
   useEffect(() => {
@@ -110,7 +148,7 @@ export function DatePicker({ value, onChange, min, max, ariaLabel }: DatePickerP
     };
   }, [open]);
 
-  const today = todayStr();
+  const today = todayDayStr();
   const cells = useMemo<Cell[]>(() => {
     const firstMs = Date.UTC(view.year, view.month - 1, 1);
     const dow = new Date(firstMs).getUTCDay(); // 0=domingo
@@ -166,7 +204,11 @@ export function DatePicker({ value, onChange, min, max, ariaLabel }: DatePickerP
       </button>
 
       {open ? (
-        <div role="dialog" aria-label="Elegir fecha" style={popoverStyle}>
+        <div
+          role="dialog"
+          aria-label="Elegir fecha"
+          style={{ ...popoverStyle, ...(alignRight ? { right: 0 } : { left: 0 }) }}
+        >
           <div style={headerStyle}>
             <button
               type="button"
@@ -248,9 +290,8 @@ function triggerStyle(open: boolean): CSSProperties {
 const popoverStyle: CSSProperties = {
   position: 'absolute',
   top: 'calc(100% + 6px)',
-  left: 0,
   zIndex: 200,
-  width: 252,
+  width: POPOVER_WIDTH,
   padding: spacing.sm,
   backgroundColor: colors.surface,
   border: `1px solid ${colors.border}`,

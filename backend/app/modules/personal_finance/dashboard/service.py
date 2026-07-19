@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import calendar
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException, status
@@ -35,6 +35,9 @@ from app.modules.personal_finance.dashboard.schemas import (
     CategoryBreakdownItem,
     CategoryDetailResponse,
     CategoryMonthlyBucket,
+    ModuleDashboardSummary,
+    ModuleSummaryItem,
+    ModuleVerdict,
     MonthlyBucket,
     SummaryResponse,
     TopExpenseItem,
@@ -249,6 +252,99 @@ async def get_summary(
         savings_rate_delta_pp=savings_rate_delta_pp,
         available_from=available_from,
         available_to=available_to,
+    )
+
+
+# Umbral del veredicto de finanzas domésticas (ADR-0006, decisión del usuario):
+# el veredicto lo da el SIGNO del flujo de caja del período; una banda muerta de
+# ±5% del ingreso alrededor de cero es "atención" (ni claramente ahorra ni
+# claramente gasta de más).
+_CASHFLOW_VERDICT_BAND = Decimal("0.05")
+
+
+async def _latest_month_bounds(
+    db: AsyncSession, user_id: uuid.UUID
+) -> tuple[datetime, datetime]:
+    """Rango `[inicio, fin]` del ÚLTIMO mes con transacciones del usuario, o del
+    mes en curso si aún no tiene datos.
+
+    PHASE-43.4 (fix) — la card no puede anclarse al mes NATURAL en curso: quien
+    importa por meses tiene el mes actual vacío hasta que lo sube, así que la
+    card salía siempre a 0. El último mes con datos es la foto más reciente
+    representativa. Sólo se usa como fallback cuando el caller no pasa rango."""
+    _, latest = await repository.get_transaction_month_bounds(db, user_id)
+    now = datetime.now(UTC)
+    year, month = (
+        (int(latest[:4]), int(latest[5:7])) if latest else (now.year, now.month)
+    )
+    last_day = calendar.monthrange(year, month)[1]
+    return (
+        datetime(year, month, 1, tzinfo=UTC),
+        datetime(year, month, last_day, 23, 59, 59, tzinfo=UTC),
+    )
+
+
+async def get_module_summary(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    currency: str | None = None,
+    target_currency: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+) -> ModuleDashboardSummary:
+    """PHASE-43.4 (ADR-0006) — tarjeta del módulo Finanzas Domésticas para el
+    dashboard: flujo de caja del período + tasa de ahorro + veredicto.
+
+    El período lo fija el navegador del dashboard (`date_from`/`date_to`); si no
+    llega ninguno, se usa el ÚLTIMO mes con datos (no el mes natural en curso,
+    que suele estar vacío para quien importa por meses).
+
+    El veredicto lo da el signo del flujo de caja (decisión del usuario):
+    positivo con margen → `healthy`; negativo con margen → `stressed`; dentro
+    de ±5% del ingreso → `caution`; sin ingresos en el período → `neutral`.
+    """
+    if date_from is None or date_to is None:
+        date_from, date_to = await _latest_month_bounds(db, user_id)
+
+    summary = await get_summary(
+        db,
+        user_id,
+        currency=currency,
+        target_currency=target_currency,
+        date_from=date_from,
+        date_to=date_to,
+    )
+
+    income = summary.income
+    balance = summary.balance
+    savings_rate_pct = float(balance / income * 100) if income > 0 else None
+
+    verdict: ModuleVerdict
+    if income <= 0:
+        verdict = "neutral"
+    else:
+        band = income * _CASHFLOW_VERDICT_BAND
+        if balance > band:
+            verdict = "healthy"
+        elif balance < -band:
+            verdict = "stressed"
+        else:
+            verdict = "caution"
+
+    secondary: list[ModuleSummaryItem] = []
+    if savings_rate_pct is not None:
+        secondary.append(
+            ModuleSummaryItem(label="Ahorro", value=f"{savings_rate_pct:.0f} %")
+        )
+
+    return ModuleDashboardSummary(
+        verdict=verdict,
+        headline_value=balance,
+        headline_label="flujo neto",
+        currency=summary.currency,
+        secondary=secondary,
+        link="/personal-finance/analysis",
     )
 
 

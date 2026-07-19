@@ -30,6 +30,7 @@ from app.modules.personal_finance.dashboard.schemas import (
     CategoryAvailablePeriodsResponse,
     CategoryBreakdownItem,
     CategoryDetailResponse,
+    ModuleDashboardSummary,
     MonthlyBucket,
     SummaryResponse,
     TopExpenseItem,
@@ -38,6 +39,7 @@ from app.modules.personal_finance.dashboard.service import (
     get_breakdown_by_category,
     get_category_available_periods,
     get_category_detail,
+    get_module_summary,
     get_monthly_breakdown,
     get_summary,
     get_top_expenses,
@@ -85,6 +87,24 @@ async def summary_endpoint(
         target_currency=target,
         date_from=date_from,
         date_to=date_to,
+    )
+
+
+@router.get("/module-summary", response_model=ModuleDashboardSummary)
+async def module_summary_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
+    target_currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+) -> ModuleDashboardSummary:
+    """PHASE-43.4 — tarjeta del módulo Finanzas Domésticas para el dashboard
+    (flujo del período + ahorro + veredicto). ADR-0006. Sin rango: último mes
+    con datos."""
+    cur, target = _resolve_currency_params(currency, target_currency)
+    return await get_module_summary(
+        db, user.id, currency=cur, target_currency=target, date_from=date_from, date_to=date_to
     )
 
 

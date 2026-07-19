@@ -9,8 +9,39 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel
+
+# PHASE-43.4 (ADR-0006) — contrato de agregación del dashboard. Cada módulo
+# vertical expone su tarjeta como `veredicto + un número + un link`. El
+# dashboard COMPONE estas tarjetas; no recalcula (salvo el patrimonio
+# consolidado, que cruza módulos y es suyo por definición).
+ModuleVerdict = Literal["healthy", "caution", "stressed", "neutral"]
+
+
+class ModuleSummaryItem(BaseModel):
+    """Un par etiqueta/valor secundario de la tarjeta de módulo (ya formateado
+    para mostrar, p. ej. `("Ahorro", "9 %")`)."""
+
+    label: str
+    value: str
+
+
+class ModuleDashboardSummary(BaseModel):
+    """Tarjeta de un módulo en el dashboard (ADR-0006).
+
+    `veredicto + un número + un link`. NO es un mini-módulo: el detalle vive
+    en la superficie propia del módulo, a la que apunta `link`.
+    """
+
+    verdict: ModuleVerdict
+    headline_value: Decimal
+    """El número grande, con signo (p. ej. flujo del mes o −deuda viva)."""
+    headline_label: str
+    currency: str
+    secondary: list[ModuleSummaryItem] = []
+    link: str
 
 
 class SummaryResponse(BaseModel):

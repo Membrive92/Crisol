@@ -64,24 +64,13 @@ export function StitchPeriodToggle({
   );
 }
 
-export function rangeForPeriod(
-  period: Exclude<PeriodKey, 'custom'>,
-): { dateFrom: string; dateTo: string } {
-  const now = new Date();
-  return boundsForAnchor(
-    period,
-    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`,
-  );
-}
-
 /**
  * PHASE-34 — Rango de fechas ISO `[inicio, fin]` del período
  * (mes / trimestre / año) que CONTIENE el mes `anchor` (`YYYY-MM`).
  *
  * Normaliza internamente al primer mes del período, así que da igual si el
  * ancla es el mes en curso (p. ej. `2026-06` con `year` → todo 2026) o ya el
- * inicio. Es la versión navegable de `rangeForPeriod` (que es este mismo
- * cálculo anclado al mes actual).
+ * inicio.
  *
  * AUDIT-2026-07 (LOW): los límites se construyen en UTC (`Date.UTC`), igual
  * que el TimeSelector de /transactions. Antes usaba `new Date(año, mes, día)`

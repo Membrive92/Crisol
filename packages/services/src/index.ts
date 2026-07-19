@@ -71,7 +71,12 @@ export {
   useUpdateCategory,
   useDeleteCategory,
 } from './query/hooks/useCategories';
-export { useDebtCategorySummary, useDebtHealth, useDebtHistory } from './query/hooks/useDebt';
+export {
+  useDebtCategorySummary,
+  useDebtDashboardSummary,
+  useDebtHealth,
+  useDebtHistory,
+} from './query/hooks/useDebt';
 export {
   periodLabel,
   stepAnchor,
@@ -105,9 +110,14 @@ export {
   useDashboardByMonth,
   useDashboardSummary,
   useDashboardTopExpenses,
+  useModuleSummary,
   useUserCurrencies,
 } from './query/hooks/useDashboard';
-export { useExpenseStructure, useMonthOutlook } from './query/hooks/useAnalytics';
+export {
+  useExpenseStructure,
+  useExpenseStructureExplain,
+  useMonthOutlook,
+} from './query/hooks/useAnalytics';
 export {
   useImports,
   useImport,

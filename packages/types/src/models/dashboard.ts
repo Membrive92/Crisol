@@ -97,3 +97,25 @@ export interface CategoryDetail {
   /** Top 10 tx por importe en el rango. */
   top_transactions: TopExpenseItem[];
 }
+
+/**
+ * PHASE-43.4 (ADR-0006) — tarjeta de un módulo en el dashboard:
+ * `veredicto + un número + un link`. El dashboard COMPONE estas tarjetas;
+ * el detalle vive en la superficie del módulo (a la que apunta `link`).
+ */
+export type ModuleVerdict = 'healthy' | 'caution' | 'stressed' | 'neutral';
+
+export interface ModuleSummaryItem {
+  label: string;
+  value: string;
+}
+
+export interface ModuleDashboardSummary {
+  verdict: ModuleVerdict;
+  /** El número grande, con signo (flujo del mes, −deuda viva…). */
+  headline_value: string;
+  headline_label: string;
+  currency: string;
+  secondary: ModuleSummaryItem[];
+  link: string;
+}

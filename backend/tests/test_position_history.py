@@ -2,9 +2,25 @@
 
 from __future__ import annotations
 
+import uuid
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
+import pytest_asyncio
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from app.modules.personal_finance.accounts.installments_repository import (
+    generate_installments_for_account,
+    list_installments,
+)
+from app.modules.personal_finance.accounts.models import (
+    Account,
+    AccountNature,
+    AccountType,
+)
+from app.modules.personal_finance.accounts.position_history import compute_position_as_of
+from app.modules.users.models import User
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -193,3 +209,76 @@ async def test_position_as_of_delta_excludes_movements_before_range(client: Asyn
     assert Decimal(body["net_worth"]) == Decimal("1700.00")
     # Δ de mayo = solo el ingreso de mayo (el de marzo queda en la base).
     assert Decimal(body["delta_net_worth"]) == Decimal("500.00")
+
+
+# ── PHASE-43.x — pasivo CON cuadro: patrimonio dirigido por el cuadro ─────────
+
+
+@pytest_asyncio.fixture
+async def session_factory(test_engine):  # type: ignore[no-untyped-def]
+    return async_sessionmaker(bind=test_engine, expire_on_commit=False, autoflush=False)
+
+
+async def test_position_as_of_scheduled_liability_from_schedule(
+    session_factory,  # type: ignore[no-untyped-def]
+) -> None:
+    """El patrimonio de un pasivo CON cuadro sale del CUADRO (Σ principal de las
+    cuotas no pagadas), no del saldo transaccional. Un préstamo cuyas cuotas se
+    marcan pagadas SIN una tx que reduzca la cuenta-pasivo (amortización dirigida
+    por el cuadro, PHASE-36) amortiza en el patrimonio; antes se quedaba clavado
+    en su `opening_balance`, inflando la deuda y hundiendo el neto de más."""
+    uid = uuid.uuid4()
+    last_year = datetime.now(UTC).year - 1
+    async with session_factory() as db:
+        db.add(
+            User(id=uid, email=f"p_{uid.hex[:8]}@example.com", password_hash="x", display_name="P")
+        )
+        await db.flush()
+        db.add(
+            Account(
+                user_id=uid,
+                name="BBVA",
+                nature=AccountNature.ASSET,
+                type=AccountType.BANK,
+                currency="EUR",
+                opening_balance=Decimal("2000"),
+            )
+        )
+        loan = Account(
+            user_id=uid,
+            name="Préstamo",
+            nature=AccountNature.LIABILITY,
+            type=AccountType.LOAN,
+            currency="EUR",
+            opening_balance=Decimal("1200"),
+            apr=Decimal("0.05"),
+            term_months=12,
+            start_date=date(last_year, 1, 1),
+        )
+        db.add(loan)
+        await db.flush()
+        insts = await generate_installments_for_account(db, loan)
+        # 3 cuotas pagadas por el cuadro, SIN ninguna tx sobre la cuenta-pasivo.
+        for i in range(3):
+            insts[i].paid_at = datetime(last_year, 1, 15, tzinfo=UTC)
+        loan_id = loan.id
+        await db.commit()
+
+    async with session_factory() as db:
+        # date_to en el futuro → deuda viva = cuotas no pagadas (paid_at NULL).
+        pos = await compute_position_as_of(
+            db,
+            uid,
+            date_from=datetime(last_year - 1, 1, 1, tzinfo=UTC),
+            date_to=datetime(last_year + 5, 1, 1, tzinfo=UTC),
+        )
+        insts = await list_installments(db, loan_id, uid)
+    outstanding = sum((i.principal for i in insts if i.paid_at is None), Decimal("0")).quantize(
+        Decimal("0.01")
+    )
+
+    # El pasivo del patrimonio == deuda viva del cuadro, NO la apertura (1200).
+    assert pos.total_liabilities == outstanding
+    assert pos.total_liabilities < Decimal("1200.00")  # amortizado, no clavado
+    assert pos.total_assets == Decimal("2000.00")
+    assert pos.net_worth == (Decimal("2000.00") - outstanding).quantize(Decimal("0.01"))

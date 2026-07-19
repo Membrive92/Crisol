@@ -5,7 +5,6 @@ import {
   CartesianGrid,
   ComposedChart,
   Line,
-  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -24,6 +23,25 @@ import {
 
 import { Card } from '@/components/ui/card';
 
+/**
+ * Dominio del eje Y del SALDO de deuda: encuadrado alrededor de los valores
+ * (no desde 0). Sobre una deuda de ~20k, una variación de cientos de euros se
+ * ve plana con el eje anclado en 0; este encuadre la hace visible. Exportada y
+ * compartida con la vista mensual (`debt-monthly-evolution`).
+ */
+export function computeBalanceDomain(
+  rows: { balance: number | null }[],
+): [number, number] | undefined {
+  const values = rows
+    .map((r) => r.balance)
+    .filter((b): b is number => b !== null && Number.isFinite(b));
+  if (values.length === 0) return undefined;
+  const lo = Math.min(...values);
+  const hi = Math.max(...values);
+  const pad = Math.max((hi - lo) * 0.6, hi * 0.02, 1);
+  return [Math.max(0, Math.floor(lo - pad)), Math.ceil(hi + pad)];
+}
+
 export interface DebtDailyEvolutionProps {
   items: DailyDebtPoint[];
   currency: string;
@@ -35,8 +53,7 @@ export interface DebtDailyEvolutionProps {
 interface ChartRow {
   day: number;
   emitida: number;
-  /** Negativo a propósito: baja en el eje de flujo (amortización). */
-  amortizadoNeg: number;
+  amortizado: number;
   interest: number;
   balance: number | null;
 }
@@ -63,14 +80,26 @@ export function DebtDailyEvolution({
   const data: ChartRow[] = items.map((p) => ({
     day: p.day,
     emitida: Number(p.emitida),
-    amortizadoNeg: -Number(p.amortizado),
+    amortizado: Number(p.amortizado),
     interest: Number(p.interest),
     balance: p.balance === null ? null : Number(p.balance),
   }));
   const hasBalance = data.some((r) => r.balance !== null);
+  // Eje del saldo AMPLIADO (no desde 0): sobre una deuda de ~20k, una bajada de
+  // ~240 € en el mes se ve plana si el eje arranca en 0. Encuadramos el eje
+  // alrededor de los valores para que el escalón de la amortización sea visible.
+  const balanceDomain = computeBalanceDomain(data);
+  // Barras de flujo como FRANJA en la parte baja: ambas suben desde el suelo
+  // (rojo=emisión, verde=amortización), sin colgar de un cero a media altura
+  // (que las hacía flotar desconectadas). El eje va oculto (el importe está en
+  // el tooltip) y con techo ×3.5 → las barras ocupan sólo el ~28% inferior, sin
+  // pisar la línea del saldo (que vive en la zona alta).
+  const maxFlow = Math.max(0, ...data.map((r) => Math.max(r.emitida, r.amortizado)));
+  const flowDomain: [number, number] | undefined =
+    maxFlow > 0 ? [0, maxFlow * 3.5] : undefined;
   const empty =
     !isLoading &&
-    data.every((r) => r.emitida === 0 && r.amortizadoNeg === 0 && r.interest === 0);
+    data.every((r) => r.emitida === 0 && r.amortizado === 0 && r.interest === 0);
 
   return (
     <Card
@@ -127,45 +156,39 @@ export function DebtDailyEvolution({
                 tickLine={false}
                 interval={4}
               />
-              {/* Eje izq.: saldo (línea). Sólo se usa si hay pasivos. */}
+              {/* Eje izq.: saldo (línea). Ampliado alrededor de los datos para
+                  que la bajada del mes no se aplaste contra un 0 lejano. */}
               <YAxis
                 yAxisId="bal"
+                {...(balanceDomain ? { domain: balanceDomain } : {})}
+                allowDecimals={false}
                 tick={{ fontSize: 11, fill: colors.textMuted }}
                 axisLine={false}
                 tickLine={false}
-                tickFormatter={(v: number) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : `${v}`)}
+                tickFormatter={(v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${v}`)}
                 width={48}
               />
-              {/* Eje der.: flujo diario (barras). */}
-              <YAxis
-                yAxisId="flow"
-                orientation="right"
-                tick={{ fontSize: 11, fill: colors.textMuted }}
-                axisLine={false}
-                tickLine={false}
-                tickFormatter={(v: number) => {
-                  const a = Math.abs(v);
-                  return a >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${v}`;
-                }}
-                width={44}
-              />
+              {/* Eje der.: flujo diario (barras) — OCULTO; techo ×3.5 mantiene
+                  las barras en la franja baja. El importe va en el tooltip. */}
+              <YAxis yAxisId="flow" orientation="right" hide {...(flowDomain ? { domain: flowDomain } : {})} />
               <Tooltip
                 cursor={{ fill: colors.surfaceMuted }}
                 content={<DailyTooltip currency={currency} />}
               />
-              <ReferenceLine yAxisId="flow" y={0} stroke={colors.border} />
               <Bar
                 yAxisId="flow"
                 dataKey="emitida"
                 fill={colors.expense}
+                fillOpacity={0.75}
                 radius={[2, 2, 0, 0]}
                 maxBarSize={14}
               />
               <Bar
                 yAxisId="flow"
-                dataKey="amortizadoNeg"
+                dataKey="amortizado"
                 fill={colors.income}
-                radius={[0, 0, 2, 2]}
+                fillOpacity={0.75}
+                radius={[2, 2, 0, 0]}
                 maxBarSize={14}
               />
               {hasBalance ? (
@@ -245,7 +268,7 @@ function DailyTooltip({
   if (!active || !payload || payload.length === 0) return null;
   const row = payload[0]?.payload;
   if (!row) return null;
-  const amortizado = Math.abs(row.amortizadoNeg);
+  const amortizado = row.amortizado;
   return (
     <div
       style={{

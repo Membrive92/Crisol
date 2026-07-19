@@ -668,17 +668,6 @@ def test_resolve_range_past_and_current_periods() -> None:
     assert len(buckets) == 5  # Ene..May
 
 
-def test_resolve_period_end() -> None:
-    from datetime import date
-
-    from app.modules.personal_finance.debt.service import resolve_period_end
-
-    today = date(2026, 5, 15)
-    assert resolve_period_end("year", date(2024, 3, 1), today) == date(2024, 12, 31)
-    assert resolve_period_end("year", None, today) == today  # actual → recortado
-    assert resolve_period_end("month", date(2024, 2, 9), today) == date(2024, 2, 29)
-
-
 async def test_summary_anchor_targets_past_month(client: AsyncClient) -> None:
     """`anchor` selecciona un mes pasado concreto, no el actual."""
     token = await _register(client, "anchor_month@example.com")
@@ -933,3 +922,44 @@ async def test_summary_custom_requires_date_from_and_to(client: AsyncClient) -> 
         headers=_auth(token),
     )
     assert r2.status_code == 422, r2.text
+
+
+async def test_summary_outstanding_and_balance_are_period_scoped(client: AsyncClient) -> None:
+    """PHASE-43.x — la deuda viva (STOCK) va en la respuesta y respeta el
+    cuadro: `outstanding_at_end` = principal pendiente (préstamo recién creado,
+    nada pagado = capital completo), `outstanding_by_type` clasifica por tipo, y
+    la serie mensual trae `balance` (línea que baja del combo)."""
+    token = await _register(client, "summary_outstanding@example.com")
+    await _create_account(
+        client,
+        token,
+        name="Prestamo coche",
+        type="loan",
+        currency="EUR",
+        opening_balance="12000",
+        apr="0.06",
+        term_months=48,
+        start_date="2026-01-01",
+    )
+    r = await client.get("/debt/category-summary?range=year", headers=_auth(token))
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    # Deuda viva al cierre: sin cuotas pagadas ≈ capital completo (12.000).
+    assert Decimal(body["outstanding_at_end"]) == Decimal("12000.00")
+    # Composición por tipo al cierre: todo en 'loan'.
+    by_type = {b["type"]: Decimal(b["amount"]) for b in body["outstanding_by_type"]}
+    assert by_type.get("loan") == Decimal("12000.00")
+    # La serie mensual trae la línea de saldo (no null) con deuda con cuadro.
+    assert body["monthly_series"], "debe haber puntos mensuales"
+    assert all(p["balance"] is not None for p in body["monthly_series"])
+
+
+async def test_summary_outstanding_zero_without_debt(client: AsyncClient) -> None:
+    """Sin pasivos con cuadro, `outstanding_at_end` = 0 y sin composición."""
+    token = await _register(client, "summary_nooutstanding@example.com")
+    await _create_account(client, token, name="Cte", type="bank", currency="EUR", opening_balance="1000")
+    r = await client.get("/debt/category-summary?range=year", headers=_auth(token))
+    body = r.json()
+    assert Decimal(body["outstanding_at_end"]) == Decimal("0.00")
+    assert body["outstanding_by_type"] == []

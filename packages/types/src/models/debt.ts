@@ -154,6 +154,8 @@ export interface MonthlyDebtPoint {
   payments: string;
   interests: string;
   capital: string;
+  /** PHASE-43.x — Saldo de deuda al cierre del mes (STOCK); `null` sin cuadro. */
+  balance: string | null;
 }
 
 /**
@@ -199,6 +201,14 @@ export interface DebtCategorySummary {
   interests_and_fees: string;
   capital_amortized: string;
   by_type: DebtTypeBreakdown[];
+  /**
+   * PHASE-43.x — Deuda viva TOTAL al cierre del período (STOCK). A año/hoy
+   * iguala `debt-health.total_liabilities`; al navegar a un mes pasado muestra
+   * la deuda de entonces (mayor). Reemplaza a debt-health en el donut/KPI.
+   */
+  outstanding_at_end: string;
+  /** PHASE-43.x — Composición de la deuda viva por tipo al cierre del período. */
+  outstanding_by_type: DebtTypeBreakdown[];
   monthly_series: MonthlyDebtPoint[];
   /**
    * PHASE-30.9 — Sólo para `range='month'`: un punto por día del mes con

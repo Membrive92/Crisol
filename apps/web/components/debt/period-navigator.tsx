@@ -1,5 +1,7 @@
 'use client';
 
+import { useEffect } from 'react';
+
 import {
   canStepNext,
   canStepPrev,
@@ -11,7 +13,25 @@ import type { DebtTimeRange } from '@crisol/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import { StitchPeriodToggle } from '@/components/analysis/stitch-period-toggle';
-import { DatePicker } from '@/components/ui/date-picker';
+import {
+  DatePicker,
+  dataMaxDayStr,
+  dataMinDayStr,
+} from '@/components/ui/date-picker';
+
+/** Menor de dos day-strings `YYYY-MM-DD` (comparación lexicográfica). `b` es el
+ * tope duro; si `a` es null o posterior, gana `b`. */
+function minDayStr(a: string | null | undefined, b: string): string {
+  return a != null && a < b ? a : b;
+}
+
+/** Recorta un day-string al rango `[lo, hi]` (lo puede ser null = sin tope). */
+function clampDay(day: string, lo: string | null, hi: string): string {
+  let d = day;
+  if (d > hi) d = hi;
+  if (lo != null && d < lo) d = lo;
+  return d;
+}
 
 export interface PeriodNavigatorProps {
   range: DebtTimeRange;
@@ -56,6 +76,34 @@ export function PeriodNavigator({
   const prevEnabled = range !== 'custom' && canStepPrev(range, anchor, availableFrom);
   const nextEnabled = range !== 'custom' && canStepNext(range, anchor, availableTo);
 
+  // El ancla por defecto es el mes en curso, que puede caer FUERA del rango con
+  // datos (p. ej. julio vacío cuando la última tx es de junio). `clampAnchor`
+  // sólo corre al pulsar el toggle/flecha, así que sin esto te quedas en un
+  // período sin datos hasta que navegas. Aquí lo re-acotamos en cuanto llegan
+  // los límites (tras cargar): comparamos el clamp CON límites contra el clamp
+  // SIN límites (mera normalización) — si difieren, el ancla estaba fuera y la
+  // corregimos. Idempotente: una vez dentro, no vuelve a disparar.
+  useEffect(() => {
+    if (range === 'custom') return;
+    if (availableFrom == null && availableTo == null) return;
+    const clamped = clampAnchor(range, anchor, availableFrom, availableTo);
+    const normalized = clampAnchor(range, anchor, null, null);
+    if (clamped !== normalized) onAnchorChange(clamped);
+  }, [range, anchor, availableFrom, availableTo, onAnchorChange]);
+
+  // Rango personalizado acotado a los días CON DATOS: si el from/to sembrado
+  // (o uno viejo de la URL) cae fuera de `[primer día, último día]` con datos,
+  // lo recortamos. Cubre el caso del seed en modo Año, que llega hasta hoy
+  // aunque el último dato sea de un mes anterior. Idempotente.
+  useEffect(() => {
+    if (range !== 'custom' || !customFrom || !customTo) return;
+    const lo = dataMinDayStr(availableFrom);
+    const hi = dataMaxDayStr(availableTo);
+    const f = clampDay(customFrom, lo, hi);
+    const t = clampDay(customTo, lo, hi);
+    if (f !== customFrom || t !== customTo) onCustomRangeChange?.(f, t);
+  }, [range, customFrom, customTo, availableFrom, availableTo, onCustomRangeChange]);
+
   function handleRangeChange(next: DebtTimeRange) {
     onRangeChange(next);
     // Re-snap + re-clamp el ancla a la nueva granularidad (custom no navega).
@@ -99,14 +147,16 @@ export function PeriodNavigator({
         >
           <DatePicker
             value={customFrom}
-            max={customTo}
+            min={dataMinDayStr(availableFrom)}
+            max={minDayStr(customTo, dataMaxDayStr(availableTo))}
             onChange={(from) => onCustomRangeChange?.(from, customTo ?? '')}
             ariaLabel="Desde"
           />
           <span style={{ color: colors.textMuted, fontSize: fontSize.sm }}>–</span>
           <DatePicker
             value={customTo}
-            min={customFrom}
+            min={customFrom ?? dataMinDayStr(availableFrom)}
+            max={dataMaxDayStr(availableTo)}
             onChange={(to) => onCustomRangeChange?.(customFrom ?? '', to)}
             ariaLabel="Hasta"
           />

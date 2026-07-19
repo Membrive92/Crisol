@@ -30,9 +30,11 @@ export type {
 export type {
   AnalyticsCategoryAmount,
   AnalyticsTxRef,
+  CategoryStructureExplain,
   CommittedItem,
   ExpenseStructureResponse,
   MonthOutlookResponse,
+  StructureReason,
 } from './models/analytics';
 export type {
   AmortizationRow,
@@ -60,7 +62,12 @@ export type {
   ReclassifyBulkResponse,
   TransferPair,
 } from './models/transfer';
-export type { Category, CategoryKind, CategoryRole } from './models/category';
+export type {
+  Category,
+  CategoryKind,
+  CategoryRole,
+  ExpenseNature,
+} from './models/category';
 export type {
   CategoryRule,
   CategoryRuleCreateRequest,
@@ -80,6 +87,9 @@ export type {
   CategoryDetail,
   CategoryMonthlyBucket,
   DashboardSummary,
+  ModuleDashboardSummary,
+  ModuleSummaryItem,
+  ModuleVerdict,
   MonthlyBucket,
   TopExpenseItem,
 } from './models/dashboard';

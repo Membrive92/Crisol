@@ -8,7 +8,7 @@ import type {
   DashboardTopExpensesQuery,
 } from '@crisol/types';
 
-import { dashboardApi } from '../../api/endpoints/dashboard';
+import { dashboardApi, type ModuleSummaryQuery } from '../../api/endpoints/dashboard';
 import { queryKeys } from '../keys';
 
 const STALE_TIME = 60_000;
@@ -29,6 +29,19 @@ export function useDashboardSummary(query: DashboardSummaryQuery = {}) {
   return useQuery({
     queryKey: queryKeys.dashboard.summary(query),
     queryFn: () => dashboardApi.summary(query),
+    staleTime: STALE_TIME,
+    placeholderData: (previous) => previous,
+  });
+}
+
+/**
+ * PHASE-43.4 (ADR-0006) — tarjeta del módulo Finanzas Domésticas para el
+ * dashboard: flujo del mes + ahorro + veredicto.
+ */
+export function useModuleSummary(query: ModuleSummaryQuery = {}) {
+  return useQuery({
+    queryKey: queryKeys.dashboard.moduleSummary(query),
+    queryFn: () => dashboardApi.moduleSummary(query),
     staleTime: STALE_TIME,
     placeholderData: (previous) => previous,
   });

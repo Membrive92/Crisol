@@ -160,15 +160,15 @@ def _apply_scope[Q: Select[Any]](
     return query
 
 
-def _exclude_transfer_kind(query: Any, *, outer_join: bool) -> Any:
+def _exclude_transfer_kind(query: Any) -> Any:
     """Excluye transferencias internas del cashflow agregado.
 
     PHASE-34: la exclusión la manda `flow` (TRANSFER_*), con fallback a
-    `category.is_transfer` para filas sin flow vía `_is_internal_transfer()`
-    (NULL-safe, así que `outer_join` ya no altera la lógica — se conserva por
-    compatibilidad de firma y se retira en 34.6). La exclusión por
-    `transfer_pair_id` (pares emparejados, señal ortogonal) sigue viva en
-    `_apply_scope`.
+    `category.is_transfer` para filas sin flow vía `_is_internal_transfer()`.
+    Es NULL-safe, así que da igual que el JOIN a `categories` sea inner u
+    outer (de ahí que ya no haga falta el antiguo parámetro `outer_join`).
+    La exclusión por `transfer_pair_id` (pares emparejados, señal ortogonal)
+    sigue viva en `_apply_scope`.
     """
     return query.where(_is_internal_transfer().is_(False))
 
@@ -212,7 +212,7 @@ async def get_totals_by_kind(
         date_from=date_from,
         date_to=date_to,
     )
-    query = _exclude_transfer_kind(query, outer_join=True)
+    query = _exclude_transfer_kind(query)
 
     row = (await db.execute(query)).one()
     return {CategoryKind.INCOME: Decimal(row[0]), CategoryKind.EXPENSE: Decimal(row[1])}
@@ -255,7 +255,7 @@ async def get_summary_aggregates(
             date_from=date_from,
             date_to=date_to,
         )
-        unconv_subq = _exclude_transfer_kind(unconv_subq, outer_join=True)
+        unconv_subq = _exclude_transfer_kind(unconv_subq)
         unconv_col = unconv_subq.scalar_subquery().label("unconvertible_count")
     else:
         unconv_col = literal(0).label("unconvertible_count")
@@ -277,7 +277,7 @@ async def get_summary_aggregates(
         date_from=date_from,
         date_to=date_to,
     )
-    query = _exclude_transfer_kind(query, outer_join=True)
+    query = _exclude_transfer_kind(query)
 
     row = (await db.execute(query)).one()
     return (
@@ -341,7 +341,7 @@ async def get_breakdown_by_category(
         date_from=date_from,
         date_to=date_to,
     )
-    query = _exclude_transfer_kind(query, outer_join=True)
+    query = _exclude_transfer_kind(query)
     # AUDIT-2026-06 — La cara income/expense del donut se decide por `flow`
     # (igual que el KPI "Gastos" y la barra roja), NO por `Category.kind`.
     # Antes filtraba `Category.kind == kind`, así que cuando flow y la
@@ -525,7 +525,7 @@ async def get_category_kpis(
         date_from=date_from,
         date_to=date_to,
     )
-    query = _exclude_transfer_kind(query, outer_join=True)
+    query = _exclude_transfer_kind(query)
     row = (await db.execute(query)).one()
     return Decimal(row[0]), int(row[1])
 
@@ -593,7 +593,7 @@ async def get_category_top_transactions(
         date_from=date_from,
         date_to=date_to,
     )
-    query = _exclude_transfer_kind(query, outer_join=True)
+    query = _exclude_transfer_kind(query)
     query = query.order_by(amount.desc().nulls_last()).limit(limit)
     result = await db.execute(query)
     return [

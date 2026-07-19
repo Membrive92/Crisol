@@ -37,7 +37,7 @@ class DebtTypeBreakdown(BaseModel):
 
 
 class MonthlyDebtPoint(BaseModel):
-    """Un punto de la serie mensual: pagos, intereses, capital."""
+    """Un punto de la serie mensual: pagos, intereses, capital + saldo."""
 
     month: str
     """`YYYY-MM`."""
@@ -47,6 +47,10 @@ class MonthlyDebtPoint(BaseModel):
     """Σ flujo de categorías DEBT_INTEREST ese mes."""
     capital: Decimal
     """`payments - interests`."""
+    balance: Decimal | None = None
+    """PHASE-43.x — Saldo de deuda al CIERRE del mes (STOCK, dirigido por el
+    cuadro: `_scheduled_remaining_at`). Es la línea que baja del combo
+    saldo+pagos. `None` si el usuario no tiene deuda con cuadro."""
 
 
 class DailyDebtPoint(BaseModel):
@@ -121,7 +125,17 @@ class DebtCategorySummary(BaseModel):
     """`total_payments - interests_and_fees`."""
 
     by_type: list[DebtTypeBreakdown]
-    """Composición agregada por tipo aproximado para el donut."""
+    """Composición de los PAGOS por tipo durante el rango (flujo)."""
+
+    outstanding_at_end: Decimal = Decimal("0")
+    """PHASE-43.x — Deuda viva TOTAL al CIERRE del período seleccionado (STOCK,
+    dirigida por el cuadro). A período = año/hoy iguala `debt-health.total_
+    liabilities`; al navegar a un mes pasado muestra la deuda de entonces
+    (mayor, porque se habían hecho menos pagos)."""
+    outstanding_by_type: list[DebtTypeBreakdown]
+    """PHASE-43.x — Composición de la deuda viva por tipo AL CIERRE del período
+    (STOCK). Reemplaza a `debt-health.debt_by_type` en el donut para que la
+    composición respete el navegador de período."""
 
     monthly_series: list[MonthlyDebtPoint]
     """Un punto por mes del período (meses sin actividad en 0): 1 para

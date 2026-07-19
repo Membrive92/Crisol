@@ -79,7 +79,7 @@ const TYPE_LABEL: Record<AccountType, string> = {
   mortgage: 'Hipoteca',
 };
 
-export const DEFAULT_ACCOUNT_FORM: AccountFormValues = {
+const DEFAULT_ACCOUNT_FORM: AccountFormValues = {
   name: '',
   type: 'bank',
   currency: 'EUR',

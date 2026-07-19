@@ -12,15 +12,16 @@ import {
   useDebtHistory,
 } from '@crisol/services';
 import { useCurrencyStore } from '@crisol/store';
-import type {
-  DebtHealthKpis,
-  DebtTimeRange,
-  DebtTypeBreakdown,
-  DebtTypeBucket,
-} from '@crisol/types';
+import type { DebtHealthKpis, DebtTimeRange } from '@crisol/types';
 import { colors, fontSize, fontWeight, formatAmount, layout, radius, spacing } from '@crisol/ui';
 
+import {
+  boundsForAnchor,
+  boundsForCustomRange,
+} from '@/components/analysis/stitch-period-toggle';
 import { DebtList } from '@/components/debt/debt-list';
+import { todayDayStr } from '@/components/ui/date-picker';
+import { DebtMovementsCard } from '@/components/debt/debt-movements-card';
 import { EffortRatioSection } from '@/components/debt/effort-ratio-section';
 import { PaymentsSummaryCard } from '@/components/debt/payments-summary-card';
 import { PeriodNavigator } from '@/components/debt/period-navigator';
@@ -83,16 +84,20 @@ export default function DebtPage() {
   const [customTo, setCustomTo] = useState<string | null>(null);
 
   function seedCustomFromPeriod(): { from: string; to: string } {
+    // El `to` se capa a HOY: sembrar hasta fin de año/mes en el período en
+    // curso metía fechas futuras (sin datos) en el rango por defecto.
+    const today = todayDayStr();
+    const cap = (to: string): string => (to > today ? today : to);
     const [y, m] = anchorMonth.split('-').map(Number);
     const yy = y ?? new Date().getFullYear();
     if (range === 'year') {
-      return { from: `${yy}-01-01`, to: `${yy}-12-31` };
+      return { from: `${yy}-01-01`, to: cap(`${yy}-12-31`) };
     }
     const mm = m ?? 1;
     const lastDay = new Date(Date.UTC(yy, mm, 0)).getUTCDate();
     return {
       from: `${anchorMonth}-01`,
-      to: `${anchorMonth}-${String(lastDay).padStart(2, '0')}`,
+      to: cap(`${anchorMonth}-${String(lastDay).padStart(2, '0')}`),
     };
   }
 
@@ -138,6 +143,16 @@ export default function DebtPage() {
     ...(targetCurrency ? { targetCurrency } : {}),
   });
 
+  // PHASE-43.5 — bounds ISO del período para la lista de movimientos de deuda
+  // (misma convención mes/año/custom que Análisis/Dashboard).
+  const { dateFrom: movementsFrom, dateTo: movementsTo } = useMemo(
+    () =>
+      range === 'custom' && customFrom && customTo
+        ? boundsForCustomRange(customFrom, customTo)
+        : boundsForAnchor(range === 'custom' ? 'year' : range, anchorMonth),
+    [range, anchorMonth, customFrom, customTo],
+  );
+
   const liabilities = useMemo(
     () =>
       (balancesQuery.data?.items ?? []).filter(
@@ -169,25 +184,23 @@ export default function DebtPage() {
         ).toFixed(2)
       : monthlyDebtPayment;
 
-  // PHASE-37 — Composición de la DEUDA VIVA por tipo desde debt-health
-  // (`schedule_outstanding`, fuente única). El donut pasa de "pagos por
-  // tipo" (flujo, casi vacío) a "cuánto debes por tipo" (stock real).
-  const debtComposition = useMemo<DebtTypeBreakdown[]>(() => {
-    const slices = health?.debt_by_type ?? [];
-    const total = slices.reduce((s, x) => s + Number(x.amount), 0);
-    const KNOWN: DebtTypeBucket[] = ['mortgage', 'loan', 'credit_card'];
-    return slices.map((s) => ({
-      type: (KNOWN.includes(s.type as DebtTypeBucket) ? s.type : 'other') as DebtTypeBucket,
-      amount: s.amount,
-      percent: total > 0 ? Number(s.amount) / total : 0,
-    }));
-  }, [health?.debt_by_type]);
+  // PHASE-43.x — Composición de la DEUDA VIVA por tipo AL CIERRE del período
+  // (period-scoped): sale de `category-summary.outstanding_by_type`, no de
+  // debt-health (que era "ahora" fijo). A año/hoy coincide con debt-health; al
+  // navegar a un mes pasado muestra la deuda de entonces. Respeta el navegador.
+  const debtComposition = summary?.outstanding_by_type ?? [];
 
   return (
     <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
       <PageHeader />
 
-      <DebtKpiStrip health={health} currency={referenceCurrency} isLoading={healthQuery.isLoading} />
+      <DebtKpiStrip
+        health={health}
+        outstandingAtEnd={summary?.outstanding_at_end}
+        interestsPaidPeriod={summary?.interests_and_fees}
+        currency={referenceCurrency}
+        isLoading={healthQuery.isLoading || summaryQuery.isLoading}
+      />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
         <PeriodNavigator
@@ -235,6 +248,12 @@ export default function DebtPage() {
           isLoading={summaryQuery.isLoading}
         />
 
+        <DebtMovementsCard
+          dateFrom={movementsFrom}
+          dateTo={movementsTo}
+          currency={referenceCurrency}
+        />
+
         <div
           style={{
             display: 'grid',
@@ -244,9 +263,9 @@ export default function DebtPage() {
         >
           <DebtCompositionDonut
             items={debtComposition}
-            total={health?.total_liabilities ?? '0'}
+            total={summary?.outstanding_at_end ?? '0'}
             currency={referenceCurrency}
-            isLoading={healthQuery.isLoading}
+            isLoading={summaryQuery.isLoading}
           />
           {range === 'month' ? (
             <DebtDailyEvolution
@@ -299,23 +318,29 @@ export default function DebtPage() {
  */
 function DebtKpiStrip({
   health,
+  outstandingAtEnd,
+  interestsPaidPeriod,
   currency,
   isLoading,
 }: {
   health: DebtHealthKpis | undefined;
+  /** PHASE-43.x — deuda viva al cierre del período (period-scoped). */
+  outstandingAtEnd: string | undefined;
+  /** PHASE-43.x — intereses pagados DURANTE el período (period-scoped). */
+  interestsPaidPeriod: string | undefined;
   currency: string;
   isLoading: boolean;
 }) {
   const tiles: { label: string; value: string; hint: string }[] = [
     {
       label: 'Deuda viva total',
-      value: health ? formatAmount(health.total_liabilities, currency) : '—',
-      hint: 'Saldo pendiente (cuadro)',
+      value: outstandingAtEnd != null ? formatAmount(outstandingAtEnd, currency) : '—',
+      hint: 'Al cierre del período',
     },
     {
-      label: 'Intereses pagados (año)',
-      value: health ? formatAmount(health.interest_paid_ytd, currency) : '—',
-      hint: 'Del cuadro de amortización',
+      label: 'Intereses pagados',
+      value: interestsPaidPeriod != null ? formatAmount(interestsPaidPeriod, currency) : '—',
+      hint: 'Durante el período',
     },
     {
       label: 'Interés contractual total',

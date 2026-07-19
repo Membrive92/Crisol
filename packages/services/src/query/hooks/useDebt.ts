@@ -5,6 +5,7 @@ import type {
   DebtHealthKpis,
   DebtHistoryResponse,
   DebtTimeRange,
+  ModuleDashboardSummary,
 } from '@crisol/types';
 
 import { debtApi } from '../../api/endpoints/debt';
@@ -69,6 +70,26 @@ export function useDebtHealth(options: { targetCurrency?: string } = {}) {
     queryKey: queryKeys.debt.health(targetCurrency),
     queryFn: () =>
       debtApi.debtHealth(targetCurrency ? { target_currency: targetCurrency } : {}),
+    staleTime: 1000 * 60,
+  });
+}
+
+/**
+ * PHASE-43.4 (ADR-0006) — tarjeta del módulo Deuda para el dashboard:
+ * deuda viva + esfuerzo + veredicto.
+ */
+export function useDebtDashboardSummary(
+  options: { targetCurrency?: string; dateFrom?: string; dateTo?: string } = {},
+) {
+  const { targetCurrency, dateFrom, dateTo } = options;
+  return useQuery<ModuleDashboardSummary, Error>({
+    queryKey: queryKeys.debt.dashboardSummary(targetCurrency, dateFrom, dateTo),
+    queryFn: () =>
+      debtApi.dashboardSummary({
+        ...(targetCurrency ? { target_currency: targetCurrency } : {}),
+        ...(dateFrom ? { date_from: dateFrom } : {}),
+        ...(dateTo ? { date_to: dateTo } : {}),
+      }),
     staleTime: 1000 * 60,
   });
 }

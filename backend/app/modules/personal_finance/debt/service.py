@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.personal_finance.accounts.debt_health import (
     DEFAULT_REFERENCE_CURRENCY,
     classify_effort,
+    compute_debt_health,
     windowed_income_total,
 )
 from app.modules.personal_finance.accounts.debt_history import _scheduled_remaining_at
@@ -24,6 +25,11 @@ from app.modules.personal_finance.accounts.installments_repository import (
 )
 from app.modules.personal_finance.accounts.models import Account, AccountNature
 from app.modules.personal_finance.categories.models import Category, CategoryRole
+from app.modules.personal_finance.dashboard.schemas import (
+    ModuleDashboardSummary,
+    ModuleSummaryItem,
+    ModuleVerdict,
+)
 from app.modules.personal_finance.debt.repository import (
     aggregate_debt_payments_by_category,
     aggregate_debt_payments_by_role,
@@ -46,6 +52,71 @@ from app.modules.personal_finance.fixed_expenses.models import (
     FixedExpense,
     FixedExpenseStatus,
 )
+
+_DEBT_VERDICT: dict[str, ModuleVerdict] = {
+    "healthy": "healthy",
+    "caution": "caution",
+    "stressed": "stressed",
+    "unknown": "neutral",
+}
+
+
+async def compute_dashboard_summary(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    target_currency: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+) -> ModuleDashboardSummary:
+    """PHASE-43.4 (ADR-0006) — tarjeta del módulo Deuda para el dashboard:
+    deuda viva (STOCK, número grande en negativo) + tasa de esfuerzo +
+    veredicto. Reutiliza `compute_debt_health` (bandas BdE 30/35%); no
+    recalcula. Sin deuda → `neutral`.
+
+    PHASE-43.x — la DEUDA VIVA es period-scoped: al cierre del rango
+    `[date_from, date_to]` (mismo `outstanding_at_end` que el módulo /debt y
+    coherente con el "Patrimonio Neto" del dashboard, que también es a fecha de
+    fin de rango). Sin rango → foto "a día de hoy" (debt-health). El VEREDICTO y
+    el esfuerzo siguen de debt-health: son un indicador de salud estable, no una
+    magnitud del período."""
+    health = await compute_debt_health(db, user_id, target_currency=target_currency)
+    reference = target_currency or await _resolve_reference_currency(db, user_id)
+
+    if date_from is not None and date_to is not None:
+        # Deuda viva al cierre del período (misma fuente que /debt: el cuadro a
+        # fecha). Garantiza que dashboard y módulo cuenten el mismo número.
+        period = await compute_category_summary(
+            db,
+            user_id,
+            range_="custom",
+            date_from=date_from,
+            date_to=date_to,
+            target_currency=target_currency,
+        )
+        total_debt = period.outstanding_at_end
+    else:
+        total_debt = health.total_liabilities
+    verdict: ModuleVerdict = (
+        "neutral" if total_debt <= 0 else _DEBT_VERDICT.get(health.dti_status, "neutral")
+    )
+
+    secondary: list[ModuleSummaryItem] = []
+    if health.dti_ratio is not None:
+        secondary.append(
+            ModuleSummaryItem(label="Esfuerzo", value=f"{health.dti_ratio * 100:.1f} %")
+        )
+
+    return ModuleDashboardSummary(
+        verdict=verdict,
+        # La deuda viva se muestra en negativo (es un pasivo).
+        headline_value=-total_debt,
+        headline_label="deuda viva",
+        currency=reference,
+        secondary=secondary,
+        link="/debt",
+    )
+
 
 # ─────────────────────────────────────────────────────────────────────
 # Helpers de rango temporal
@@ -80,25 +151,6 @@ def _period_bounds(range_: DebtTimeRange, anchor: date) -> tuple[date, date]:
         return start, date(anchor.year, anchor.month, last_day)
     # year
     return date(anchor.year, 1, 1), date(anchor.year, 12, 31)
-
-
-def resolve_period_end(
-    range_: DebtTimeRange,
-    anchor: date | None = None,
-    today: date | None = None,
-) -> date:
-    """Fecha de corte ("as-of") del período: fin natural del período,
-    salvo el período en curso que se recorta a hoy.
-
-    PHASE-30.8 — Fuente ÚNICA de verdad del as-of, compartida entre
-    Capa 1 (`compute_category_summary`) y Capa 2 (`compute_debt_health`
-    / `compute_debt_history`) para que los tres endpoints coincidan en
-    la fecha de corte de un mismo período.
-    """
-    today = today or _today_utc()
-    anchor = anchor or today
-    _, period_end = _period_bounds(range_, anchor)
-    return min(period_end, today)
 
 
 def _resolve_range(
@@ -494,23 +546,41 @@ async def _build_daily_series(
     # Saldo del cuadro para el MES mostrado (misma base due-date que
     # debt_history, para que las dos vistas temporales cuadren entre sí).
     displayed_month = date(range_end.year, range_end.month, 1)
-    scheduled_base = Decimal("0")
+    prev_month = _add_month(displayed_month, -1)
+    # PHASE-43.x — el saldo del cuadro arranca en el CIERRE DEL MES ANTERIOR y
+    # baja EN ESCALÓN el día que se amortiza cada cuota (`sched_amort_by_day`,
+    # abajo). Antes se fijaba al cierre del mes mostrado (constante) → la línea
+    # salía plana y "no reflejaba nada". El valor de FIN de mes no cambia
+    # (start − amortización del mes = cierre del mes), sólo la trayectoria.
+    scheduled_start = Decimal("0")
     for a in scheduled:
-        native = _scheduled_remaining_at(insts_by_account[a.id], displayed_month)
+        insts = insts_by_account[a.id]
+        first_due = min((i.due_date for i in insts), default=None)
+        # PHASE-43.x — un pasivo cuyo cuadro ARRANCA en el mes mostrado se emitió
+        # este mes: NO va en el ancla de inicio de mes; su emisión SUBE el saldo
+        # vía la barra `emitida` el día de la "Operación financiada" (abajo). Así
+        # no se pre-cuenta como si existiera desde antes.
+        if first_due is not None and first_due >= displayed_month:
+            continue
+        native = _scheduled_remaining_at(insts, prev_month)
         if target_currency is None or a.currency.upper() == effective_currency:
-            scheduled_base += native
+            scheduled_start += native
         else:
             converted = await _convert_at_today(
                 db, native, from_currency=a.currency, target_currency=effective_currency
             )
             if converted is not None:
-                scheduled_base += converted
+                scheduled_start += converted
 
     # PHASE-37 — interés del cuadro por día: la cuota pagada este mes aporta
-    # su interés al día de su `paid_at`. Las cuotas son mensuales, así que a
-    # lo sumo una por pasivo cae en el mes mostrado.
+    # su interés al día de su `paid_at`. PHASE-43.x — y su PRINCIPAL a
+    # `sched_amort_by_day` (baja el saldo ese día + alimenta la barra
+    # "amortizado"). Las cuotas son mensuales, así que a lo sumo una por pasivo
+    # cae en el mes mostrado.
     sched_interest_by_day: dict[int, Decimal] = {}
+    sched_amort_by_day: dict[int, Decimal] = {}
     for a in scheduled:
+        native_ccy = target_currency is None or a.currency.upper() == effective_currency
         for inst in insts_by_account[a.id]:
             paid = inst.paid_at
             if (
@@ -519,15 +589,22 @@ async def _build_daily_series(
                 or paid.month != displayed_month.month
             ):
                 continue
-            if target_currency is None or a.currency.upper() == effective_currency:
-                val = inst.interest
+            if native_ccy:
+                interest_val, principal_val = inst.interest, inst.principal
             else:
-                converted = await _convert_at_today(
+                ci = await _convert_at_today(
                     db, inst.interest, from_currency=a.currency, target_currency=effective_currency
                 )
-                val = converted if converted is not None else Decimal("0")
+                cp = await _convert_at_today(
+                    db, inst.principal, from_currency=a.currency, target_currency=effective_currency
+                )
+                interest_val = ci if ci is not None else Decimal("0")
+                principal_val = cp if cp is not None else Decimal("0")
             sched_interest_by_day[paid.day] = (
-                sched_interest_by_day.get(paid.day, Decimal("0")) + val
+                sched_interest_by_day.get(paid.day, Decimal("0")) + interest_val
+            )
+            sched_amort_by_day[paid.day] = (
+                sched_amort_by_day.get(paid.day, Decimal("0")) + principal_val
             )
 
     if nonsched_ids:
@@ -551,6 +628,26 @@ async def _build_daily_series(
     else:
         flows = {}
         carry = Decimal("0")
+
+    # PHASE-43.x — EMITIDA (deuda nueva) de TODOS los pasivos, con cuadro o sin
+    # él: la "Operación financiada" que contrae deuda es un movimiento sobre la
+    # cuenta-pasivo. Antes sólo se miraban los SIN cuadro → la emisión de compras
+    # financiadas (con cuadro) no aparecía en las barras. La AMORTIZACIÓN de los
+    # CON cuadro sigue saliendo del cuadro (`sched_amort_by_day`), no de aquí, así
+    # que sólo tomamos la parte `emitida` de este flujo (evita doble conteo).
+    if liability_ids:
+        all_flows = await daily_liability_flows(
+            db,
+            user_id,
+            liability_ids=liability_ids,
+            start=start_dt,
+            end=end_dt,
+            reference_currency=native_currency,
+            target_currency=target_currency,
+        )
+    else:
+        all_flows = {}
+
     # Apertura agregada de los pasivos SIN cuadro (convertida a hoy en target).
     opening = Decimal("0")
     for a in nonsched:
@@ -563,11 +660,15 @@ async def _build_daily_series(
         if converted is not None:
             opening += converted
 
-    balance = opening + carry + scheduled_base
+    balance = opening + carry + scheduled_start
     for d in range(1, last_day + 1):
-        emitida, amortizado = flows.get(d, (Decimal("0"), Decimal("0")))
+        # Emitida = de TODOS los pasivos (con/sin cuadro). Amortizado = SIN cuadro
+        # (de sus movimientos) + principal del cuadro amortizado ese día.
+        emitida, _am_all = all_flows.get(d, (Decimal("0"), Decimal("0")))
+        _em_ns, amortizado_ns = flows.get(d, (Decimal("0"), Decimal("0")))
         _capital, cat_interest = cat_flows.get(d, (Decimal("0"), Decimal("0")))
         interest = cat_interest + sched_interest_by_day.get(d, Decimal("0"))
+        amortizado = amortizado_ns + sched_amort_by_day.get(d, Decimal("0"))
         balance = balance + emitida - amortizado
         points.append(
             DailyDebtPoint(
@@ -691,6 +792,64 @@ async def compute_category_summary(
     )
     by_type = _build_by_type(rows, total_payments)
 
+    # ── 2b. Deuda viva AL CIERRE del período (STOCK, dirigido por el cuadro) ──
+    # PHASE-43.x — la composición y el saldo respetan ahora el navegador de
+    # período. Deuda viva a fecha D = Σ principal de cuotas NO pagadas a esa
+    # fecha (`paid_at IS NULL OR paid_at > D`) — MISMA definición que
+    # `schedule_outstanding` de debt-health (basada en la reconciliación, no en
+    # la curva contractual), así que a D=hoy iguala `total_liabilities` al
+    # céntimo y a un mes pasado muestra la deuda real de entonces (mayor: menos
+    # cuotas pagadas). Ojo: NO usar `_scheduled_remaining_at` aquí — deduce la
+    # cuota del mes en curso aunque siga sin pagarse → diverge ~1 cuota de hoy.
+    scheduled_debt = [a for a in scheduled if a.counts_as_debt]
+    today_ = _today_utc()
+
+    async def _outstanding_at(as_of: date) -> tuple[Decimal, dict[DebtTypeBucket, Decimal]]:
+        # Cuota pendiente a `as_of`: nunca pagada, o —para fechas PASADAS— pagada
+        # DESPUÉS de esa fecha (a fin de mayo aún debías la cuota que pagas en
+        # junio). Para `as_of >= hoy` (período en curso) sólo cuenta lo NO pagado,
+        # igual que `schedule_outstanding` de debt-health: una cuota del mes en
+        # curso con `paid_at` futuro (reconciliada a su vencimiento) ya está
+        # pagada, no la contamos de más.
+        agg: dict[DebtTypeBucket, Decimal] = {
+            "mortgage": Decimal("0"),
+            "loan": Decimal("0"),
+            "credit_card": Decimal("0"),
+            "other": Decimal("0"),
+        }
+        past = as_of < today_
+        for a in scheduled_debt:
+            native = sum(
+                (
+                    i.principal
+                    for i in insts_by_acc[a.id]
+                    if i.paid_at is None or (past and i.paid_at.date() > as_of)
+                ),
+                Decimal("0"),
+            )
+            if native <= 0:
+                continue
+            if target_currency is None or a.currency.upper() == effective_currency:
+                val = native
+            else:
+                converted = await _convert_at_today(
+                    db, native, from_currency=a.currency, target_currency=effective_currency
+                )
+                val = converted if converted is not None else Decimal("0")
+            agg[_ACCOUNT_TYPE_BUCKET.get(a.type.value, "other")] += val
+        return sum(agg.values(), Decimal("0")), agg
+
+    outstanding_at_end, outstanding_agg = await _outstanding_at(range_end)
+    outstanding_by_type: list[DebtTypeBreakdown] = [
+        DebtTypeBreakdown(
+            type=bucket,
+            amount=amount.quantize(Decimal("0.01")),
+            percent=float(amount / outstanding_at_end) if outstanding_at_end > 0 else 0.0,
+        )
+        for bucket, amount in outstanding_agg.items()
+        if amount > 0
+    ]
+
     # ── 3. Serie mensual ─────────────────────────────────────────────
     series_rows = await monthly_debt_series(
         db,
@@ -711,12 +870,14 @@ async def compute_category_summary(
         m_sched_p = await _sched_paid(principal_paid_in_window, start=month_start, end=month_end)
         m_interest = interests + m_sched_i
         m_payments = payments + m_sched_i + m_sched_p
+        m_balance, _ = await _outstanding_at(month_end)
         monthly_series.append(
             MonthlyDebtPoint(
                 month=_format_month(month_start),
                 payments=m_payments.quantize(Decimal("0.01")),
                 interests=m_interest.quantize(Decimal("0.01")),
                 capital=(m_payments - m_interest).quantize(Decimal("0.01")),
+                balance=m_balance.quantize(Decimal("0.01")) if scheduled_debt else None,
             )
         )
 
@@ -823,6 +984,8 @@ async def compute_category_summary(
         interests_and_fees=interests_and_fees.quantize(Decimal("0.01")),
         capital_amortized=capital_amortized.quantize(Decimal("0.01")),
         by_type=by_type,
+        outstanding_at_end=outstanding_at_end.quantize(Decimal("0.01")),
+        outstanding_by_type=outstanding_by_type,
         monthly_series=monthly_series,
         daily_series=daily_series,
         monthly_income_avg=monthly_income,

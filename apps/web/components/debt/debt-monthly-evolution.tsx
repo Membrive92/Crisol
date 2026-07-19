@@ -2,8 +2,9 @@
 
 import {
   Bar,
-  BarChart,
   CartesianGrid,
+  ComposedChart,
+  Line,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -22,6 +23,7 @@ import {
 } from '@crisol/ui';
 
 import { Card } from '@/components/ui/card';
+import { computeBalanceDomain } from '@/components/debt/debt-daily-evolution';
 
 const SPANISH_MONTHS = [
   'Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
@@ -39,15 +41,15 @@ interface ChartRow {
   monthLabel: string;
   capital: number;
   interests: number;
+  balance: number | null;
   isCurrent: boolean;
 }
 
 /**
- * PHASE-30.3 — Bar chart apilado de la evolución mensual de pagos a
- * deuda (capital + intereses). Muestra exactamente los meses que el
- * backend devuelve (12 para `12m`, ytd para YTD, 1 para month). El
- * mes actual queda resaltado con un `ReferenceLine` vertical para
- * que el usuario lo identifique de un vistazo.
+ * PHASE-30.3 / PHASE-43.x — Combo de la evolución mensual: BARRAS apiladas de
+ * pagos (capital + intereses, eje izq, FLUJO) + LÍNEA del saldo de deuda al
+ * cierre de cada mes (eje der, STOCK). Así se ve a la vez cuánto pagas y cómo
+ * BAJA la deuda. El mes actual va resaltado con un `ReferenceLine`.
  */
 export function DebtMonthlyEvolution({
   items,
@@ -68,10 +70,13 @@ export function DebtMonthlyEvolution({
           : `${monthName} ${String(year).slice(-2)}`,
       capital: Number(p.capital),
       interests: Number(p.interests),
+      balance: p.balance != null ? Number(p.balance) : null,
       isCurrent: p.month === currentMonthKey,
     };
   });
   const empty = !isLoading && data.every((r) => r.capital + r.interests === 0);
+  const hasBalance = data.some((r) => r.balance != null);
+  const balanceDomain = computeBalanceDomain(data);
 
   return (
     <Card
@@ -120,7 +125,7 @@ export function DebtMonthlyEvolution({
       ) : (
         <div style={{ width: '100%', height: 220 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+            <ComposedChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={colors.border} vertical={false} />
               <XAxis
                 dataKey="monthLabel"
@@ -129,6 +134,7 @@ export function DebtMonthlyEvolution({
                 tickLine={false}
               />
               <YAxis
+                yAxisId="pagos"
                 tick={{ fontSize: 11, fill: colors.textMuted }}
                 axisLine={false}
                 tickLine={false}
@@ -138,12 +144,35 @@ export function DebtMonthlyEvolution({
                 }}
                 width={48}
               />
+              {hasBalance ? (
+                <YAxis
+                  yAxisId="saldo"
+                  orientation="right"
+                  {...(balanceDomain ? { domain: balanceDomain } : {})}
+                  tick={{ fontSize: 11, fill: colors.textSubtle }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toString())}
+                  width={44}
+                />
+              ) : null}
               <Tooltip
                 cursor={{ fill: colors.surfaceMuted }}
                 content={<MonthlyTooltip currency={currency} />}
               />
-              <Bar dataKey="capital" stackId="a" fill={colors.primary} radius={[0, 0, 0, 0]} />
-              <Bar dataKey="interests" stackId="a" fill={colors.danger} radius={[4, 4, 0, 0]} />
+              <Bar yAxisId="pagos" dataKey="capital" stackId="a" fill={colors.primary} radius={[0, 0, 0, 0]} />
+              <Bar yAxisId="pagos" dataKey="interests" stackId="a" fill={colors.danger} radius={[4, 4, 0, 0]} />
+              {hasBalance ? (
+                <Line
+                  yAxisId="saldo"
+                  type="monotone"
+                  dataKey="balance"
+                  stroke={colors.text}
+                  strokeWidth={2}
+                  dot={false}
+                  connectNulls
+                />
+              ) : null}
               {(() => {
                 const currentLabel = data.find((r) => r.isCurrent)?.monthLabel;
                 return currentLabel ? (
@@ -155,7 +184,7 @@ export function DebtMonthlyEvolution({
                   />
                 ) : null;
               })()}
-            </BarChart>
+            </ComposedChart>
           </ResponsiveContainer>
         </div>
       )}
@@ -176,6 +205,7 @@ function Legend() {
     >
       <LegendChip color={colors.primary} label="Capital" />
       <LegendChip color={colors.danger} label="Intereses" />
+      <LegendChip color={colors.text} label="Saldo" />
     </div>
   );
 }
@@ -217,6 +247,7 @@ function MonthlyTooltip({
   if (!active || !payload || payload.length === 0) return null;
   const capital = payload.find((p) => p.dataKey === 'capital')?.value ?? 0;
   const interests = payload.find((p) => p.dataKey === 'interests')?.value ?? 0;
+  const balance = payload.find((p) => p.dataKey === 'balance')?.value;
   const total = capital + interests;
   return (
     <div
@@ -259,6 +290,14 @@ function MonthlyTooltip({
           {formatAmount(total.toFixed(2), currency)}
         </strong>
       </span>
+      {balance != null ? (
+        <span style={{ color: colors.textMuted, marginTop: 2, borderTop: `1px solid ${colors.border}`, paddingTop: 2 }}>
+          Saldo ·{' '}
+          <strong style={{ color: colors.text, fontVariantNumeric: 'tabular-nums' }}>
+            {formatAmount(balance.toFixed(2), currency)}
+          </strong>
+        </span>
+      ) : null}
     </div>
   );
 }
