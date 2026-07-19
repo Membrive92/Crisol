@@ -909,9 +909,7 @@ async def compute_debt_health(
         sched_interest_ytd += await _to_effective(
             interest_paid_in_window(insts, start=year_start, end=today), liab.currency
         )
-        sched_interest_total += await _to_effective(
-            interest_total(insts), liab.currency
-        )
+        sched_interest_total += await _to_effective(interest_total(insts), liab.currency)
         sched_interest_remaining += await _to_effective(
             interest_total(insts, unpaid_only=True), liab.currency
         )

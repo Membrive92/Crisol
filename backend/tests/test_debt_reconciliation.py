@@ -38,7 +38,9 @@ async def _seed_user(session_factory) -> uuid.UUID:  # type: ignore[no-untyped-d
     uid = uuid.uuid4()
     async with session_factory() as db:
         db.add(
-            User(id=uid, email=f"debt_{uid.hex[:8]}@example.com", password_hash="x", display_name="D")
+            User(
+                id=uid, email=f"debt_{uid.hex[:8]}@example.com", password_hash="x", display_name="D"
+            )
         )
         await db.commit()
     return uid
@@ -130,8 +132,12 @@ async def test_reconcile_loan_generates_anchors_and_matches(session_factory) -> 
     )
     for m in range(2, 6):  # feb..may 2026
         await _seed_tx(
-            session_factory, uid, bank, amount=Decimal("232.27"),
-            when=datetime(2026, m, 1, tzinfo=UTC), description="CARGO POR AMORTIZACION DE PRESTAMO",
+            session_factory,
+            uid,
+            bank,
+            amount=Decimal("232.27"),
+            when=datetime(2026, m, 1, tzinfo=UTC),
+            description="CARGO POR AMORTIZACION DE PRESTAMO",
         )
 
     async with session_factory() as db:
@@ -193,8 +199,12 @@ async def test_reconcile_card_matches_and_assumes_excess(session_factory) -> Non
     # Cargos agregados del banco (> cuota de 100.08): el exceso es deuda previa.
     for m, amt in [(2, "373.93"), (3, "200.46"), (4, "287.36"), (5, "316.35")]:
         await _seed_tx(
-            session_factory, uid, bank, amount=Decimal(amt),
-            when=datetime(2026, m, 4, tzinfo=UTC), description="OPERACIÓN FINANCIADA CON TARJETA",
+            session_factory,
+            uid,
+            bank,
+            amount=Decimal(amt),
+            when=datetime(2026, m, 4, tzinfo=UTC),
+            description="OPERACIÓN FINANCIADA CON TARJETA",
         )
 
     async with session_factory() as db:
@@ -223,14 +233,26 @@ async def test_reconcile_splits_aggregate_charge_across_cards(session_factory) -
     )
     # Compra "antigua" (inicia enero) y compra "nueva" (inicia abril).
     old = await _seed_account(
-        session_factory, uid, name="Compra financiada", nature=AccountNature.LIABILITY,
-        type_=AccountType.CREDIT_CARD, opening=Decimal("824.77"), apr=Decimal("0.2160"),
-        term=9, start=date(2026, 1, 6),
+        session_factory,
+        uid,
+        name="Compra financiada",
+        nature=AccountNature.LIABILITY,
+        type_=AccountType.CREDIT_CARD,
+        opening=Decimal("824.77"),
+        apr=Decimal("0.2160"),
+        term=9,
+        start=date(2026, 1, 6),
     )
     new = await _seed_account(
-        session_factory, uid, name="Compra financiada mar-2026", nature=AccountNature.LIABILITY,
-        type_=AccountType.CREDIT_CARD, opening=Decimal("239.00"), apr=Decimal("0.2160"),
-        term=9, start=date(2026, 4, 5),
+        session_factory,
+        uid,
+        name="Compra financiada mar-2026",
+        nature=AccountNature.LIABILITY,
+        type_=AccountType.CREDIT_CARD,
+        opening=Decimal("239.00"),
+        apr=Decimal("0.2160"),
+        term=9,
+        start=date(2026, 4, 5),
     )
     async with session_factory() as db:
         for aid in (old, new):
@@ -241,8 +263,12 @@ async def test_reconcile_splits_aggregate_charge_across_cards(session_factory) -
     # Cargos agregados enero, febrero, marzo, mayo (sin abril).
     for m, amt in [(1, "373.93"), (2, "200.46"), (3, "287.36"), (5, "316.35")]:
         await _seed_tx(
-            session_factory, uid, bank, amount=Decimal(amt),
-            when=datetime(2026, m, 4, tzinfo=UTC), description="OPERACIÓN FINANCIADA CON TARJETA",
+            session_factory,
+            uid,
+            bank,
+            amount=Decimal(amt),
+            when=datetime(2026, m, 4, tzinfo=UTC),
+            description="OPERACIÓN FINANCIADA CON TARJETA",
         )
 
     async with session_factory() as db:
@@ -287,14 +313,26 @@ async def test_reconcile_excess_attribution_is_idempotent_across_runs(session_fa
     )
     # 'Alfa' ordena primera (mismo inicio, nombre menor) y agota su cuadro en 1 cuota.
     alfa = await _seed_account(
-        session_factory, uid, name="Alfa", nature=AccountNature.LIABILITY,
-        type_=AccountType.CREDIT_CARD, opening=Decimal("100.00"), apr=Decimal("0"),
-        term=1, start=date(2026, 1, 6),
+        session_factory,
+        uid,
+        name="Alfa",
+        nature=AccountNature.LIABILITY,
+        type_=AccountType.CREDIT_CARD,
+        opening=Decimal("100.00"),
+        apr=Decimal("0"),
+        term=1,
+        start=date(2026, 1, 6),
     )
     zeta = await _seed_account(
-        session_factory, uid, name="Zeta", nature=AccountNature.LIABILITY,
-        type_=AccountType.CREDIT_CARD, opening=Decimal("90.00"), apr=Decimal("0"),
-        term=9, start=date(2026, 1, 6),
+        session_factory,
+        uid,
+        name="Zeta",
+        nature=AccountNature.LIABILITY,
+        type_=AccountType.CREDIT_CARD,
+        opening=Decimal("90.00"),
+        apr=Decimal("0"),
+        term=9,
+        start=date(2026, 1, 6),
     )
     async with session_factory() as db:
         for aid in (alfa, zeta):
@@ -305,8 +343,12 @@ async def test_reconcile_excess_attribution_is_idempotent_across_runs(session_fa
     # Cargos agregados grandes (exceso positivo), SIN category_id.
     for m in (1, 2):
         await _seed_tx(
-            session_factory, uid, bank, amount=Decimal("500.00"),
-            when=datetime(2026, m, 4, tzinfo=UTC), description="OPERACIÓN FINANCIADA CON TARJETA",
+            session_factory,
+            uid,
+            bank,
+            amount=Decimal("500.00"),
+            when=datetime(2026, m, 4, tzinfo=UTC),
+            description="OPERACIÓN FINANCIADA CON TARJETA",
         )
 
     async with session_factory() as db:
@@ -334,23 +376,41 @@ async def test_reconcile_idempotent_and_excludes_noise(session_factory) -> None:
         session_factory, uid, name="BBVA", nature=AccountNature.ASSET, type_=AccountType.BANK
     )
     loan = await _seed_account(
-        session_factory, uid, name="Prestamo", nature=AccountNature.LIABILITY,
-        type_=AccountType.LOAN, opening=Decimal("10000"), apr=Decimal("0.03"), term=60,
+        session_factory,
+        uid,
+        name="Prestamo",
+        nature=AccountNature.LIABILITY,
+        type_=AccountType.LOAN,
+        opening=Decimal("10000"),
+        apr=Decimal("0.03"),
+        term=60,
         start=date(2025, 1, 31),
     )
     await _seed_tx(
-        session_factory, uid, bank, amount=Decimal("179.69"),
-        when=datetime(2026, 2, 1, tzinfo=UTC), description="CARGO POR AMORTIZACION DE PRESTAMO",
+        session_factory,
+        uid,
+        bank,
+        amount=Decimal("179.69"),
+        when=datetime(2026, 2, 1, tzinfo=UTC),
+        description="CARGO POR AMORTIZACION DE PRESTAMO",
     )
     # Ruido que NO debe matchear: ADEUDO (liquidación) + financiación entrante.
     await _seed_tx(
-        session_factory, uid, bank, amount=Decimal("500"),
-        when=datetime(2026, 2, 2, tzinfo=UTC), description="ADEUDO MENSUAL DE TARJETA",
+        session_factory,
+        uid,
+        bank,
+        amount=Decimal("500"),
+        when=datetime(2026, 2, 2, tzinfo=UTC),
+        description="ADEUDO MENSUAL DE TARJETA",
         flow=TransactionFlow.TRANSFER_OUT,
     )
     await _seed_tx(
-        session_factory, uid, bank, amount=Decimal("239"),
-        when=datetime(2026, 3, 1, tzinfo=UTC), description="OPERACION FINANCIADA",
+        session_factory,
+        uid,
+        bank,
+        amount=Decimal("239"),
+        when=datetime(2026, 3, 1, tzinfo=UTC),
+        description="OPERACION FINANCIADA",
         flow=TransactionFlow.TRANSFER_IN,
     )
 
@@ -379,13 +439,23 @@ async def test_balance_is_schedule_driven_after_reconcile(session_factory) -> No
         session_factory, uid, name="BBVA", nature=AccountNature.ASSET, type_=AccountType.BANK
     )
     loan = await _seed_account(
-        session_factory, uid, name="Prestamo", nature=AccountNature.LIABILITY,
-        type_=AccountType.LOAN, opening=Decimal("22000"), apr=Decimal("0.0490"), term=120,
+        session_factory,
+        uid,
+        name="Prestamo",
+        nature=AccountNature.LIABILITY,
+        type_=AccountType.LOAN,
+        opening=Decimal("22000"),
+        apr=Decimal("0.0490"),
+        term=120,
         start=date(2024, 8, 31),
     )
     await _seed_tx(
-        session_factory, uid, bank, amount=Decimal("232.27"),
-        when=datetime(2026, 2, 1, tzinfo=UTC), description="CARGO POR AMORTIZACION DE PRESTAMO",
+        session_factory,
+        uid,
+        bank,
+        amount=Decimal("232.27"),
+        when=datetime(2026, 2, 1, tzinfo=UTC),
+        description="CARGO POR AMORTIZACION DE PRESTAMO",
     )
     async with session_factory() as db:
         await reconcile_debt_payments(db, uid, dry_run=False)
@@ -403,8 +473,14 @@ async def test_balance_is_schedule_driven_after_reconcile(session_factory) -> No
 async def test_installments_by_account_groups(session_factory) -> None:  # type: ignore[no-untyped-def]
     uid = await _seed_user(session_factory)
     loan = await _seed_account(
-        session_factory, uid, name="Prestamo", nature=AccountNature.LIABILITY,
-        type_=AccountType.LOAN, opening=Decimal("5000"), apr=Decimal("0.03"), term=12,
+        session_factory,
+        uid,
+        name="Prestamo",
+        nature=AccountNature.LIABILITY,
+        type_=AccountType.LOAN,
+        opening=Decimal("5000"),
+        apr=Decimal("0.03"),
+        term=12,
         start=date(2026, 1, 31),
     )
     async with session_factory() as db:

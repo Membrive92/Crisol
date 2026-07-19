@@ -444,7 +444,12 @@ async def test_brokerage_excluded_from_debt_health_assets(
     )
     await client.post(
         "/accounts",
-        json={"name": "Broker", "type": "brokerage", "currency": "EUR", "opening_balance": "10000.00"},
+        json={
+            "name": "Broker",
+            "type": "brokerage",
+            "currency": "EUR",
+            "opening_balance": "10000.00",
+        },
         headers=_auth(token),
     )
     await client.post(

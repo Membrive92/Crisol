@@ -439,6 +439,10 @@ async def debt_movement_bounds(
     )
     sched_min, sched_max = (await db.execute(sched_query)).one()
 
-    lows = [d.date() if isinstance(d, datetime) else d for d in (tx_min, sched_min) if d is not None]
-    highs = [d.date() if isinstance(d, datetime) else d for d in (tx_max, sched_max) if d is not None]
+    lows = [
+        d.date() if isinstance(d, datetime) else d for d in (tx_min, sched_min) if d is not None
+    ]
+    highs = [
+        d.date() if isinstance(d, datetime) else d for d in (tx_max, sched_max) if d is not None
+    ]
     return (min(lows) if lows else None, max(highs) if highs else None)

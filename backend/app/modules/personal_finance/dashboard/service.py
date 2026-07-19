@@ -128,14 +128,17 @@ def _previous_period(date_from: datetime, date_to: datetime) -> tuple[datetime, 
     """
     tz = date_from.tzinfo
     same_year_month = date_from.year == date_to.year and date_from.month == date_to.month
-    at_month_start = (
-        date_from.day == 1
-        and (date_from.hour, date_from.minute, date_from.second, date_from.microsecond) == (0, 0, 0, 0)
-    )
-    at_month_end = (
-        date_to.day == calendar.monthrange(date_to.year, date_to.month)[1]
-        and (date_to.hour, date_to.minute, date_to.second) == (23, 59, 59)
-    )
+    at_month_start = date_from.day == 1 and (
+        date_from.hour,
+        date_from.minute,
+        date_from.second,
+        date_from.microsecond,
+    ) == (0, 0, 0, 0)
+    at_month_end = date_to.day == calendar.monthrange(date_to.year, date_to.month)[1] and (
+        date_to.hour,
+        date_to.minute,
+        date_to.second,
+    ) == (23, 59, 59)
     if same_year_month and at_month_start and at_month_end:
         y, m = (date_from.year, date_from.month - 1)
         if m == 0:
@@ -148,7 +151,8 @@ def _previous_period(date_from: datetime, date_to: datetime) -> tuple[datetime, 
     at_year_start = (
         date_from.month == 1
         and date_from.day == 1
-        and (date_from.hour, date_from.minute, date_from.second, date_from.microsecond) == (0, 0, 0, 0)
+        and (date_from.hour, date_from.minute, date_from.second, date_from.microsecond)
+        == (0, 0, 0, 0)
     )
     at_year_end = (
         date_to.month == 12
@@ -224,12 +228,7 @@ async def get_summary(
     savings_rate_delta_pp: float | None = None
     if prev_balance is not None:
         cashflow_delta = balance - prev_balance
-    if (
-        prev_income is not None
-        and prev_income > 0
-        and income > 0
-        and prev_balance is not None
-    ):
+    if prev_income is not None and prev_income > 0 and income > 0 and prev_balance is not None:
         rate_now = float(balance / income * 100)
         rate_prev = float(prev_balance / prev_income * 100)
         savings_rate_delta_pp = rate_now - rate_prev
@@ -262,9 +261,7 @@ async def get_summary(
 _CASHFLOW_VERDICT_BAND = Decimal("0.05")
 
 
-async def _latest_month_bounds(
-    db: AsyncSession, user_id: uuid.UUID
-) -> tuple[datetime, datetime]:
+async def _latest_month_bounds(db: AsyncSession, user_id: uuid.UUID) -> tuple[datetime, datetime]:
     """Rango `[inicio, fin]` del ÚLTIMO mes con transacciones del usuario, o del
     mes en curso si aún no tiene datos.
 
@@ -274,9 +271,7 @@ async def _latest_month_bounds(
     representativa. Sólo se usa como fallback cuando el caller no pasa rango."""
     _, latest = await repository.get_transaction_month_bounds(db, user_id)
     now = datetime.now(UTC)
-    year, month = (
-        (int(latest[:4]), int(latest[5:7])) if latest else (now.year, now.month)
-    )
+    year, month = (int(latest[:4]), int(latest[5:7])) if latest else (now.year, now.month)
     last_day = calendar.monthrange(year, month)[1]
     return (
         datetime(year, month, 1, tzinfo=UTC),
@@ -334,9 +329,7 @@ async def get_module_summary(
 
     secondary: list[ModuleSummaryItem] = []
     if savings_rate_pct is not None:
-        secondary.append(
-            ModuleSummaryItem(label="Ahorro", value=f"{savings_rate_pct:.0f} %")
-        )
+        secondary.append(ModuleSummaryItem(label="Ahorro", value=f"{savings_rate_pct:.0f} %"))
 
     return ModuleDashboardSummary(
         verdict=verdict,
@@ -414,7 +407,12 @@ async def get_monthly_breakdown(
                 db, user_id, target_currency=target, date_from=date_from, date_to=date_to
             )
         rows_range = await repository.get_totals_by_month_in_range(
-            db, user_id, date_from=date_from, date_to=date_to, currency=legacy, target_currency=target
+            db,
+            user_id,
+            date_from=date_from,
+            date_to=date_to,
+            currency=legacy,
+            target_currency=target,
         )
         income_r: dict[tuple[int, int], Decimal] = {}
         expenses_r: dict[tuple[int, int], Decimal] = {}

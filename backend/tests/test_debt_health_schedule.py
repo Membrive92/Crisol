@@ -84,9 +84,7 @@ async def test_interest_and_debt_from_schedule(session_factory) -> None:  # type
     assert k.interest_remaining == exp_remaining.quantize(q)
     assert k.total_liabilities == exp_outstanding.quantize(q)
     # Composición de deuda viva por tipo: un único préstamo.
-    assert [(s.type, s.amount) for s in k.debt_by_type] == [
-        ("loan", exp_outstanding.quantize(q))
-    ]
+    assert [(s.type, s.amount) for s in k.debt_by_type] == [("loan", exp_outstanding.quantize(q))]
 
 
 async def test_debt_movement_bounds_include_schedule(session_factory) -> None:  # type: ignore[no-untyped-def]

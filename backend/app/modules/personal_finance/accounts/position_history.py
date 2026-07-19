@@ -82,11 +82,7 @@ def _scheduled_outstanding_as_of(
     """
     past = as_of < today
     return sum(
-        (
-            i.principal
-            for i in insts
-            if i.paid_at is None or (past and i.paid_at.date() > as_of)
-        ),
+        (i.principal for i in insts if i.paid_at is None or (past and i.paid_at.date() > as_of)),
         Decimal("0"),
     )
 

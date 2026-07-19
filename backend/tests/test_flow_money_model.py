@@ -146,11 +146,23 @@ async def test_transfer_flow_in_expense_category_is_excluded_from_cashflow(sessi
         session_factory, uid, kind=CategoryKind.EXPENSE, is_transfer=False
     )
     # Gasto real: cuenta.
-    await _seed_tx(session_factory, uid, bbva, amount=Decimal("100"), flow=TransactionFlow.OUT,
-                   category_id=gasto_cat)
+    await _seed_tx(
+        session_factory,
+        uid,
+        bbva,
+        amount=Decimal("100"),
+        flow=TransactionFlow.OUT,
+        category_id=gasto_cat,
+    )
     # Transferencia metida en la MISMA categoría de gasto: NO cuenta.
-    await _seed_tx(session_factory, uid, bbva, amount=Decimal("5000"),
-                   flow=TransactionFlow.TRANSFER_OUT, category_id=gasto_cat)
+    await _seed_tx(
+        session_factory,
+        uid,
+        bbva,
+        amount=Decimal("5000"),
+        flow=TransactionFlow.TRANSFER_OUT,
+        category_id=gasto_cat,
+    )
 
     async with session_factory() as db:
         _income, expense, count, _unconv = await get_summary_aggregates(db, uid, currency="EUR")
@@ -170,8 +182,14 @@ async def test_out_flow_in_transfer_category_counts_as_expense(session_factory) 
     transfer_cat = await _seed_category(
         session_factory, uid, kind=CategoryKind.EXPENSE, is_transfer=True
     )
-    await _seed_tx(session_factory, uid, bbva, amount=Decimal("50"), flow=TransactionFlow.OUT,
-                   category_id=transfer_cat)
+    await _seed_tx(
+        session_factory,
+        uid,
+        bbva,
+        amount=Decimal("50"),
+        flow=TransactionFlow.OUT,
+        category_id=transfer_cat,
+    )
 
     async with session_factory() as db:
         _income, expense, _count, _unconv = await get_summary_aggregates(db, uid, currency="EUR")
@@ -191,11 +209,13 @@ async def test_null_flow_falls_back_to_category(session_factory) -> None:  # typ
         session_factory, uid, kind=CategoryKind.EXPENSE, is_transfer=True
     )
     # Sin flow + categoría de gasto → gasto.
-    await _seed_tx(session_factory, uid, bbva, amount=Decimal("80"), flow=None,
-                   category_id=gasto_cat)
+    await _seed_tx(
+        session_factory, uid, bbva, amount=Decimal("80"), flow=None, category_id=gasto_cat
+    )
     # Sin flow + categoría is_transfer → excluida.
-    await _seed_tx(session_factory, uid, bbva, amount=Decimal("999"), flow=None,
-                   category_id=transfer_cat)
+    await _seed_tx(
+        session_factory, uid, bbva, amount=Decimal("999"), flow=None, category_id=transfer_cat
+    )
 
     async with session_factory() as db:
         _income, expense, _count, _unconv = await get_summary_aggregates(db, uid, currency="EUR")
@@ -217,8 +237,9 @@ async def test_balance_asset_signs_from_flow(session_factory) -> None:  # type: 
     )
     await _seed_tx(session_factory, uid, bbva, amount=Decimal("1000"), flow=TransactionFlow.IN)
     await _seed_tx(session_factory, uid, bbva, amount=Decimal("200"), flow=TransactionFlow.OUT)
-    await _seed_tx(session_factory, uid, bbva, amount=Decimal("300"),
-                   flow=TransactionFlow.TRANSFER_OUT)
+    await _seed_tx(
+        session_factory, uid, bbva, amount=Decimal("300"), flow=TransactionFlow.TRANSFER_OUT
+    )
 
     async with session_factory() as db:
         balances = await get_balances_for_user(db, uid)
@@ -258,15 +279,27 @@ async def test_convert_to_debt_absorbs_mirror_charge(session_factory) -> None:  
         session_factory, uid, nature=AccountNature.LIABILITY, type_=AccountType.CREDIT_CARD
     )
     abono = await _seed_tx(
-        session_factory, uid, bbva, amount=Decimal("824.77"), flow=TransactionFlow.IN,
+        session_factory,
+        uid,
+        bbva,
+        amount=Decimal("824.77"),
+        flow=TransactionFlow.IN,
         description="OPERACIÓN FINANCIADA",
     )
     mirror = await _seed_tx(
-        session_factory, uid, bbva, amount=Decimal("824.77"), flow=TransactionFlow.OUT,
+        session_factory,
+        uid,
+        bbva,
+        amount=Decimal("824.77"),
+        flow=TransactionFlow.OUT,
         description="ADEUDO MENSUAL DE TARJETA",
     )
     other = await _seed_tx(
-        session_factory, uid, bbva, amount=Decimal("43.93"), flow=TransactionFlow.OUT,
+        session_factory,
+        uid,
+        bbva,
+        amount=Decimal("43.93"),
+        flow=TransactionFlow.OUT,
         description="ADEUDO MENSUAL DE TARJETA",
     )
 
@@ -341,9 +374,7 @@ def test_classify_operacion_financiada_bare_is_transfer() -> None:
     """La 'OPERACIÓN FINANCIADA' a secas (evento de CREACIÓN de deuda, sin
     'tarjeta') sigue siendo movimiento interno neutro — no es una cuota."""
     assert (
-        classify_import_flow(
-            bank_sign=-1, text="OPERACIÓN FINANCIADA", category_is_transfer=False
-        )
+        classify_import_flow(bank_sign=-1, text="OPERACIÓN FINANCIADA", category_is_transfer=False)
         == TransactionFlow.TRANSFER_OUT
     )
 
@@ -399,16 +430,17 @@ def test_classify_category_transfer_overrides() -> None:
 def test_classify_no_sign_no_signal_is_unclassified() -> None:
     """Sin signo, sin texto direccional y sin categoría → None (neutro, no
     revisión): contribuye 0, igual que una tx sin categoría."""
-    assert (
-        classify_import_flow(bank_sign=0, text="COMPRA", category_is_transfer=False) is None
-    )
+    assert classify_import_flow(bank_sign=0, text="COMPRA", category_is_transfer=False) is None
 
 
 def test_classify_no_sign_falls_back_to_category_kind() -> None:
     """Extracto sólo-magnitud: la dirección sale del kind de la categoría."""
     assert (
         classify_import_flow(
-            bank_sign=0, text="COMPRA", category_is_transfer=False, category_kind=CategoryKind.EXPENSE
+            bank_sign=0,
+            text="COMPRA",
+            category_is_transfer=False,
+            category_kind=CategoryKind.EXPENSE,
         )
         == TransactionFlow.OUT
     )

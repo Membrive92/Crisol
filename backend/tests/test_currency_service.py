@@ -223,5 +223,3 @@ async def test_refresh_rates_propagates_unavailable(test_engine) -> None:  # typ
             pytest.raises(FrankfurterUnavailableError),
         ):
             await service.refresh_rates(db, target_date=date(2026, 4, 1), quotes=["USD"])
-
-

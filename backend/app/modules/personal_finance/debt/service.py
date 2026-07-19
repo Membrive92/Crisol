@@ -711,9 +711,7 @@ async def compute_category_summary(
     exacta `[date_from 00:00, date_to 23:59:59]`.
     """
     today = _today_utc()
-    custom_bounds = (
-        (date_from, date_to) if range_ == "custom" and date_from and date_to else None
-    )
+    custom_bounds = (date_from, date_to) if range_ == "custom" and date_from and date_to else None
     range_start, range_end, monthly_buckets = _resolve_range(
         range_, anchor, today, custom_bounds=custom_bounds
     )

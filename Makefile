@@ -37,7 +37,7 @@ dev-backend: ## Solo backend (FastAPI)
 
 lint: ## Lint frontend + backend
 	pnpm lint
-	cd backend && ruff check app/
+	cd backend && ruff check app tests && black --check app tests
 
 typecheck: ## TypeScript + mypy
 	pnpm typecheck

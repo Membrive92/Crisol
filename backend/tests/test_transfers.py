@@ -102,9 +102,7 @@ async def test_link_two_transactions_as_transfer(client: AsyncClient) -> None:
     assert in_tx["transfer_pair_id"] == out_id
 
 
-async def _make_linked_pair(
-    client: AsyncClient, email: str
-) -> tuple[str, str, str]:
+async def _make_linked_pair(client: AsyncClient, email: str) -> tuple[str, str, str]:
     """Helper: usuario con dos cuentas + par de transferencia enlazado.
     Devuelve (token, out_id, in_id)."""
     token, _cat, acc_a, acc_b = await _setup_user_with_two_accounts(client, email)
@@ -978,9 +976,7 @@ async def test_from_source_debt_400_when_parent_card_archived(
         headers=headers,
     )
     parent_id = parent.json()["id"]
-    arch = await client.put(
-        f"/accounts/{parent_id}", json={"is_archived": True}, headers=headers
-    )
+    arch = await client.put(f"/accounts/{parent_id}", json={"is_archived": True}, headers=headers)
     assert arch.status_code == 200
     source_id = await _create_tx(
         client,

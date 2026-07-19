@@ -207,6 +207,4 @@ async def test_debt_dashboard_summary_period_scoped(
     # headline es negativo (pasivo): `before` tiene MÁS deuda (más negativo).
     assert before.headline_value < after.headline_value
     # La diferencia es exactamente el principal de la cuota pagada en medio.
-    assert after.headline_value - before.headline_value == first_principal.quantize(
-        Decimal("0.01")
-    )
+    assert after.headline_value - before.headline_value == first_principal.quantize(Decimal("0.01"))

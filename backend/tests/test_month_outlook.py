@@ -30,6 +30,7 @@ def _shift_month(d: date, months_back: int) -> date:
     year, month0 = divmod(total, 12)
     return date(year, month0 + 1, 15)
 
+
 _TODAY = datetime.now(UTC).date()
 _MONTH_START = date(_TODAY.year, _TODAY.month, 1)
 
@@ -64,8 +65,24 @@ async def test_liquid_balance_excludes_non_liquid(session_factory) -> None:  # t
     """Sólo bank/savings/cash cuentan como colchón; brokerage/crypto no."""
     uid = await _seed_user(session_factory)
     async with session_factory() as db:
-        db.add(_account(uid, name="BBVA", nature=AccountNature.ASSET, type=AccountType.BANK, opening_balance=Decimal("1000")))
-        db.add(_account(uid, name="IBKR", nature=AccountNature.ASSET, type=AccountType.BROKERAGE, opening_balance=Decimal("5000")))
+        db.add(
+            _account(
+                uid,
+                name="BBVA",
+                nature=AccountNature.ASSET,
+                type=AccountType.BANK,
+                opening_balance=Decimal("1000"),
+            )
+        )
+        db.add(
+            _account(
+                uid,
+                name="IBKR",
+                nature=AccountNature.ASSET,
+                type=AccountType.BROKERAGE,
+                opening_balance=Decimal("5000"),
+            )
+        )
         await db.commit()
         m = await get_month_outlook(db, uid, currency="EUR")
     assert m.liquid_balance == Decimal("1000.00")  # brokerage fuera
@@ -79,11 +96,24 @@ async def test_committed_items_month_window(session_factory) -> None:  # type: i
     uid = await _seed_user(session_factory)
     loan_id = uuid.uuid4()
     async with session_factory() as db:
-        db.add(_account(uid, name="Cuenta", nature=AccountNature.ASSET, type=AccountType.BANK, opening_balance=Decimal("3000")))
         db.add(
             _account(
-                uid, id=loan_id, name="Préstamo", nature=AccountNature.LIABILITY,
-                type=AccountType.LOAN, apr=Decimal("0.05"), term_months=12,
+                uid,
+                name="Cuenta",
+                nature=AccountNature.ASSET,
+                type=AccountType.BANK,
+                opening_balance=Decimal("3000"),
+            )
+        )
+        db.add(
+            _account(
+                uid,
+                id=loan_id,
+                name="Préstamo",
+                nature=AccountNature.LIABILITY,
+                type=AccountType.LOAN,
+                apr=Decimal("0.05"),
+                term_months=12,
                 start_date=_MONTH_START,
             )
         )
@@ -92,16 +122,28 @@ async def test_committed_items_month_window(session_factory) -> None:  # type: i
         last_month_end = _MONTH_START - timedelta(days=1)
         db.add(
             LiabilityInstallment(
-                user_id=uid, account_id=loan_id, installment_index=1,
-                due_date=_MONTH_START, payment=Decimal("200"), interest=Decimal("20"),
-                principal=Decimal("180"), remaining_balance=Decimal("1000"), paid_at=None,
+                user_id=uid,
+                account_id=loan_id,
+                installment_index=1,
+                due_date=_MONTH_START,
+                payment=Decimal("200"),
+                interest=Decimal("20"),
+                principal=Decimal("180"),
+                remaining_balance=Decimal("1000"),
+                paid_at=None,
             )
         )
         db.add(
             LiabilityInstallment(
-                user_id=uid, account_id=loan_id, installment_index=0,
-                due_date=last_month_end, payment=Decimal("200"), interest=Decimal("22"),
-                principal=Decimal("178"), remaining_balance=Decimal("1180"), paid_at=None,
+                user_id=uid,
+                account_id=loan_id,
+                installment_index=0,
+                due_date=last_month_end,
+                payment=Decimal("200"),
+                interest=Decimal("22"),
+                principal=Decimal("178"),
+                remaining_balance=Decimal("1180"),
+                paid_at=None,
             )
         )
         # Gasto fijo del mes (día 15) + gasto fijo apuntado al préstamo (MUX out).
@@ -131,7 +173,14 @@ async def test_runway_positive_happy_path(session_factory) -> None:  # type: ign
     cat_id = uuid.uuid4()
     async with session_factory() as db:
         db.add(
-            _account(uid, id=bbva_id, name="BBVA", nature=AccountNature.ASSET, type=AccountType.BANK, opening_balance=Decimal("1200"))
+            _account(
+                uid,
+                id=bbva_id,
+                name="BBVA",
+                nature=AccountNature.ASSET,
+                type=AccountType.BANK,
+                opening_balance=Decimal("1200"),
+            )
         )
         db.add(Category(id=cat_id, user_id=uid, name="Supermercado", kind=CategoryKind.EXPENSE))
         await db.flush()
@@ -140,9 +189,13 @@ async def test_runway_positive_happy_path(session_factory) -> None:  # type: ign
             m = _shift_month(_TODAY, i)
             db.add(
                 Transaction(
-                    user_id=uid, account_id=bbva_id, amount=Decimal("100"), currency="EUR",
+                    user_id=uid,
+                    account_id=bbva_id,
+                    amount=Decimal("100"),
+                    currency="EUR",
                     occurred_at=datetime(m.year, m.month, m.day, 12, tzinfo=UTC),
-                    category_id=cat_id, flow=TransactionFlow.OUT,
+                    category_id=cat_id,
+                    flow=TransactionFlow.OUT,
                 )
             )
         await db.commit()
@@ -158,7 +211,15 @@ async def test_runway_none_without_structural_base(session_factory) -> None:  # 
     """Sin gasto estructural (usuario sin histórico) → runway None."""
     uid = await _seed_user(session_factory)
     async with session_factory() as db:
-        db.add(_account(uid, name="BBVA", nature=AccountNature.ASSET, type=AccountType.BANK, opening_balance=Decimal("5000")))
+        db.add(
+            _account(
+                uid,
+                name="BBVA",
+                nature=AccountNature.ASSET,
+                type=AccountType.BANK,
+                opening_balance=Decimal("5000"),
+            )
+        )
         await db.commit()
         m = await get_month_outlook(db, uid, currency="EUR")
     assert m.runway_months is None
@@ -166,11 +227,25 @@ async def test_runway_none_without_structural_base(session_factory) -> None:  # 
 
 
 def _fixed(
-    uid: uuid.UUID, merchant: str, amount: Decimal, *, next_due: date, account_id: uuid.UUID | None = None
+    uid: uuid.UUID,
+    merchant: str,
+    amount: Decimal,
+    *,
+    next_due: date,
+    account_id: uuid.UUID | None = None,
 ) -> FixedExpense:
     return FixedExpense(
-        user_id=uid, merchant=merchant, raw_description=merchant, amount=amount,
-        currency="EUR", cadence_days=30, next_due=next_due,
-        status=FixedExpenseStatus.CONFIRMED, account_id=account_id,
-        first_seen_at=_MONTH_START, last_seen_at=_MONTH_START, occurrence_count=3, confidence=0.9,
+        user_id=uid,
+        merchant=merchant,
+        raw_description=merchant,
+        amount=amount,
+        currency="EUR",
+        cadence_days=30,
+        next_due=next_due,
+        status=FixedExpenseStatus.CONFIRMED,
+        account_id=account_id,
+        first_seen_at=_MONTH_START,
+        last_seen_at=_MONTH_START,
+        occurrence_count=3,
+        confidence=0.9,
     )

@@ -94,17 +94,21 @@ async def test_position_history_last_point_matches_balances(client: AsyncClient)
     /accounts/balances (con cuentas sin cuadro, ambas fuentes son por
     movimientos y deben coincidir al céntimo)."""
     token = await _register(client, "pos_invariant@example.com")
-    bank = await _create_account(
-        client, token, name="BBVA", type="bank", opening_balance="1000.00"
-    )
+    bank = await _create_account(client, token, name="BBVA", type="bank", opening_balance="1000.00")
     card = await _create_account(
         client, token, name="Visa", type="credit_card", opening_balance="0.00"
     )
     # Todo en meses CERRADOS (hasta jun-2026) para que el último punto (jun)
     # contenga todos los movimientos, igual que el saldo all-time de balances.
-    await _post_tx(client, token, account_id=bank, amount="500.00", flow="IN", when="2026-03-10T12:00:00Z")
-    await _post_tx(client, token, account_id=bank, amount="200.00", flow="OUT", when="2026-04-12T12:00:00Z")
-    await _post_tx(client, token, account_id=card, amount="300.00", flow="OUT", when="2026-05-08T12:00:00Z")
+    await _post_tx(
+        client, token, account_id=bank, amount="500.00", flow="IN", when="2026-03-10T12:00:00Z"
+    )
+    await _post_tx(
+        client, token, account_id=bank, amount="200.00", flow="OUT", when="2026-04-12T12:00:00Z"
+    )
+    await _post_tx(
+        client, token, account_id=card, amount="300.00", flow="OUT", when="2026-05-08T12:00:00Z"
+    )
 
     balances = (await client.get("/accounts/balances", headers=_auth(token))).json()
     pos = (
@@ -125,11 +129,11 @@ async def test_position_history_last_point_matches_balances(client: AsyncClient)
 async def test_position_history_delta_period(client: AsyncClient) -> None:
     """Δ del periodo = neto último − neto primer punto de la ventana."""
     token = await _register(client, "pos_delta@example.com")
-    bank = await _create_account(
-        client, token, name="BBVA", type="bank", opening_balance="1000.00"
-    )
+    bank = await _create_account(client, token, name="BBVA", type="bank", opening_balance="1000.00")
     # Un ingreso en un mes intermedio: el neto sube entre el primer y último punto.
-    await _post_tx(client, token, account_id=bank, amount="400.00", flow="IN", when="2026-04-10T12:00:00Z")
+    await _post_tx(
+        client, token, account_id=bank, amount="400.00", flow="IN", when="2026-04-10T12:00:00Z"
+    )
 
     pos = (
         await client.get("/accounts/position-history?months_back=6", headers=_auth(token))
@@ -163,12 +167,14 @@ async def test_position_as_of_reflects_range_end_not_today(client: AsyncClient) 
     `date_to` (es una foto del período, no de hoy) y el Δ cuenta solo los
     movimientos DENTRO de `[date_from, date_to]`."""
     token = await _register(client, "asof_end@example.com")
-    bank = await _create_account(
-        client, token, name="BBVA", type="bank", opening_balance="1000.00"
+    bank = await _create_account(client, token, name="BBVA", type="bank", opening_balance="1000.00")
+    await _post_tx(
+        client, token, account_id=bank, amount="400.00", flow="IN", when="2026-04-10T12:00:00Z"
     )
-    await _post_tx(client, token, account_id=bank, amount="400.00", flow="IN", when="2026-04-10T12:00:00Z")
     # Movimiento POSTERIOR al rango: no debe entrar en la foto a fecha.
-    await _post_tx(client, token, account_id=bank, amount="100.00", flow="OUT", when="2026-06-20T12:00:00Z")
+    await _post_tx(
+        client, token, account_id=bank, amount="100.00", flow="OUT", when="2026-06-20T12:00:00Z"
+    )
 
     r = await client.get(
         "/accounts/position-as-of",
@@ -192,11 +198,13 @@ async def test_position_as_of_delta_excludes_movements_before_range(client: Asyn
     """Un movimiento ANTERIOR a `date_from` entra en la base (valor a fecha)
     pero NO en el Δ del rango."""
     token = await _register(client, "asof_before@example.com")
-    bank = await _create_account(
-        client, token, name="BBVA", type="bank", opening_balance="1000.00"
+    bank = await _create_account(client, token, name="BBVA", type="bank", opening_balance="1000.00")
+    await _post_tx(
+        client, token, account_id=bank, amount="200.00", flow="IN", when="2026-03-05T12:00:00Z"
     )
-    await _post_tx(client, token, account_id=bank, amount="200.00", flow="IN", when="2026-03-05T12:00:00Z")
-    await _post_tx(client, token, account_id=bank, amount="500.00", flow="IN", when="2026-05-15T12:00:00Z")
+    await _post_tx(
+        client, token, account_id=bank, amount="500.00", flow="IN", when="2026-05-15T12:00:00Z"
+    )
 
     r = await client.get(
         "/accounts/position-as-of",

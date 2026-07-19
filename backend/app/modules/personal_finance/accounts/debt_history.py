@@ -184,10 +184,7 @@ async def _compute_historical_points(
     liability_ids = [liab.id for liab in nonsched_liabs]
     # Opening (en divisa efectiva) sólo de los pasivos SIN cuadro.
     sum_opening = sum(
-        (
-            liab.opening_balance * fx_factor.get(liab.id, Decimal("1"))
-            for liab in nonsched_liabs
-        ),
+        (liab.opening_balance * fx_factor.get(liab.id, Decimal("1")) for liab in nonsched_liabs),
         Decimal("0"),
     )
 
@@ -598,9 +595,7 @@ async def compute_debt_history(
     #    + factores de conversión a la divisa efectiva.
     from app.modules.personal_finance.accounts.repository import get_balances_for_user
 
-    insts_by_account = await installments_by_account(
-        db, user_id, [liab.id for liab in liabilities]
-    )
+    insts_by_account = await installments_by_account(db, user_id, [liab.id for liab in liabilities])
     movements = await get_balances_for_user(db, user_id)
 
     # fx_factor: 1 en modo nativo o misma divisa; tasa de HOY si convertimos;

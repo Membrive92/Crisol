@@ -825,9 +825,7 @@ async def test_list_debt_only_filters_to_debt_transactions(client: AsyncClient) 
     all_tx = await client.get("/transactions", headers=_auth(token))
     assert all_tx.json()["total"] == 2
 
-    r = await client.get(
-        "/transactions", params={"debt_only": "true"}, headers=_auth(token)
-    )
+    r = await client.get("/transactions", params={"debt_only": "true"}, headers=_auth(token))
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["total"] == 1

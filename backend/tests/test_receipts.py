@@ -85,9 +85,7 @@ def _auth(token: str) -> dict[str, str]:
 async def _create_category(
     client: AsyncClient, token: str, name: str, kind: str = "expense"
 ) -> str:
-    r = await client.post(
-        "/categories", json={"name": name, "kind": kind}, headers=_auth(token)
-    )
+    r = await client.post("/categories", json={"name": name, "kind": kind}, headers=_auth(token))
     assert r.status_code in (200, 201), r.text
     return str(r.json()["id"])
 
@@ -114,9 +112,7 @@ async def _confirm(
         "currency": "EUR",
         **extra,
     }
-    return await client.post(
-        f"/receipts/{receipt_id}/confirm", json=payload, headers=_auth(token)
-    )
+    return await client.post(f"/receipts/{receipt_id}/confirm", json=payload, headers=_auth(token))
 
 
 async def _only_tx(client: AsyncClient, token: str) -> dict[str, Any]:

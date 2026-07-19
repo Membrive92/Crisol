@@ -161,16 +161,20 @@ async def installments_by_account(
     if not account_ids:
         return {}
     rows = (
-        await db.execute(
-            select(LiabilityInstallment)
-            .where(LiabilityInstallment.user_id == user_id)
-            .where(LiabilityInstallment.account_id.in_(account_ids))
-            .order_by(
-                LiabilityInstallment.account_id,
-                LiabilityInstallment.installment_index.asc(),
+        (
+            await db.execute(
+                select(LiabilityInstallment)
+                .where(LiabilityInstallment.user_id == user_id)
+                .where(LiabilityInstallment.account_id.in_(account_ids))
+                .order_by(
+                    LiabilityInstallment.account_id,
+                    LiabilityInstallment.installment_index.asc(),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     by_account: dict[uuid.UUID, list[LiabilityInstallment]] = {}
     for inst in rows:
         by_account.setdefault(inst.account_id, []).append(inst)

@@ -32,9 +32,7 @@ def _debt_only_condition(own_account: Any, partner_account: Any) -> Any:
     `own_account` (la cuenta propia) y a `partner_account` (la de la pareja).
     Misma señal que la columna `is_debt_pair` del listado, más el rol.
     """
-    is_debt = Category.role.in_(
-        [CategoryRole.DEBT_PAYMENT, CategoryRole.DEBT_INTEREST]
-    ) | (
+    is_debt = Category.role.in_([CategoryRole.DEBT_PAYMENT, CategoryRole.DEBT_INTEREST]) | (
         Transaction.transfer_pair_id.is_not(None)
         & (
             (own_account.nature == AccountNature.LIABILITY)
@@ -47,6 +45,7 @@ def _debt_only_condition(own_account: Any, partner_account: Any) -> Any:
         func.coalesce(partner_account.counts_as_debt, True).is_(False)
     )
     return is_debt & ~from_non_debt
+
 
 # `active`  → `deleted_at IS NULL`  (default — listado normal, dashboard).
 # `trashed` → `deleted_at IS NOT NULL` (endpoint /trash, restore, purge).
@@ -198,9 +197,9 @@ async def list_transactions(
         .outerjoin(partner_account, partner_account.id == partner_tx.account_id)
     )
     if debt_only:
-        items_query = items_query.outerjoin(
-            Category, Category.id == Transaction.category_id
-        ).where(_debt_only_condition(own_account, partner_account))
+        items_query = items_query.outerjoin(Category, Category.id == Transaction.category_id).where(
+            _debt_only_condition(own_account, partner_account)
+        )
     items_query = _scope(
         items_query,
         user_id,

@@ -127,12 +127,20 @@ async def test_summary_reports_global_month_bounds(client: AsyncClient) -> None:
     token, account_id = await _register(client, "dash-bounds@example.com")
     cat = await _make_category(client, token, name="Comida", kind="expense")
     await _make_tx(
-        client, token, account_id, amount="10.00",
-        occurred_at="2025-02-15T10:00:00Z", category_id=cat,
+        client,
+        token,
+        account_id,
+        amount="10.00",
+        occurred_at="2025-02-15T10:00:00Z",
+        category_id=cat,
     )
     await _make_tx(
-        client, token, account_id, amount="20.00",
-        occurred_at="2026-05-20T10:00:00Z", category_id=cat,
+        client,
+        token,
+        account_id,
+        amount="20.00",
+        occurred_at="2026-05-20T10:00:00Z",
+        category_id=cat,
     )
 
     # Sin filtro: bounds globales.
@@ -380,9 +388,7 @@ async def test_by_category_kind_classifies_by_flow_not_category(
     )
 
     expense_donut = (
-        await client.get(
-            "/dashboard/by-category", params={"kind": "expense"}, headers=_auth(token)
-        )
+        await client.get("/dashboard/by-category", params={"kind": "expense"}, headers=_auth(token))
     ).json()
     # El único gasto es el OUT, que vive en la categoría de ingreso "Nómina".
     assert len(expense_donut) == 1
@@ -390,9 +396,7 @@ async def test_by_category_kind_classifies_by_flow_not_category(
     assert Decimal(expense_donut[0]["total"]) == Decimal("30.00")
 
     income_donut = (
-        await client.get(
-            "/dashboard/by-category", params={"kind": "income"}, headers=_auth(token)
-        )
+        await client.get("/dashboard/by-category", params={"kind": "income"}, headers=_auth(token))
     ).json()
     # El único ingreso es el IN, que vive en la categoría de gasto "Compras".
     assert len(income_donut) == 1
@@ -457,20 +461,36 @@ async def test_by_month_custom_range_partial_boundary_months(client: AsyncClient
 
     # Mayo: una ANTES del 15 (fuera) + una DESPUÉS del 15 (dentro).
     await _make_tx(
-        client, token, account_id, amount="500.00", occurred_at="2026-05-10T10:00:00Z",
+        client,
+        token,
+        account_id,
+        amount="500.00",
+        occurred_at="2026-05-10T10:00:00Z",
         category_id=expense,
     )
     await _make_tx(
-        client, token, account_id, amount="200.00", occurred_at="2026-05-20T10:00:00Z",
+        client,
+        token,
+        account_id,
+        amount="200.00",
+        occurred_at="2026-05-20T10:00:00Z",
         category_id=expense,
     )
     # Junio: una ANTES del 15 (dentro) + una DESPUÉS del 15 (fuera).
     await _make_tx(
-        client, token, account_id, amount="1000.00", occurred_at="2026-06-05T10:00:00Z",
+        client,
+        token,
+        account_id,
+        amount="1000.00",
+        occurred_at="2026-06-05T10:00:00Z",
         category_id=income,
     )
     await _make_tx(
-        client, token, account_id, amount="9999.00", occurred_at="2026-06-20T10:00:00Z",
+        client,
+        token,
+        account_id,
+        amount="9999.00",
+        occurred_at="2026-06-20T10:00:00Z",
         category_id=income,
     )
 
@@ -734,18 +754,30 @@ async def test_summary_previous_period_is_exact_calendar_month(client: AsyncClie
 
     # Período actual: marzo 2026.
     await _make_tx(
-        client, token, account_id, amount="100.00", occurred_at="2026-03-10T10:00:00Z",
+        client,
+        token,
+        account_id,
+        amount="100.00",
+        occurred_at="2026-03-10T10:00:00Z",
         category_id=income_cat,
     )
     # Febrero (período anterior natural): SÍ cuenta.
     await _make_tx(
-        client, token, account_id, amount="70.00", occurred_at="2026-02-15T10:00:00Z",
+        client,
+        token,
+        account_id,
+        amount="70.00",
+        occurred_at="2026-02-15T10:00:00Z",
         category_id=income_cat,
     )
     # 31-ene: la ventana de igual longitud [~29-ene … 28-feb] la colaba, pero
     # NO es febrero → con el mes natural NO cuenta.
     await _make_tx(
-        client, token, account_id, amount="999.00", occurred_at="2026-01-31T10:00:00Z",
+        client,
+        token,
+        account_id,
+        amount="999.00",
+        occurred_at="2026-01-31T10:00:00Z",
         category_id=income_cat,
     )
 

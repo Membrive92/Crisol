@@ -430,9 +430,7 @@ def classify_import_flow(
     # externo (W-01): una nómina/pensión por transferencia es ingreso real. El
     # override NO pisa un `category_is_transfer` explícito (señal más fuerte que
     # el heurístico de descripción).
-    text_says_internal = is_internal_movement_text(text) and not _has_external_income_marker(
-        text
-    )
+    text_says_internal = is_internal_movement_text(text) and not _has_external_income_marker(text)
     # PHASE-38 (decisión del usuario): la CUOTA de una compra a plazos con
     # tarjeta ("OPERACIÓN FINANCIADA CON TARJETA") SÍ cuenta como gasto real
     # del mes (visión de caja), a diferencia de la liquidación de tarjeta

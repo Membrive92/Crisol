@@ -115,12 +115,8 @@ async def get_transaction_month_bounds(
             # mes no dependa de la TZ de la sesión de PostgreSQL, igual que
             # debt_history/debt_health. Sin esto, min/max cerca de frontera de
             # mes podían caer en el mes contiguo según la TZ del servidor.
-            func.to_char(
-                func.min(func.timezone("UTC", Transaction.occurred_at)), "YYYY-MM"
-            ),
-            func.to_char(
-                func.max(func.timezone("UTC", Transaction.occurred_at)), "YYYY-MM"
-            ),
+            func.to_char(func.min(func.timezone("UTC", Transaction.occurred_at)), "YYYY-MM"),
+            func.to_char(func.max(func.timezone("UTC", Transaction.occurred_at)), "YYYY-MM"),
         )
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
@@ -544,9 +540,9 @@ async def get_category_monthly_evolution(
     ordenado cronológicamente. Meses sin actividad se omiten — el
     frontend rellena gaps si lo necesita."""
     # AUDIT-2026-07 (LOW): bucket de mes en UTC (consistente con el resto).
-    month_col = func.to_char(
-        func.timezone("UTC", Transaction.occurred_at), "YYYY-MM"
-    ).label("month")
+    month_col = func.to_char(func.timezone("UTC", Transaction.occurred_at), "YYYY-MM").label(
+        "month"
+    )
     amount = _amount_expr(target_currency)
     query = (
         select(month_col, func.coalesce(func.sum(amount), Decimal("0")))

@@ -129,6 +129,7 @@ async def _validate_debt_category_link(
 
 DEFAULT_REFERENCE_CURRENCY = "EUR"
 
+
 async def list_accounts(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -675,9 +676,9 @@ async def get_balances(
             if conv_balance is None:
                 conv_opening = None
             elif display_balance != 0:
-                conv_opening = (
-                    account.opening_balance * conv_balance / display_balance
-                ).quantize(Decimal("0.01"))
+                conv_opening = (account.opening_balance * conv_balance / display_balance).quantize(
+                    Decimal("0.01")
+                )
             else:
                 conv_opening = await _convert_at_today(
                     db,
@@ -1162,18 +1163,14 @@ async def pay_installments_by_principal(
         if inst.paid_at is not None:
             continue
         if inst.principal <= remaining + tolerance:
-            await repo_mark_paid(
-                db, inst, paid_at=when, paid_transaction_id=paid_transaction_id
-            )
+            await repo_mark_paid(db, inst, paid_at=when, paid_transaction_id=paid_transaction_id)
             remaining -= inst.principal
             covered += inst.principal
             marked += 1
         else:
             break
 
-    outstanding = schedule_outstanding(
-        await repo_list_installments(db, account_id, user_id)
-    )
+    outstanding = schedule_outstanding(await repo_list_installments(db, account_id, user_id))
     uncovered = principal_amount - covered
     if uncovered < 0:
         uncovered = Decimal("0")

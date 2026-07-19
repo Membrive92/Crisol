@@ -92,9 +92,8 @@ def _recurrence_window(
     anchor_month_complete = anchor_date.day == last_day
     months_back_to_last_complete = 0 if anchor_month_complete else 1
     # `window_end` = último microsegundo del último mes completo.
-    window_end = (
-        _month_floor_shift(anchor, months_back_to_last_complete - 1)
-        - timedelta(microseconds=1)
+    window_end = _month_floor_shift(anchor, months_back_to_last_complete - 1) - timedelta(
+        microseconds=1
     )
     window_start = _month_floor_shift(window_end, RECURRENCE_WINDOW_MONTHS - 1)
     return window_start, window_end
@@ -403,7 +402,9 @@ async def get_month_outlook(
     window_start, window_end = _recurrence_window(None, now=now)
 
     accounts = await list_accounts(db, user_id, include_archived=False)
-    reference = (target_currency or currency or (accounts[0].currency if accounts else "EUR")).upper()
+    reference = (
+        target_currency or currency or (accounts[0].currency if accounts else "EUR")
+    ).upper()
 
     if target_currency is not None:
         await ensure_rates_for_user_scope(
@@ -502,11 +503,7 @@ async def get_month_outlook(
         window_start=window_start,
         window_end=window_end,
     )
-    runway = (
-        float(liquid_balance / monthly_avg)
-        if monthly_avg > 0 and liquid_balance > 0
-        else None
-    )
+    runway = float(liquid_balance / monthly_avg) if monthly_avg > 0 and liquid_balance > 0 else None
 
     return MonthOutlookResponse(
         reference_currency=reference,

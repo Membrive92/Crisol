@@ -42,18 +42,48 @@ def _dt(y: int, m: int, d: int, hh: int = 0, mm: int = 0, ss: int = 0) -> dateti
     [
         # Bug A — "Año en curso" (selector emite 31/12), hoy 17/07/2026.
         # Antes: jul–dic 2026 (1 mes con datos). Ahora: ene–jun (6 completos).
-        (_dt(2026, 12, 31, 23, 59, 59), _dt(2026, 7, 17), date(2026, 1, 1), date(2026, 6, 30), "año en curso"),
+        (
+            _dt(2026, 12, 31, 23, 59, 59),
+            _dt(2026, 7, 17),
+            date(2026, 1, 1),
+            date(2026, 6, 30),
+            "año en curso",
+        ),
         # Bug B — custom 15/05→15/06: junio truncado NO entra (consumía holgura).
-        (_dt(2026, 6, 15, 23, 59, 59), _dt(2026, 7, 17), date(2025, 12, 1), date(2026, 5, 31), "custom mid-mes"),
+        (
+            _dt(2026, 6, 15, 23, 59, 59),
+            _dt(2026, 7, 17),
+            date(2025, 12, 1),
+            date(2026, 5, 31),
+            "custom mid-mes",
+        ),
         # Off-by-one — "Año 2025" (pasado): diciembre ES un mes completo visto
         # desde 2026 y SÍ entra. El código naíf del plan lo excluía (jun–nov).
-        (_dt(2025, 12, 31, 23, 59, 59), _dt(2026, 7, 17), date(2025, 7, 1), date(2025, 12, 31), "año pasado completo"),
+        (
+            _dt(2025, 12, 31, 23, 59, 59),
+            _dt(2026, 7, 17),
+            date(2025, 7, 1),
+            date(2025, 12, 31),
+            "año pasado completo",
+        ),
         # Rango que cae justo en fin de mes pasado → ese mes entra completo.
-        (_dt(2026, 6, 30, 23, 59, 59), _dt(2026, 7, 17), date(2026, 1, 1), date(2026, 6, 30), "fin de mes exacto"),
+        (
+            _dt(2026, 6, 30, 23, 59, 59),
+            _dt(2026, 7, 17),
+            date(2026, 1, 1),
+            date(2026, 6, 30),
+            "fin de mes exacto",
+        ),
         # Sin rango (histórico abierto): meses completos hasta el anterior a hoy.
         (None, _dt(2026, 7, 17), date(2026, 1, 1), date(2026, 6, 30), "rango abierto"),
         # Mes en curso seleccionado (julio parcial) → se excluye, ene–jun.
-        (_dt(2026, 7, 31, 23, 59, 59), _dt(2026, 7, 17), date(2026, 1, 1), date(2026, 6, 30), "mes en curso"),
+        (
+            _dt(2026, 7, 31, 23, 59, 59),
+            _dt(2026, 7, 17),
+            date(2026, 1, 1),
+            date(2026, 6, 30),
+            "mes en curso",
+        ),
     ],
 )
 def test_recurrence_window(
@@ -159,9 +189,7 @@ async def _patch_category(
 ) -> dict[str, Any]:
     # El router expone PUT con schema parcial (CategoryUpdate), así que un
     # PUT con sólo el campo a tocar actualiza sin pisar el resto.
-    r = await client.put(
-        f"/categories/{category_id}", json=fields, headers=_auth(token)
-    )
+    r = await client.put(f"/categories/{category_id}", json=fields, headers=_auth(token))
     assert r.status_code == 200, r.text
     return dict(r.json())
 
@@ -229,17 +257,31 @@ async def test_split_recurring_vs_oneoff_and_invariant(client: AsyncClient) -> N
     # Supermercado ~100 € cada mes ene–jun → recurrente (estructural).
     for month in range(1, 7):
         await _post_tx(
-            client, token, account_id=acc, amount="100.00", flow="OUT",
-            when=f"2026-0{month}-15T12:00:00Z", category_id=market["id"],
+            client,
+            token,
+            account_id=acc,
+            amount="100.00",
+            flow="OUT",
+            when=f"2026-0{month}-15T12:00:00Z",
+            category_id=market["id"],
         )
     # Dentista 500 € sólo en junio → puntual.
     await _post_tx(
-        client, token, account_id=acc, amount="500.00", flow="OUT",
-        when="2026-06-20T12:00:00Z", category_id=dentist["id"],
+        client,
+        token,
+        account_id=acc,
+        amount="500.00",
+        flow="OUT",
+        when="2026-06-20T12:00:00Z",
+        category_id=dentist["id"],
     )
     # Ingreso de junio para las tasas de ahorro.
     await _post_tx(
-        client, token, account_id=acc, amount="2000.00", flow="IN",
+        client,
+        token,
+        account_id=acc,
+        amount="2000.00",
+        flow="IN",
         when="2026-06-01T09:00:00Z",
     )
 
@@ -273,8 +315,13 @@ async def test_debt_category_is_structural(client: AsyncClient) -> None:
     acc = await _create_account(client, token)
     loan = await _create_category(client, token, name="Cuota préstamo", role="DEBT_PAYMENT")
     await _post_tx(
-        client, token, account_id=acc, amount="200.00", flow="OUT",
-        when="2026-06-10T12:00:00Z", category_id=loan["id"],
+        client,
+        token,
+        account_id=acc,
+        amount="200.00",
+        flow="OUT",
+        when="2026-06-10T12:00:00Z",
+        category_id=loan["id"],
     )
     body = await _expense_structure(client, token)
     assert Decimal(body["structural_total"]) == Decimal("200.00")
@@ -288,8 +335,14 @@ async def test_override_true_forces_exceptional(client: AsyncClient) -> None:
     acc = await _create_account(client, token)
     loan = await _create_category(client, token, name="Cuota préstamo", role="DEBT_PAYMENT")
     await _post_tx(
-        client, token, account_id=acc, amount="200.00", flow="OUT",
-        when="2026-06-10T12:00:00Z", category_id=loan["id"], is_exceptional=True,
+        client,
+        token,
+        account_id=acc,
+        amount="200.00",
+        flow="OUT",
+        when="2026-06-10T12:00:00Z",
+        category_id=loan["id"],
+        is_exceptional=True,
     )
     body = await _expense_structure(client, token)
     assert Decimal(body["structural_total"]) == Decimal("0.00")
@@ -303,8 +356,14 @@ async def test_override_false_forces_structural(client: AsyncClient) -> None:
     acc = await _create_account(client, token)
     misc = await _create_category(client, token, name="Reforma")
     await _post_tx(
-        client, token, account_id=acc, amount="800.00", flow="OUT",
-        when="2026-06-10T12:00:00Z", category_id=misc["id"], is_exceptional=False,
+        client,
+        token,
+        account_id=acc,
+        amount="800.00",
+        flow="OUT",
+        when="2026-06-10T12:00:00Z",
+        category_id=misc["id"],
+        is_exceptional=False,
     )
     body = await _expense_structure(client, token)
     assert Decimal(body["structural_total"]) == Decimal("800.00")
@@ -317,12 +376,21 @@ async def test_transfers_excluded_from_both_totals(client: AsyncClient) -> None:
     acc = await _create_account(client, token)
     misc = await _create_category(client, token, name="Varios")
     await _post_tx(
-        client, token, account_id=acc, amount="300.00", flow="OUT",
-        when="2026-06-05T12:00:00Z", category_id=misc["id"],
+        client,
+        token,
+        account_id=acc,
+        amount="300.00",
+        flow="OUT",
+        when="2026-06-05T12:00:00Z",
+        category_id=misc["id"],
     )
     # Transferencia interna (no cashflow).
     await _post_tx(
-        client, token, account_id=acc, amount="1000.00", flow="TRANSFER_OUT",
+        client,
+        token,
+        account_id=acc,
+        amount="1000.00",
+        flow="TRANSFER_OUT",
         when="2026-06-06T12:00:00Z",
     )
     body = await _expense_structure(client, token)
@@ -340,8 +408,13 @@ async def test_recurrence_unavailable_with_insufficient_history(client: AsyncCli
     # Sólo 2 meses con datos (mayo, junio) → por debajo del mínimo de 4.
     for month in (5, 6):
         await _post_tx(
-            client, token, account_id=acc, amount="100.00", flow="OUT",
-            when=f"2026-0{month}-15T12:00:00Z", category_id=market["id"],
+            client,
+            token,
+            account_id=acc,
+            amount="100.00",
+            flow="OUT",
+            when=f"2026-0{month}-15T12:00:00Z",
+            category_id=market["id"],
         )
     body = await _expense_structure(client, token)
     assert body["window_months_with_data"] == 2
@@ -360,8 +433,13 @@ async def test_savings_rate_none_without_income(client: AsyncClient) -> None:
     acc = await _create_account(client, token)
     misc = await _create_category(client, token, name="Varios")
     await _post_tx(
-        client, token, account_id=acc, amount="120.00", flow="OUT",
-        when="2026-06-05T12:00:00Z", category_id=misc["id"],
+        client,
+        token,
+        account_id=acc,
+        amount="120.00",
+        flow="OUT",
+        when="2026-06-05T12:00:00Z",
+        category_id=misc["id"],
     )
     body = await _expense_structure(client, token)
     assert body["savings_rate_gross"] is None
@@ -393,12 +471,15 @@ async def test_category_override_structural_beats_heuristic(client: AsyncClient)
     heurística marcaría puntual (un one-off sin recurrencia)."""
     token = await _register(client, "ovr_cat_struct@example.com")
     acc = await _create_account(client, token)
-    cat = await _create_category(
-        client, token, name="Reforma", expense_nature="structural"
-    )
+    cat = await _create_category(client, token, name="Reforma", expense_nature="structural")
     await _post_tx(
-        client, token, account_id=acc, amount="800.00", flow="OUT",
-        when="2026-06-10T12:00:00Z", category_id=cat["id"],
+        client,
+        token,
+        account_id=acc,
+        amount="800.00",
+        flow="OUT",
+        when="2026-06-10T12:00:00Z",
+        category_id=cat["id"],
     )
     body = await _expense_structure(client, token)
     assert Decimal(body["structural_total"]) == Decimal("800.00")
@@ -412,25 +493,36 @@ async def test_category_override_exceptional_beats_rule_1(
     resuelve la limitación §2.5 (Netflix confirmado no arrastra todo Ocio)."""
     token = await _register(client, "ovr_cat_exc@example.com")
     acc = await _create_account(client, token)
-    ocio = await _create_category(
-        client, token, name="Ocio", expense_nature="exceptional"
-    )
+    ocio = await _create_category(client, token, name="Ocio", expense_nature="exceptional")
     user_id = uuid.UUID(ocio["user_id"])
     sm = async_sessionmaker(bind=test_engine, expire_on_commit=False)
     async with sm() as session:
         session.add(
             FixedExpense(
-                user_id=user_id, merchant="NETFLIX", raw_description="NETFLIX",
-                amount=Decimal("13.00"), currency="EUR", cadence_days=30,
-                next_due=date(2026, 8, 1), status=FixedExpenseStatus.CONFIRMED,
-                category_id=uuid.UUID(ocio["id"]), first_seen_at=date(2026, 1, 1),
-                last_seen_at=date(2026, 7, 1), occurrence_count=6, confidence=0.9,
+                user_id=user_id,
+                merchant="NETFLIX",
+                raw_description="NETFLIX",
+                amount=Decimal("13.00"),
+                currency="EUR",
+                cadence_days=30,
+                next_due=date(2026, 8, 1),
+                status=FixedExpenseStatus.CONFIRMED,
+                category_id=uuid.UUID(ocio["id"]),
+                first_seen_at=date(2026, 1, 1),
+                last_seen_at=date(2026, 7, 1),
+                occurrence_count=6,
+                confidence=0.9,
             )
         )
         await session.commit()
     await _post_tx(
-        client, token, account_id=acc, amount="13.00", flow="OUT",
-        when="2026-06-10T12:00:00Z", category_id=ocio["id"],
+        client,
+        token,
+        account_id=acc,
+        amount="13.00",
+        flow="OUT",
+        when="2026-06-10T12:00:00Z",
+        category_id=ocio["id"],
     )
     body = await _expense_structure(client, token)
     # El override de categoría (exceptional) gana a la regla 1 → puntual.
@@ -444,30 +536,30 @@ async def test_tx_override_beats_category_override(client: AsyncClient) -> None:
     puntual."""
     token = await _register(client, "ovr_tx_over_cat@example.com")
     acc = await _create_account(client, token)
-    cat = await _create_category(
-        client, token, name="Supermercado", expense_nature="structural"
-    )
+    cat = await _create_category(client, token, name="Supermercado", expense_nature="structural")
     await _post_tx(
-        client, token, account_id=acc, amount="100.00", flow="OUT",
-        when="2026-06-10T12:00:00Z", category_id=cat["id"], is_exceptional=True,
+        client,
+        token,
+        account_id=acc,
+        amount="100.00",
+        flow="OUT",
+        when="2026-06-10T12:00:00Z",
+        category_id=cat["id"],
+        is_exceptional=True,
     )
     body = await _expense_structure(client, token)
     assert Decimal(body["structural_total"]) == Decimal("0.00")
     assert Decimal(body["exceptional_total"]) == Decimal("100.00")
 
 
-async def test_explain_reasons_cover_the_cascade(
-    client: AsyncClient, test_engine: Any
-) -> None:
+async def test_explain_reasons_cover_the_cascade(client: AsyncClient, test_engine: Any) -> None:
     """El endpoint explain devuelve la `reason` correcta para cada rama de la
     cascada: override de categoría, reglas 1/2, regla 3, no-recurrente e
     historia insuficiente."""
     token = await _register(client, "explain_all@example.com")
     acc = await _create_account(client, token)
 
-    override = await _create_category(
-        client, token, name="Override", expense_nature="structural"
-    )
+    override = await _create_category(client, token, name="Override", expense_nature="structural")
     fixed = await _create_category(client, token, name="ConFijo")
     debt = await _create_category(client, token, name="Cuota", role="DEBT_PAYMENT")
     recurring = await _create_category(client, token, name="Recurrente")
@@ -479,11 +571,19 @@ async def test_explain_reasons_cover_the_cascade(
     async with sm() as session:
         session.add(
             FixedExpense(
-                user_id=user_id, merchant="GYM", raw_description="GYM",
-                amount=Decimal("30.00"), currency="EUR", cadence_days=30,
-                next_due=date(2026, 8, 1), status=FixedExpenseStatus.CONFIRMED,
-                category_id=uuid.UUID(fixed["id"]), first_seen_at=date(2026, 1, 1),
-                last_seen_at=date(2026, 7, 1), occurrence_count=6, confidence=0.9,
+                user_id=user_id,
+                merchant="GYM",
+                raw_description="GYM",
+                amount=Decimal("30.00"),
+                currency="EUR",
+                cadence_days=30,
+                next_due=date(2026, 8, 1),
+                status=FixedExpenseStatus.CONFIRMED,
+                category_id=uuid.UUID(fixed["id"]),
+                first_seen_at=date(2026, 1, 1),
+                last_seen_at=date(2026, 7, 1),
+                occurrence_count=6,
+                confidence=0.9,
             )
         )
         await session.commit()
@@ -492,21 +592,41 @@ async def test_explain_reasons_cover_the_cascade(
     async def _all_months(cat_id: str, amounts: list[str]) -> None:
         for month, amt in enumerate(amounts, start=1):
             await _post_tx(
-                client, token, account_id=acc, amount=amt, flow="OUT",
-                when=f"2026-0{month}-15T12:00:00Z", category_id=cat_id,
+                client,
+                token,
+                account_id=acc,
+                amount=amt,
+                flow="OUT",
+                when=f"2026-0{month}-15T12:00:00Z",
+                category_id=cat_id,
             )
 
     await _post_tx(
-        client, token, account_id=acc, amount="50.00", flow="OUT",
-        when="2026-06-15T12:00:00Z", category_id=override["id"],
+        client,
+        token,
+        account_id=acc,
+        amount="50.00",
+        flow="OUT",
+        when="2026-06-15T12:00:00Z",
+        category_id=override["id"],
     )
     await _post_tx(
-        client, token, account_id=acc, amount="30.00", flow="OUT",
-        when="2026-06-15T12:00:00Z", category_id=fixed["id"],
+        client,
+        token,
+        account_id=acc,
+        amount="30.00",
+        flow="OUT",
+        when="2026-06-15T12:00:00Z",
+        category_id=fixed["id"],
     )
     await _post_tx(
-        client, token, account_id=acc, amount="200.00", flow="OUT",
-        when="2026-06-15T12:00:00Z", category_id=debt["id"],
+        client,
+        token,
+        account_id=acc,
+        amount="200.00",
+        flow="OUT",
+        when="2026-06-15T12:00:00Z",
+        category_id=debt["id"],
     )
     # Recurrente: 6 meses estables ~100 → regla 3.
     await _all_months(recurring["id"], ["100.00"] * 6)
@@ -518,12 +638,22 @@ async def test_explain_reasons_cover_the_cascade(
     )
     # Corta: sólo mayo+junio (2 meses < 4) → insufficient_history.
     await _post_tx(
-        client, token, account_id=acc, amount="40.00", flow="OUT",
-        when="2026-05-15T12:00:00Z", category_id=short["id"],
+        client,
+        token,
+        account_id=acc,
+        amount="40.00",
+        flow="OUT",
+        when="2026-05-15T12:00:00Z",
+        category_id=short["id"],
     )
     await _post_tx(
-        client, token, account_id=acc, amount="40.00", flow="OUT",
-        when="2026-06-15T12:00:00Z", category_id=short["id"],
+        client,
+        token,
+        account_id=acc,
+        amount="40.00",
+        flow="OUT",
+        when="2026-06-15T12:00:00Z",
+        category_id=short["id"],
     )
 
     rows = await _explain(client, token)
@@ -547,12 +677,23 @@ async def test_explain_reports_tx_overrides_count(client: AsyncClient) -> None:
     acc = await _create_account(client, token)
     cat = await _create_category(client, token, name="Supermercado")
     await _post_tx(
-        client, token, account_id=acc, amount="100.00", flow="OUT",
-        when="2026-06-10T12:00:00Z", category_id=cat["id"], is_exceptional=True,
+        client,
+        token,
+        account_id=acc,
+        amount="100.00",
+        flow="OUT",
+        when="2026-06-10T12:00:00Z",
+        category_id=cat["id"],
+        is_exceptional=True,
     )
     await _post_tx(
-        client, token, account_id=acc, amount="80.00", flow="OUT",
-        when="2026-06-12T12:00:00Z", category_id=cat["id"],
+        client,
+        token,
+        account_id=acc,
+        amount="80.00",
+        flow="OUT",
+        when="2026-06-12T12:00:00Z",
+        category_id=cat["id"],
     )
     rows = await _explain(client, token)
     assert rows["Supermercado"]["tx_overrides"] == 1
@@ -580,20 +721,36 @@ async def test_seed_structural_ids_rules_1_and_2(
     async with sm() as session:
         session.add(
             FixedExpense(
-                user_id=user_id, merchant="GYM", raw_description="GYM CUOTA",
-                amount=Decimal("30.00"), currency="EUR", cadence_days=30,
-                next_due=date(2026, 8, 1), status=FixedExpenseStatus.CONFIRMED,
-                category_id=uuid.UUID(gym["id"]), first_seen_at=date(2026, 1, 1),
-                last_seen_at=date(2026, 7, 1), occurrence_count=6, confidence=0.9,
+                user_id=user_id,
+                merchant="GYM",
+                raw_description="GYM CUOTA",
+                amount=Decimal("30.00"),
+                currency="EUR",
+                cadence_days=30,
+                next_due=date(2026, 8, 1),
+                status=FixedExpenseStatus.CONFIRMED,
+                category_id=uuid.UUID(gym["id"]),
+                first_seen_at=date(2026, 1, 1),
+                last_seen_at=date(2026, 7, 1),
+                occurrence_count=6,
+                confidence=0.9,
             )
         )
         session.add(
             FixedExpense(
-                user_id=user_id, merchant="OTRO", raw_description="OTRO",
-                amount=Decimal("10.00"), currency="EUR", cadence_days=30,
-                next_due=date(2026, 8, 1), status=FixedExpenseStatus.PENDING,
-                category_id=uuid.UUID(pending["id"]), first_seen_at=date(2026, 1, 1),
-                last_seen_at=date(2026, 7, 1), occurrence_count=2, confidence=0.4,
+                user_id=user_id,
+                merchant="OTRO",
+                raw_description="OTRO",
+                amount=Decimal("10.00"),
+                currency="EUR",
+                cadence_days=30,
+                next_due=date(2026, 8, 1),
+                status=FixedExpenseStatus.PENDING,
+                category_id=uuid.UUID(pending["id"]),
+                first_seen_at=date(2026, 1, 1),
+                last_seen_at=date(2026, 7, 1),
+                occurrence_count=2,
+                confidence=0.4,
             )
         )
         await session.commit()

@@ -56,9 +56,7 @@ async def seed_structural_breakdown(
         .distinct()
     )
     debt_q = (
-        select(Category.id)
-        .where(Category.user_id == user_id)
-        .where(Category.role.in_(_DEBT_ROLES))
+        select(Category.id).where(Category.user_id == user_id).where(Category.role.in_(_DEBT_ROLES))
     )
     fixed_rows = (await db.execute(fixed_q)).scalars().all()
     debt_rows = (await db.execute(debt_q)).scalars().all()
@@ -67,9 +65,7 @@ async def seed_structural_breakdown(
     return fixed_ids, debt_ids
 
 
-async def seed_structural_category_ids(
-    db: AsyncSession, user_id: uuid.UUID
-) -> set[uuid.UUID]:
+async def seed_structural_category_ids(db: AsyncSession, user_id: uuid.UUID) -> set[uuid.UUID]:
     """Categorías estructurales por reglas 1 y 2 (unión).
 
     La regla 3 (recurrencia por importe estable) se calcula aparte en
@@ -97,9 +93,9 @@ async def monthly_expense_by_category(
     totales mensuales (un elemento por mes con actividad), lista para
     `classify_recurring_categories`.
     """
-    month_col = func.to_char(
-        func.timezone("UTC", Transaction.occurred_at), "YYYY-MM"
-    ).label("month")
+    month_col = func.to_char(func.timezone("UTC", Transaction.occurred_at), "YYYY-MM").label(
+        "month"
+    )
     amount = _amount_expr(target_currency)
     query = (
         select(Transaction.category_id, month_col, func.coalesce(func.sum(amount), Decimal("0")))
@@ -238,9 +234,7 @@ def is_structural_expr(structural_category_ids: set[uuid.UUID]) -> ColumnElement
     condiciones de la rama 2 dan NULL/False y cae a la heurística — correcto.
     """
     if structural_category_ids:
-        heuristic: ColumnElement[bool] = Transaction.category_id.in_(
-            list(structural_category_ids)
-        )
+        heuristic: ColumnElement[bool] = Transaction.category_id.in_(list(structural_category_ids))
     else:
         heuristic = literal(False)
     return case(
@@ -311,9 +305,9 @@ async def structural_monthly_avg(
     baja la media (comportamiento correcto). Sin ningún mes con gasto →
     0 (el caller lo trata como "sin base para runway").
     """
-    month_col = func.to_char(
-        func.timezone("UTC", Transaction.occurred_at), "YYYY-MM"
-    ).label("month")
+    month_col = func.to_char(func.timezone("UTC", Transaction.occurred_at), "YYYY-MM").label(
+        "month"
+    )
     amount = _amount_expr(target_currency)
     is_struct = is_structural_expr(structural_category_ids)
     structural_amount = case((is_struct, amount), else_=Decimal("0"))
@@ -403,6 +397,4 @@ async def exceptional_by_category(
     query = query.where(_is_internal_transfer().is_(False))
     query = query.order_by(total_col.desc())
     rows = (await db.execute(query)).all()
-    return [
-        (cid, name, color, icon, Decimal(total)) for cid, name, color, icon, total in rows
-    ]
+    return [(cid, name, color, icon, Decimal(total)) for cid, name, color, icon, total in rows]

@@ -958,7 +958,9 @@ async def test_summary_outstanding_and_balance_are_period_scoped(client: AsyncCl
 async def test_summary_outstanding_zero_without_debt(client: AsyncClient) -> None:
     """Sin pasivos con cuadro, `outstanding_at_end` = 0 y sin composición."""
     token = await _register(client, "summary_nooutstanding@example.com")
-    await _create_account(client, token, name="Cte", type="bank", currency="EUR", opening_balance="1000")
+    await _create_account(
+        client, token, name="Cte", type="bank", currency="EUR", opening_balance="1000"
+    )
     r = await client.get("/debt/category-summary?range=year", headers=_auth(token))
     body = r.json()
     assert Decimal(body["outstanding_at_end"]) == Decimal("0.00")

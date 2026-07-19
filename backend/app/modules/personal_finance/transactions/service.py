@@ -330,11 +330,7 @@ async def update_transaction(
     # flow (TRANSFER_IN/OUT) lo fija el par; relabelar la categoría de una
     # pata NO debe invertir el signo de su saldo. Cambiar la categoría de una
     # pata sigue permitido (no rompe el par), pero deja el flow intacto.
-    if (
-        "category_id" in payload
-        and "flow" not in payload
-        and transaction.transfer_pair_id is None
-    ):
+    if "category_id" in payload and "flow" not in payload and transaction.transfer_pair_id is None:
         new_cat = (
             await get_category_by_id(db, transaction.category_id, user_id)
             if transaction.category_id is not None

@@ -57,9 +57,7 @@ async def find_mirror_charge(
         Transaction.flow.in_([TransactionFlow.OUT, TransactionFlow.TRANSFER_OUT]),
         Transaction.flow.is_(None),
     )
-    distance = sa.func.abs(
-        sa.func.extract("epoch", Transaction.occurred_at - source.occurred_at)
-    )
+    distance = sa.func.abs(sa.func.extract("epoch", Transaction.occurred_at - source.occurred_at))
     query = (
         select(Transaction)
         .where(

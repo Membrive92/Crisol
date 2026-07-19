@@ -38,9 +38,9 @@ def is_inflow() -> ColumnElement[bool]:
 
 def _is_internal_transfer() -> ColumnElement[bool]:
     """Transferencia interna entre cuentas propias (neutra para ahorro/cashflow)."""
-    return Transaction.flow.in_(
-        [TransactionFlow.TRANSFER_IN, TransactionFlow.TRANSFER_OUT]
-    ) | (Transaction.flow.is_(None) & Category.is_transfer.is_(True))
+    return Transaction.flow.in_([TransactionFlow.TRANSFER_IN, TransactionFlow.TRANSFER_OUT]) | (
+        Transaction.flow.is_(None) & Category.is_transfer.is_(True)
+    )
 
 
 def signed_amount_expr(account: Any, paired_account: Any) -> ColumnElement[Decimal]:

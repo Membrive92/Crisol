@@ -69,7 +69,7 @@ def is_card_financed_op(description: str | None) -> bool:
     if not description:
         return False
     d = description.lower()
-    return ("operaci" in d and "financiada" in d and "tarjeta" in d)
+    return "operaci" in d and "financiada" in d and "tarjeta" in d
 
 
 @dataclass
@@ -119,16 +119,18 @@ class ReconcilePlan:
     liabilities: list[LiabilityPlan] = field(default_factory=list)
     skipped_payments: list[str] = field(default_factory=list)
     # Estado interno para el apply (no se serializa).
-    anchor_at: datetime = field(default_factory=lambda: datetime(2000, 1, 1, tzinfo=UTC), repr=False)
+    anchor_at: datetime = field(
+        default_factory=lambda: datetime(2000, 1, 1, tzinfo=UTC), repr=False
+    )
     schedules: dict[uuid.UUID, list[_ScheduleRow]] = field(default_factory=dict, repr=False)
     accounts_by_id: dict[uuid.UUID, Account] = field(default_factory=dict, repr=False)
     plan_by_id: dict[uuid.UUID, LiabilityPlan] = field(default_factory=dict, repr=False)
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "data_window_start": self.data_window_start.isoformat()
-            if self.data_window_start
-            else None,
+            "data_window_start": (
+                self.data_window_start.isoformat() if self.data_window_start else None
+            ),
             "liabilities": [
                 {
                     "name": lp.name,
@@ -138,12 +140,12 @@ class ReconcilePlan:
                     "anchored": lp.anchored,
                     "matched": lp.matched,
                     "assumed_unregistered_debt": str(lp.assumed_unregistered_debt),
-                    "outstanding_before": str(lp.outstanding_before)
-                    if lp.outstanding_before is not None
-                    else None,
-                    "outstanding_after": str(lp.outstanding_after)
-                    if lp.outstanding_after is not None
-                    else None,
+                    "outstanding_before": (
+                        str(lp.outstanding_before) if lp.outstanding_before is not None else None
+                    ),
+                    "outstanding_after": (
+                        str(lp.outstanding_after) if lp.outstanding_after is not None else None
+                    ),
                     "actions": [
                         {
                             "ix": a.installment_index,
@@ -153,9 +155,9 @@ class ReconcilePlan:
                             "reason": a.reason,
                             "tx": str(a.paid_transaction_id) if a.paid_transaction_id else None,
                             "tx_desc": a.payment_description,
-                            "tx_amount": str(a.payment_amount)
-                            if a.payment_amount is not None
-                            else None,
+                            "tx_amount": (
+                                str(a.payment_amount) if a.payment_amount is not None else None
+                            ),
                         }
                         for a in lp.actions
                     ],
@@ -181,17 +183,19 @@ async def _load_aportaciones(db: AsyncSession, user_id: uuid.UUID) -> list[Trans
     """Movimientos candidatos a aportación de deuda (amortización / cuota
     de tarjeta financiada), ordenados cronológicamente. Excluye papelera."""
     rows = (
-        await db.execute(
-            select(Transaction)
-            .where(Transaction.user_id == user_id)
-            .where(Transaction.deleted_at.is_(None))
-            .order_by(Transaction.occurred_at.asc(), Transaction.created_at.asc())
+        (
+            await db.execute(
+                select(Transaction)
+                .where(Transaction.user_id == user_id)
+                .where(Transaction.deleted_at.is_(None))
+                .order_by(Transaction.occurred_at.asc(), Transaction.created_at.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [
-        t
-        for t in rows
-        if is_loan_amortization(t.description) or is_card_financed_op(t.description)
+        t for t in rows if is_loan_amortization(t.description) or is_card_financed_op(t.description)
     ]
 
 
@@ -260,7 +264,9 @@ async def build_reconcile_plan(db: AsyncSession, user_id: uuid.UUID) -> Reconcil
                 .where(Account.nature == AccountNature.LIABILITY)
                 .where(Account.is_archived.is_(False))
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
 
     plan = ReconcilePlan(data_window_start=window_start)
@@ -464,7 +470,11 @@ async def build_reconcile_plan(db: AsyncSession, user_id: uuid.UUID) -> Reconcil
         # "before" = como estaba en BD (sólo cuotas ya pagadas en BD);
         # "after" = tras ancla + match de este plan.
         before_paid_principal = sum(
-            (r.principal for r in rows if r.existing is not None and r.existing.paid_at is not None),
+            (
+                r.principal
+                for r in rows
+                if r.existing is not None and r.existing.paid_at is not None
+            ),
             Decimal("0"),
         )
         total_principal = sum((r.principal for r in rows), Decimal("0"))
@@ -487,16 +497,12 @@ async def apply_reconcile_plan(db: AsyncSession, user_id: uuid.UUID, plan: Recon
         if lp.generate_schedule:
             await generate_installments_for_account(db, liab)
         # Recargar las cuotas reales (ya persistidas) por índice.
-        persisted = {
-            i.installment_index: i for i in await list_installments(db, liab.id, user_id)
-        }
+        persisted = {i.installment_index: i for i in await list_installments(db, liab.id, user_id)}
         for action in lp.actions:
             inst = persisted.get(action.installment_index)
             if inst is None or inst.paid_at is not None:
                 continue  # idempotencia: ya pagada o inexistente
-            paid_at = (
-                action_paid_at(action) if action.reason == "matched" else anchor_at
-            )
+            paid_at = action_paid_at(action) if action.reason == "matched" else anchor_at
             await mark_installment_paid(
                 db,
                 inst,
