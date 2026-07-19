@@ -26,7 +26,6 @@ from app.modules.auth.repository import (
 )
 from app.modules.auth.repository import (
     get_refresh_token_by_token_id,
-    revoke_all_user_tokens,
     revoke_family,
     revoke_token,
 )
@@ -267,11 +266,6 @@ async def logout(db: AsyncSession, refresh_token_plain: str) -> None:
             detail="Refresh token inválido",
         )
     await revoke_token(db, token_record.id)
-
-
-async def logout_all(db: AsyncSession, user_id: uuid.UUID) -> None:
-    """Revoca TODOS los refresh tokens del usuario."""
-    await revoke_all_user_tokens(db, user_id)
 
 
 async def _issue_tokens(

@@ -115,16 +115,3 @@ async def upsert_rates(
     await db.execute(stmt)
     await db.flush()
     return len(payload)
-
-
-async def list_distinct_quotes(db: AsyncSession, *, since: date | None = None) -> list[str]:
-    """Devuelve todos los `quote` distintos almacenados.
-
-    Útil para construir la lista de monedas que el cliente HTTP debe
-    refrescar diariamente.
-    """
-    stmt = select(ExchangeRate.quote).distinct().order_by(ExchangeRate.quote)
-    if since is not None:
-        stmt = stmt.where(ExchangeRate.rate_date >= since)
-    result = await db.execute(stmt)
-    return [row[0] for row in result.all()]

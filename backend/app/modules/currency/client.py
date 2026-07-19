@@ -103,32 +103,3 @@ async def fetch_rates(
             raise FrankfurterInvalidResponseError(f"Tasa no positiva para {quote}: {value!r}")
         out[quote.upper()] = parsed
     return out
-
-
-async def fetch_actual_rate_date(
-    *, target_date: date, base: str = "EUR", quote: str = "USD"
-) -> date | None:
-    """Devuelve la fecha real publicada por frankfurter para `target_date`.
-
-    Útil para conocer qué fecha publicó el ECB cuando la pedida cae en
-    fin de semana o festivo. Devuelve `None` si la API falla — caller
-    puede caer en otro fallback.
-    """
-    try:
-        async with httpx.AsyncClient(
-            base_url=settings.frankfurter_base_url,
-            timeout=float(settings.frankfurter_timeout_seconds),
-            follow_redirects=True,
-        ) as client:
-            response = await client.get(
-                f"/{target_date.isoformat()}",
-                params={"from": base.upper(), "to": quote.upper()},
-            )
-            response.raise_for_status()
-            data = response.json()
-            actual = data.get("date")
-            if isinstance(actual, str):
-                return date.fromisoformat(actual)
-            return None
-    except (httpx.HTTPError, ValueError):
-        return None

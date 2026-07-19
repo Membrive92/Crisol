@@ -40,7 +40,6 @@ from app.modules.personal_finance.imports.schemas import ImportColumnMappings
 from app.modules.personal_finance.imports.service import (
     _compute_hash,
     _direction_ambiguous_concepts,
-    _parse_amount,
     _parse_amount_signed,
     _parse_row,
     _persist_user_category_overrides,
@@ -48,7 +47,7 @@ from app.modules.personal_finance.imports.service import (
 from app.modules.personal_finance.transactions.models import Transaction
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Finding #4 — desambiguación miles vs. decimal en `_parse_amount`
+# Finding #4 — desambiguación miles vs. decimal en `_parse_amount_signed`
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -72,7 +71,7 @@ from app.modules.personal_finance.transactions.models import Transaction
     ],
 )
 def test_parse_amount_disambiguates_thousands_vs_decimal(raw: str, expected: Decimal) -> None:
-    assert _parse_amount(raw) == expected
+    assert _parse_amount_signed(raw)[0] == expected
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -26,7 +26,7 @@ from app.modules.personal_finance.imports.parser import (
 )
 from app.modules.personal_finance.imports.service import (
     ParsedRow,
-    _parse_amount,
+    _parse_amount_signed,
     _parse_balance,
     _pick_balance_anchor,
     _RowError,
@@ -319,7 +319,7 @@ def test_parse_pdf_smart_ambiguous_when_no_transactions_table() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# _parse_amount: importe con formatos europeos, símbolos de moneda, signos
+# _parse_amount_signed: importe con formatos europeos, símbolos de moneda, signos
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -345,7 +345,7 @@ def test_parse_pdf_smart_ambiguous_when_no_transactions_table() -> None:
     ],
 )
 def test_parse_amount_accepts_currency_symbols_and_signs(raw: str, expected: Decimal) -> None:
-    assert _parse_amount(raw) == expected
+    assert _parse_amount_signed(raw)[0] == expected
 
 
 @pytest.mark.parametrize(
@@ -360,7 +360,7 @@ def test_parse_amount_accepts_currency_symbols_and_signs(raw: str, expected: Dec
 )
 def test_parse_amount_rejects_empty_or_zero(raw: str) -> None:
     with pytest.raises(_RowError):
-        _parse_amount(raw)
+        _parse_amount_signed(raw)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

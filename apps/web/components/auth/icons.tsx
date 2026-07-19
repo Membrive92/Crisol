@@ -19,16 +19,6 @@ const baseProps = (props: IconProps) => ({
   'aria-hidden': props['aria-hidden'] ?? true,
 });
 
-export function IconLogo({ size = 28, ...rest }: IconProps) {
-  // Pictograma "F" sobre un círculo: identificable y simple.
-  return (
-    <svg {...baseProps({ size, ...rest })} viewBox="0 0 32 32">
-      <circle cx="16" cy="16" r="14" stroke="currentColor" strokeWidth="2" fill="none" />
-      <path d="M11 9h10M11 9v14M11 16h7" />
-    </svg>
-  );
-}
-
 export function IconBank(props: IconProps) {
   return (
     <svg {...baseProps(props)}>

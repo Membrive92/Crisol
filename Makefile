@@ -1,7 +1,7 @@
 # Crisol — Comandos de desarrollo
 # Usa: make <comando>
 
-.PHONY: dev dev-web dev-mobile dev-backend setup lint typecheck test verify format db-migrate db-upgrade docker-up docker-down clean
+.PHONY: dev dev-web dev-mobile dev-backend setup lint typecheck test verify format knip knip-all db-migrate db-upgrade docker-up docker-down clean
 
 # ═══════════════════════════════════════
 # SETUP
@@ -57,11 +57,18 @@ format: ## Formatear todo
 	pnpm format
 	cd backend && black app/ tests/
 
-verify: ## Verificación completa (lint + typecheck + tests)
+knip: ## Código muerto — sólo lo inequívoco (ficheros + deps). Bloquea en verify
+	pnpm knip
+
+knip-all: ## Código muerto — informe completo, incluidos exports sin usar (asesor)
+	pnpm knip:all
+
+verify: ## Verificación completa (lint + typecheck + tests + código muerto)
 	@echo "🔍 Ejecutando verificación completa..."
 	@make lint
 	@make typecheck
 	@make test
+	@make knip
 	@echo "✅ Todo OK — fase lista para documentar y commitear."
 
 # ═══════════════════════════════════════

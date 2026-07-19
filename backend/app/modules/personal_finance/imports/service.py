@@ -1314,18 +1314,6 @@ def _parse_row(
     )
 
 
-def _parse_amount(value: str) -> Decimal:
-    """Devuelve la MAGNITUD (siempre positiva) del importe del extracto.
-
-    Wrapper retro-compatible de `_parse_amount_signed` que descarta el
-    signo del banco. Se conserva para callers/tests que sólo necesitan
-    la cantidad. El pipeline usa `_parse_amount_signed` cuando necesita
-    el signo del extracto como señal de dirección (AUDIT finding #1).
-    """
-    amount, _sign = _parse_amount_signed(value)
-    return amount
-
-
 def _parse_amount_signed(value: str) -> tuple[Decimal, int]:
     """Acepta `1.234,56`, `1,234.56`, `25.50`, signos `+`/`-` y
     símbolos de moneda comunes (`€`, `$`, `£`, ` EUR`, ` USD`...).

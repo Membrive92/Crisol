@@ -75,38 +75,3 @@ export function CardTitle({
     </h3>
   );
 }
-
-/**
- * PHASE-38 — Cabecera de card: icono opcional + título + acción/badge opcional
- * a la derecha. Reemplaza el `<header>` ad-hoc que cada card repetía con
- * espaciados distintos. `title` acepta texto o nodo (para badges inline).
- */
-export function CardHeader({
-  icon,
-  title,
-  action,
-  size = 'md',
-  style,
-}: {
-  icon?: ReactNode;
-  title: ReactNode;
-  action?: ReactNode;
-  size?: 'md' | 'sm';
-  style?: CSSProperties;
-}) {
-  return (
-    <header
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: spacing.sm,
-        marginBottom: spacing.md,
-        ...style,
-      }}
-    >
-      {icon}
-      <CardTitle size={size}>{title}</CardTitle>
-      {action ? <span style={{ marginLeft: 'auto', display: 'inline-flex' }}>{action}</span> : null}
-    </header>
-  );
-}

@@ -284,33 +284,3 @@ async def ensure_rates_for_dates(
         except (FrankfurterUnavailableError, FrankfurterInvalidResponseError):
             continue
     return fetched
-
-
-async def ensure_rate(
-    db: AsyncSession, *, quote: str, at_date: date, base: str = CANONICAL_BASE
-) -> bool:
-    """Garantiza que existe tasa `base→quote` para `at_date`.
-
-    Si ya hay tasa exacta, no hace nada. Si no, intenta refrescar desde
-    frankfurter. Devuelve True si tras el refresco hay tasa exacta;
-    False en cualquier otro caso (incluido fallo de red).
-
-    Pensado para llamarse en background (al crear una transacción) o
-    de forma lazy desde la capa de presentación.
-    """
-    base_norm = _normalize(base)
-    quote_norm = _normalize(quote)
-    if quote_norm == base_norm:
-        return True
-
-    existing = await repository.get_rate(db, rate_date=at_date, base=base_norm, quote=quote_norm)
-    if existing is not None:
-        return True
-
-    try:
-        await refresh_rates(db, target_date=at_date, quotes=[quote_norm], base=base_norm)
-    except (FrankfurterUnavailableError, FrankfurterInvalidResponseError):
-        return False
-
-    refreshed = await repository.get_rate(db, rate_date=at_date, base=base_norm, quote=quote_norm)
-    return refreshed is not None

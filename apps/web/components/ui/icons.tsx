@@ -61,15 +61,6 @@ export const BarChart3Icon = (p: IconProps) => (
   </Icon>
 );
 
-export const ArrowLeftRightIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <path d="m16 3 4 4-4 4" />
-    <path d="M20 7H4" />
-    <path d="m8 21-4-4 4-4" />
-    <path d="M4 17h16" />
-  </Icon>
-);
-
 export const UploadIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -155,26 +146,6 @@ export const MoreHorizontalIcon = (p: IconProps) => (
   </Icon>
 );
 
-export const SunIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <circle cx="12" cy="12" r="4" />
-    <path d="M12 2v2" />
-    <path d="M12 20v2" />
-    <path d="m4.93 4.93 1.41 1.41" />
-    <path d="m17.66 17.66 1.41 1.41" />
-    <path d="M2 12h2" />
-    <path d="M20 12h2" />
-    <path d="m6.34 17.66-1.41 1.41" />
-    <path d="m19.07 4.93-1.41 1.41" />
-  </Icon>
-);
-
-export const MoonIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-  </Icon>
-);
-
 // ──────────────────────────────────────────
 // Estado / KPIs
 // ──────────────────────────────────────────
@@ -235,13 +206,6 @@ export const RocketIcon = (p: IconProps) => (
   </Icon>
 );
 
-export const LockIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-  </Icon>
-);
-
 export const MenuIcon = (p: IconProps) => (
   <Icon {...p}>
     <line x1="3" y1="6" x2="21" y2="6" />
@@ -257,17 +221,6 @@ export const XIcon = (p: IconProps) => (
   </Icon>
 );
 
-export const ListIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <line x1="8" y1="6" x2="21" y2="6" />
-    <line x1="8" y1="12" x2="21" y2="12" />
-    <line x1="8" y1="18" x2="21" y2="18" />
-    <line x1="3" y1="6" x2="3.01" y2="6" />
-    <line x1="3" y1="12" x2="3.01" y2="12" />
-    <line x1="3" y1="18" x2="3.01" y2="18" />
-  </Icon>
-);
-
 export const WalletIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M20 12V8H6a2 2 0 0 1-2-2c0-1.1.9-2 2-2h12v4" />
@@ -276,33 +229,11 @@ export const WalletIcon = (p: IconProps) => (
   </Icon>
 );
 
-export const BellIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
-    <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
-  </Icon>
-);
-
 export const BanknoteIcon = (p: IconProps) => (
   <Icon {...p}>
     <rect x="2" y="6" width="20" height="12" rx="2" />
     <circle cx="12" cy="12" r="2" />
     <path d="M6 12h.01M18 12h.01" />
-  </Icon>
-);
-
-export const XCircleIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <circle cx="12" cy="12" r="10" />
-    <line x1="15" y1="9" x2="9" y2="15" />
-    <line x1="9" y1="9" x2="15" y2="15" />
-  </Icon>
-);
-
-export const ClockIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <circle cx="12" cy="12" r="10" />
-    <polyline points="12 6 12 12 16 14" />
   </Icon>
 );
 
@@ -365,12 +296,6 @@ export const PlaneIcon = (p: IconProps) => (
   </Icon>
 );
 
-export const HeartIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-  </Icon>
-);
-
 export const BriefcaseIcon = (p: IconProps) => (
   <Icon {...p}>
     <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
@@ -428,23 +353,9 @@ export const HeartPulseIcon = (p: IconProps) => (
 // Avatares / dropdown
 // ──────────────────────────────────────────
 
-export const UserIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-    <circle cx="12" cy="7" r="4" />
-  </Icon>
-);
-
 export const ChevronDownIcon = (p: IconProps) => (
   <Icon {...p}>
     <polyline points="6 9 12 15 18 9" />
-  </Icon>
-);
-
-export const UnfoldMoreIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <polyline points="8 18 12 22 16 18" />
-    <polyline points="8 6 12 2 16 6" />
   </Icon>
 );
 

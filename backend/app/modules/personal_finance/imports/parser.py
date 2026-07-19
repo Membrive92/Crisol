@@ -23,7 +23,7 @@ import csv
 import io
 import re
 from datetime import date
-from typing import IO, Any
+from typing import Any
 
 import pdfplumber
 from openpyxl import load_workbook
@@ -339,13 +339,6 @@ def parse_file(payload: bytes, filename: str, content_type: str | None) -> list[
     if fmt == "xlsx":
         return parse_xlsx(payload)
     return parse_pdf(payload)
-
-
-def parse_stream(
-    stream: IO[bytes], filename: str, content_type: str | None
-) -> list[dict[str, str]]:
-    """Variante para streams ya abiertos (p.ej. `UploadFile`)."""
-    return parse_file(stream.read(), filename, content_type)
 
 
 def count_pdf_pages(payload: bytes) -> int:
