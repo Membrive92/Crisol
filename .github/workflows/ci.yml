@@ -18,7 +18,7 @@ jobs:
     name: Frontend
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # No `version:` — la versión la fija `packageManager` en package.json
       # (pnpm@9.15.9). Ponerla en ambos sitios rompe action-setup@v4
@@ -77,7 +77,7 @@ jobs:
         working-directory: backend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v5
         with:
