@@ -492,6 +492,128 @@ retiro", grepea TODOS sus consumidores (otras apps, móvil, wizards, tests). La
 pertenencia a un módulo no implica que el símbolo sea exclusivo de la feature
 que retiras.
 
+### [PHASE-43] `tsc` y ESLint NO ven el código muerto: son de ámbito fichero, y un `export` está "usado" por definición
+**Error:** Tres rediseños consecutivos (PHASE-29 → 30 → 37) sustituyeron
+componentes y dejaron los originales. Se acumularon **2.318 LoC muertas en 8
+ficheros** (incl. `position-hero.tsx`, 855 LoC con una copia del gauge de tasa
+de esfuerzo) sin que `lint` ni `typecheck` dijeran nada — teniendo el repo
+`strict`, `noUnusedLocals`, `noUnusedParameters` y `no-explicit-any` como error.
+**Causa:** `noUnusedLocals` y `@typescript-eslint/no-unused-vars` son de ámbito
+**fichero**: preguntan "¿se usa este símbolo AQUÍ?". Si lleva `export`, la
+respuesta es sí por definición — el compilador no puede saber que ningún módulo
+lo importa (podrías ser una librería con consumidores externos). El rigor estaba
+puesto, pero en un eje que no mide esto: **"¿alguien usa esto?" no es una
+pregunta de tipos, es de alcanzabilidad de proyecto.**
+**Solución:** `knip` (parte de los entrypoints y calcula alcanzabilidad global)
+cableado a `make verify` vía `pnpm knip`. Encontró los 5 que un barrido manual
+ya había visto **y 3 más en móvil que no**.
+**Regla:** Un linter no sustituye a un detector de alcanzabilidad; son ejes
+ortogonales. Si tu `verify` sólo corre lint + typecheck + tests, el código
+muerto crece sin límite y en silencio. Corolario: la deuda que ninguna
+herramienta mide es la que nadie ve, así que **antes de asumir que algo "se
+habría detectado", comprueba qué eje mide cada herramienta que tienes**.
+
+### [PHASE-43] Un detector de alcanzabilidad da por muerto todo lo que se resuelve por CONVENCIÓN — verifica el mecanismo antes de borrar
+**Error:** El primer informe de knip (sin configurar) señaló como muerto
+`packages/store/src/storage.native.ts`, los `.test.tsx` de móvil con su
+`jest.config.js`, y las dependencias `react-dom` / `react-native-web` /
+`@react-native-async-storage/async-storage`. Borrar cualquiera habría roto
+móvil en silencio.
+**Causa:** knip traza **imports**. Todo lo que se enlaza por otra vía le es
+invisible: Metro resuelve `storage.native.ts` por **extensión de plataforma**
+(nadie lo importa; `currency.ts` importa `./storage` y Metro sustituye el
+`.native` en iOS/Android), jest recoge los tests por `testMatch`, y Expo exige
+`react-dom`/`react-native-web` en runtime para su target web. La ironía: el
+propio `storage.native.ts` documenta su mecanismo en el docstring — la
+herramienta no lee prosa.
+**Solución:** Configurar los entrypoints reales (Expo Router, `testMatch`) y
+documentar **cada** exclusión con su motivo en `knip.config.ts` (por eso es
+`.ts` y no `.json`: JSON no admite comentarios y una exclusión sin motivo la
+borra alguien dentro de seis meses). Cada hallazgo se verificó a mano antes de
+borrar; 6 de los 14 iniciales eran falsos positivos.
+**Regla:** Un hallazgo de código muerto es una **hipótesis, no un veredicto**.
+Antes de borrar, identifica por qué mecanismo vive el fichero: import, convención
+de ruta (Next/Expo Router), extensión de plataforma (`.native.ts`, `.ios.tsx`),
+`testMatch`, o runtime del bundler. Generaliza la lección de PHASE-41: no
+clasifiques código para borrar sin mapear su consumidor **real**, aunque quien
+lo señale sea una herramienta y no una corazonada.
+
+### [PHASE-43] Una premisa escrita en un comentario caduca en silencio — y ninguna herramienta lo detecta
+**Error:** `position-hero.tsx` no era un olvido: se mantenía **a propósito**,
+con su motivo escrito — *"Las cards legacy (`BalancesCard`, `DebtHealthCard`) se
+mantienen intactas porque siguen siendo válidas en `/dashboard`"*. Era cierto en
+PHASE-29.5. Dejó de serlo en PHASE-37.2, cuando el rediseño se llevó
+`/dashboard` por delante. Nadie mintió: la premisa caducó sola, y con ella 1.632
+LoC pasaron de "decisión justificada" a "código muerto que parece vivo".
+**Causa:** Un comentario fija una verdad en el tiempo, pero no se recalcula. Es
+el mismo fenómeno que el README declarando PHASE-39 "pendiente de commit" tres
+fases después de commitearla, o el análisis de 2026-07-17 citando un saldo que
+la auditoría ya había retractado: **texto que era correcto y el mundo se movió
+debajo**.
+**Regla:** Cuando justifiques por escrito conservar algo ("lo mantengo porque X
+lo usa"), estás creando una dependencia que ninguna herramienta verifica. Al
+retirar X, busca los comentarios que lo nombran (`grep`). Y si la premisa es
+"alguien lo usa", mejor que un comentario: que lo diga el detector de
+alcanzabilidad, que sí se recalcula en cada `verify`.
+
+### [PHASE-43] En un backend declarativo (FastAPI/Pydantic/SQLAlchemy) un detector de llamadas da 95% de ruido — filtra por la CAPA, no por la confianza
+**Error:** Correr `vulture app/` en el backend devolvió 273 hallazgos. Tomarlos
+al pie de la letra habría borrado TODOS los endpoints (`*_endpoint`, los
+registra un decorador, no una llamada), los campos de cada schema (los usa la
+serialización de Pydantic), las columnas ORM (las usa SQLAlchemy) y hasta el
+guard anti-bomba `Image.MAX_IMAGE_PIXELS = 50_000_000` (una asignación sobre un
+global de Pillow).
+**Causa:** vulture rastrea el grafo de llamadas de Python. Un framework
+declarativo invoca tu código por reflexión/registro/decorador, no con una
+llamada textual — así que TODO lo que el framework consume le es invisible. La
+confianza que reporta (60/100) no distingue esto: un endpoint muerto y uno vivo
+puntúan igual.
+**Solución:** No subir el umbral de confianza — **excluir las capas
+declarativas**: `--exclude "*/schemas.py,*/models.py,*/config.py"`,
+`--ignore-decorators "@router.*,@field_validator,@app.*"`,
+`--ignore-names "*_endpoint,model_config,cls"`. De 273 → 32 candidatos, cada uno
+verificado a mano contando consumidores en `app/` **y** `tests/` **y**
+`alembic/versions/` (vulture sólo mira `app/`). Falsos positivos que sobrevivían
+al filtro: `load_snapshot` (la llama una migración Alembic), `count_pdf_pages`
+(fallback de visión).
+**Regla:** Antes de creer a un detector de código muerto, pregunta qué NO puede
+ver por el paradigma del framework: en FastAPI son los endpoints; en
+Pydantic/SQLAlchemy, todo lo declarativo (schemas, models, validators); en
+Alembic, las migraciones (fuera de `app/`). Excluye esas capas de la herramienta
+en vez de leerlas una a una, y verifica el resto contando consumidores en TODOS
+los árboles (app + tests + migraciones), no sólo donde mira la herramienta.
+Generaliza la lección de knip (PHASE-43): un hallazgo es una hipótesis; el
+mecanismo invisible aquí es el registro por framework, allí la resolución por
+convención de ruta.
+
+### [PHASE-43] Una función "muerta" que se autodocumenta como "fuente ÚNICA de verdad" no es basura: es un invariante roto — repórtala, no la borres
+**Error (evitado):** El barrido señaló 3 funciones sin llamadas que, leídas,
+resultaron NO ser basura sino síntomas:
+- `debt/service.resolve_period_end` — su docstring dice *"PHASE-30.8 — Fuente
+  ÚNICA de verdad del as-of, compartida entre Capa 1 y Capa 2 para que los tres
+  endpoints coincidan"*, y no la llama nadie. Verificado: `compute_debt_health`
+  ni siquiera toma período (es snapshot de hoy) y `compute_debt_history` usa
+  `months_back/ahead`. **El objetivo de diseño que declara la fase no está
+  cableado.**
+- `accounts/repository.get_net_savings_movement_for_account` — el doc de PHASE-32
+  (HIGH#1) dice *"el ahorro neto de la principal es ahora display-only (`get_net_savings…`)"*.
+  La función existe, `is_default` se valida, pero `get_balances` no la llama:
+  **la feature "saldo de la cuenta principal = ahorro neto" está regresada.**
+- Además, `mypy app/` fallaba en `main` con 5 errores de `rowcount` pese a que
+  `lessons.md` (PHASE-38) declara que se añadió `type: ignore[attr-defined]` — el
+  ignore nunca se commiteó. El README declaraba "mypy verde".
+**Causa:** Borrar código muerto es seguro sólo si es basura. Cuando el código
+huérfano es la IMPLEMENTACIÓN de un comportamiento documentado, su orfandad es
+la prueba de que el comportamiento se perdió; borrarlo cementa la regresión y
+destruye la evidencia.
+**Regla:** Al limpiar código muerto, LEE cada símbolo antes de borrarlo. Si su
+nombre/docstring afirma ser fuente de verdad, invariante, o la implementación de
+una feature con doc de fase, no es basura: es un bug de "feature construida y
+descableada". Sepáralo del borrado y repórtalo. La misma señal (0 llamadas)
+significa "basura" o "regresión" según lo que el símbolo DIGA que hace —
+distínguelo. (Los 3 se dejaron en el código y se reportaron; el `type: ignore`
+sí se aplicó porque su fix es el documentado.)
+
 ---
 
 ## Ejemplos de referencia (no son lecciones reales)
