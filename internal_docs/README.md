@@ -421,6 +421,19 @@ Solo web + backend (sin paridad móvil). No hay migraciones ni endpoints nuevos.
 > móvil 18. Datos del periodo validados al céntimo contra `transactions`.
 > Follow-up: paridad móvil de "Ingresos vs Gastos" (totales de periodo).
 
+### Fase 43 — Split dashboard/análisis (ADR-0006) + saneamiento
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 43   | Dashboard = balance/stocks (patrimonio + tarjetas de módulo: veredicto + número + link), Análisis = cuenta de resultados/flujos (ADR-0006) · `expense_nature` (estructural vs puntual) + recurrencia + smart insights v2 · patrimonio con pasivos dirigidos por el cuadro (un préstamo amortiza en el neto y cuadra con Deuda / `get_balances`) · tarjeta Deuda del dashboard period-scoped · `debt_movement_bounds` sólo cuenta cuotas pagadas (el navegador no cae en meses sin datos) · guardarraíles de calendario (re-clamp del ancla, rango acotado a días con datos, popover que voltea en el borde) · poda de código muerto (knip ~2.3k LoC + vulture) cableada a `make verify` | ✅ | — |
+
+> Plan en [`improvements/phase-43-dashboard-analysis-split.md`](improvements/phase-43-dashboard-analysis-split.md)
+> y ADR [`decisions/0006-balance-vs-income-statement.md`](decisions/0006-balance-vs-income-statement.md).
+> En `main` (commits `1f987dd` · `99da1a7` · `31a5a70` · `fb91f45`, push directo,
+> 2026-07-19). BE 696 tests · mypy · ruff · knip · FE typecheck · lint.
+> Sin paridad móvil (sólo web + backend). Follow-up: la línea "Pasivos" del chart
+> de evolución sigue a 12 meses fijos (no responde al selector de período).
+
 ---
 
 ## Estructura de este directorio
