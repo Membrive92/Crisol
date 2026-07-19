@@ -27,6 +27,7 @@ import { PaymentsSummaryCard } from '@/components/debt/payments-summary-card';
 import { PeriodNavigator } from '@/components/debt/period-navigator';
 import { RecurringQuotasList } from '@/components/debt/recurring-quotas-list';
 import { ErrorState } from '@/components/ui/error-state';
+import { InfoTooltip } from '@/components/ui/info-tooltip';
 import { Skeleton } from '@/components/ui/skeleton';
 
 // AUDIT-2026-05: charts con recharts en chunk diferido (ssr:false).
@@ -331,26 +332,30 @@ function DebtKpiStrip({
   currency: string;
   isLoading: boolean;
 }) {
-  const tiles: { label: string; value: string; hint: string }[] = [
+  const tiles: { label: string; value: string; hint: string; info: string }[] = [
     {
       label: 'Deuda viva total',
       value: outstandingAtEnd != null ? formatAmount(outstandingAtEnd, currency) : '—',
       hint: 'Al cierre del período',
+      info: 'Lo que debes en total al final del período, según el capital pendiente del cuadro de amortización de cada préstamo, hipoteca o tarjeta financiada.',
     },
     {
       label: 'Intereses pagados',
       value: interestsPaidPeriod != null ? formatAmount(interestsPaidPeriod, currency) : '—',
       hint: 'Durante el período',
+      info: 'Intereses que has pagado dentro del período. Van incluidos en las cuotas (el banco no los cobra como un movimiento aparte), por eso salen del cuadro de amortización.',
     },
     {
       label: 'Interés contractual total',
       value: health ? formatAmount(health.interest_scheduled_total, currency) : '—',
       hint: 'Coste total del crédito',
+      info: 'Todos los intereses que pagarás a lo largo de la vida completa de tus créditos, según sus cuadros de amortización. Es el sobrecoste total de financiarte.',
     },
     {
       label: 'Interés restante',
       value: health ? formatAmount(health.interest_remaining, currency) : '—',
       hint: 'Por pagar',
+      info: 'Intereses que aún te quedan por pagar: la suma de la parte de interés de las cuotas pendientes de todos tus créditos.',
     },
   ];
   return (
@@ -382,17 +387,27 @@ function DebtKpiStrip({
         >
           <span
             style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
               fontSize: 10,
               fontWeight: fontWeight.semibold,
               letterSpacing: '0.05em',
               textTransform: 'uppercase',
               color: colors.textMuted,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
             }}
           >
-            {t.label}
+            <span
+              style={{
+                minWidth: 0,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {t.label}
+            </span>
+            <InfoTooltip text={t.info} label={`Qué es «${t.label}»`} />
           </span>
           <span
             style={{

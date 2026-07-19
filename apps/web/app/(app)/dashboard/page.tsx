@@ -179,6 +179,7 @@ export default function DashboardPage() {
         <KpiStrip>
           <KpiTile
             label="Patrimonio neto"
+            info="Todo lo que tienes menos lo que debes (activos − pasivos) a fecha de fin del período. Las deudas con cuadro cuentan su capital pendiente. Excluye brókers/cripto (valor de mercado)."
             value={netWorth != null ? formatAmount(netWorth, worthCurrency) : '—'}
             sparkline={
               worthSeries.length >= 2 ? (
@@ -191,6 +192,7 @@ export default function DashboardPage() {
           />
           <KpiTile
             label="Δ patrimonio"
+            info="Cuánto ha cambiado tu patrimonio neto durante el período, comparado con su valor al inicio del rango seleccionado."
             value={deltaPeriod != null ? fmtSignedAmount(deltaPeriod, worthCurrency) : '—'}
             delta={deltaPeriod}
             deltaText={deltaPeriodPct != null ? `${deltaPeriodPct.toFixed(1)} %` : undefined}

@@ -312,6 +312,7 @@ export default function AnalysisPage() {
         <KpiStrip>
           <KpiTile
             label="Flujo de caja neto"
+            info="Ingresos menos gastos del período: lo que te sobra (+) o te falta (−). No cuenta las transferencias entre tus propias cuentas. La tasa de ahorro es ese neto sobre tus ingresos."
             value={cashflow != null ? fmtSignedAmount(cashflow, refCurrency) : '—'}
             delta={cashflowDelta != null ? Number(cashflowDelta) : null}
             deltaText={cashflowDelta != null ? fmtSignedAmount(cashflowDelta, refCurrency) : undefined}
@@ -331,6 +332,7 @@ export default function AnalysisPage() {
           />
           <KpiTile
             label="Gasto estructural / mes"
+            info="Tu coste de vida fijo mensual: gastos recurrentes (alquiler, suministros, cuotas…), excluyendo los puntuales o excepcionales. Necesita ~6 meses de historia para ser fiable."
             value={structuralMonthlyAvg != null ? formatAmount(structuralMonthlyAvg, refCurrency) : '—'}
             subtitle={
               recurrenceAvailable

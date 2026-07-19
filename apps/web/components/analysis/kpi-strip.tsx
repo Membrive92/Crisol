@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import { TrendingDownIcon, TrendingUpIcon } from '@/components/ui/icons';
+import { InfoTooltip } from '@/components/ui/info-tooltip';
 
 export type KpiStatus = 'success' | 'warning' | 'danger' | 'neutral';
 
@@ -30,6 +31,8 @@ export interface KpiTileProps {
   badge?: string | undefined;
   /** Tooltip nativo (title) con la explicación ampliada del tile. */
   title?: string | undefined;
+  /** Texto de la "i" de información (tooltip estilado en hover) junto al label. */
+  info?: string | undefined;
 }
 
 const STATUS_COLOR: Record<KpiStatus, string> = {
@@ -51,6 +54,7 @@ export function KpiTile({
   invertDeltaColor = false,
   badge,
   title,
+  info,
 }: KpiTileProps) {
   const hasDelta = delta != null && deltaText != null;
   const positive = (delta ?? 0) >= 0;
@@ -85,6 +89,7 @@ export function KpiTile({
         }}
       >
         {label}
+        {info ? <InfoTooltip text={info} label={`Qué es «${label}»`} /> : null}
         {badge ? (
           <span
             style={{
