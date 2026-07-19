@@ -1,7 +1,7 @@
 # Crisol — Comandos de desarrollo
 # Usa: make <comando>
 
-.PHONY: dev dev-web dev-mobile dev-backend setup lint typecheck test verify format knip knip-all db-migrate db-upgrade docker-up docker-down clean
+.PHONY: dev dev-web dev-mobile dev-backend setup lint typecheck test verify format knip knip-all deps-lock db-migrate db-upgrade docker-up docker-down clean
 
 # ═══════════════════════════════════════
 # SETUP
@@ -9,7 +9,7 @@
 
 setup: ## Instalar todo desde cero
 	pnpm install
-	cd backend && pip install -e ".[dev]" --break-system-packages
+	cd backend && pip install -e ".[dev]" -c constraints.txt --break-system-packages
 	cp .env.example .env 2>/dev/null || true
 	make docker-up
 	cd backend && alembic upgrade head
@@ -56,6 +56,15 @@ test-module: ## Tests de un módulo. Uso: make test-module MOD=auth
 format: ## Formatear todo
 	pnpm format
 	cd backend && black app/ tests/
+
+deps-lock: ## Regenerar backend/constraints.txt (pin exacto → CI reproducible)
+	cd backend && ( \
+	  echo "# Auto-generado por 'make deps-lock'. NO editar a mano."; \
+	  echo "# Pin exacto de las deps del backend para que CI instale lo MISMO que"; \
+	  echo "# local (los rangos viven en pyproject.toml). Regenera tras cambiar deps."; \
+	  echo "# Uso: pip install -e '.[dev]' -c constraints.txt"; \
+	  python -m pip freeze --exclude-editable \
+	) > constraints.txt
 
 knip: ## Código muerto — sólo lo inequívoco (ficheros + deps). Bloquea en verify
 	pnpm knip

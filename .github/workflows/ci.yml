@@ -83,12 +83,16 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: backend/pyproject.toml
+          cache-dependency-path: |
+            backend/pyproject.toml
+            backend/constraints.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          # -c constraints.txt: pin EXACTO (generado con `make deps-lock`) para
+          # que CI instale lo mismo que local y no diverjan versiones (mypy/SQLAlchemy).
+          python -m pip install -e ".[dev]" -c constraints.txt
 
       - name: Ruff (lint)
         run: ruff check app tests
