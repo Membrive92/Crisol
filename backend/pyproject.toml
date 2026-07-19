@@ -68,6 +68,11 @@ extend-exclude = "alembic/versions|\\.venv"
 [tool.mypy]
 python_version = "3.12"
 strict = true
+# `execute().rowcount` (DML) lo exponen unos stubs de SQLAlchemy y otros no,
+# según la versión resuelta (CI vs local divergen). Los `type: ignore` de
+# `rowcount` son necesarios donde no lo reconoce; esto evita que salten como
+# "unused" donde sí lo hace, sin depender de fijar la versión exacta.
+warn_unused_ignores = false
 plugins = ["pydantic.mypy"]
 exclude = ["alembic/versions", "\\.venv"]
 
