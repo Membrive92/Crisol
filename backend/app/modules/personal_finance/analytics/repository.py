@@ -20,7 +20,11 @@ from decimal import Decimal
 from sqlalchemy import ColumnElement, case, func, literal, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.personal_finance.categories.models import Category, CategoryRole
+from app.modules.personal_finance.categories.models import (
+    Category,
+    CategoryRole,
+    ExpenseNature,
+)
 from app.modules.personal_finance.dashboard.repository import (
     _amount_expr,
     _apply_scope,
@@ -33,23 +37,17 @@ from app.modules.personal_finance.transactions.models import Transaction
 _DEBT_ROLES = (CategoryRole.DEBT_PAYMENT, CategoryRole.DEBT_INTEREST)
 
 
-async def seed_structural_category_ids(
+async def seed_structural_breakdown(
     db: AsyncSession, user_id: uuid.UUID
-) -> set[uuid.UUID]:
-    """Categorías estructurales por reglas 1 y 2 de la heurística.
+) -> tuple[set[uuid.UUID], set[uuid.UUID]]:
+    """Reglas 1 y 2 de la heurística, DESGLOSADAS `(fijos, deuda)`.
 
-    Regla 1: categorías apuntadas por un `fixed_expense` CONFIRMADO.
-    Regla 2: categorías con rol de deuda (`DEBT_PAYMENT`/`DEBT_INTEREST`).
+    Regla 1 (`fijos`): categorías apuntadas por un `fixed_expense` CONFIRMADO.
+    Regla 2 (`deuda`): categorías con rol de deuda (`DEBT_PAYMENT`/`DEBT_INTEREST`).
 
-    La regla 3 (recurrencia por importe estable) se calcula aparte en
-    `analytics.service` con `classify_recurring_categories` sobre
-    `monthly_expense_by_category`.
+    El endpoint `explain` necesita distinguirlas (razones `rule_1`/`rule_2`);
+    `seed_structural_category_ids` las une. Fuente única para no divergir.
     """
-    debt_q = (
-        select(Category.id)
-        .where(Category.user_id == user_id)
-        .where(Category.role.in_(_DEBT_ROLES))
-    )
     fixed_q = (
         select(FixedExpense.category_id)
         .where(FixedExpense.user_id == user_id)
@@ -57,11 +55,29 @@ async def seed_structural_category_ids(
         .where(FixedExpense.category_id.is_not(None))
         .distinct()
     )
-    debt_rows = (await db.execute(debt_q)).scalars().all()
+    debt_q = (
+        select(Category.id)
+        .where(Category.user_id == user_id)
+        .where(Category.role.in_(_DEBT_ROLES))
+    )
     fixed_rows = (await db.execute(fixed_q)).scalars().all()
-    result: set[uuid.UUID] = set(debt_rows)
-    result.update(cid for cid in fixed_rows if cid is not None)
-    return result
+    debt_rows = (await db.execute(debt_q)).scalars().all()
+    fixed_ids = {cid for cid in fixed_rows if cid is not None}
+    debt_ids = set(debt_rows)
+    return fixed_ids, debt_ids
+
+
+async def seed_structural_category_ids(
+    db: AsyncSession, user_id: uuid.UUID
+) -> set[uuid.UUID]:
+    """Categorías estructurales por reglas 1 y 2 (unión).
+
+    La regla 3 (recurrencia por importe estable) se calcula aparte en
+    `analytics.service` con `classify_recurring_categories` sobre
+    `monthly_expense_by_category`.
+    """
+    fixed_ids, debt_ids = await seed_structural_breakdown(db, user_id)
+    return fixed_ids | debt_ids
 
 
 async def monthly_expense_by_category(
@@ -109,16 +125,117 @@ async def monthly_expense_by_category(
     return dict(by_category)
 
 
+async def expense_categories_in_range(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    currency: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+) -> list[tuple[uuid.UUID, str, ExpenseNature]]:
+    """Categorías reales con GASTO en el rango — `(id, name, expense_nature)`.
+
+    El universo que el endpoint `explain` describe: las categorías que el
+    usuario ve en su desglose del periodo. Excluye el bucket sin categoría
+    (no es una categoría que se pueda clasificar ni sobre la que fijar un
+    override). Orden estable por nombre.
+    """
+    query = (
+        select(Category.id, Category.name, Category.expense_nature)
+        .select_from(Transaction)
+        .join(Category, Category.id == Transaction.category_id)
+        .where(_is_expense())
+        .group_by(Category.id, Category.name, Category.expense_nature)
+        .order_by(Category.name)
+    )
+    query = _apply_scope(
+        query, user_id=user_id, currency=currency, date_from=date_from, date_to=date_to
+    )
+    query = query.where(_is_internal_transfer().is_(False))
+    rows = (await db.execute(query)).all()
+    return [(cid, name, nature) for cid, name, nature in rows]
+
+
+async def tx_override_counts_by_category(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    currency: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+) -> dict[uuid.UUID, int]:
+    """Nº de tx de GASTO por categoría con override propio (`is_exceptional`
+    no nulo) en el rango. Alimenta `tx_overrides` del `explain`: cuántas
+    transacciones de la categoría contradicen (o refuerzan) su clasificación."""
+    query = (
+        select(Transaction.category_id, func.count())
+        .select_from(Transaction)
+        .outerjoin(Category, Category.id == Transaction.category_id)
+        .where(_is_expense())
+        .where(Transaction.category_id.is_not(None))
+        .where(Transaction.is_exceptional.is_not(None))
+        .group_by(Transaction.category_id)
+    )
+    query = _apply_scope(
+        query, user_id=user_id, currency=currency, date_from=date_from, date_to=date_to
+    )
+    query = query.where(_is_internal_transfer().is_(False))
+    rows = (await db.execute(query)).all()
+    return {cid: int(count) for cid, count in rows if cid is not None}
+
+
+async def count_expense_months_in_window(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    window_start: datetime,
+    window_end: datetime,
+    currency: str | None = None,
+    target_currency: str | None = None,
+) -> int:
+    """Nº de meses naturales DISTINTOS de la ventana con algún gasto.
+
+    PHASE-43.1 — alimenta `recurrence_available`/`window_months_with_data`:
+    la regla 3 (recurrencia) sólo es significativa si hay ≥
+    `RECURRENCE_MIN_MONTHS` meses completos con datos. Mismo alcance de gasto
+    (flow=OUT, transferencias excluidas) que el resto de queries del módulo.
+    """
+    month_col = func.to_char(func.timezone("UTC", Transaction.occurred_at), "YYYY-MM")
+    query = (
+        select(func.count(func.distinct(month_col)))
+        .select_from(Transaction)
+        .outerjoin(Category, Category.id == Transaction.category_id)
+        .where(_is_expense())
+    )
+    query = _apply_scope(
+        query,
+        user_id=user_id,
+        currency=currency,
+        date_from=window_start,
+        date_to=window_end,
+    )
+    query = query.where(_is_internal_transfer().is_(False))
+    return int((await db.execute(query)).scalar_one() or 0)
+
+
 def is_structural_expr(structural_category_ids: set[uuid.UUID]) -> ColumnElement[bool]:
     """Expresión SQL: ¿esta tx de gasto es estructural?
 
-    El override manual (`is_exceptional`) gana SIEMPRE:
-      TRUE  → puntual  → NO estructural.
-      FALSE → estructural.
-      NULL  → decide la heurística: pertenece al conjunto estructural.
+    Cascada de precedencia (ADR-0006 / PHASE-43.2), de mayor a menor:
+
+      1. `transactions.is_exceptional` (override por transacción):
+         TRUE  → puntual · FALSE → estructural.
+      2. `categories.expense_nature` (override por categoría):
+         EXCEPTIONAL → puntual · STRUCTURAL → estructural.
+      3. heurística: pertenece al conjunto estructural (reglas 1 ∪ 2 ∪ 3).
 
     Con el conjunto vacío, la heurística es `False` (sólo cuentan los
     overrides) — evita un `IN ()` degenerado.
+
+    **Requiere que la query una `Category`** (todos los consumidores hacen
+    `outerjoin(Category, ...)`): la rama 2 lee `Category.expense_nature`. Con
+    `category_id` NULL (`outerjoin` sin match) esa columna es NULL, las dos
+    condiciones de la rama 2 dan NULL/False y cae a la heurística — correcto.
     """
     if structural_category_ids:
         heuristic: ColumnElement[bool] = Transaction.category_id.in_(
@@ -127,8 +244,13 @@ def is_structural_expr(structural_category_ids: set[uuid.UUID]) -> ColumnElement
     else:
         heuristic = literal(False)
     return case(
+        # 1. override por transacción
         (Transaction.is_exceptional.is_(True), literal(False)),
         (Transaction.is_exceptional.is_(False), literal(True)),
+        # 2. override por categoría
+        (Category.expense_nature == ExpenseNature.EXCEPTIONAL, literal(False)),
+        (Category.expense_nature == ExpenseNature.STRUCTURAL, literal(True)),
+        # 3. heurística (reglas 1 ∪ 2 ∪ 3)
         else_=heuristic,
     )
 

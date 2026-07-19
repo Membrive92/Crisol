@@ -23,6 +23,23 @@ export function useExpenseStructure(query: ExpenseStructureQuery = {}) {
 }
 
 /**
+ * PHASE-43.2 — Explicabilidad: por qué cada categoría del desglose es Fija o
+ * Variable (razón + meses activos/en-banda + overrides). `enabled` para
+ * cargarlo sólo cuando se necesita (tooltip/panel), no en cada render.
+ */
+export function useExpenseStructureExplain(
+  query: ExpenseStructureQuery = {},
+  options: { enabled?: boolean } = {},
+) {
+  return useQuery({
+    queryKey: queryKeys.analytics.expenseStructureExplain(query),
+    queryFn: () => analyticsApi.expenseStructureExplain(query),
+    staleTime: STALE_TIME,
+    enabled: options.enabled ?? true,
+  });
+}
+
+/**
  * PHASE-37.4 — Proyección de fin de mes (cargos comprometidos) + colchón/
  * runway. Sin rango: siempre el mes en curso. Espera `currency` (o
  * `target_currency`) del selector del header.

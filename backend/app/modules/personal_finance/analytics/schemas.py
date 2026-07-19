@@ -39,6 +39,13 @@ class ExpenseStructureResponse(BaseModel):
     `structural_monthly_avg` es la media mensual del gasto estructural en
     la ventana de recurrencia (no del rango pedido) — base estable para el
     runway de 37.4, independiente del período que el usuario esté viendo.
+
+    PHASE-43.1 — la ventana de recurrencia son los `RECURRENCE_WINDOW_MONTHS`
+    meses naturales COMPLETOS terminados en `min(date_to, hoy)` (el mes en
+    curso o cortado por el rango se excluye). `recurrence_available` y
+    `window_months_with_data` hacen explícito cuándo la regla 3 no puede
+    clasificar por falta de histórico — antes degradaba a las reglas 1+2 en
+    silencio (bug A).
     """
 
     reference_currency: str
@@ -50,6 +57,47 @@ class ExpenseStructureResponse(BaseModel):
     savings_rate_structural: float | None
     top_exceptional: list[TxRef]
     exceptional_by_category: list[CategoryAmount]
+    window_start: date
+    """Primer día del primer mes completo de la ventana de recurrencia."""
+    window_end: date
+    """Último día del último mes completo de la ventana de recurrencia."""
+    window_months_with_data: int
+    """Nº de meses de la ventana con algún gasto registrado."""
+    recurrence_available: bool
+    """`False` si `window_months_with_data < RECURRENCE_MIN_MONTHS`: la regla
+    3 no puede clasificar y sólo actúan las reglas 1+2 (gastos fijos + deuda).
+    La UI debe avisarlo en vez de mostrar una tasa estructural engañosa."""
+
+
+StructureReason = Literal[
+    "override_category",  # expense_nature != auto (gana a la heurística)
+    "rule_1_fixed_expense",  # gasto fijo confirmado apunta a la categoría
+    "rule_2_debt_role",  # rol DEBT_PAYMENT / DEBT_INTEREST
+    "rule_3_recurrence",  # recurre con importe estable
+    "not_recurring",  # evaluada por la regla 3 y no cumple
+    "insufficient_history",  # < RECURRENCE_MIN_MONTHS meses activos en la ventana
+]
+
+
+class CategoryStructureExplain(BaseModel):
+    """PHASE-43.2 — por qué una categoría es Fija o Variable (bug D).
+
+    Explica la clasificación a nivel de CATEGORÍA (la que pinta el desglose).
+    `tx_overrides` indica cuántas transacciones de la categoría llevan su
+    propio override — que gana sobre esta clasificación caso a caso."""
+
+    category_id: uuid.UUID
+    category_name: str
+    is_structural: bool
+    reason: StructureReason
+    months_active: int
+    """Meses de la ventana de recurrencia con gasto en la categoría."""
+    months_in_band: int
+    """De los activos, cuántos dentro de ±banda de la mediana (regla 3)."""
+    median_monthly: Decimal | None
+    """Mediana de los totales mensuales activos; `None` si no hay actividad."""
+    tx_overrides: int
+    """Nº de tx de la categoría en el rango con `is_exceptional` fijado."""
 
 
 class CommittedItem(BaseModel):

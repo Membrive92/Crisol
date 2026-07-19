@@ -12,7 +12,7 @@ import {
   useUpdateCategory,
 } from '@crisol/services';
 import { toast } from '@crisol/store';
-import type { Category, CategoryKind } from '@crisol/types';
+import type { Category, CategoryKind, ExpenseNature } from '@crisol/types';
 import {
   DEFAULT_CATEGORY_COLOR,
   colors,
@@ -43,6 +43,13 @@ const EMPTY_FORM: FormState = {
   color: DEFAULT_CATEGORY_COLOR,
   icon: null,
   is_transfer: false,
+};
+
+// PHASE-43.2 — override estructural/puntual por categoría. Sólo aplica a gasto.
+const EXPENSE_NATURE_LABELS: Record<ExpenseNature, string> = {
+  auto: 'Automático',
+  structural: 'Siempre fijo',
+  exceptional: 'Siempre variable',
 };
 
 export default function CategoriesSettingsPage() {
@@ -331,10 +338,16 @@ function CategoryRow({ category }: { category: Category }) {
   const [draftIsTransfer, setDraftIsTransfer] = useState<boolean>(
     category.is_transfer,
   );
+  const [draftExpenseNature, setDraftExpenseNature] = useState<ExpenseNature>(
+    category.expense_nature,
+  );
   const [rowError, setRowError] = useState<string | null>(null);
 
   const update = useUpdateCategory(category.id);
   const remove = useDeleteCategory();
+
+  // El override sólo tiene sentido para gasto no-transferencia.
+  const supportsNatureOverride = category.kind === 'expense' && !category.is_transfer;
 
   function startEdit() {
     setRowError(null);
@@ -343,6 +356,7 @@ function CategoryRow({ category }: { category: Category }) {
     setDraftColor(category.color ?? DEFAULT_CATEGORY_COLOR);
     setDraftIcon(category.icon);
     setDraftIsTransfer(category.is_transfer);
+    setDraftExpenseNature(category.expense_nature);
     setEditing(true);
   }
 
@@ -360,6 +374,9 @@ function CategoryRow({ category }: { category: Category }) {
         color: draftColor,
         icon: draftIcon,
         is_transfer: draftIsTransfer,
+        // Si deja de ser gasto, la naturaleza vuelve a `auto` (es inerte fuera de gasto).
+        expense_nature:
+          draftKind === 'expense' && !draftIsTransfer ? draftExpenseNature : 'auto',
       },
       {
         onSuccess: () => setEditing(false),
@@ -429,6 +446,35 @@ function CategoryRow({ category }: { category: Category }) {
           />
           Es transferencia interna (no cuenta como gasto ni ingreso)
         </label>
+        {supportsNatureOverride && !draftIsTransfer && draftKind === 'expense' ? (
+          <div style={{ maxWidth: 280 }}>
+            <Select
+              label="Naturaleza del gasto"
+              value={draftExpenseNature}
+              onChange={(e) =>
+                setDraftExpenseNature(e.target.value as ExpenseNature)
+              }
+            >
+              <option value="auto">{EXPENSE_NATURE_LABELS.auto}</option>
+              <option value="structural">{EXPENSE_NATURE_LABELS.structural}</option>
+              <option value="exceptional">{EXPENSE_NATURE_LABELS.exceptional}</option>
+            </Select>
+            <p
+              style={{
+                margin: `${spacing.xs}px 0 0 0`,
+                fontSize: fontSize.xs,
+                color: colors.textMuted,
+                lineHeight: 1.4,
+              }}
+            >
+              {draftExpenseNature === 'auto'
+                ? 'Automático: la app decide si es fijo o variable según tu histórico.'
+                : draftExpenseNature === 'structural'
+                  ? 'Siempre fijo: cuenta como coste de vida recurrente en tu tasa de ahorro estructural.'
+                  : 'Siempre variable: cuenta como gasto puntual, fuera de tu coste de vida fijo.'}
+            </p>
+          </div>
+        ) : null}
         <div style={{ display: 'flex', gap: spacing.xs, justifyContent: 'flex-end' }}>
           <Button type="button" variant="ghost" onClick={() => setEditing(false)}>
             Cancelar
@@ -464,6 +510,7 @@ function CategoryRow({ category }: { category: Category }) {
       >
         {category.name}
       </span>
+      {supportsNatureOverride ? <NatureBadge nature={category.expense_nature} /> : null}
       <KindBadge kind={category.kind} isTransfer={category.is_transfer} />
       <div style={{ display: 'flex', gap: spacing.xs }}>
         <Button type="button" variant="ghost" onClick={startEdit}>
@@ -514,6 +561,29 @@ function CategorySwatch({ color, icon }: { color: string | null; icon: string | 
       }}
     >
       {icon ? <span style={{ fontSize: fontSize.md, lineHeight: 1 }}>{icon}</span> : null}
+    </span>
+  );
+}
+
+function NatureBadge({ nature }: { nature: ExpenseNature }) {
+  if (nature === 'auto') return null;
+  const label = nature === 'structural' ? 'Fijo' : 'Variable';
+  return (
+    <span
+      title={`Override manual: ${EXPENSE_NATURE_LABELS[nature]}`}
+      style={{
+        padding: `${spacing.xs / 2}px ${spacing.sm}px`,
+        borderRadius: radius.sm,
+        fontSize: fontSize.xs,
+        fontWeight: fontWeight.semibold,
+        textTransform: 'uppercase',
+        letterSpacing: '0.04em',
+        backgroundColor: colors.surfaceMuted,
+        color: colors.textMuted,
+        border: `1px solid ${colors.border}`,
+      }}
+    >
+      {label}
     </span>
   );
 }

@@ -53,6 +53,25 @@ class CategoryRole(enum.StrEnum):
     """Intereses puros + comisiones financieras de deuda."""
 
 
+class ExpenseNature(enum.StrEnum):
+    """PHASE-43.2 — Override manual de la naturaleza estructural/puntual de
+    una categoría de gasto, por encima de la heurística de recurrencia.
+
+    Es el segundo nivel de la cascada de precedencia (ADR-0006):
+
+        1. `transactions.is_exceptional`  — override por transacción
+        2. `categories.expense_nature`    — override por categoría (esto)
+        3. heurística                     — reglas 1 ∪ 2 ∪ 3
+
+    `AUTO` = sin override, decide la heurística (comportamiento previo a
+    la fase). Sólo aplica a categorías de gasto; en ingresos es inerte.
+    """
+
+    AUTO = "auto"
+    STRUCTURAL = "structural"
+    EXCEPTIONAL = "exceptional"
+
+
 class Category(Base):
     """Tabla de categorías de gasto/ingreso por usuario."""
 
@@ -81,6 +100,16 @@ class Category(Base):
     """PHASE-30.1 — rol semántico (ver `CategoryRole`). El backfill de
     la migración lo deriva de `is_transfer` y de los nombres del seed
     (Intereses *, Préstamos e hipotecas, Tarjeta de crédito)."""
+    expense_nature: Mapped[ExpenseNature] = mapped_column(
+        Enum(ExpenseNature, name="expensenature", native_enum=True),
+        nullable=False,
+        # El label Postgres es el NOMBRE del miembro (mayúsculas), igual que
+        # `categorykind`/`categoryrole` — SQLAlchemy persiste `.name`, no
+        # `.value`. La API sí serializa el value lowercase vía Pydantic.
+        server_default=ExpenseNature.AUTO.name,
+    )
+    """PHASE-43.2 — override estructural/puntual por categoría (ver
+    `ExpenseNature`). `AUTO` por defecto = decide la heurística."""
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -17,6 +17,16 @@ export type CategoryRole =
   | 'DEBT_PAYMENT'
   | 'DEBT_INTEREST';
 
+/**
+ * PHASE-43.2 — Override manual de la naturaleza estructural/puntual de una
+ * categoría de gasto, por encima de la heurística de recurrencia. Segundo
+ * nivel de la cascada de precedencia (ADR-0006):
+ * `transactions.is_exceptional` > `categories.expense_nature` > heurística.
+ *
+ * `auto` = sin override (decide la heurística). Sólo aplica a gasto.
+ */
+export type ExpenseNature = 'auto' | 'structural' | 'exceptional';
+
 export interface Category {
   id: string;
   user_id: string;
@@ -38,6 +48,11 @@ export interface Category {
    * `DEBT_PAYMENT` y `DEBT_INTEREST` en las categorías relevantes.
    */
   role: CategoryRole;
+  /**
+   * PHASE-43.2 — Override estructural/puntual (ver `ExpenseNature`). `auto`
+   * por defecto: la clasificación la decide la heurística de recurrencia.
+   */
+  expense_nature: ExpenseNature;
   created_at: string;
   updated_at: string;
 }

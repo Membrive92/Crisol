@@ -4,7 +4,12 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
 
-import type { AnalyticsCategoryAmount, CategoryBreakdownItem } from '@crisol/types';
+import type {
+  AnalyticsCategoryAmount,
+  CategoryBreakdownItem,
+  CategoryStructureExplain,
+  StructureReason,
+} from '@crisol/types';
 import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@crisol/ui';
 
 import { iconForCategoryName } from '@/lib/category-icons';
@@ -43,6 +48,12 @@ export interface StitchExpenseBreakdownProps {
    * pueda volver restaurando el mismo período/filtro.
    */
   backQuery?: string | undefined;
+  /**
+   * PHASE-43.2 — explicabilidad por categoría (endpoint explain). Cuando se
+   * pasa, cada fila de la leyenda muestra en su tooltip POR QUÉ es fija o
+   * variable. Opcional: sin ella el desglose funciona igual.
+   */
+  explain?: CategoryStructureExplain[] | undefined;
 }
 
 const STRUCTURE_LABELS: Record<StructureFilter, string> = {
@@ -50,6 +61,29 @@ const STRUCTURE_LABELS: Record<StructureFilter, string> = {
   structural: 'Fijo',
   exceptional: 'Variable',
 };
+
+const REASON_LABELS: Record<StructureReason, string> = {
+  override_category: 'marcada manualmente',
+  rule_1_fixed_expense: 'tiene un gasto fijo confirmado',
+  rule_2_debt_role: 'es pago de deuda',
+  rule_3_recurrence: 'recurre con importe estable',
+  not_recurring: 'no recurre de forma estable',
+  insufficient_history: 'sin histórico suficiente',
+};
+
+/** Texto del tooltip: "Fijo · recurre con importe estable (5 de 6 meses)". */
+function explainTooltip(e: CategoryStructureExplain): string {
+  const head = e.is_structural ? 'Fijo' : 'Variable';
+  const reason = REASON_LABELS[e.reason];
+  const showMonths =
+    e.reason === 'rule_3_recurrence' ||
+    e.reason === 'not_recurring' ||
+    e.reason === 'insufficient_history';
+  const detail = showMonths
+    ? ` (${e.months_in_band} de ${e.months_active} meses en banda)`
+    : '';
+  return `${head} · ${reason}${detail}`;
+}
 
 /** Clave de emparejamiento entre datasets: id real o el bucket sin categoría. */
 function categoryKey(id: string | null): string {
@@ -130,8 +164,14 @@ export function StitchExpenseBreakdown({
   filter: filterProp,
   onFilterChange,
   backQuery,
+  explain,
 }: StitchExpenseBreakdownProps) {
   const router = useRouter();
+  const explainById = useMemo(() => {
+    const map = new Map<string, CategoryStructureExplain>();
+    for (const e of explain ?? []) map.set(e.category_id, e);
+    return map;
+  }, [explain]);
   // `activeId` = slice del DONUT resaltado (dim del donut + centro).
   // `hoveredLegendId` = fila CONCRETA de la leyenda bajo el cursor. Se separan
   // porque las categorías de la cola comparten `donutId='_other'`: si el
@@ -372,6 +412,7 @@ export function StitchExpenseBreakdown({
                   key={s.id}
                   slice={s}
                   currency={currency}
+                  explain={s.categoryId ? explainById.get(s.categoryId) : undefined}
                   // Resaltado por `donutId`: al pasar por una fila de la cola se
                   // resalta la porción "Otros" del donut (y todas sus hermanas);
                   // al pasar por el donut, la porción resalta sus filas.
@@ -570,18 +611,29 @@ function DonutCenter({
 function LegendRow({
   slice,
   currency,
+  explain,
   hovered,
   onHover,
   onClick,
 }: {
   slice: Slice;
   currency: string;
+  explain?: CategoryStructureExplain | undefined;
   hovered: boolean;
   onHover: (next: boolean) => void;
   onClick: () => void;
 }) {
   const Icon = slice.isOther ? FolderIcon : iconForCategoryName(slice.label);
   const clickable = slice.isOther || slice.categoryId != null;
+  // PHASE-43.2 — el tooltip explica por qué es fija/variable si hay datos;
+  // si no, cae al texto de acción por defecto ("ver desglose").
+  const tooltip = explain
+    ? explainTooltip(explain)
+    : slice.isOther
+      ? 'Expandir las categorías agrupadas'
+      : slice.categoryId
+        ? 'Ver desglose de esta categoría'
+        : undefined;
   return (
     <li
       onMouseEnter={() => onHover(true)}
@@ -609,13 +661,7 @@ function LegendRow({
         transition: 'background-color 120ms ease',
         cursor: clickable ? 'pointer' : 'default',
       }}
-      title={
-        slice.isOther
-          ? 'Expandir las categorías agrupadas'
-          : slice.categoryId
-            ? 'Ver desglose de esta categoría'
-            : undefined
-      }
+      title={tooltip}
     >
       <span
         aria-hidden

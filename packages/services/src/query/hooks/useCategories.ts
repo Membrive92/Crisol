@@ -41,6 +41,9 @@ export function useUpdateCategory(id: string) {
     mutationFn: (data) => categoriesApi.update(id, data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.categories.all });
+      // PHASE-43.2: `expense_nature` cambia la clasificación estructural/puntual
+      // → el desglose y la tasa de ahorro estructural deben recomputarse.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.analytics.all });
     },
   });
 }

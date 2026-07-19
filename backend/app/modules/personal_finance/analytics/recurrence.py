@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from decimal import Decimal
 
 # Parámetros de la regla 3 (nombrados y ajustables — ver nota de honestidad).
@@ -51,6 +52,40 @@ def _median(values: Sequence[Decimal]) -> Decimal:
     if n % 2 == 1:
         return ordered[mid]
     return (ordered[mid - 1] + ordered[mid]) / Decimal("2")
+
+
+@dataclass(frozen=True)
+class RecurrenceDetail:
+    """Desglose explicable de la regla 3 para una categoría (PHASE-43.2).
+
+    Alimenta el endpoint `explain`: por qué una categoría recurre o no.
+    """
+
+    months_active: int
+    """Meses de la ventana con gasto > 0 en la categoría."""
+    months_in_band: int
+    """De los activos, cuántos dentro de ±banda de la mediana."""
+    median: Decimal | None
+    """Mediana de los totales activos; `None` si no hay meses activos."""
+
+
+def recurrence_detail(
+    totals: Sequence[Decimal], *, band: Decimal = RECURRENCE_BAND
+) -> RecurrenceDetail:
+    """Métricas de estabilidad de la regla 3 para una categoría — fuente
+    ÚNICA de la aritmética de banda, compartida por `classify_recurring_
+    categories` (el veredicto) y el endpoint `explain` (el porqué), para que
+    no diverjan (lección PHASE-34/41)."""
+    active = [t for t in totals if t > 0]
+    if not active:
+        return RecurrenceDetail(months_active=0, months_in_band=0, median=None)
+    median = _median(active)
+    if median <= 0:
+        return RecurrenceDetail(months_active=len(active), months_in_band=0, median=median)
+    low = median * (Decimal("1") - band)
+    high = median * (Decimal("1") + band)
+    in_band = sum(1 for t in active if low <= t <= high)
+    return RecurrenceDetail(months_active=len(active), months_in_band=in_band, median=median)
 
 
 def classify_recurring_categories(
@@ -73,15 +108,7 @@ def classify_recurring_categories(
     """
     recurring: set[uuid.UUID] = set()
     for category_id, totals in monthly_totals.items():
-        active = [t for t in totals if t > 0]
-        if len(active) < min_months:
-            continue
-        median = _median(active)
-        if median <= 0:
-            continue
-        low = median * (Decimal("1") - band)
-        high = median * (Decimal("1") + band)
-        in_band = sum(1 for t in active if low <= t <= high)
-        if in_band >= min_months:
+        detail = recurrence_detail(totals, band=band)
+        if detail.months_active >= min_months and detail.months_in_band >= min_months:
             recurring.add(category_id)
     return recurring

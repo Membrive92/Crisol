@@ -3,16 +3,24 @@ PHASE-17.1)."""
 
 from __future__ import annotations
 
+import uuid
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import Any
 
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.modules.personal_finance.fixed_expenses.detector import (
     Candidate,
     _detect_in_group,
     normalize_merchant,
 )
+from app.modules.personal_finance.fixed_expenses.models import (
+    FixedExpense,
+    FixedExpenseStatus,
+)
+from app.modules.personal_finance.fixed_expenses.repository import find_by_fingerprint
 
 # ---------- normalize_merchant ----------
 
@@ -305,3 +313,87 @@ def test_candidate_dataclass_is_immutable() -> None:
     except Exception:
         return
     raise AssertionError("Candidate debería ser frozen (inmutable)")
+
+
+# ---------- Regresión: huella duplicada no revienta el scan ----------
+
+
+async def _user_id_of(client: AsyncClient, token: str) -> uuid.UUID:
+    cat = await client.post(
+        "/categories",
+        json={"name": "TmpForUserId", "kind": "expense"},
+        headers=_auth(token),
+    )
+    return uuid.UUID(cat.json()["user_id"])
+
+
+async def _add_fixed_expense(
+    factory: Any, user_id: uuid.UUID, *, status: FixedExpenseStatus, **fingerprint: Any
+) -> None:
+    async with factory() as session:
+        session.add(
+            FixedExpense(
+                user_id=user_id,
+                raw_description="HBO MAX",
+                next_due=date(2026, 8, 1),
+                status=status,
+                first_seen_at=date(2026, 1, 1),
+                last_seen_at=date(2026, 7, 1),
+                occurrence_count=6,
+                confidence=0.9,
+                **fingerprint,
+            )
+        )
+        await session.commit()
+
+
+async def test_find_by_fingerprint_survives_duplicate(
+    client: AsyncClient, test_engine: Any
+) -> None:
+    """Regresión del crash del cron: dos filas con la MISMA huella (una
+    CONFIRMED + una DISMISSED, anomalía histórica) hacían que
+    `scalar_one_or_none()` lanzara `MultipleResultsFound` y abortara TODO el
+    scan del usuario. Ahora `find_by_fingerprint` devuelve una determinista
+    (la gestionada activamente) sin lanzar."""
+    r = await client.post(
+        "/auth/register",
+        json={"email": "fp_dup@example.com", "password": "SecurePass123", "display_name": "T"},
+    )
+    token = r.json()["access_token"]
+    user_id = await _user_id_of(client, token)
+
+    fingerprint: dict[str, Any] = dict(
+        merchant="hbomax", amount=Decimal("5.49"), currency="EUR", cadence_days=30
+    )
+    factory = async_sessionmaker(bind=test_engine, expire_on_commit=False)
+    # Orden de inserción a propósito: dismissed primero — la preferencia por
+    # status (no por orden de inserción) debe seguir eligiendo la confirmed.
+    await _add_fixed_expense(factory, user_id, status=FixedExpenseStatus.DISMISSED, **fingerprint)
+    await _add_fixed_expense(factory, user_id, status=FixedExpenseStatus.CONFIRMED, **fingerprint)
+
+    async with factory() as session:
+        found = await find_by_fingerprint(session, user_id, **fingerprint)
+    assert found is not None
+    assert found.status == FixedExpenseStatus.CONFIRMED
+
+
+async def test_scan_does_not_crash_on_duplicate_fingerprint(
+    client: AsyncClient, test_engine: Any
+) -> None:
+    """El endpoint de scan (mismo path que el cron) responde 200 aunque exista
+    un duplicado de huella que matchea un patrón detectado — antes 500."""
+    token, cat_id, account_id = await _setup_user(client, "scan_dup@example.com")
+    # Serie recurrente que el detector reduce a la huella (hbomax, 5.49, 30d).
+    await _insert_recurring(
+        client, token, cat_id, account_id, description="HBO MAX", amount="5.49", months_back=4
+    )
+    user_id = await _user_id_of(client, token)
+    fingerprint: dict[str, Any] = dict(
+        merchant="hbomax", amount=Decimal("5.49"), currency="EUR", cadence_days=30
+    )
+    factory = async_sessionmaker(bind=test_engine, expire_on_commit=False)
+    await _add_fixed_expense(factory, user_id, status=FixedExpenseStatus.DISMISSED, **fingerprint)
+    await _add_fixed_expense(factory, user_id, status=FixedExpenseStatus.CONFIRMED, **fingerprint)
+
+    r = await client.post("/fixed-expenses/scan", headers=_auth(token))
+    assert r.status_code == 200, r.text

@@ -7,7 +7,7 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.personal_finance.fixed_expenses.models import (
@@ -48,6 +48,18 @@ async def get_fixed_expense_by_id(
     return (await db.execute(query)).scalar_one_or_none()
 
 
+# Orden de preferencia cuando una huella tiene VARIAS filas (anomalía de
+# datos, ver abajo): refrescamos la que el usuario gestiona de forma activa.
+_STATUS_PREFERENCE = case(
+    (FixedExpense.status == FixedExpenseStatus.CONFIRMED, 0),
+    (FixedExpense.status == FixedExpenseStatus.PENDING, 1),
+    (FixedExpense.status == FixedExpenseStatus.PAUSED, 2),
+    (FixedExpense.status == FixedExpenseStatus.CANCELLED, 3),
+    (FixedExpense.status == FixedExpenseStatus.DISMISSED, 4),
+    else_=5,
+)
+
+
 async def find_by_fingerprint(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -60,15 +72,34 @@ async def find_by_fingerprint(
     """Busca un gasto fijo existente por su huella
     (merchant + amount + currency + cadence). Usado por el detector
     para refrescar datos en lugar de duplicar.
+
+    La huella se DISEÑÓ única por usuario, pero no lo garantiza ninguna
+    restricción y hay formas históricas de duplicarla (deriva de la huella
+    entre scans: un `amount`/`merchant` que cambió y volvió, la fusión por
+    prefijo de PHASE-14.7…). Cuando hay varias filas —p. ej. una CONFIRMED y
+    una DISMISSED de lo mismo— un `scalar_one_or_none()` reventaba TODO el
+    scan del cron (`MultipleResultsFound`), no sólo esa huella.
+
+    Devolvemos UNA fila de forma determinista, prefiriendo la que el usuario
+    gestiona activamente (CONFIRMED > PENDING > … > DISMISSED) y, a igualdad,
+    la vista más recientemente. Esto NO resucita un patrón descartado: el
+    `scan` sólo crea fila nueva si aquí devolvemos `None`; devolver cualquier
+    fila existente refresca sin duplicar, así que la supresión de lo dismissed
+    se mantiene sea cual sea la fila elegida.
     """
-    query = select(FixedExpense).where(
-        FixedExpense.user_id == user_id,
-        FixedExpense.merchant == merchant,
-        FixedExpense.amount == amount,
-        FixedExpense.currency == currency,
-        FixedExpense.cadence_days == cadence_days,
+    query = (
+        select(FixedExpense)
+        .where(
+            FixedExpense.user_id == user_id,
+            FixedExpense.merchant == merchant,
+            FixedExpense.amount == amount,
+            FixedExpense.currency == currency,
+            FixedExpense.cadence_days == cadence_days,
+        )
+        .order_by(_STATUS_PREFERENCE, FixedExpense.last_seen_at.desc(), FixedExpense.id)
+        .limit(1)
     )
-    return (await db.execute(query)).scalar_one_or_none()
+    return (await db.execute(query)).scalars().first()
 
 
 async def create_fixed_expense(db: AsyncSession, fixed_expense: FixedExpense) -> FixedExpense:

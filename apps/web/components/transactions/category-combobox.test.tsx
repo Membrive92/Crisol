@@ -19,6 +19,7 @@ function cat(
     kind,
     is_transfer: isTransfer,
     role: isTransfer ? 'TRANSFER' : 'GENERIC',
+    expense_nature: "auto",
     icon: null,
     color: null,
     created_at: '2026-01-01T00:00:00Z',

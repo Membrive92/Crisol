@@ -7,7 +7,11 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.modules.personal_finance.categories.models import CategoryKind, CategoryRole
+from app.modules.personal_finance.categories.models import (
+    CategoryKind,
+    CategoryRole,
+    ExpenseNature,
+)
 
 
 class CategoryCreate(BaseModel):
@@ -25,6 +29,8 @@ class CategoryCreate(BaseModel):
     """PHASE-30.1 — rol semántico. Default GENERIC. Cuando
     `is_transfer=True` el service lo fuerza a TRANSFER por
     consistencia (transición segura mientras `is_transfer` siga vivo)."""
+    expense_nature: ExpenseNature = ExpenseNature.AUTO
+    """PHASE-43.2 — override estructural/puntual. Default AUTO (heurística)."""
 
 
 class CategoryUpdate(BaseModel):
@@ -36,6 +42,7 @@ class CategoryUpdate(BaseModel):
     kind: CategoryKind | None = None
     is_transfer: bool | None = None
     role: CategoryRole | None = None
+    expense_nature: ExpenseNature | None = None
 
 
 class CategoryResponse(BaseModel):
@@ -49,6 +56,7 @@ class CategoryResponse(BaseModel):
     kind: CategoryKind
     is_transfer: bool
     role: CategoryRole
+    expense_nature: ExpenseNature
     created_at: datetime
     updated_at: datetime
 

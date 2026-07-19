@@ -1,4 +1,8 @@
-import type { CategoryKind, CategoryRole } from '../models/category';
+import type {
+  CategoryKind,
+  CategoryRole,
+  ExpenseNature,
+} from '../models/category';
 
 export interface CategoryCreateRequest {
   name: string;
@@ -13,6 +17,8 @@ export interface CategoryCreateRequest {
    * `TRANSFER`.
    */
   role?: CategoryRole;
+  /** PHASE-43.2: override estructural/puntual. Default `auto` (heurística). */
+  expense_nature?: ExpenseNature;
 }
 
 export interface CategoryUpdateRequest {
@@ -22,4 +28,5 @@ export interface CategoryUpdateRequest {
   kind?: CategoryKind;
   is_transfer?: boolean;
   role?: CategoryRole;
+  expense_nature?: ExpenseNature;
 }

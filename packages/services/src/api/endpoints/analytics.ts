@@ -1,4 +1,5 @@
 import type {
+  CategoryStructureExplain,
   ExpenseStructureQuery,
   ExpenseStructureResponse,
   MonthOutlookQuery,
@@ -13,6 +14,16 @@ export const analyticsApi = {
   ): Promise<ExpenseStructureResponse> {
     const response = await apiClient.get<ExpenseStructureResponse>(
       '/analytics/expense-structure',
+      { params: query },
+    );
+    return response.data;
+  },
+
+  async expenseStructureExplain(
+    query: ExpenseStructureQuery = {},
+  ): Promise<CategoryStructureExplain[]> {
+    const response = await apiClient.get<CategoryStructureExplain[]>(
+      '/analytics/expense-structure/explain',
       { params: query },
     );
     return response.data;

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import calendar
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,17 +23,21 @@ from app.modules.personal_finance.accounts.repository import (
 )
 from app.modules.personal_finance.analytics import repository as repo
 from app.modules.personal_finance.analytics.recurrence import (
+    RECURRENCE_MIN_MONTHS,
     RECURRENCE_WINDOW_MONTHS,
     classify_recurring_categories,
+    recurrence_detail,
 )
 from app.modules.personal_finance.analytics.schemas import (
     CategoryAmount,
+    CategoryStructureExplain,
     CommittedItem,
     ExpenseStructureResponse,
     MonthOutlookResponse,
+    StructureReason,
     TxRef,
 )
-from app.modules.personal_finance.categories.models import CategoryKind
+from app.modules.personal_finance.categories.models import CategoryKind, ExpenseNature
 from app.modules.personal_finance.dashboard.repository import get_totals_by_kind
 from app.modules.personal_finance.dashboard.service import ensure_rates_for_user_scope
 from app.modules.personal_finance.fixed_expenses.models import FixedExpenseStatus
@@ -50,6 +54,50 @@ def _month_floor_shift(dt: datetime, months_back: int) -> datetime:
     total = (dt.year * 12 + (dt.month - 1)) - months_back
     year, month0 = divmod(total, 12)
     return datetime(year, month0 + 1, 1, tzinfo=UTC)
+
+
+def _recurrence_window(
+    date_to: datetime | None, *, now: datetime | None = None
+) -> tuple[datetime, datetime]:
+    """PHASE-43.1 — ventana de `RECURRENCE_WINDOW_MONTHS` meses naturales
+    COMPLETOS terminados en `min(date_to, hoy)`.
+
+    Dos correcciones sobre el cálculo previo (`window_end = date_to`):
+
+    1. **Clamp a hoy** (bug A): un rango que termina en el futuro (p. ej. el
+       selector "Año en curso" emite 31/12) no puede anclar la ventana en
+       meses sin datos. Sin esto, ver el año actual a mitad de julio dejaba
+       la ventana en jul–dic con un solo mes (julio parcial) de datos, la
+       regla 3 no clasificaba nada y la tasa estructural degradaba a las
+       reglas 1+2 en silencio.
+
+    2. **Sólo meses completos** (bug B): un mes cortado —el mes en curso, o
+       el mes final de un rango que termina a mitad— vale ~50 % de un mes
+       normal, cae fuera de la banda ±40 % y consume un hueco del conteo
+       `in_band`. Se excluye el mes del ancla SALVO que el ancla caiga en su
+       último día natural (entonces ese mes está completo y SÍ entra —
+       imprescindible para clasificar bien un período pasado como "Año 2025",
+       cuyo diciembre es un mes completo visto desde 2026).
+
+    `now` es inyectable para tests deterministas (no dependen del reloj).
+
+    Trade-off aceptado (ya documentado en PHASE-37.3): un gasto recurrente
+    nuevo tarda un mes natural completo en poder clasificarse como estructural.
+    """
+    now = now if now is not None else datetime.now(UTC)
+    anchor = min(date_to, now) if date_to is not None else now
+    anchor_date = anchor.date()
+    last_day = calendar.monthrange(anchor_date.year, anchor_date.month)[1]
+    # El mes del ancla está completo sólo si el ancla es su último día.
+    anchor_month_complete = anchor_date.day == last_day
+    months_back_to_last_complete = 0 if anchor_month_complete else 1
+    # `window_end` = último microsegundo del último mes completo.
+    window_end = (
+        _month_floor_shift(anchor, months_back_to_last_complete - 1)
+        - timedelta(microseconds=1)
+    )
+    window_start = _month_floor_shift(window_end, RECURRENCE_WINDOW_MONTHS - 1)
+    return window_start, window_end
 
 
 def _safe_rate(income: Decimal, expense: Decimal) -> float | None:
@@ -71,12 +119,12 @@ async def get_expense_structure(
     """Calcula el desglose estructural/puntual del gasto del rango.
 
     La ventana de recurrencia (para clasificar categorías recurrentes y
-    la media mensual estructural) se ancla al final del rango pedido
-    (`date_to`) o a "ahora" si el rango es abierto — así ver un período
-    pasado usa el histórico hasta ese punto, no el actual.
+    la media mensual estructural) son los meses naturales COMPLETOS hasta
+    `min(date_to, hoy)` — ver `_recurrence_window`. Así ver un período
+    pasado usa el histórico hasta ese punto, no el actual, y ningún mes
+    parcial contamina la clasificación.
     """
-    window_end = date_to if date_to is not None else datetime.now(UTC)
-    window_start = _month_floor_shift(window_end, RECURRENCE_WINDOW_MONTHS - 1)
+    window_start, window_end = _recurrence_window(date_to)
 
     if target_currency is not None:
         # Cubrir toda la ventana (no sólo el rango) para que la conversión
@@ -102,6 +150,18 @@ async def get_expense_structure(
     )
     recurring = classify_recurring_categories(monthly)
     structural_ids = seed | recurring
+
+    # Explicitar cuándo la regla 3 no puede clasificar por falta de histórico
+    # (bug A): antes degradaba a reglas 1+2 sin avisar.
+    months_with_data = await repo.count_expense_months_in_window(
+        db,
+        user_id,
+        window_start=window_start,
+        window_end=window_end,
+        currency=currency,
+        target_currency=target_currency,
+    )
+    recurrence_available = months_with_data >= RECURRENCE_MIN_MONTHS
 
     structural_total, exceptional_total = await repo.expense_split_totals(
         db,
@@ -186,7 +246,102 @@ async def get_expense_structure(
             )
             for cid, name, color, icon, total in by_cat_rows
         ],
+        window_start=window_start.date(),
+        window_end=window_end.date(),
+        window_months_with_data=months_with_data,
+        recurrence_available=recurrence_available,
     )
+
+
+async def explain_expense_structure(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    currency: str | None = None,
+    target_currency: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+) -> list[CategoryStructureExplain]:
+    """PHASE-43.2 (bug D) — por qué cada categoría del desglose es Fija o
+    Variable. Convierte el KPI de "número que ignoro" en "número que puedo
+    auditar y corregir": sin esto, el override de categoría es a ciegas.
+
+    Clasifica a nivel de CATEGORÍA con la MISMA cascada que la capa SQL
+    (`is_structural_expr`) pero sin el nivel de transacción — ese se reporta
+    aparte como `tx_overrides`. La ventana de recurrencia es la de PHASE-43.1.
+    """
+    window_start, window_end = _recurrence_window(date_to)
+
+    if target_currency is not None:
+        await ensure_rates_for_user_scope(
+            db,
+            user_id,
+            target_currency=target_currency,
+            date_from=window_start,
+            date_to=window_end,
+        )
+
+    monthly = await repo.monthly_expense_by_category(
+        db,
+        user_id,
+        window_start=window_start,
+        window_end=window_end,
+        currency=currency,
+        target_currency=target_currency,
+    )
+    fixed_ids, debt_ids = await repo.seed_structural_breakdown(db, user_id)
+    categories = await repo.expense_categories_in_range(
+        db, user_id, currency=currency, date_from=date_from, date_to=date_to
+    )
+    tx_overrides = await repo.tx_override_counts_by_category(
+        db, user_id, currency=currency, date_from=date_from, date_to=date_to
+    )
+
+    out: list[CategoryStructureExplain] = []
+    for cid, name, nature in categories:
+        detail = recurrence_detail(monthly.get(cid, []))
+        is_structural, reason = _classify_category_reason(
+            nature, cid, fixed_ids, debt_ids, detail.months_active, detail.months_in_band
+        )
+        out.append(
+            CategoryStructureExplain(
+                category_id=cid,
+                category_name=name,
+                is_structural=is_structural,
+                reason=reason,
+                months_active=detail.months_active,
+                months_in_band=detail.months_in_band,
+                median_monthly=detail.median,
+                tx_overrides=tx_overrides.get(cid, 0),
+            )
+        )
+    return out
+
+
+def _classify_category_reason(
+    nature: ExpenseNature,
+    category_id: uuid.UUID,
+    fixed_ids: set[uuid.UUID],
+    debt_ids: set[uuid.UUID],
+    months_active: int,
+    months_in_band: int,
+) -> tuple[bool, StructureReason]:
+    """Veredicto + razón a nivel de categoría, en el MISMO orden de
+    precedencia que `is_structural_expr` (override categoría > reglas 1/2 >
+    regla 3). El override de transacción se reporta aparte (`tx_overrides`)."""
+    if nature == ExpenseNature.EXCEPTIONAL:
+        return False, "override_category"
+    if nature == ExpenseNature.STRUCTURAL:
+        return True, "override_category"
+    if category_id in fixed_ids:
+        return True, "rule_1_fixed_expense"
+    if category_id in debt_ids:
+        return True, "rule_2_debt_role"
+    if months_active < RECURRENCE_MIN_MONTHS:
+        return False, "insufficient_history"
+    if months_in_band >= RECURRENCE_MIN_MONTHS:
+        return True, "rule_3_recurrence"
+    return False, "not_recurring"
 
 
 async def _structural_monthly_avg(
@@ -195,13 +350,12 @@ async def _structural_monthly_avg(
     *,
     currency: str | None,
     target_currency: str | None,
-    reference: datetime,
+    window_start: datetime,
+    window_end: datetime,
 ) -> Decimal:
     """Media mensual del gasto estructural (base del runway) — misma
     definición que `get_expense_structure`, factorizada para reusar en el
-    month-outlook. Ventana de recurrencia anclada a `reference`."""
-    window_end = reference
-    window_start = _month_floor_shift(window_end, RECURRENCE_WINDOW_MONTHS - 1)
+    month-outlook. Recibe la ventana ya calculada (`_recurrence_window`)."""
     seed = await repo.seed_structural_category_ids(db, user_id)
     monthly = await repo.monthly_expense_by_category(
         db,
@@ -244,6 +398,10 @@ async def get_month_outlook(
     month_end = date(today.year, today.month, last_day)
     days_remaining = (month_end - today).days
 
+    # Ventana de recurrencia para el gasto estructural del runway: meses
+    # completos hasta hoy (excluye el mes en curso parcial — PHASE-43.1).
+    window_start, window_end = _recurrence_window(None, now=now)
+
     accounts = await list_accounts(db, user_id, include_archived=False)
     reference = (target_currency or currency or (accounts[0].currency if accounts else "EUR")).upper()
 
@@ -252,8 +410,8 @@ async def get_month_outlook(
             db,
             user_id,
             target_currency=target_currency,
-            date_from=_month_floor_shift(now, RECURRENCE_WINDOW_MONTHS - 1),
-            date_to=now,
+            date_from=window_start,
+            date_to=window_end,
         )
 
     async def _to_ref(amount: Decimal, from_cur: str) -> Decimal | None:
@@ -337,7 +495,12 @@ async def get_month_outlook(
     # alcance de divisa (ver `_to_ref`). None si no hay base estructural o si
     # no hay colchón (líquido ≤ 0, p. ej. saldo de apertura sin cuadrar).
     monthly_avg = await _structural_monthly_avg(
-        db, user_id, currency=currency, target_currency=target_currency, reference=now
+        db,
+        user_id,
+        currency=currency,
+        target_currency=target_currency,
+        window_start=window_start,
+        window_end=window_end,
     )
     runway = (
         float(liquid_balance / monthly_avg)

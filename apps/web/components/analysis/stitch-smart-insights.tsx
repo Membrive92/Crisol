@@ -4,9 +4,8 @@ import type {
   CategoryBreakdownItem,
   DashboardSummary,
   ExpenseStructureResponse,
-  MonthOutlookResponse,
 } from '@crisol/types';
-import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import { Card } from '@/components/ui/card';
 import { CheckCircleIcon, InfoIcon, SparklesIcon } from '@/components/ui/icons';
@@ -16,9 +15,6 @@ export interface StitchSmartInsightsProps {
   expensesByCategory: CategoryBreakdownItem[] | undefined;
   /** PHASE-37.5 — gasto estructural/puntual (37.3), para el insight de impacto de puntuales. */
   structure: ExpenseStructureResponse | undefined;
-  /** PHASE-37.5 — proyección de fin de mes (37.4), para el insight de cargo próximo. */
-  outlook: MonthOutlookResponse | undefined;
-  currency: string;
 }
 
 interface Insight {
@@ -34,23 +30,15 @@ interface Insight {
  * no se emite un insight cuyo dato principal ya sea visible en un KPI/card del
  * layout. Por eso se ELIMINARON los insights de "saldo neto vs periodo
  * anterior" (duplicaba el Δ del tile Flujo) y "tasa de ahorro" (duplicaba el
- * tile T. Ahorro). Los generadores nuevos derivan de 37.3 (impacto de gastos
- * puntuales) y 37.4 (cargo próximo relevante). Máximo 3, por prioridad.
+ * tile T. Ahorro). PHASE-43.3 — retirado el insight prospectivo "cargo próximo"
+ * (viaja al dashboard con el month-outlook: Análisis es sólo flujos). Máximo 3.
  */
 export function StitchSmartInsights({
   summary,
   expensesByCategory,
   structure,
-  outlook,
-  currency,
 }: StitchSmartInsightsProps) {
-  const insights = computeInsights(
-    summary,
-    expensesByCategory ?? [],
-    structure,
-    outlook,
-    currency,
-  );
+  const insights = computeInsights(summary, expensesByCategory ?? [], structure);
 
   return (
     <Card
@@ -107,8 +95,6 @@ export function computeInsights(
   summary: DashboardSummary | undefined,
   byCategory: CategoryBreakdownItem[],
   structure: ExpenseStructureResponse | undefined,
-  outlook: MonthOutlookResponse | undefined,
-  currency: string,
 ): Insight[] {
   const out: Insight[] = [];
 
@@ -149,40 +135,7 @@ export function computeInsights(
     });
   }
 
-  // P3 — Cargo próximo relevante (37.4): el mayor cargo de los próximos 7 días
-  // si domina lo comprometido — un aviso para tener saldo, no la lista entera.
-  if (outlook) {
-    const committed = Number(outlook.committed_remaining);
-    const soon = upcomingWithin7Days(outlook.committed_items);
-    const biggest = soon.sort((a, b) => Number(b.amount) - Number(a.amount))[0];
-    if (biggest && committed > 0 && Number(biggest.amount) >= committed * 0.25) {
-      out.push({
-        kind: 'info',
-        priority: 3,
-        title: `Cargo próximo: ${biggest.name}`,
-        body: `El ${formatDay(biggest.expected_date)} te llega ${formatAmount(biggest.amount, currency)}, el mayor cargo de los próximos días. Asegúrate de tener saldo.`,
-      });
-    }
-  }
-
   return out.sort((a, b) => a.priority - b.priority).slice(0, 3);
-}
-
-/** Cargos con `expected_date` en los próximos 7 días (desde hoy, no vencidos). */
-function upcomingWithin7Days(items: MonthOutlookResponse['committed_items']) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const in7 = new Date(today);
-  in7.setDate(in7.getDate() + 7);
-  return items.filter((it) => {
-    const d = new Date(`${it.expected_date}T00:00:00`);
-    return d >= today && d <= in7;
-  });
-}
-
-/** `YYYY-MM-DD` → `DD/MM`. */
-function formatDay(dateStr: string): string {
-  return `${dateStr.slice(8, 10)}/${dateStr.slice(5, 7)}`;
 }
 
 function InsightCard({ insight }: { insight: Insight }) {

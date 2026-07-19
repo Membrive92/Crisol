@@ -36,6 +36,46 @@ export interface ExpenseStructureResponse {
   savings_rate_structural: number | null;
   top_exceptional: AnalyticsTxRef[];
   exceptional_by_category: AnalyticsCategoryAmount[];
+  /**
+   * PHASE-43.1 — Ventana de recurrencia (meses naturales completos hasta
+   * `min(date_to, hoy)`). `YYYY-MM-DD`.
+   */
+  window_start: string;
+  window_end: string;
+  /** Meses de la ventana con algún gasto registrado. */
+  window_months_with_data: number;
+  /**
+   * PHASE-43.1 — `false` si `window_months_with_data < 4`: la regla 3 no
+   * puede clasificar y sólo actúan gastos fijos + deuda. La UI debe avisarlo
+   * en vez de mostrar una tasa estructural engañosa.
+   */
+  recurrence_available: boolean;
+}
+
+// PHASE-43.2 — Explicabilidad: por qué una categoría es Fija o Variable.
+
+/** Razón por la que una categoría se clasificó estructural/puntual. */
+export type StructureReason =
+  | 'override_category'
+  | 'rule_1_fixed_expense'
+  | 'rule_2_debt_role'
+  | 'rule_3_recurrence'
+  | 'not_recurring'
+  | 'insufficient_history';
+
+export interface CategoryStructureExplain {
+  category_id: string;
+  category_name: string;
+  is_structural: boolean;
+  reason: StructureReason;
+  /** Meses de la ventana con gasto en la categoría. */
+  months_active: number;
+  /** De los activos, cuántos dentro de ±banda de la mediana (regla 3). */
+  months_in_band: number;
+  /** Mediana de los totales mensuales activos; `null` si no hay actividad. */
+  median_monthly: string | null;
+  /** Nº de tx de la categoría en el rango con `is_exceptional` fijado. */
+  tx_overrides: number;
 }
 
 // PHASE-37.4 — Proyección de fin de mes + runway.

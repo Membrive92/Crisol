@@ -56,6 +56,7 @@ async def create_category(db: AsyncSession, user_id: uuid.UUID, data: CategoryCr
         kind=data.kind,
         is_transfer=data.is_transfer,
         role=role,
+        expense_nature=data.expense_nature,
     )
     return await persist_category(db, category)
 
