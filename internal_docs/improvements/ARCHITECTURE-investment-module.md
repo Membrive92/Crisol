@@ -410,6 +410,23 @@ class FundamentalsAdapter(Protocol):
 
 `normalization.py` produce `CanonicalStatement` desde `RawFilingData`:
 - Aplicar `scale`/`decimals` XBRL → unidades absolutas.
+- **Ausencia vs cero — `IMPUTABLE_ZERO_CONCEPTS`** (decisión de
+  diseño, DESIGN §4.5): concepto ausente en el filing → `Decimal(0)`
+  con proveniencia `imputed_zero` SOLO si está en esta lista:
+  `short_term_debt, ltd_current_portion, lease_liabilities_current,
+  lease_liabilities_noncurrent, current_financial_assets, inventory,
+  goodwill, intangibles, deferred_tax_assets, deferred_tax_liabilities,
+  treasury_stock, share_premium, rd_expense, sbc_expense, impairments,
+  gains_on_sale_of_business, acquisitions, divestitures, buybacks,
+  share_issuance, dividends_paid, debt_change, wc_change_inventory`.
+  El resto de partidas ausentes → `None` (nunca 0).
+  **Condicional**: `interest_expense` ausente → 0 solo si
+  short_term_debt + ltd_current_portion + long_term_debt es 0 (real o
+  imputado); con deuda > 0 → `None`.
+  Registrar cada imputación en `raw_source_ref.mapping` con marca
+  `imputed_zero`. Si una imputación rompe un cuadre de
+  `validation.py` (componentes > total), revertir a `None` + quality
+  flag: la identidad contable manda sobre la lista.
 - **Convención de signos canónica**: todas las partidas se almacenan
   en positivo con semántica fija (capex positivo = inversión;
   dividends_paid positivo = pago; buybacks positivo = recompra).
@@ -459,7 +476,7 @@ class MetricResult:
     value: Decimal | None
     status: Literal["ok","not_computable","approximation"]
     reason: str | None                    # por qué no computable
-    provenance: Provenance                # sourced/derived/estimated inputs
+    provenance: Provenance                # sourced/derived/estimated/imputed_zero
     band: Literal["healthy","caution","stressed"] | None
 
 @dataclass(frozen=True)
@@ -693,7 +710,7 @@ de que el engine esté golden-tested produce retrabajo.
 | Fase | Contenido | Criterio de salida |
 |---|---|---|
 | 40.1 | Migraciones completas + enums + ADR tablas globales + modelos SQLAlchemy + seed thresholds | `alembic upgrade/downgrade` reversibles; tests de modelo |
-| 40.2 | `canonical.py` + engine: conventions, derivations, base_ratios (Capa 1) | Unit tests de las 20 métricas base con sintéticos |
+| 40.2 | `canonical.py` + engine: conventions, derivations, base_ratios (Capa 1) | Unit tests de las 27 métricas base con sintéticos (DESIGN §5; eran 20 antes de la ampliación v2.1) |
 | 40.3 | Engine: evolution (1.5) + forensic (2) + dividend (3) + stress (3.5) + synthesis (4) + version.py | Unit tests por métrica; golden test con fixture sintético completo |
 | 40.4 | Adapter EDGAR + cache + concept_map + normalization + validation + restatements + IngestionJob + endpoints de fundamentales | Fixtures reales capturados; tests de normalización y restatement; smoke manual contra EDGAR documentado |
 | 40.5 | Endpoints de análisis + AnalysisRun + goldens con empresas reales | Golden tests; 409/200 según estado de datos |
