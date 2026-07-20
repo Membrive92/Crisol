@@ -14,7 +14,6 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
-
 from app.core.config import settings
 from app.core.database import Base
 
@@ -27,6 +26,23 @@ from app.modules.auth.webauthn.models import (  # noqa: F401
     WebAuthnCredential,
 )
 from app.modules.currency.models import ExchangeRate  # noqa: F401
+from app.modules.investment.analysis.models import AnalysisRun  # noqa: F401
+from app.modules.investment.catalog.models import Security  # noqa: F401
+from app.modules.investment.fundamentals.models import (  # noqa: F401
+    FinancialStatement,
+    IngestionJob,
+    RestatementFlag,
+)
+from app.modules.investment.portfolio.models import (  # noqa: F401
+    CorporateAction,
+    DividendReceived,
+    Lot,
+    LotAdjustment,
+    Sale,
+    SaleAllocation,
+)
+from app.modules.investment.pricing.models import PriceQuote  # noqa: F401
+from app.modules.investment.thresholds.models import ScoringThresholds  # noqa: F401
 from app.modules.personal_finance.accounts.installments_model import (  # noqa: F401
     LiabilityInstallment,
 )

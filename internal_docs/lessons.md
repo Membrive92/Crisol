@@ -614,6 +614,26 @@ significa "basura" o "regresión" según lo que el símbolo DIGA que hace —
 distínguelo. (Los 3 se dejaron en el código y se reportaron; el `type: ignore`
 sí se aplicó porque su fix es el documentado.)
 
+### [PHASE-44.1] El padre de una migración se elige por el HEAD real del DAG, no por el filename ordenado alfabéticamente
+**Error:** Al crear la migración de cimientos del módulo Inversión puse
+`down_revision = "z3p58r0on2q1p7"` porque era el último fichero que devolvía
+`ls alembic/versions | tail`. No era el head: `z3p58r0on2q1p7` ya tenía un hijo
+(`a4q70s2pn4r3q9`), así que parenté a un nodo intermedio y creé una SEGUNDA
+cabeza. `alembic heads` pasó a mostrar dos heads → `alembic upgrade` habría
+fallado con "multiple heads" y CI en rojo.
+**Causa:** Los revision IDs de Alembic son cadenas aleatorias, NO secuenciales.
+Ordenar los ficheros por nombre no refleja el orden del DAG. El head real era
+`f9v25x7us9w8v4` (PHASE-43.2), cuyo fichero empieza por `f9` y quedaba MÁS
+ARRIBA en el listado alfabético — invisible a `tail`.
+**Solución:** Preguntar al propio Alembic. `alembic heads` da el/los head(s)
+reales y `alembic history` reconstruye el DAG. Repunté `down_revision` a
+`f9v25x7us9w8v4` y confirmé que `alembic heads` volvía a devolver UNA sola línea.
+**Regla:** Antes de fijar `down_revision`, ejecuta `alembic heads` y usa ESE
+valor; nunca deduzcas el head del nombre del fichero. Tras crear la migración,
+`alembic heads` debe devolver exactamente un head; si devuelve dos, has
+ramificado. Y verifica parity con `alembic check` sobre una BD a head (debe
+decir "No new upgrade operations detected") — es el gate que corre CI.
+
 ---
 
 ## Ejemplos de referencia (no son lecciones reales)

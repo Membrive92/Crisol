@@ -31,6 +31,23 @@ from app.modules.auth.webauthn.models import (  # noqa: F401
     WebAuthnCredential,
 )
 from app.modules.currency.models import ExchangeRate  # noqa: F401
+from app.modules.investment.analysis.models import AnalysisRun  # noqa: F401
+from app.modules.investment.catalog.models import Security  # noqa: F401
+from app.modules.investment.fundamentals.models import (  # noqa: F401
+    FinancialStatement,
+    IngestionJob,
+    RestatementFlag,
+)
+from app.modules.investment.portfolio.models import (  # noqa: F401
+    CorporateAction,
+    DividendReceived,
+    Lot,
+    LotAdjustment,
+    Sale,
+    SaleAllocation,
+)
+from app.modules.investment.pricing.models import PriceQuote  # noqa: F401
+from app.modules.investment.thresholds.models import ScoringThresholds  # noqa: F401
 from app.modules.personal_finance.accounts.models import Account  # noqa: F401
 from app.modules.personal_finance.bank_mappings.models import BankCategoryMapping  # noqa: F401
 from app.modules.personal_finance.budgets.models import Budget  # noqa: F401
