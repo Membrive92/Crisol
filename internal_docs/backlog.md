@@ -12,10 +12,8 @@
 >   (no se tacha) — la phase doc deja la traza histórica.
 > - Si un item se promueve a fase formal, se traslada a
 >   `phases/phase-X.Y-*.md` y se borra de aquí.
-> - Última actualización: 2026-07-11 (poda tras fases 14/21/37: se
->   borran items ya resueltos — edición inline de presupuestos, budget
->   over, date picker mobile, `convertAll` mobile, color/icono
->   per-categoría, refresh token web en cookie `httpOnly`).
+> - Última actualización: 2026-07-20 (alta de la sección "Módulo Inversión"
+>   con los follow-ups de las fases 44.1-44.3).
 
 ---
 
@@ -148,6 +146,45 @@ Si quieres atacar trabajo real, por orden de valor:
 - **[PHASE-8.4]** `previous_period_*` aún hace una segunda query
   contra `get_totals_by_kind`. Consolidar al 100% requeriría un
   SELECT con doble scope; no compensa la complejidad por ahora.
+
+---
+
+## Módulo Inversión — follow-ups (fase 44)
+
+Limitaciones conscientes del engine. **No** incluye el roadmap de capas
+pendientes (3, 3.5, 4) ni el adapter EDGAR: eso es trabajo planificado en
+[`improvements/ARCHITECTURE-investment-module.md`](improvements/ARCHITECTURE-investment-module.md) §9,
+no deuda.
+
+- **[PHASE-44.3] Calibrar el corte de C2 ("beneficio sin caja")**. La regla
+  del DESIGN §5 dice "NI crece y CFO plano/cae" sin definir **qué es plano**.
+  Se implementó el criterio estricto (crecimiento de CFO ≤ 0) para no generar
+  falsos positivos, con el efecto de que un CFO creciendo un 1% frente a un
+  resultado neto creciendo un 30% **no dispara** la bandera — que es
+  exactamente el patrón que la regla quiere cazar. Decidir el umbral real
+  (¿diferencia de crecimientos > N pp?) cuando haya empresas reales ingeridas
+  contra las que medir el ruido. Mismo tipo de calibración que pide C6.
+- **[PHASE-44.3] C5 no distingue "sin compras" de "sin dato"**. Si
+  `acquisitions` es un hueco, la regla se salta el año en vez de afirmar que
+  el fondo de comercio apareció solo. Con la política de imputación del §4.5
+  (`acquisitions` está en la lista blanca ausente→0) debería llegar siempre
+  informado desde la ingesta; verificar cuando el adapter EDGAR esté vivo.
+- **[PHASE-44.1 → 44.3] Seed de `scoring_thresholds`**. Diferido por decisión
+  del usuario (2026-07-20) hasta que el engine fijara las `metric_key`. Ya está
+  desbloqueado: `engine/catalog.py` expone las 37 métricas con sus bandas por
+  defecto, y el seed debe construirse **desde ahí** para que las claves de BD
+  no puedan divergir de las que el engine calcula.
+- **[PHASE-44.2] Golden test del engine pendiente**. ARCHITECTURE §7 lo exige
+  (AnalysisRun serializado que falla si cambia el output sin bump de
+  `ENGINE_VERSION`), pero necesita fixtures reales de EDGAR cacheados. Hasta
+  entonces la protección contra cambios silenciosos de fórmula depende solo de
+  los unit tests con sintéticos.
+- **[PHASE-44.1] Sin `registry.py` del módulo backend** (la ARCH §1 lo lista).
+  Se añadirá cuando el módulo tenga endpoints; hoy no hay router ni precedente
+  en otros módulos.
+- **[PHASE-44.1] Módulo oculto en el frontend**: el registro `investments` de
+  `modules.ts` sigue `enabled:false` — se activa cuando la Tab Análisis tenga
+  MVP funcional, no antes.
 
 ---
 

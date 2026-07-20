@@ -434,6 +434,39 @@ Solo web + backend (sin paridad móvil). No hay migraciones ni endpoints nuevos.
 > Sin paridad móvil (sólo web + backend). Follow-up: la línea "Pasivos" del chart
 > de evolución sigue a 12 meses fijos (no responde al selector de período).
 
+### Fase 44 — Módulo de Inversión (green-field)
+
+Módulo nuevo desacoplado (cartera + análisis fundamental forense). Diseño en
+[`improvements/DESIGN-v2-investment-module.md`](improvements/DESIGN-v2-investment-module.md)
+y [`improvements/ARCHITECTURE-investment-module.md`](improvements/ARCHITECTURE-investment-module.md).
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 44.1 | Cimientos: 8 enums nativos + 13 tablas (catálogo/fundamentales/umbrales/precios globales · cartera/análisis scoped) + migración reversible (`alembic check` verde) + ADR-0007 tablas globales + tests de modelo | 🚧 | — |
+| 44.2 | Engine puro Capa 1: `CanonicalStatement` (48 partidas) + convenciones §4.5 (media t/t−1, guardas, hueco ≠ 0) + 17 derivaciones §4.4 + 27 métricas base con bandas + DuPont + banderas `ebt_divergence`/`fcf_divergence` | 🚧 | — |
+| 44.3 | Engine capas 1.5 y 2: evolutiva (E1 horizontal · E2 common-size · E3 σ de márgenes · E4 crecimiento sostenible · cruces C1-C8) + forense (M-Score, Z'', F-Score, accruals, F5, F6, FZ, F7 con desglose) + catálogo agregado de 37 métricas | 🚧 | — |
+
+> Detalle en [`phases/phase-44.1-investment-foundations.md`](phases/phase-44.1-investment-foundations.md)
+> y ADR [`decisions/0007-investment-global-tables.md`](decisions/0007-investment-global-tables.md).
+> Código completo y verde (BE: ruff · black · mypy 152 · `alembic upgrade/downgrade`
+> reversibles · `alembic check` sin drift · 11 tests de modelo + 693 suite completa).
+> Sin endpoints ni UI todavía. Seed de `scoring_thresholds` diferido a 44.2
+> (confirmado por el usuario 2026-07-20).
+
+> Detalle de 44.2 en [`phases/phase-44.2-investment-engine-base.md`](phases/phase-44.2-investment-engine-base.md).
+> Engine PURO (sin BD/red/reloj, con test de pureza por AST). Código completo y
+> verde (ruff · black · mypy 159 · 71 tests en 4,0 s). `METRIC_CATALOG` es la
+> fuente única de las `metric_key`, lo que cierra el riesgo de drift del seed.
+> El recuento 27 y la política ausencia-vs-cero (`imputed_zero`) quedaron
+> cerrados en la revisión de documentos del 2026-07-20.
+
+> Detalle de 44.3 en [`phases/phase-44.3-investment-engine-evolution-forensic.md`](phases/phase-44.3-investment-engine-evolution-forensic.md).
+> Capas 1.5 + 2 completas y verdes (ruff · black · mypy 163 · 45 tests nuevos ·
+> 116 del engine en 6,3 s · suite BE **809 passed**). `catalog.py` agrega las 37
+> métricas de las tres capas — fuente única para el seed. Regla dura verificada:
+> en financieras los 8 scores forenses salen `not_computable` con razón, nunca
+> omitidos. Follow-ups en [`backlog.md`](backlog.md#módulo-inversión--follow-ups-fase-44).
+
 ---
 
 ## Estructura de este directorio
