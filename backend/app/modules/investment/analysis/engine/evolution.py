@@ -30,9 +30,11 @@ from app.modules.investment.analysis.engine.conventions import (
     ONE,
     ZERO,
     avg_balance,
+    cagr,
     constant,
     divide,
     multiply,
+    population_stdev,
     sourced,
     subtract,
 )
@@ -156,27 +158,6 @@ def _growth(current: Decimal | None, previous: Decimal | None) -> Decimal | None
     return (current - previous) / abs(previous)
 
 
-def _cagr(
-    first: Decimal | None, last: Decimal | None, periods: int
-) -> tuple[Decimal | None, str | None]:
-    """Tasa compuesta anual entre el primer y el último ejercicio.
-
-    Solo existe con extremos del mismo signo y positivos: con un extremo ≤ 0 la
-    raíz n-ésima del cociente no está definida en reales (o cambia de sentido).
-    """
-    if first is None or last is None:
-        return None, "faltan los extremos de la serie"
-    if periods < 1:
-        return None, "hacen falta al menos dos ejercicios"
-    if first <= ZERO or last <= ZERO:
-        return None, (
-            "la tasa compuesta no está definida con un extremo negativo o cero "
-            "(cambio de signo en la serie)"
-        )
-    ratio = last / first
-    return (ratio.ln() / Decimal(periods)).exp() - 1, None
-
-
 def compute_horizontal(series: StatementSeries) -> tuple[HorizontalSeries, ...]:
     """E1 — YoY, CAGR y base 100 de las 7 magnitudes."""
     result: list[HorizontalSeries] = []
@@ -199,10 +180,10 @@ def compute_horizontal(series: StatementSeries) -> tuple[HorizontalSeries, ...]:
 
         first = values[0][1] if values else None
         last = values[-1][1] if values else None
-        cagr, reason = _cagr(first, last, len(values) - 1)
+        cagr_value, reason = cagr(first, last, len(values) - 1)
         result.append(
             HorizontalSeries(
-                key=key, label=label, points=tuple(points), cagr=cagr, cagr_reason=reason
+                key=key, label=label, points=tuple(points), cagr=cagr_value, cagr_reason=reason
             )
         )
     return tuple(result)
@@ -290,10 +271,7 @@ def compute_margin_stability(series: StatementSeries) -> Amount:
                 f"calculable para medir su dispersión (hay {len(margins)})"
             ),
         )
-    count = Decimal(len(margins))
-    mean = sum(margins, ZERO) / count
-    variance = sum(((m - mean) ** 2 for m in margins), ZERO) / count
-    return Amount(value=variance.sqrt() * PP, provenance=Provenance.DERIVED)
+    return Amount(value=population_stdev(margins) * PP, provenance=Provenance.DERIVED)
 
 
 def payout_ratio(statement: CanonicalStatement) -> Amount:

@@ -767,10 +767,18 @@ def test_un_hueco_deja_el_score_sin_calcular_y_nombra_la_variable() -> None:
 # ══ Catálogo agregado ════════════════════════════════════════════════
 
 
-def test_el_catalogo_agregado_suma_las_tres_capas() -> None:
-    """27 base + 2 evolutivas + 8 forenses = 37 métricas."""
-    assert len(catalog.ALL_METRIC_DEFINITIONS) == 37
-    assert len(set(catalog.ALL_METRIC_KEYS)) == 37
+def test_el_catalogo_agregado_contiene_estas_capas() -> None:
+    """Base (27) + evolutiva (2) + forense (8) están todas en el agregado.
+
+    No se fija el TOTAL: crece con cada capa nueva. El recuento exacto lo
+    verifica el test de la última capa añadida.
+    """
+    from app.modules.investment.analysis.engine import base_ratios
+
+    agregadas = set(catalog.ALL_METRIC_KEYS)
+    for familia in (base_ratios.METRIC_CATALOG, evolution.METRIC_CATALOG, forensic.METRIC_CATALOG):
+        assert {d.key for d in familia} <= agregadas
+    assert len(catalog.ALL_METRIC_KEYS) == len(set(catalog.ALL_METRIC_KEYS)), "claves únicas"
 
 
 def test_no_hay_claves_repetidas_entre_capas() -> None:

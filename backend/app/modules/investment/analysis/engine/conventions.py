@@ -233,3 +233,53 @@ def avg_derived(
     assert current_amount.value is not None and previous_amount.value is not None
     mean = (current_amount.value + previous_amount.value) / Decimal(2)
     return derived(mean, current_amount, previous_amount)
+
+
+# ── Estadística de serie (compartida entre capas) ─────────────────────
+
+
+def median(values: list[Decimal]) -> Decimal:
+    """Mediana de una serie. Asume ≥1 valor (el llamador decide el mínimo)."""
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    if len(ordered) % 2 == 1:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / Decimal(2)
+
+
+def population_stdev(values: list[Decimal]) -> Decimal:
+    """Desviación típica POBLACIONAL (÷N) de una serie de valores.
+
+    Poblacional y no muestral (÷N−1): la serie NO es una muestra de una
+    población mayor, son TODOS los ejercicios de los que hay datos. Con 3-5
+    puntos la diferencia es visible, así que la elección importa.
+
+    Asume ≥1 valor; el mínimo de puntos "con sentido" (p. ej. E3 exige 3) lo
+    decide cada llamador, no esta primitiva.
+    """
+    count = Decimal(len(values))
+    mean = sum(values, ZERO) / count
+    variance = sum(((v - mean) ** 2 for v in values), ZERO) / count
+    return variance.sqrt()
+
+
+def cagr(
+    first: Decimal | None, last: Decimal | None, periods: int
+) -> tuple[Decimal | None, str | None]:
+    """Tasa compuesta anual entre el primer y el último valor de una serie.
+
+    Solo existe con extremos positivos: con un extremo ≤ 0 la raíz n-ésima del
+    cociente no está definida en reales (o cambia de sentido). Devuelve
+    `(None, razón)` en ese caso — nunca un número inventado.
+    """
+    if first is None or last is None:
+        return None, "faltan los extremos de la serie"
+    if periods < 1:
+        return None, "hacen falta al menos dos ejercicios"
+    if first <= ZERO or last <= ZERO:
+        return None, (
+            "la tasa compuesta no está definida con un extremo negativo o cero "
+            "(cambio de signo en la serie)"
+        )
+    growth = ((last / first).ln() / Decimal(periods)).exp() - ONE
+    return growth, None

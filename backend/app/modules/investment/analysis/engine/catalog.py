@@ -12,12 +12,15 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from app.modules.investment.analysis.engine import base_ratios, evolution, forensic
+from app.modules.investment.analysis.engine import base_ratios, dividend, evolution, forensic
 from app.modules.investment.analysis.engine.metrics import MetricDefinition, thresholds_from
 from app.modules.investment.analysis.engine.types import ThresholdSpec
 
 ALL_METRIC_DEFINITIONS: tuple[MetricDefinition, ...] = (
-    base_ratios.METRIC_CATALOG + evolution.METRIC_CATALOG + forensic.METRIC_CATALOG
+    base_ratios.METRIC_CATALOG
+    + evolution.METRIC_CATALOG
+    + forensic.METRIC_CATALOG
+    + dividend.METRIC_CATALOG
 )
 
 ALL_METRIC_KEYS: tuple[str, ...] = tuple(definition.key for definition in ALL_METRIC_DEFINITIONS)

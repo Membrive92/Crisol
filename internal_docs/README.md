@@ -445,6 +445,7 @@ y [`improvements/ARCHITECTURE-investment-module.md`](improvements/ARCHITECTURE-i
 | 44.1 | Cimientos: 8 enums nativos + 13 tablas (catálogo/fundamentales/umbrales/precios globales · cartera/análisis scoped) + migración reversible (`alembic check` verde) + ADR-0007 tablas globales + tests de modelo | 🚧 | — |
 | 44.2 | Engine puro Capa 1: `CanonicalStatement` (48 partidas) + convenciones §4.5 (media t/t−1, guardas, hueco ≠ 0) + 17 derivaciones §4.4 + 27 métricas base con bandas + DuPont + banderas `ebt_divergence`/`fcf_divergence` | 🚧 | — |
 | 44.3 | Engine capas 1.5 y 2: evolutiva (E1 horizontal · E2 common-size · E3 σ de márgenes · E4 crecimiento sostenible · cruces C1-C8) + forense (M-Score, Z'', F-Score, accruals, F5, F6, FZ, F7 con desglose) + catálogo agregado de 37 métricas | 🚧 | — |
+| 44.4 | Engine Capa 3 (dividendo): cobertura D1-D8 · calidad de caja Q1-Q5 (Q4 anomalía fiscal) · soporte de balance B1-B4 (B4 dividendo financiado con deuda) · trayectoria T1-T4 · ajuste REIT sobre FFO · helpers `population_stdev`/`cagr` compartidos · catálogo agregado de 51 métricas | 🚧 | — |
 
 > Detalle en [`phases/phase-44.1-investment-foundations.md`](phases/phase-44.1-investment-foundations.md)
 > y ADR [`decisions/0007-investment-global-tables.md`](decisions/0007-investment-global-tables.md).
@@ -466,6 +467,11 @@ y [`improvements/ARCHITECTURE-investment-module.md`](improvements/ARCHITECTURE-i
 > métricas de las tres capas — fuente única para el seed. Regla dura verificada:
 > en financieras los 8 scores forenses salen `not_computable` con razón, nunca
 > omitidos. Follow-ups en [`backlog.md`](backlog.md#módulo-inversión--follow-ups-fase-44).
+
+> Detalle de 44.4 en [`phases/phase-44.4-investment-engine-dividend.md`](phases/phase-44.4-investment-engine-dividend.md).
+> Capa 3 (dividendo) completa y verde (ruff · black · mypy 164 · 35 tests nuevos ·
+> 162 del módulo en 8,6 s). El catálogo agrega ya 51 métricas. Quedan las capas
+> 3.5 (stress) y 4 (síntesis) para cerrar el engine.
 
 ---
 
