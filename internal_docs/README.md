@@ -446,6 +446,7 @@ y [`improvements/ARCHITECTURE-investment-module.md`](improvements/ARCHITECTURE-i
 | 44.2 | Engine puro Capa 1: `CanonicalStatement` (48 partidas) + convenciones §4.5 (media t/t−1, guardas, hueco ≠ 0) + 17 derivaciones §4.4 + 27 métricas base con bandas + DuPont + banderas `ebt_divergence`/`fcf_divergence` | 🚧 | — |
 | 44.3 | Engine capas 1.5 y 2: evolutiva (E1 horizontal · E2 common-size · E3 σ de márgenes · E4 crecimiento sostenible · cruces C1-C8) + forense (M-Score, Z'', F-Score, accruals, F5, F6, FZ, F7 con desglose) + catálogo agregado de 37 métricas | 🚧 | — |
 | 44.4 | Engine Capa 3 (dividendo): cobertura D1-D8 · calidad de caja Q1-Q5 (Q4 anomalía fiscal) · soporte de balance B1-B4 (B4 dividendo financiado con deuda) · trayectoria T1-T4 · ajuste REIT sobre FFO · helpers `population_stdev`/`cagr` compartidos · catálogo agregado de 51 métricas | 🚧 | — |
+| 44.5 | Engine capas 3.5 y 4 (**cierra el engine**): stress paramétrico (ST1 shock de ingresos · ST2 shock de tipos · ST3 breakeven) + síntesis (4 preguntas con semáforo por regla · matriz Conservador/Vigilar/Evitar · `dividend_verdict` · confianza = completitud × frescura · matriz de banderas) | 🚧 | — |
 
 > Detalle en [`phases/phase-44.1-investment-foundations.md`](phases/phase-44.1-investment-foundations.md)
 > y ADR [`decisions/0007-investment-global-tables.md`](decisions/0007-investment-global-tables.md).
@@ -472,6 +473,13 @@ y [`improvements/ARCHITECTURE-investment-module.md`](improvements/ARCHITECTURE-i
 > Capa 3 (dividendo) completa y verde (ruff · black · mypy 164 · 35 tests nuevos ·
 > 162 del módulo en 8,6 s). El catálogo agrega ya 51 métricas. Quedan las capas
 > 3.5 (stress) y 4 (síntesis) para cerrar el engine.
+
+> Detalle de 44.5 en [`phases/phase-44.5-investment-engine-stress-synthesis.md`](phases/phase-44.5-investment-engine-stress-synthesis.md).
+> **Engine COMPLETO** (6 capas puras). Capas 3.5 + 4 verdes (ruff · black · mypy
+> 166 · 26 tests nuevos · 188 del módulo en 9,8 s). La síntesis recibe los
+> resultados ya calculados de cada capa (resuelve la inyección de bandas para
+> B1/B2). Lo siguiente sale del engine: el adapter EDGAR (44.6), con parada para
+> el cruzado con empresas reales.
 
 ---
 
