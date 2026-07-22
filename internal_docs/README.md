@@ -447,6 +447,17 @@ y [`improvements/ARCHITECTURE-investment-module.md`](improvements/ARCHITECTURE-i
 | 44.3 | Engine capas 1.5 y 2: evolutiva (E1 horizontal · E2 common-size · E3 σ de márgenes · E4 crecimiento sostenible · cruces C1-C8) + forense (M-Score, Z'', F-Score, accruals, F5, F6, FZ, F7 con desglose) + catálogo agregado de 37 métricas | 🚧 | — |
 | 44.4 | Engine Capa 3 (dividendo): cobertura D1-D8 · calidad de caja Q1-Q5 (Q4 anomalía fiscal) · soporte de balance B1-B4 (B4 dividendo financiado con deuda) · trayectoria T1-T4 · ajuste REIT sobre FFO · helpers `population_stdev`/`cagr` compartidos · catálogo agregado de 51 métricas | 🚧 | — |
 | 44.5 | Engine capas 3.5 y 4 (**cierra el engine**): stress paramétrico (ST1 shock de ingresos · ST2 shock de tipos · ST3 breakeven) + síntesis (4 preguntas con semáforo por regla · matriz Conservador/Vigilar/Evitar · `dividend_verdict` · confianza = completitud × frescura · matriz de banderas) | 🚧 | — |
+| 44.6 | Adapter EDGAR — **cruzado hecho + capa de ingesta pura**. `scripts/validate_edgar.py` validó el mapeo us-gaap contra MCD/O/JNJ. `pretax_income` entra como partida canónica 49 y el `concept_map` pasa del script al módulo con sus 4 mecanismos (candidatos · combinación · `dei` · signo) + normalización + cuadres. Falta el adapter de red (`edgartools`, cache, `IngestionJob`, endpoints) | 🚧 | — |
+
+> Detalle y checkpoint de 44.6 en [`phases/phase-44.6-edgar-crosscheck-WIP.md`](phases/phase-44.6-edgar-crosscheck-WIP.md).
+> Decisiones cerradas por el usuario: EBIT derivado del pretax + intereses ·
+> `total_liabilities = activo − patrimonio` · REIT con liquidez/COGS
+> `not_computable` apoyado en FFO/D6 · `pretax_income` como partida 49.
+> Verde: BE **951 passed** · ruff · black · mypy 170 · `alembic upgrade/downgrade`
+> reversibles · `alembic check` sin drift. Las dos derivaciones inutilizan la
+> comprobación que tendría esa partida como testigo, así que `ebt_divergence` no
+> se evalúa con el EBIT derivado y el cuadre de balance se informa como **no
+> verificable** — nunca como superado.
 
 > Detalle en [`phases/phase-44.1-investment-foundations.md`](phases/phase-44.1-investment-foundations.md)
 > y ADR [`decisions/0007-investment-global-tables.md`](decisions/0007-investment-global-tables.md).

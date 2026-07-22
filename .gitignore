@@ -97,3 +97,6 @@ desktop.ini
 *.key
 *.cert
 secrets/
+
+# Cache de companyfacts de la SEC (PHASE-44.6) — 3-4 MB por empresa
+backend/data/edgar_cache/
