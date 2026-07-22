@@ -111,7 +111,7 @@ class FinancialStatement(Base):
     treasury_stock: Mapped[Decimal | None] = _money()
     equity: Mapped[Decimal | None] = _money()
 
-    # ── Cuenta de resultados (12 + acciones) ──────────────────────
+    # ── Cuenta de resultados (13 + acciones) ──────────────────────
     revenue: Mapped[Decimal | None] = _money()
     cogs: Mapped[Decimal | None] = _money()
     sga_expense: Mapped[Decimal | None] = _money()
@@ -121,6 +121,7 @@ class FinancialStatement(Base):
     gains_on_sale_of_business: Mapped[Decimal | None] = _money()
     ebit: Mapped[Decimal | None] = _money()
     interest_expense: Mapped[Decimal | None] = _money()
+    pretax_income: Mapped[Decimal | None] = _money()
     taxes: Mapped[Decimal | None] = _money()
     net_income: Mapped[Decimal | None] = _money()
     shares_basic: Mapped[Decimal | None] = _money()

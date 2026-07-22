@@ -279,9 +279,9 @@ def compute(
             )
         )
 
-        ebt_flag = dv.ebt_divergence_flag(statement)
-        if ebt_flag is not None:
-            flags.append(ebt_flag)
+        for flag in (dv.ebt_divergence_flag(statement), dv.ebt_reconstruction_flag(statement)):
+            if flag is not None:
+                flags.append(flag)
 
     flags.extend(dv.fcf_divergence_flags(series))
     return BaseRatiosResult(metrics=tuple(metrics), flags=tuple(flags), dupont=tuple(dupont))

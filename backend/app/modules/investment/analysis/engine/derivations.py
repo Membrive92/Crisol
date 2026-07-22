@@ -100,19 +100,74 @@ def ebit_clean(statement: CanonicalStatement) -> Amount:
 
 
 def ebt(statement: CanonicalStatement) -> Amount:
-    """`net_income + taxes` [Dec.2] — resultado antes de impuestos."""
+    """Resultado antes de impuestos.
+
+    Prefiere el `pretax_income` REPORTADO (partida 49, PHASE-44.6) y solo si
+    falta cae a la reconstrucción `net_income + taxes` [Dec.2]. El orden importa:
+    la reconstrucción parte del resultado ATRIBUIBLE A LA MATRIZ, así que se deja
+    fuera los minoritarios y las actividades discontinuadas — en Realty Income,
+    11,2 M$ de diferencia sobre el pretax publicado.
+    """
+    reported = sourced(statement, "pretax_income")
+    if not reported.is_missing:
+        return reported
     return add(sourced(statement, "net_income"), sourced(statement, "taxes"))
 
 
+def ebt_reconstruction_flag(statement: CanonicalStatement) -> Flag | None:
+    """Bandera si el pretax reportado se aparta >2% de `net_income + taxes`.
+
+    Compara dos fuentes INDEPENDIENTES del mismo número, así que solo tiene
+    sentido cuando ambas existen. Lo que delata la diferencia es lo que vive
+    entre el pretax y el resultado neto: minoritarios y actividades
+    discontinuadas. Severidad `info` — habla de la COMPLETITUD DEL MAPEO, no de
+    la salud del negocio.
+    """
+    reported = sourced(statement, "pretax_income")
+    rebuilt = add(sourced(statement, "net_income"), sourced(statement, "taxes"))
+    if reported.is_missing or rebuilt.is_missing:
+        return None
+    assert reported.value is not None and rebuilt.value is not None
+    if reported.value == ZERO:
+        return None
+    divergence = abs(reported.value - rebuilt.value) / abs(reported.value)
+    if divergence <= EBT_DIVERGENCE_TOLERANCE:
+        return None
+    return Flag(
+        key="ebt_reconstruction_divergence",
+        severity="info",
+        message=(
+            f"El resultado antes de impuestos publicado ({reported.value:,.0f}) se aparta un "
+            f"{divergence:.1%} de resultado neto + impuestos ({rebuilt.value:,.0f}) en "
+            f"{statement.fiscal_year}: por debajo del pretax hay partidas que el modelo no "
+            "recoge (minoritarios o actividades discontinuadas)."
+        ),
+        evidence={
+            "fiscal_year": statement.fiscal_year,
+            "pretax_reported": str(reported.value),
+            "net_income_plus_taxes": str(rebuilt.value),
+            "divergence": str(divergence),
+        },
+    )
+
+
 def ebt_divergence_flag(statement: CanonicalStatement) -> Flag | None:
-    """Bandera si el EBT reconstruido diverge >2% de `ebit − interest_expense`.
+    """Bandera si el EBT diverge >2% de `ebit − interest_expense`.
 
     Delata partidas no modeladas en el canónico (resultado financiero que no es
     interés, puesta en equivalencia, minoritarios). Severidad `info`: es una
     señal sobre la CALIDAD DE LOS DATOS, no sobre la salud de la empresa — el
     DESIGN §4.4 pide "flag" sin fijar severidad, y mezclarla con las alarmas de
     negocio del informe daría una alarma roja por un mapeo incompleto.
+
+    Guarda de PHASE-44.6: si el `ebit` no es SOURCED, la ingesta lo derivó como
+    `ebt + interest_expense` y entonces `ebit − interest_expense ≡ ebt` por
+    construcción. Comparar sería tautológico, y una bandera que jamás puede
+    dispararse es peor que ninguna: parece una comprobación superada. No se
+    evalúa.
     """
+    if statement.provenance_of("ebit") is not Provenance.SOURCED:
+        return None
     reconstructed = ebt(statement)
     operating = subtract(sourced(statement, "ebit"), sourced(statement, "interest_expense"))
     if reconstructed.is_missing or operating.is_missing:

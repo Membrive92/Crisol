@@ -472,6 +472,74 @@ def test_bandera_de_ebt_cuando_hay_partidas_no_modeladas() -> None:
     assert flag.severity == "info"
 
 
+# ── `pretax_income`, la partida 49 (PHASE-44.6) ───────────────────────
+
+
+def _pretax_statement(**overrides: object) -> CanonicalStatement:
+    base: dict[str, object] = {
+        "fiscal_year": 2024,
+        "fiscal_year_end": date(2024, 12, 31),
+        "accounting_std": AccountingStd.GAAP,
+        "ebit": dec(400),
+        "interest_expense": dec(50),
+        "taxes": dec(70),
+        "net_income": dec(280),
+    }
+    base.update(overrides)
+    return CanonicalStatement(**base)  # type: ignore[arg-type]
+
+
+def test_el_ebt_prefiere_el_pretax_reportado_a_la_reconstruccion() -> None:
+    """Publicado 360 ≠ reconstruido 350 (280+70): manda el publicado. La
+    diferencia son los minoritarios, que `net_income` deja fuera."""
+    assert dv.ebt(_pretax_statement(pretax_income=dec(360))).value == dec(360)
+
+
+def test_sin_pretax_reportado_el_ebt_cae_a_la_reconstruccion() -> None:
+    """Retrocompatible: los estados ya ingeridos no tienen la partida 49."""
+    assert dv.ebt(_pretax_statement()).value == dec(350)
+
+
+def test_la_bandera_de_ebt_no_se_evalua_si_el_ebit_es_derivado() -> None:
+    """Si la ingesta derivó el EBIT como `ebt + intereses`, comparar
+    `ebit − intereses` con el EBT es tautológico: la bandera no puede disparar
+    NUNCA, y una comprobación que siempre pasa engaña más que no tenerla."""
+    statement = _pretax_statement(
+        ebit=dec(410),  # = pretax 360 + intereses 50, como haría el adapter
+        pretax_income=dec(360),
+        item_provenance={"ebit": Provenance.DERIVED},
+    )
+    assert dv.ebt_divergence_flag(statement) is None
+
+
+def test_la_bandera_de_ebt_sigue_viva_si_el_ebit_es_sourced() -> None:
+    """Con el EBIT publicado las dos fuentes son independientes: 300 − 50 = 250
+    frente a un pretax de 360 son 30,6% de divergencia."""
+    statement = _pretax_statement(ebit=dec(300), pretax_income=dec(360))
+    flag = dv.ebt_divergence_flag(statement)
+    assert flag is not None
+    assert flag.key == "ebt_divergence"
+
+
+def test_bandera_cuando_el_pretax_publicado_no_cuadra_con_neto_mas_impuestos() -> None:
+    """Publicado 500 vs reconstruido 350: 30% — hay minoritarios o actividades
+    discontinuadas que el canónico no modela."""
+    flag = dv.ebt_reconstruction_flag(_pretax_statement(pretax_income=dec(500)))
+    assert flag is not None
+    assert flag.key == "ebt_reconstruction_divergence"
+    assert flag.severity == "info"
+
+
+def test_sin_bandera_de_reconstruccion_cuando_la_diferencia_es_tolerable() -> None:
+    """355 vs 350 es un 1,4%, por debajo del 2%: ruido de redondeo, no señal."""
+    assert dv.ebt_reconstruction_flag(_pretax_statement(pretax_income=dec(355))) is None
+
+
+def test_sin_pretax_reportado_no_hay_bandera_de_reconstruccion() -> None:
+    """Sin las dos fuentes no hay nada que comparar: no se inventa una señal."""
+    assert dv.ebt_reconstruction_flag(_pretax_statement()) is None
+
+
 def test_divergencia_de_fcf_exige_dos_años_seguidos(series: StatementSeries) -> None:
     """Un solo año divergente no levanta bandera: lo explica la estacionalidad."""
     flags = dv.fcf_divergence_flags(series)
@@ -832,9 +900,12 @@ def test_una_partida_inexistente_es_un_error_no_un_hueco_silencioso() -> None:
         _statement_2024().get("recievables")
 
 
-def test_el_canonico_tiene_las_48_partidas() -> None:
-    assert len(CANONICAL_ITEMS) == 48
-    assert len(set(CANONICAL_ITEMS)) == 48
+def test_el_canonico_tiene_las_49_partidas() -> None:
+    """48 del DESIGN §4 + `pretax_income`, que añadió el cruzado EDGAR de
+    PHASE-44.6 al ver que el EBIT hay que derivarlo del pretax."""
+    assert len(CANONICAL_ITEMS) == 49
+    assert len(set(CANONICAL_ITEMS)) == 49
+    assert "pretax_income" in CANONICAL_ITEMS
 
 
 def test_avg_balance_solo_acepta_partidas_de_balance(series: StatementSeries) -> None:

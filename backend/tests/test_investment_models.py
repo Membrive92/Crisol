@@ -40,7 +40,8 @@ from app.modules.investment.pricing.models import PriceQuote
 from app.modules.investment.thresholds.models import ScoringThresholds
 from app.modules.users.models import User
 
-# Las 48 partidas monetarias canónicas §4 del DESIGN (deben existir TODAS y ser
+# Las 49 partidas monetarias canónicas (§4 del DESIGN + `pretax_income`, que
+# añadió PHASE-44.6) deben existir TODAS y ser
 # NULLABLE: hueco ≠ cero). Se listan aquí para cazar cualquier omisión futura.
 CANONICAL_MONEY_ITEMS = {
     # Balance (23)
@@ -51,10 +52,10 @@ CANONICAL_MONEY_ITEMS = {
     "current_liabilities", "long_term_debt", "lease_liabilities_noncurrent",
     "deferred_tax_liabilities", "total_liabilities", "share_premium",
     "retained_earnings", "treasury_stock", "equity",
-    # Cuenta de resultados (11 + acciones 4)
+    # Cuenta de resultados (12 + acciones 4)
     "revenue", "cogs", "sga_expense", "rd_expense",
     "depreciation_amortization", "impairments", "gains_on_sale_of_business",
-    "ebit", "interest_expense", "taxes", "net_income",
+    "ebit", "interest_expense", "pretax_income", "taxes", "net_income",
     "shares_basic", "shares_diluted", "shares_outstanding_eop", "sbc_expense",
     # Flujo de caja (10)
     "cfo", "wc_change_inventory", "capex", "acquisitions", "divestitures",
@@ -81,7 +82,7 @@ def test_scoped_tables_have_user_id() -> None:
 
 
 def test_financial_statement_has_all_canonical_items_nullable() -> None:
-    """Las 48 partidas canónicas existen y son NULLABLE (hueco ≠ cero)."""
+    """Las 49 partidas canónicas existen y son NULLABLE (hueco ≠ cero)."""
     cols = {c.name: c for c in FinancialStatement.__table__.columns}
     missing = CANONICAL_MONEY_ITEMS - cols.keys()
     assert not missing, f"Partidas canónicas ausentes: {sorted(missing)}"

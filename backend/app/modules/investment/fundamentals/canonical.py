@@ -1,7 +1,7 @@
 """Modelo canónico de un estado financiero (PHASE-44.2, ARCHITECTURE §1, DESIGN §4).
 
 `CanonicalStatement` es la representación PURA (sin SQLAlchemy) de una fila de
-`financial_statements`: las 48 partidas canónicas del DESIGN §4, todas
+`financial_statements`: las 49 partidas canónicas del DESIGN §4, todas
 `Decimal | None`. Un hueco es `None`, JAMÁS 0 implícito [Dec.4, §4.5].
 
 Es la frontera entre la INGESTA (que normaliza signos y escalas una sola vez) y
@@ -77,7 +77,7 @@ def combine_provenance(*provenances: Provenance) -> Provenance:
     return max(provenances, key=lambda p: _PROVENANCE_RANK[p])
 
 
-# ── Catálogo de partidas canónicas (48) ───────────────────────────────
+# ── Catálogo de partidas canónicas (49) ───────────────────────────────
 
 CANONICAL_BALANCE_ITEMS: tuple[str, ...] = (
     # Activo corriente
@@ -120,6 +120,7 @@ CANONICAL_INCOME_ITEMS: tuple[str, ...] = (
     "gains_on_sale_of_business",
     "ebit",
     "interest_expense",
+    "pretax_income",
     "taxes",
     "net_income",
     "shares_basic",
@@ -144,9 +145,16 @@ CANONICAL_CASHFLOW_ITEMS: tuple[str, ...] = (
 CANONICAL_ITEMS: tuple[str, ...] = (
     CANONICAL_BALANCE_ITEMS + CANONICAL_INCOME_ITEMS + CANONICAL_CASHFLOW_ITEMS
 )
-"""Las 48 partidas canónicas, en el orden del DESIGN §4. Fuente de verdad
+"""Las 49 partidas canónicas, en el orden del DESIGN §4. Fuente de verdad
 compartida por engine, normalización y tests — para que 'qué partidas hay' no
-se escriba dos veces y diverja."""
+se escriba dos veces y diverja.
+
+`pretax_income` es la 49ª y la añadió PHASE-44.6: el cruzado con EDGAR mostró
+que `OperatingIncomeLoss` no es fiable en XBRL (JNJ dejó de publicarlo en 2015,
+los REIT no tienen línea operativa), así que el EBIT hay que derivarlo del
+resultado antes de impuestos. Con el pretax REPORTADO la derivación no depende
+de reconstruirlo con `net_income + taxes` —que ignora minoritarios y actividades
+discontinuadas— y la bandera `ebt_divergence` conserva dos fuentes que comparar."""
 
 CANONICAL_BALANCE_ITEM_SET: frozenset[str] = frozenset(CANONICAL_BALANCE_ITEMS)
 CANONICAL_ITEM_SET: frozenset[str] = frozenset(CANONICAL_ITEMS)
@@ -196,7 +204,7 @@ class CanonicalStatement:
     treasury_stock: Decimal | None = None
     equity: Decimal | None = None
 
-    # ── Cuenta de resultados (15, acciones incluidas) ──────────────
+    # ── Cuenta de resultados (16, acciones incluidas) ──────────────
     revenue: Decimal | None = None
     cogs: Decimal | None = None
     sga_expense: Decimal | None = None
@@ -206,6 +214,7 @@ class CanonicalStatement:
     gains_on_sale_of_business: Decimal | None = None
     ebit: Decimal | None = None
     interest_expense: Decimal | None = None
+    pretax_income: Decimal | None = None
     taxes: Decimal | None = None
     net_income: Decimal | None = None
     shares_basic: Decimal | None = None
