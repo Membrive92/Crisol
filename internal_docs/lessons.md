@@ -634,6 +634,104 @@ valor; nunca deduzcas el head del nombre del fichero. Tras crear la migración,
 ramificado. Y verifica parity con `alembic check` sobre una BD a head (debe
 decir "No new upgrade operations detected") — es el gate que corre CI.
 
+### [PHASE-44.6] La forma de salida de una librería se PRUEBA, no se deduce leyendo su código — sobre todo si el desajuste falla en silencio
+**Error:** Al escribir el adapter de `edgartools` deduje su contrato leyendo el
+código fuente: `FinancialFact` tiene `taxonomy` y `concept` por separado, luego
+la clave se compone `qualify(taxonomy, concept)`. Falso. La librería devuelve el
+concepto **ya cualificado** (`'us-gaap:Assets'`) Y `taxonomy` aparte, así que la
+composición daba `'us-gaap:us-gaap:Assets'`. Segundo fallo del mismo tipo: filtré
+los ratios por acción con la unidad que escribe la SEC (`USD/shares`), pero la
+librería la reetiqueta como `USD per share`, así que el filtro no cazaba nada.
+**Causa:** Leer la fuente enseña qué campos EXISTEN, no qué valores CONTIENEN.
+Los dos campos existían y sus nombres eran los esperados; lo que no era el
+esperado era el formato del contenido.
+**Solución:** Un probe de 40 líneas —payload sintético con la forma real de la
+SEC → parser de la librería → imprimir cada campo con su `repr` y su tipo— destapó
+las dos en un minuto. Después, un test que recorre el pipeline COMPLETO pasando
+por el parser real, para que un cambio de contrato de la librería falle en CI y
+no en producción.
+**Regla:** Antes de escribir el código que consume una librería en una frontera
+de datos, ejecútala una vez con un caso mínimo e imprime lo que devuelve. Es
+especialmente crítico cuando el desajuste **no lanza excepción**: aquí no habría
+saltado ningún error, simplemente NINGUNA partida habría encontrado su concepto y
+la empresa entera habría salido en blanco — un fallo que se lee como "esta
+empresa no publica datos", no como un bug. Y no bases un filtro en literales que
+escribe un tercero (unidades, etiquetas): detecta por forma, que sobrevive a que
+cambien la cadena.
+
+### [PHASE-44.6] Verificar con el intérprete equivocado da un verde que no vale
+**Error:** Corrí `pytest`, `mypy`, `ruff` y `black` con el `python` del PATH
+(global, 3.13) durante toda la sesión. El proyecto tiene su venv en
+`backend/.venv` con **Python 3.12 — el mismo que CI** y con los pines exactos de
+`constraints.txt`. El verde de 984 tests era real, pero no era el verde que
+importa. Peor: estuve a punto de regenerar `constraints.txt` con un `pip freeze`
+del entorno global, que habría metido ~150 paquetes ajenos (torch, whisper,
+celery) y **retrocedido** los pines de fastapi, SQLAlchemy y pydantic.
+**Causa:** `python` en el PATH resolvía a un intérprete global que casualmente
+tenía instaladas las deps del backend, así que todo "funcionaba" y nada avisaba.
+**Solución:** Repetir la verificación con `.venv/Scripts/python.exe` y regenerar
+el lock desde ahí; el diff quedó en adiciones puras (la rama de dependencias de
+`edgartools`) sin mover un solo pin existente.
+**Regla:** Antes de dar por verificada una fase, comprueba QUÉ intérprete estás
+usando (`python -c "import sys; print(sys.prefix)"`) y que su versión coincide
+con la de CI. Y un fichero generado por `pip freeze` se regenera SIEMPRE desde el
+venv del proyecto: si el diff toca versiones que no has cambiado, el entorno está
+mal, no el fichero.
+
+### [PHASE-44.6] `getattr(obj, "metodo")` sin llamarlo es SIEMPRE truthy — un método leído como atributo apaga una feature en silencio
+**Error:** El adapter decidía si una empresa es financiera con
+`if getattr(company, "is_financial_institution", False): is_financial = True`.
+En `edgartools`, `is_financial_institution` es un **método**, no un atributo, así
+que `getattr` devolvía el objeto método sin llamar —un bound method es siempre
+truthy— y **TODA** empresa salía `financiera=True`: McDonald's (SIC 5812,
+restauración) y Johnson & Johnson (SIC 2834, farmacia) incluidas. Efecto: la capa
+forense entera (Beneish M-Score, Altman Z, Piotroski F-Score) se apagaba para
+todas ellas, porque los forenses no aplican a bancos.
+**Causa:** Deducir el contrato de la librería leyendo su código (existe un
+`is_financial_institution` → lo trato como flag) en vez de ejecutarlo y mirar qué
+devuelve. Misma raíz que la lección de arriba sobre la forma de salida de la
+librería, con un modo de fallo específico de Python: acceder a un método sin
+paréntesis no es un error, es una verdad constante.
+**Descubierto por:** el smoke EN VIVO contra empresas reales. Los tests con
+hechos sintéticos no lo cazaban porque construían el `SecurityIdentity` a mano,
+sin pasar por `resolve()` ni por el objeto `Company` de la librería. Los tests
+sintéticos prueban el anclaje y el mapeo; sólo tocar la librería de verdad
+destapa cómo se leen SUS objetos.
+**Solución:** Llamar al método con guarda `callable` (sobrevive a que la librería
+lo convierta en propiedad): `flag = getattr(company, "is_financial_institution",
+False); flag = flag() if callable(flag) else flag`. Y una regresión con un
+`Company` FALSO cuyo `is_financial_institution` es un método —la forma real—, que
+es justo lo que ningún test tocaba.
+**Regla:** Cuando leas un atributo de un objeto de terceros para usarlo como
+bool, confirma si es dato o método antes de fiarte de su truthiness: un `getattr`
+sobre un método siempre pasa el `if`. Y si un flag GOBIERNA qué se calcula
+(aquí, si corren los forenses), su lectura tiene que estar cubierta por un test
+que use la forma REAL del objeto, no un stub construido a mano que se salta la
+frontera. Generaliza [PHASE-44.6] "la forma de salida se prueba, no se deduce" al
+acceso a métodos, no sólo al contenido de los campos.
+
+### [ui-diagnosis] Un "cambio visual regresó" es zoom del navegador hasta que un `git diff` demuestre lo contrario
+**Error:** El usuario reportó que las cards de la web tenían "demasiado aire /
+márgenes" y lo atribuyó al desarrollo del módulo de Inversión. Se dedicó una
+sesión larga a arqueología de git (reflog, ramas, commits colgantes) y a editar
+el padding del `Card` y de 10 componentes de Deuda —con reverts incluidos—
+antes de descubrir que la causa era el **navegador a >100% de zoom**. Con
+`Ctrl+0` volvió a verse idéntico a la referencia.
+**Causa:** Asumir que un síntoma visual equivale a un cambio de código sin
+descartar primero el entorno. Agravado por comparar capturas de **páginas
+distintas** (Análisis, densa, vs Deuda, con cards hero aireadas por diseño) como
+si fueran el mismo layout que "se ensanchó".
+**Solución:** `git diff <commit-de-referencia> HEAD -- apps/web packages/ui` salió
+**0 líneas** — el frontend no había cambiado desde el 19-jul; todo lo posterior
+(20–22 jul) era backend de Inversión. Eso probó que no era código; el reset de
+zoom del usuario lo confirmó.
+**Regla:** Ante un "esto se ve distinto/peor" sin evidencia de commit, PRIMERO
+descarta zoom (`Ctrl+0`) y prueba con `git diff <ref> HEAD -- <área>`; si sale
+vacío, es entorno, no código — no toques nada. No compares capturas de páginas
+distintas como prueba de regresión. Los estilos en px escalan con el zoom, así
+que las proporciones se mantienen: el zoom no "rompe" el layout, solo agranda
+todo de forma uniforme.
+
 ---
 
 ## Ejemplos de referencia (no son lecciones reales)

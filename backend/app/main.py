@@ -17,6 +17,8 @@ from app.modules.ai.router import router as ai_router
 from app.modules.auth.router import router as auth_router
 from app.modules.auth.webauthn.router import router as webauthn_router
 from app.modules.currency.router import router as currency_router
+from app.modules.investment.router import router as investment_router
+from app.modules.investment.thresholds.service import seed_if_empty
 from app.modules.personal_finance.accounts.router import router as accounts_router
 from app.modules.personal_finance.analytics.router import router as analytics_router
 from app.modules.personal_finance.bank_mappings.router import router as bank_mappings_router
@@ -52,6 +54,14 @@ async def lifespan(app_: FastAPI) -> AsyncIterator[None]:
         scheduler.start()
         # Stash para que tests / debugging puedan inspeccionarlo.
         app_.state.scheduler = scheduler
+    # Siembra los umbrales de inversión si la tabla está vacía (idempotente y
+    # defensivo: un fallo de BD al arrancar no debe tumbar el proceso).
+    try:
+        await seed_if_empty()
+    except Exception:
+        logging.getLogger("crisol").warning(
+            "No se pudo sembrar scoring_thresholds al arrancar", exc_info=True
+        )
     try:
         yield
     finally:
@@ -127,6 +137,7 @@ app.include_router(receipts_router)
 app.include_router(bank_mappings_router)
 app.include_router(category_rules_router)
 app.include_router(seed_router)
+app.include_router(investment_router)
 
 
 @app.get("/health", tags=["system"])

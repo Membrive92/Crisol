@@ -12,8 +12,48 @@
 >   (no se tacha) — la phase doc deja la traza histórica.
 > - Si un item se promueve a fase formal, se traslada a
 >   `phases/phase-X.Y-*.md` y se borra de aquí.
-> - Última actualización: 2026-07-20 (alta de la sección "Módulo Inversión"
->   con los follow-ups de las fases 44.1-44.3).
+> - Última actualización: 2026-07-23 (PHASE-44.7: módulo Inversión completo —
+>   se borran los follow-ups resueltos (seed de umbrales, golden test, módulo
+>   oculto en el frontend) y se alta la **prueba manual pendiente**, que bloquea
+>   el commit).
+> - 2026-07-24: alta de **UI-2026-07-24 — auditoría responsive** (aplicada, sin
+>   commitear, pendiente de validación visual).
+
+---
+
+## UI-2026-07-24 — Auditoría responsive del frontend web (aplicada, sin commitear)
+
+Origen: un falso positivo de "cards con demasiado aire" que resultó ser **zoom
+del navegador** (ver `lessons.md` → `[ui-diagnosis]`). A raíz de eso, auditoría
+responsive completa de `apps/web` a 100% de zoom (resoluciones 1366→ultrawide),
+**sin bajar `pageWide=2400`** (es el look aprobado por el usuario).
+
+- **Auditoría**: 32 hallazgos (4 altos, 12 medios, 16 bajos) — grids de columnas
+  fijas que no reflúyen, tablas sin scroll horizontal (se **cortan** en estrecho),
+  toolbars sin `flexWrap`, y contenido que se dispersa en monitores grandes.
+- **Aplicado** (24 ficheros, **sin commitear**): grids colapsables
+  (`repeat(auto-fit, minmax(min(100%, N), 1fr))`, o media query `<style>` donde
+  el ratio no es equitativo — p. ej. el donut+gráfica **1:1.6** de Deuda, que el
+  `auto-fit` habría igualado alterando la vista a 2360px), wrappers `overflowX:
+  auto` en el `DataTable` compartido + tablas de cartera/cuadro, `flexWrap` en
+  toolbars, y caps de anchura (`pageNarrow` / valores fijos) en formularios y
+  listas de pocas columnas.
+- **Verde**: `tsc --noEmit` · `eslint` · las rutas editadas compilan y sirven 200.
+- **Revisión adversarial de diffs completada**: revirtió 3 caps de Grupo-2
+  **contraproducentes** (donut, gráfica Ingresos/Gastos, gráfica de evolución de
+  categoría) que capaban contenido que ya llenaba el ancho y creaban hueco vacío
+  nuevo. El resto de Grupo-2 (que sí reduce el aire pero **cambia la vista a
+  2360px**) queda **pendiente de validación visual del usuario** antes de commitear.
+- **Diferido a propósito** (no aplicado): altura fija de las **gráficas**
+  (Recharts: `debt-daily-evolution`, `debt-monthly-evolution`, `debt-trend-chart`,
+  `networth-evolution-card`) → sólo se aplanan por encima de 2400px (fuera del
+  monitor del usuario) y pasarlas a `aspect`/`clamp` a ciegas es arriesgado; más
+  un par de caps cosméticos redundantes (`transaction-list` maxWidth,
+  `budget-form` ya cubierto por el cap de la página de presupuestos).
+- **Nota estructural**: los estilos son inline y **no admiten `@media`**; la
+  adaptación se hace con grids intrínsecos (`auto-fit`/`minmax`) y, donde hay que
+  preservar un ratio, con bloques `<style>` + clase (mismo mecanismo que el
+  breakpoint móvil de `app/(app)/layout.tsx`).
 
 ---
 
@@ -151,10 +191,66 @@ Si quieres atacar trabajo real, por orden de valor:
 
 ## Módulo Inversión — follow-ups (fase 44)
 
-Limitaciones conscientes del engine. **No** incluye el roadmap de capas
-pendientes (3, 3.5, 4) ni el adapter EDGAR: eso es trabajo planificado en
-[`improvements/ARCHITECTURE-investment-module.md`](improvements/ARCHITECTURE-investment-module.md) §9,
-no deuda.
+Limitaciones conscientes del módulo. El engine (6 capas), el adapter EDGAR, la
+persistencia, la API y el frontend están **construidos** (PHASE-44.7); lo de aquí
+es lo que queda.
+
+### ⏳ PENDIENTE DE PROBAR — validación manual del módulo (bloquea el commit)
+
+- **[PHASE-44.7] Prueba manual en vivo del módulo completo — SIN HACER.** El
+  código está verde en tests automáticos (BE 1042 · FE lint/typecheck/tests/knip),
+  pero **la app nunca se ha ejecutado end-to-end contra la SEC real con la UI**.
+  Hasta hacerla, el módulo NO se commitea (decisión del usuario, 2026-07-23).
+  Playbook paso a paso en
+  [`investment-module-guide.md` §9](investment-module-guide.md).
+  Qué falta validar:
+  - Flujo Análisis en web: `resolve` (MCD) → `ingest` (descarga real ~3,5 MB) →
+    `run` → informe (veredicto de 4 preguntas + paneles). Comprobar que MCD **no**
+    sale marcada como financiera (regresión del bug `is_financial_institution`).
+  - Casos de rama: `O` (REIT → EBIT derivado, forenses `not_computable`) y `JNJ`
+    (EBIT derivado desde 2015).
+  - Flujo Cartera: alta de compra, posición con coste base, badge "sin cotización"
+    (sin Finnhub key), venta con FIFO (409 al vender de más), split aplicado.
+  - Paridad móvil: shell + tabs + veredicto.
+  - **Estado del entorno de prueba** (2026-07-23): Postgres arriba, BD dev en head
+    (`bb2c58d0e3f7a1`), backend en `:8002` (el puerto del proxy web), web en
+    `:3000`, seed de umbrales con 1440 filas, rutas registradas (401, no 404).
+
+### Follow-ups funcionales
+
+- **[PHASE-44.7] Sin `FINNHUB_API_KEY`**: cotizaciones y búsqueda externa
+  desactivadas. El adapter está construido y probado con fixtures; en cuanto haya
+  key, la cartera muestra valor de mercado, P&L latente y peso sin tocar código.
+- **[PHASE-44.7] Summary en divisa nativa**: los totales mezclan divisas si la
+  cartera es multi-moneda. Falta integrar un feed de FX vivo para convertir a una
+  divisa base — la fórmula del P&L (opción A) ya reparte precio/divisa cuando
+  `fx_actual` exista (hoy cae a `fx_compra` → `fx_effect = 0`).
+- **[PHASE-44.7] `spinoff` y `return_of_capital`**: se registran pero aplicarlas
+  devuelve 400. El modelo `CorporateAction` (un `ratio` escalar) no expresa el
+  security destino ni la fracción de base; exige ampliar el modelo + migración.
+- **[PHASE-44.7] Informe sin charts**: evolución common-size, stress y heatmap de
+  Δ% están diferidos; el informe MVP muestra veredicto + tablas de métricas.
+  Falta también el `statement-viewer` (canónico + toggle a `raw_source_ref`).
+- **[PHASE-44.7] Paridad móvil parcial del informe**: sólo el veredicto. Los
+  paneles de métricas y los charts (gifted-charts, 0% reutilizable desde web) son
+  ~2-3 entregas más.
+- **[PHASE-44.7] Sin tests de componente FE** específicos del módulo. La lógica
+  está cubierta en backend (1042) + services (endpoints), pero las cards del
+  informe y la tabla de cartera no tienen test propio.
+- **[PHASE-44.7] Reconciliación con el patrimonio (ARCH §9, fase 40.9)**: decidido
+  dejar Inversión como espacio SEPARADO (no entra en el patrimonio neto del
+  Dashboard) y eximir `/investments` del `AccountsGuard`. Integrarlo exige decidir
+  la política de exclusión/inclusión de brokerage (PHASE-31.4).
+- **[PHASE-44.7] Split sobre lote parcialmente vendido**: aplicar el ratio escala
+  la cantidad completa del lote, incluida la parte ya consumida por ventas
+  anteriores (cuyas allocations quedan congeladas a precios pre-split). Caso
+  borde; el ajuste es auditado y reversible vía `inv_lot_adjustments`.
+- **[PHASE-44.1] Sin `registry.py` del módulo backend** (la ARCH §1 lo lista como
+  metadatos del módulo). El enrutado sí existe (`investment/router.py` agrega los
+  5 sub-routers); falta sólo el fichero de metadatos, sin precedente en otros
+  módulos.
+
+### Calibración del engine (necesita empresas reales ingeridas)
 
 - **[PHASE-44.3] Calibrar el corte de C2 ("beneficio sin caja")**. La regla
   del DESIGN §5 dice "NI crece y CFO plano/cae" sin definir **qué es plano**.
@@ -168,23 +264,7 @@ no deuda.
   `acquisitions` es un hueco, la regla se salta el año en vez de afirmar que
   el fondo de comercio apareció solo. Con la política de imputación del §4.5
   (`acquisitions` está en la lista blanca ausente→0) debería llegar siempre
-  informado desde la ingesta; verificar cuando el adapter EDGAR esté vivo.
-- **[PHASE-44.1 → 44.3] Seed de `scoring_thresholds`**. Diferido por decisión
-  del usuario (2026-07-20) hasta que el engine fijara las `metric_key`. Ya está
-  desbloqueado: `engine/catalog.py` expone las 37 métricas con sus bandas por
-  defecto, y el seed debe construirse **desde ahí** para que las claves de BD
-  no puedan divergir de las que el engine calcula.
-- **[PHASE-44.2] Golden test del engine pendiente**. ARCHITECTURE §7 lo exige
-  (AnalysisRun serializado que falla si cambia el output sin bump de
-  `ENGINE_VERSION`), pero necesita fixtures reales de EDGAR cacheados. Hasta
-  entonces la protección contra cambios silenciosos de fórmula depende solo de
-  los unit tests con sintéticos.
-- **[PHASE-44.1] Sin `registry.py` del módulo backend** (la ARCH §1 lo lista).
-  Se añadirá cuando el módulo tenga endpoints; hoy no hay router ni precedente
-  en otros módulos.
-- **[PHASE-44.1] Módulo oculto en el frontend**: el registro `investments` de
-  `modules.ts` sigue `enabled:false` — se activa cuando la Tab Análisis tenga
-  MVP funcional, no antes.
+  informado desde la ingesta; verificar ahora que el adapter EDGAR está vivo.
 
 ---
 

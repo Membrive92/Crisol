@@ -502,7 +502,7 @@ motor".
 | Fuente | Papel | Coste | Límite |
 |---|---|---|---|
 | **EDGAR XBRL** (edgartools) | Fundamentales MVP | Gratis | Solo US + ADRs; identidad SEC obligatoria; ~10 req/s → descargas serializadas [Dec.18]; cache local de crudos como evidencia [Dec.18] |
-| **Finnhub** | Quotes cartera + symbol search | Free tier 60 req/min | Real-time limitado; suficiente para EOD/1h staleness-tolerant |
+| **Finnhub** | Quotes cartera (~~+ symbol search~~) | Free tier 60 req/min | Real-time limitado; suficiente para EOD/1h staleness-tolerant. **PHASE-44.8 / ADR-0008**: el symbol search se retira — su `/search` no devuelve la bolsa (sólo `description`, `displaySymbol`, `symbol`, `type`), así que no puede alimentar un buscador multi-mercado |
 | FMP / EODHD | Fundamentales EU (futuro) | De pago | Adapter futuro tras D2/D3 |
 | PDF + LLM | Fallback manual | — | Frágil; fuera de MVP |
 

@@ -98,5 +98,8 @@ desktop.ini
 *.cert
 secrets/
 
-# Cache de companyfacts de la SEC (PHASE-44.6) — 3-4 MB por empresa
-backend/data/edgar_cache/
+# Cache de companyfacts de la SEC (PHASE-44.6) — 3-4 MB por empresa.
+# El directorio entero, no sólo `edgar_cache`: el `EDGAR_CACHE_DIR` es
+# configurable y las sondas escriben en el suyo (`edgar_probe_cache`, 5,8 MB),
+# así que una regla por nombre concreto deja fuera al siguiente que se cree.
+backend/data/

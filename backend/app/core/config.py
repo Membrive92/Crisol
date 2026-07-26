@@ -113,6 +113,31 @@ class Settings(BaseSettings):
     minio_bucket_receipts: str = "receipts"
     minio_secure: bool = False
 
+    # ---------- EDGAR (fundamentales del módulo Inversión) ----------
+    # La SEC exige identificarse en el User-Agent ("Nombre email") para
+    # descargar datos. Vacía por defecto: la ingesta falla con un mensaje
+    # accionable en vez de arrancar y que la SEC devuelva 403 a mitad. NO se
+    # persiste en ningún sitio salvo aquí — sólo viaja en la cabecera.
+    edgar_identity: str = ""
+    # Payloads crudos de `companyfacts` (evidencia de auditoría, Dec.18).
+    # Relativa al directorio del backend. Excluida de git: 3-4 MB por empresa.
+    edgar_cache_dir: str = "data/edgar_cache"
+    # Ejercicios a ingerir por defecto. 5 cubre las ventanas de la capa
+    # evolutiva (crecimiento, σ de márgenes) sin descargar historia inútil.
+    edgar_filings_back: int = 5
+    edgar_timeout_seconds: int = 60
+
+    # ---------- Precios (módulo Inversión) ----------
+    # Proveedor de cotizaciones. Sin `finnhub_api_key` las cotizaciones y la
+    # búsqueda externa quedan DESACTIVADAS (la cartera funciona con datos
+    # manuales; el valor de mercado sale "sin cotización"), no rompe nada.
+    price_provider: str = "finnhub"
+    finnhub_api_key: str = ""
+    # Frescura máxima antes de refrescar on-access. 24h por defecto; poner 1
+    # para refresco horario.
+    price_ttl_hours: int = 24
+    price_timeout_seconds: int = 15
+
     # ---------- CORS ----------
     cors_origins: str = "http://localhost:3000,http://localhost:8081"
 

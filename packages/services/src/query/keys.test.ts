@@ -101,4 +101,17 @@ describe('queryKeys', () => {
     expect('debtHealth' in queryKeys.accounts).toBe(false);
     expect('debtHistory' in queryKeys.accounts).toBe(false);
   });
+
+  it('la búsqueda de valores NO cuelga de investment.all (PHASE-44.8 E1)', () => {
+    // Todas las mutaciones del módulo invalidan `investment.all` para refrescar
+    // cartera y análisis. Con la búsqueda dentro de esa raíz, elegir un valor
+    // invalidaba la propia lista que lo acababa de ofrecer y la relanzaba entera.
+    const root = queryKeys.investment.all[0];
+    expect(queryKeys.investment.search('mcd')[0]).not.toBe(root);
+    expect(queryKeys.investment.search('mcd')).toEqual(['investment-search', 'mcd']);
+    // El resto del módulo sí sigue colgando de la raíz común.
+    expect(queryKeys.investment.positions()[0]).toBe(root);
+    expect(queryKeys.investment.summary()[0]).toBe(root);
+    expect(queryKeys.investment.security('abc')[0]).toBe(root);
+  });
 });

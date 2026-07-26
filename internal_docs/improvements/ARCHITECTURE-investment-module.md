@@ -528,17 +528,28 @@ que falla si se cambia una fórmula sin tocar la versión: golden test
 Prefijo `/investment`. Todos los endpoints scoped por usuario
 autenticado salvo lectura de catálogo global.
 
+> **Corregido en PHASE-44.8 (ADR-0008).** El buscador de tres pasos que se
+> describía aquí no es implementable tal cual: el `/search` de Finnhub **no
+> devuelve la bolsa** (sus únicos campos son `description`, `displaySymbol`,
+> `symbol` y `type`), así que `symbol_search` del `PriceAdapter` no puede alimentar
+> un buscador multi-mercado — se retiró sin haber tenido consumidor. Y que el
+> cliente aporte el `exchange` duplicaba filas contra la restricción única
+> `(ticker, exchange)`. El diseño vigente es local-first y el mercado lo decide el
+> servidor; ver [ADR-0008](../decisions/0008-investment-symbol-search.md) y el plan
+> [`phase-44.8-investment-search-hybrid.md`](phase-44.8-investment-search-hybrid.md).
+
 ```
-# catálogo — buscador estilo broker (acción + mercado)
-GET  /investment/securities/search?q=
-     → 1) busca en catálogo local (ticker, nombre)
-       2) si <N resultados, symbol_search del PriceAdapter (multi-exchange,
-          devuelve ticker+exchange+nombre); resultados marcados
-          `in_catalog: false`
-       3) seleccionar un hit externo → POST resolve: crea Security
-          (CIK vía EDGAR si es US; sector desde SIC; sin CIK si no-US,
-          con `analysis_available: false` hasta que exista adapter EU)
-POST /investment/securities/resolve   {ticker, exchange}
+# catálogo — buscador local-first (ADR-0008)
+GET  /investment/securities/search?q=&intent=analysis|portfolio
+     → 1) catálogo local (ticker, nombre, CIK)
+       2) índice en memoria de los emisores de la SEC (sin red, sin key)
+       3) SÓLO con intent=portfolio y proveedor externo activo (apagado por
+          defecto): capa multi-mercado on-demand, marcada `in_catalog: false`
+       Cada hit declara su capacidad (analizable / sólo cartera) ANTES del clic.
+POST /investment/securities/adopt     {listing_key}   # Entrega 2
+POST /investment/securities/resolve   {ticker, exchange?}  # deprecado
+     → `exchange` es opcional y NO vinculante: el servidor normaliza la plaza
+       y deduplica por `(cik, ticker)`, no por la clave de la tabla.
 GET  /investment/securities/{id}
 
 # precios

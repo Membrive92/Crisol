@@ -294,10 +294,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
  */
 function AccountsGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname() ?? '';
   const { data, isLoading, isError } = useAccounts();
 
+  // PHASE-44.7 — Inversión es un espacio separado que no depende de las cuentas
+  // de Finanzas Domésticas (decisión del usuario: sin reconciliar todavía). Se
+  // exime del guard para que sea accesible sin cuenta de finanzas personales.
+  const exempt = pathname.startsWith('/investments');
+
   useEffect(() => {
-    if (isLoading) return;
+    if (exempt || isLoading) return;
     // Si la query falla (red caída, 5xx) no redirigimos — sería peor
     // dejar al usuario atrapado en onboarding. El children pintará su
     // propio estado de error.
@@ -305,8 +311,9 @@ function AccountsGuard({ children }: { children: React.ReactNode }) {
     if ((data ?? []).length === 0) {
       router.replace('/onboarding/accounts');
     }
-  }, [data, isError, isLoading, router]);
+  }, [data, isError, isLoading, router, exempt]);
 
+  if (exempt) return <>{children}</>;
   // Mientras la query no resuelve no pintamos children — evita el flash
   // del módulo vacío antes de redirigir al onboarding.
   if (isLoading) return null;

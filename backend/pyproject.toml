@@ -26,6 +26,11 @@ dependencies = [
   "minio>=7.2.0",
   "webauthn>=2.0.0",
   "apscheduler>=3.10.4",
+  # Fundamentales EDGAR (PHASE-44.6). PINEADA a la versión con la que se validó
+  # el cruzado contra MCD/O/JNJ: su modelo de hechos (`FinancialFact`) es la
+  # frontera del adapter, y un cambio de semántica entre versiones movería los
+  # números sin tocar una línea de nuestro código.
+  "edgartools==5.43.0",
 ]
 
 [project.optional-dependencies]
@@ -79,6 +84,13 @@ exclude = ["alembic/versions", "\\.venv"]
 [[tool.mypy.overrides]]
 module = "tests.*"
 disallow_untyped_decorators = false
+
+# `edgartools` no publica `py.typed`. El adapter lo trata como frontera sin
+# tipos (`Any` + `getattr` defensivo) y convierte a `XbrlFact` en un único
+# sitio, así que el resto del módulo sigue estrictamente tipado.
+[[tool.mypy.overrides]]
+module = ["edgar.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

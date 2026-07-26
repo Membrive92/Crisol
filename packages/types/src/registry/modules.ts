@@ -55,11 +55,17 @@ export const MODULES: readonly AppModule[] = [
     sections: [],
   },
   {
+    // PHASE-44.7 — Módulo de Inversión: análisis fundamental forense (10-K de
+    // la SEC) + cartera con FIFO. Espacio separado, no reconciliado con el
+    // patrimonio de Finanzas Domésticas todavía (decisión del usuario).
     id: 'investments',
     label: 'Inversiones',
     basePath: '/investments',
-    enabled: false,
-    sections: [],
+    enabled: true,
+    sections: [
+      { key: 'portfolio', label: 'Cartera', path: '/investments/portfolio' },
+      { key: 'analysis', label: 'Análisis', path: '/investments/analysis' },
+    ],
   },
   {
     id: 'real-estate',

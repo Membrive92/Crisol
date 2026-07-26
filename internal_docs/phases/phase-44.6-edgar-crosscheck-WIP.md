@@ -1,8 +1,8 @@
-# PHASE-44.6 — Adapter EDGAR · CRUZADO + capa de ingesta pura (checkpoint)
+# PHASE-44.6 — Adapter EDGAR · cruzado + ingesta pura + adapter (checkpoint)
 
-**Estado**: 🚧 EN CURSO — cruzado COMPLETADO sobre 3 empresas reales y capa de
-ingesta PURA (mapeo + normalización + cuadres) ya en el módulo. Falta el adapter
-de red (`edgartools`, cache, `IngestionJob`, endpoints).
+**Estado**: 🚧 EN CURSO — cruzado completado, ingesta pura y adapter EDGAR
+escritos y verdes. Falta la PERSISTENCIA (restatements, `IngestionJob`,
+endpoints) y la prueba en vivo contra las 3 empresas.
 **Última sesión**: 2026-07-22.
 
 ## Dónde estamos en el módulo Inversión (fase 44)
@@ -14,9 +14,128 @@ de red (`edgartools`, cache, `IngestionJob`, endpoints).
 | 44.3 | Engine capas 1.5 + 2 (evolution + forensic) | ✅ `dd842f5` |
 | 44.4 | Engine Capa 3 (dividend) | ✅ `3b96bee` |
 | 44.5 | Engine capas 3.5 + 4 (stress + synthesis) | ✅ `9870417` |
-| 44.6 | Cruzado + `pretax_income` + ingesta pura | 🚧 sin commitear |
+| 44.6a | `pretax_income` como partida canónica 49 | ✅ `7c0558f` |
+| 44.6b | Ingesta pura (concept_map + normalización + cuadres) | ✅ `2ed5b64` |
+| 44.6c | Adapter EDGAR (`edgartools` + cache + anclaje anual) | 🚧 **sin commitear** |
 
 **El engine puro está COMPLETO y COMMITEADO** (6 capas).
+
+---
+
+## Sesión 2026-07-23 — prueba en vivo hecha, un bug cazado
+
+Se cerró la verificación que faltaba del checkpoint anterior: la **prueba en vivo**
+contra MCD/O/JNJ (`edgar_smoke.py`), con `EDGAR_IDENTITY` ya persistida en el
+`.env` del backend. El pipeline nuevo se ejecutó por primera vez contra las tres
+empresas reales y **cruza con la tabla esperada** (márgenes FY2025 31,9% / 18,4% /
+28,5%, EBIT `sourced` en MCD y `derived` en O y JNJ, `total_liabilities` derivado
++ balance NO VERIFICABLE en MCD, huecos = ausencias reales).
+
+En la PRIMERA ejecución en vivo saltó un **bug real** que los tests sintéticos no
+podían ver:
+
+- **`is_financial_institution` es un MÉTODO en edgartools, no un atributo.**
+  `resolve()` lo leía con `getattr(company, "is_financial_institution", False)`
+  sin llamarlo → el bound method es siempre truthy → **TODA** empresa salía
+  `financiera=True` (MCD y JNJ incluidas), lo que apagaba la capa forense entera.
+  Arreglado en `adapters/edgar.py` con guarda `callable` + 2 regresiones que usan
+  un `Company` falso con el método (la forma real). Lección en `lessons.md`.
+- **Crash de encoding cp1252** del smoke en la consola de Windows (no sabe escribir
+  `─ · → ⚑`). Arreglado con `sys.stdout.reconfigure(encoding="utf-8")`.
+
+Estado de verificación tras la sesión: `edgar_smoke.py` ✅ verde contra las 3
+reales · `test_investment_edgar_adapter.py` **36 passed** (34 + 2 nuevas) ·
+**suite completa (985) relanzándose en `backend/.venv`** (lenta con BD en Windows;
+pendiente de confirmar antes del commit). El commit de 44.6c sigue SIN hacer.
+
+> Requisito de infra: la suite necesita Postgres arriba (`docker compose up -d
+> postgres`). Docker Desktop estaba caído al empezar la sesión; una vez levantado,
+> `crisol_test` ya existía en el volumen y los tests conectan.
+
+---
+
+## ⚠️ ESTADO AL DEJARLO (2026-07-22) — leer esto primero
+
+### Lo que está sin commitear
+
+El árbol de trabajo tiene el adapter EDGAR entero, verde pero **sin commit**:
+
+```
+?? backend/app/modules/investment/fundamentals/adapters/annual.py
+?? backend/app/modules/investment/fundamentals/adapters/base.py
+?? backend/app/modules/investment/fundamentals/adapters/edgar.py
+?? backend/app/modules/investment/fundamentals/cache.py
+?? backend/scripts/edgar_smoke.py
+?? backend/tests/test_investment_edgar_adapter.py
+ M backend/pyproject.toml        (edgartools==5.43.0 + override mypy)
+ M backend/constraints.txt       (regenerado desde backend/.venv)
+ M backend/app/core/config.py    (4 settings EDGAR_*)
+ M .env.example                  (las mismas 4)
+ M internal_docs/{README,lessons}.md + este documento
+ M .claude/settings.json          ← AJENO a la fase (permisos de una sesión previa)
+```
+
+El mensaje de commit está redactado y guardado en `.git/PHASE-44.6c-commit-msg.txt`
+(fuera del árbol versionado, pero justo donde se commitea):
+
+```bash
+git add backend/app/modules/investment/fundamentals/adapters \
+        backend/app/modules/investment/fundamentals/cache.py \
+        backend/scripts/edgar_smoke.py backend/tests/test_investment_edgar_adapter.py \
+        backend/pyproject.toml backend/constraints.txt backend/app/core/config.py \
+        .env.example internal_docs/
+git commit -F .git/PHASE-44.6c-commit-msg.txt
+```
+
+Ojo: **no incluir `.claude/settings.json`**, que es de otra sesión y no tiene que
+ver con la fase.
+
+### Verificación: qué está confirmado y qué no
+
+| Check | Estado |
+|-------|--------|
+| `ruff` · `black` · `mypy` (174 ficheros) | ✅ verde en `backend/.venv` |
+| `pytest` módulo inversión (170 tests) | ✅ verde |
+| `pytest` suite completa (984) | ✅ verde **antes** del último refactor |
+| `pytest` suite completa tras el refactor de identidad | ⏳ **relanzada, sin confirmar** |
+| Prueba en vivo contra MCD/O/JNJ | ❌ **no hecha** (ver abajo) |
+
+El refactor pendiente de confirmar es acotado: mover la exigencia de
+`EDGAR_IDENTITY` del constructor al momento de salir a la red. Toca
+`adapters/edgar.py` y sus dos tests, que **sí** se re-ejecutaron a mano (34
+verdes). Total colectado ahora: **985**. Relanzar para cerrar:
+
+```bash
+cd backend && .venv/Scripts/python.exe -m pytest tests/ -q
+```
+
+### ⚠️ Usar el venv, no el `python` del PATH
+
+`backend/.venv` es Python **3.12** (el de CI) y tiene los pines de
+`constraints.txt`. El `python` global de esta máquina es 3.13 y arrastra
+paquetes de otros proyectos. Verificar con el global da un verde que no vale, y
+regenerar `constraints.txt` desde ahí **retrocedería** los pines de fastapi,
+SQLAlchemy y pydantic. Ver la lección en `lessons.md`.
+
+### Lo primero al retomar: la prueba en vivo
+
+La cache del cruzado (`backend/data/edgar_cache`) **ya no está en la máquina**
+—es `.gitignore`—, así que el pipeline nuevo está validado contra hechos
+sintéticos con la forma real de la SEC, pero **nunca se ha ejecutado contra las
+3 empresas reales**. Es el hueco de verificación más grande que queda:
+
+```bash
+cd backend
+EDGAR_IDENTITY="Nombre email" .venv/Scripts/python.exe scripts/edgar_smoke.py MCD O JNJ
+```
+
+Contrastar la salida con la tabla "Resultado del cruzado" de más abajo: EBIT
+`derived` en O y JNJ, cuadre de balance NO VERIFICABLE en MCD, márgenes 31,9% /
+18,4% / 28,5%, y los huecos como ausencias reales (sin COGS en MCD y O, sin
+activo corriente en O). La primera ejecución descarga y repuebla la cache; a
+partir de ahí corre offline y sin identidad.
+
+---
 
 ## Qué es el cruzado
 
@@ -102,6 +221,68 @@ largo explícitamente en cero. Encadenar ausencias —no publica deuda, luego no
 tiene, luego no paga intereses— es justo como se fabrica una empresa impecable
 que no lo es.
 
+### c) El adapter EDGAR (paso 3 del plan)
+
+`edgartools==5.43.0` **pineada** (decisión del usuario, 2026-07-22). El reparto
+de responsabilidades es explícito:
+
+| Quién | Qué |
+|-------|-----|
+| `edgartools` | resuelve el ticker (SIC, REIT, financiera) y parsea el JSON de la SEC en hechos con periodo, unidad y `accession` |
+| Nosotros | descargamos y guardamos el CRUDO (`cache.py`, evidencia de auditoría Dec.18 — la librería no lo devuelve) |
+| Nosotros | anclamos los hechos a ejercicios (`adapters/annual.py`) |
+
+| Fichero | Qué |
+|---------|-----|
+| `adapters/base.py` | `SecurityIdentity`, `XbrlFact`, `FilingRef` + Protocol |
+| `adapters/annual.py` | PURO: hechos → `RawFiling` por ejercicio |
+| `adapters/edgar.py` | descarga, identidad, conversión desde el modelo de la librería |
+| `cache.py` | payloads crudos por CIK, escritura atómica |
+| `scripts/edgar_smoke.py` | verificación en vivo del pipeline completo |
+| `tests/test_investment_edgar_adapter.py` | 34 tests, sin red |
+
+**Por qué el anclaje no lo hace la librería.** `get_annual_fact(concept,
+fiscal_year=N)` parece justo esto y no lo es: su `fiscal_year` sale del campo
+`fy` de `companyfacts`, que es el ejercicio del INFORME, no el del dato. En el
+10-K de 2024 las tres columnas comparativas viajan con `fy=2024`, así que pedir
+2023 devuelve la cifra ORIGINAL de 2023 y nunca la reexpresada — que es
+justamente la que el análisis quiere. Nuestro anclaje usa la fecha de cierre
+(`period_end`), las reglas validadas en el cruzado (10-K + `fp=FY`, flujos de
+350-380 días para no dejar fuera los años de 52/53 semanas) y da la vista
+vigente: gana el filing más reciente.
+
+**Dos trampas que destapó probar la librería en vez de suponerla:**
+
+1. `edgartools` devuelve el concepto YA cualificado (`'us-gaap:Assets'`) pero
+   expone `taxonomy` por separado. Componerlo otra vez daba
+   `'us-gaap:us-gaap:Assets'`: ninguna partida habría encontrado su concepto y el
+   resultado no habría sido un error, sino **una empresa entera en blanco**.
+2. La unidad por acción no es `USD/shares` (como la escribe la SEC) sino
+   `USD per share` (como la reetiqueta la librería). El filtro por lista literal
+   no cazaba nada; ahora se detecta por forma.
+
+Ambas están fijadas con un test que recorre el pipeline COMPLETO desde un
+payload con la forma real de la SEC, pasando por el parser de verdad.
+
+**Un tercer agujero, propio:** el fin de ejercicio se decidía con el hecho de
+fecha más reciente del filing. Un 10-K puede traer saldos POSTERIORES al cierre
+(deuda emitida en enero), que habrían creado un ejercicio fantasma sin partidas
+y hecho desaparecer el de verdad. Ahora lo deciden los FLUJOS, que no pueden
+terminar después del cierre.
+
+**Identidad SEC**: si falta, `edgartools` la pide por consola con `input()`. En
+un backend eso no es un error visible, es una petición colgada para siempre. El
+adapter la fija él mismo y falla con un mensaje accionable — pero **al salir a la
+red, no al construirse**: con el crudo ya cacheado se puede reingerir entero sin
+identidad, que es justo para lo que sirve guardarlo (re-derivar tras cambiar el
+mapeo, montar fixtures, reproducir un análisis viejo).
+
+**Dependencias**: `edgartools` arrastra pandas, pyarrow, numpy, lxml y ~25 más.
+`constraints.txt` regenerado desde `backend/.venv` (Python 3.12, el de CI) — el
+diff es sólo adiciones, ningún pin existente se movió. `edgar` no se importa en
+el arranque de la app: el adapter lo carga dentro de sus métodos, así que el
+backend sigue levantando aunque la librería falle.
+
 ## Los cuatro mecanismos (por qué "una lista de candidatos" no bastaba)
 
 1. **Combinación** (`COMBINED_MAP`): `debt_change` no lo reporta NINGUNA con una
@@ -158,10 +339,52 @@ mudarla al adapter.
 
 ## Cómo seguir
 
-1. ~~Resolver la decisión abierta (`pretax_income` como partida 49)~~ ✅
-2. ~~Fijar el `concept_map` definitivo en el módulo~~ ✅
-3. Pinear `edgartools` y montar el adapter real: descarga + cache por
-   `(cik, accession)` + selección de datapoints anuales (mudar `_annual_points` /
-   `_is_annual_duration` del script) + `RawFiling` por ejercicio + restatements +
-   `IngestionJob` + endpoints de fundamentales.
-4. Golden fixtures con estas 3 empresas → golden test end-to-end del engine.
+Hecho: 1-3. Pendiente: 4-8.
+
+1. ~~Resolver la decisión abierta (`pretax_income` como partida 49)~~ ✅ `7c0558f`
+2. ~~Fijar el `concept_map` definitivo en el módulo~~ ✅ `2ed5b64`
+3. ~~Pinear `edgartools` y montar el adapter (descarga + cache + anclaje anual)~~ ✅ sin commitear
+
+4. **Cerrar la verificación** (bloquea el commit): relanzar la suite completa en
+   `backend/.venv` y hacer la prueba en vivo con `edgar_smoke.py` (ver "ESTADO AL
+   DEJARLO"). Si el smoke destapa algo, se arregla antes de commitear.
+
+5. **`restatements.py`** (Dec.6). La mitad difícil ya está:
+   `annual.restated_periods(facts)` devuelve qué ejercicios reportó más de un
+   10-K, que es DÓNDE mirar. Falta comparar los valores entre accessions y
+   persistir `RestatementFlag` (el modelo existe desde 44.1). Ojo: el criterio
+   no puede ser "cambió el número" a secas — un redondeo distinto no es una
+   reexpresión; hace falta un umbral relativo, como el 2% de las otras banderas.
+
+6. **Persistencia e ingesta**: repository/service/router de `fundamentals`,
+   `IngestionJob` (el modelo existe desde 44.1) y endpoints. Aquí entra la
+   decisión de qué es `is_latest_view` en BD — `annual.build_raw_filings` ya
+   resuelve la vista vigente en memoria, así que la BD debe reflejar ESA
+   decisión y no reimplementarla.
+
+7. **Golden fixtures** con MCD/O/JNJ → golden test end-to-end del engine
+   (ARCHITECTURE §7). Ojo al tamaño: el `companyfacts` crudo pesa 3-4 MB por
+   empresa, así que la fixture debe podarse a los conceptos mapeados antes de
+   commitearla. El `AnalysisRun` serializado es el golden; un cambio de output
+   sin bump de `ENGINE_VERSION` debe romper el test.
+
+8. **Seed de `scoring_thresholds`**, diferido desde 44.1 y todavía sin hacer.
+   `catalog.py` agrega las métricas de las 6 capas y es la fuente única de las
+   `metric_key`, así que el seed sale de ahí — no de una lista escrita a mano.
+
+### Cabos sueltos conocidos (no bloquean, pero conviene no olvidarlos)
+
+- **Enmiendas `10-K/A`**: `ANNUAL_FORMS` sólo acepta `10-K`. Una reexpresión
+  entra igual por la comparativa del 10-K siguiente, pero una enmienda que no
+  llegue a repetirse en el informe posterior se pierde. Decidido así a
+  propósito (mezclarlas exige saber qué partidas toca cada una).
+- **Ejercicios sin 10-K propio**: los años que sólo aparecen como comparativa se
+  descartan (no tienen portada ni `accession` propio). Con `limit=5` no duele,
+  pero acorta la serie disponible para las ventanas largas de la capa evolutiva.
+- **`edgartools` en memoria**: su cache interna de `EntityFacts` es de tamaño 1 y
+  cada empresa grande ocupa 40-80 MB. Nosotros no la usamos (parseamos con
+  `EntityFactsParser` directamente), pero si algún día se usa `get_company_facts`
+  hay que llamar a `clear_company_facts_cache()` en un proceso largo.
+- **Rate limit SEC** (~10 req/s): el adapter hace una sola descarga por empresa,
+  así que hoy no aplica. Al ingerir varias empresas seguidas hay que serializar
+  (Dec.18).

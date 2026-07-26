@@ -29,6 +29,7 @@ export {
 export { bankMappingsApi, type BankMappingUpsertPayload } from './api/endpoints/bank-mappings';
 export { categoryRulesApi } from './api/endpoints/category-rules';
 export { receiptsApi } from './api/endpoints/receipts';
+export { investmentApi } from './api/endpoints/investment';
 export {
   currencyApi,
   type ConvertQuery,
@@ -173,3 +174,30 @@ export {
   useResumeFixedExpense,
   useCancelFixedExpense,
 } from './query/hooks/useFixedExpenses';
+export {
+  useAnalysisRun,
+  useAnalysisRuns,
+  useApplyCorporateAction,
+  useCorporateActions,
+  useCreateDividend,
+  useCreateLot,
+  useCreateSale,
+  useDeleteLot,
+  useDeleteSale,
+  useIngest,
+  useIngestionJob,
+  useLots,
+  usePortfolioSummary,
+  usePositions,
+  useRefreshPricing,
+  useRegisterCorporateAction,
+  useResolveSecurity,
+  useRestatements,
+  useRunAnalysis,
+  useSecurity,
+  useSecuritySearch,
+  useStatements,
+  SEARCH_DEBOUNCE_MS,
+  SEARCH_MIN_LENGTH,
+} from './query/hooks/useInvestment';
+export { useDebouncedValue } from './query/hooks/useDebouncedValue';

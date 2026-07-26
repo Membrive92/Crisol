@@ -178,6 +178,31 @@ export const queryKeys = {
   categoryRules: {
     all: ['categoryRules'] as const,
   },
+  // PHASE-44.7 — todo lo del módulo Inversión desciende de `investment.all`,
+  // así una sola invalidación limpia el módulo entero.
+  investment: {
+    all: ['investment'] as const,
+    // La búsqueda cuelga de una raíz HERMANA, no de `investment.all`
+    // (PHASE-44.8 E1). Todas las mutaciones del módulo invalidan `investment.all`
+    // para refrescar cartera y análisis; con la búsqueda dentro, elegir un valor
+    // invalidaba la propia lista que lo acababa de ofrecer y la relanzaba entera.
+    search: (q: string) => ['investment-search', q] as const,
+    security: (id: string) => [...queryKeys.investment.all, 'security', id] as const,
+    statements: (id: string, view: string) =>
+      [...queryKeys.investment.all, 'statements', id, view] as const,
+    restatements: (id: string) =>
+      [...queryKeys.investment.all, 'restatements', id] as const,
+    job: (id: string) => [...queryKeys.investment.all, 'job', id] as const,
+    runs: (securityId: string) => [...queryKeys.investment.all, 'runs', securityId] as const,
+    run: (id: string) => [...queryKeys.investment.all, 'run', id] as const,
+    lots: (securityId?: string) =>
+      [...queryKeys.investment.all, 'lots', securityId ?? 'all'] as const,
+    sales: () => [...queryKeys.investment.all, 'sales'] as const,
+    dividends: () => [...queryKeys.investment.all, 'dividends'] as const,
+    corporateActions: () => [...queryKeys.investment.all, 'corporate-actions'] as const,
+    positions: () => [...queryKeys.investment.all, 'positions'] as const,
+    summary: () => [...queryKeys.investment.all, 'summary'] as const,
+  },
 } as const;
 
 /**
