@@ -191,9 +191,9 @@ export function PreviewStep({
         style={{
           border: `1px solid ${colors.border}`,
           borderRadius: radius.sm,
-          overflow: 'hidden',
           marginBottom: spacing.md,
           maxHeight: 400,
+          overflowX: 'auto',
           overflowY: 'auto',
         }}
       >

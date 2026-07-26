@@ -197,9 +197,11 @@ export function ScheduleCondensed({
 
             {isOpen ? (
               <div style={{ borderTop: `1px solid ${colors.border}` }}>
+                <div style={{ overflowX: 'auto' }}>
                 <table
                   style={{
                     width: '100%',
+                    minWidth: 520,
                     borderCollapse: 'collapse',
                     fontSize: fontSize.xs,
                   }}
@@ -261,6 +263,7 @@ export function ScheduleCondensed({
                     })}
                   </tbody>
                 </table>
+                </div>
               </div>
             ) : null}
           </li>

@@ -255,7 +255,12 @@ export default function DebtPage() {
           currency={referenceCurrency}
         />
 
+        {/* Ratio 1:1.6 (donut compacto, gráfica ancha) preservado en desktop;
+            colapsa a 1 columna por debajo de 900px vía media query (los estilos
+            inline no admiten @media). */}
+        <style>{`@media (max-width: 900px){.debt-layer1-grid{grid-template-columns:1fr !important}}`}</style>
         <div
+          className="debt-layer1-grid"
           style={{
             display: 'grid',
             gridTemplateColumns: 'minmax(280px, 1fr) minmax(360px, 1.6fr)',
@@ -364,7 +369,7 @@ function DebtKpiStrip({
       aria-label="Indicadores de deuda"
       style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))',
         backgroundColor: colors.surface,
         border: `1px solid ${colors.border}`,
         borderRadius: radius.md,
@@ -417,6 +422,9 @@ function DebtKpiStrip({
               letterSpacing: '-0.01em',
               fontVariantNumeric: 'tabular-nums',
               lineHeight: 1.1,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
             }}
           >
             {t.value}

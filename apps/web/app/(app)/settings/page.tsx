@@ -241,11 +241,12 @@ export default function SettingsPage() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
+            flexWrap: 'wrap',
             gap: spacing.md,
             marginBottom: spacing.md,
           }}
         >
-          <div>
+          <div style={{ flex: '1 1 260px' }}>
             <h2
               style={{
                 margin: 0,

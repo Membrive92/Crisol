@@ -358,7 +358,8 @@ export default function CategoryDetailPage() {
                 Sin movimientos en el periodo.
               </p>
             ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ backgroundColor: colors.surfaceMuted }}>
                     <Th>Fecha</Th>
@@ -370,7 +371,7 @@ export default function CategoryDetailPage() {
                   {data.top_transactions.map((tx) => (
                     <tr key={tx.transaction_id}>
                       <Td>{formatDate(tx.occurred_at)}</Td>
-                      <Td>
+                      <Td style={{ overflowWrap: 'anywhere' }}>
                         <Link
                           href={
                             `/personal-finance/transactions/${tx.transaction_id}` as never
@@ -390,7 +391,8 @@ export default function CategoryDetailPage() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+                </table>
+              </div>
             )}
           </Card>
         </div>
@@ -427,9 +429,11 @@ function Th({
 function Td({
   children,
   align = 'left',
+  style,
 }: {
   children: React.ReactNode;
   align?: 'left' | 'right';
+  style?: React.CSSProperties;
 }) {
   return (
     <td
@@ -440,6 +444,7 @@ function Td({
         color: colors.text,
         fontVariantNumeric: 'tabular-nums',
         fontSize: fontSize.sm,
+        ...style,
       }}
     >
       {children}

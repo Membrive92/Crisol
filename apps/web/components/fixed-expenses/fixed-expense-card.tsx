@@ -168,6 +168,7 @@ export function FixedExpenseCard({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          flexWrap: 'wrap',
           gap: spacing.sm,
           padding: `${spacing.xs}px 0`,
           borderTop: showAccountSelector ? 'none' : `1px solid ${colors.border}`,

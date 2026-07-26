@@ -278,7 +278,13 @@ export default function FixedExpensesPage() {
             </p>
           </Card>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 440px), 1fr))',
+              gap: spacing.sm,
+            }}
+          >
             {pending.map((item) => (
               <FixedExpenseCard
                 key={item.id}
@@ -303,7 +309,13 @@ export default function FixedExpensesPage() {
       {confirmed.length > 0 ? (
         <section style={{ marginBottom: spacing.xl }}>
           <h2 style={sectionHeaderStyle}>Confirmados</h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 440px), 1fr))',
+              gap: spacing.sm,
+            }}
+          >
             {confirmed.map((item) => (
               <FixedExpenseCard
                 key={item.id}
@@ -342,7 +354,13 @@ export default function FixedExpensesPage() {
       {paused.length > 0 ? (
         <section style={{ marginBottom: spacing.xl }}>
           <h2 style={sectionHeaderStyle}>Pausados</h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 440px), 1fr))',
+              gap: spacing.sm,
+            }}
+          >
             {paused.map((item) => (
               <FixedExpenseCard
                 key={item.id}
@@ -388,8 +406,8 @@ export default function FixedExpensesPage() {
           {showCancelled ? (
             <div
               style={{
-                display: 'flex',
-                flexDirection: 'column',
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 440px), 1fr))',
                 gap: spacing.sm,
                 marginTop: spacing.md,
               }}
@@ -428,8 +446,8 @@ export default function FixedExpensesPage() {
           {showDismissed ? (
             <div
               style={{
-                display: 'flex',
-                flexDirection: 'column',
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 440px), 1fr))',
                 gap: spacing.sm,
                 marginTop: spacing.md,
               }}

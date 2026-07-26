@@ -56,6 +56,7 @@ export function ModuleCard({ label, emoji, summary, isLoading }: ModuleCardProps
           alignItems: 'center',
           gap: spacing.md,
           padding: spacing.md,
+          maxWidth: 720,
           textDecoration: 'none',
           color: 'inherit',
         }}

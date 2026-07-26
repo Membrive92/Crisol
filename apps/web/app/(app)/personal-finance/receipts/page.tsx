@@ -5,7 +5,7 @@ import Link from 'next/link';
 
 import { useReceipts } from '@crisol/services';
 import type { ReceiptListQuery } from '@crisol/types';
-import { colors, fontSize, fontWeight, layout, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
 
 import { ReceiptList } from '@/components/receipts/receipt-list';
 import { Button } from '@/components/ui/button';
@@ -26,7 +26,7 @@ export default function ReceiptsPage() {
   const limit = filters.limit ?? PAGE_SIZE;
 
   return (
-    <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
+    <div style={{ maxWidth: 1200, margin: '0 auto', padding: spacing.lg }}>
       {/* Tickets es un flujo secundario: se llega desde el botón
           "Capturar ticket" del header de Transacciones. La flecha hacia
           atrás ancla el contexto y compensa la ausencia de tab primaria. */}

@@ -300,6 +300,8 @@ export default function TransactionsPage() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          rowGap: spacing.sm,
           padding: `${spacing.sm}px 0 ${spacing.md}px`,
         }}
       >
@@ -338,7 +340,7 @@ export default function TransactionsPage() {
             ticket (foto + IA local) son flujos secundarios — viven aquí
             porque conceptualmente son "otras formas de añadir
             transacciones", no pestañas independientes. */}
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: spacing.sm }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', rowGap: spacing.sm, gap: spacing.sm }}>
           <Link href="/personal-finance/trash">
             <Button variant="ghost">
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>

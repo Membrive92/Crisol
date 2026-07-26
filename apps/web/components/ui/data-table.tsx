@@ -78,50 +78,52 @@ export function DataTable<T>({
         overflow: 'hidden',
       }}
     >
-      <table
-        style={{
-          width: '100%',
-          borderCollapse: 'collapse',
-          fontSize: fontSize.sm,
-        }}
-      >
-        <thead>
-          <tr style={{ backgroundColor: colors.surfaceMuted }}>
-            {columns.map((col) => (
-              <th
-                key={col.key}
-                style={{
-                  padding: `${spacing.sm}px ${spacing.md}px`,
-                  textAlign: col.align ?? 'left',
-                  width: col.width,
-                  fontSize: fontSize.xs,
-                  fontWeight: fontWeight.semibold,
-                  color: colors.textMuted,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.04em',
-                  borderBottom: `1px solid ${colors.border}`,
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {col.header}
-              </th>
+      <div style={{ overflowX: 'auto' }}>
+        <table
+          style={{
+            width: '100%',
+            borderCollapse: 'collapse',
+            fontSize: fontSize.sm,
+          }}
+        >
+          <thead>
+            <tr style={{ backgroundColor: colors.surfaceMuted }}>
+              {columns.map((col) => (
+                <th
+                  key={col.key}
+                  style={{
+                    padding: `${spacing.sm}px ${spacing.md}px`,
+                    textAlign: col.align ?? 'left',
+                    width: col.width,
+                    fontSize: fontSize.xs,
+                    fontWeight: fontWeight.semibold,
+                    color: colors.textMuted,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                    borderBottom: `1px solid ${colors.border}`,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {col.header}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, idx) => (
+              <Row
+                key={rowKey(row, idx)}
+                row={row}
+                index={idx}
+                columns={columns}
+                isLast={idx === rows.length - 1}
+                onRowClick={onRowClick}
+                rowAriaLabel={rowAriaLabel}
+              />
             ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, idx) => (
-            <Row
-              key={rowKey(row, idx)}
-              row={row}
-              index={idx}
-              columns={columns}
-              isLast={idx === rows.length - 1}
-              onRowClick={onRowClick}
-              rowAriaLabel={rowAriaLabel}
-            />
-          ))}
-        </tbody>
-      </table>
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

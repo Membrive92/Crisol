@@ -158,7 +158,7 @@ export default function BudgetsPage() {
 
       <section style={{ marginBottom: spacing.xl }}>
         <h2 style={sectionHeaderStyle}>Crear nuevo</h2>
-        <Card style={{ padding: spacing.lg }}>
+        <Card style={{ padding: spacing.lg, maxWidth: layout.pageNarrow }}>
           <BudgetForm
             categories={categories ?? []}
             {...(currencies ? { currencies } : {})}
@@ -180,7 +180,7 @@ export default function BudgetsPage() {
       ) : budgets.length > 0 ? (
         <section>
           <h2 style={sectionHeaderStyle}>Presupuestos activos</h2>
-          <Card style={{ padding: 0 }}>
+          <Card style={{ padding: 0, maxWidth: layout.pageNarrow }}>
             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
               {budgets.map((b, idx) => {
                 const busy =

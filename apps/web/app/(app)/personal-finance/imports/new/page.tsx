@@ -211,7 +211,7 @@ export default function NewImportPage() {
       preview.source === 'pdfplumber_legacy');
 
   return (
-    <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
+    <div style={{ maxWidth: layout.pageNarrow, margin: '0 auto', padding: spacing.lg }}>
       <h1
         style={{
           fontSize: fontSize.xl,

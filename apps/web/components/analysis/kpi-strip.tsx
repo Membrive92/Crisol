@@ -173,11 +173,11 @@ export function KpiStrip({ children }: { children: ReactNode }) {
       aria-label="Indicadores clave"
       style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))',
         backgroundColor: colors.surface,
         border: `1px solid ${colors.border}`,
         borderRadius: radius.md,
-        overflow: 'hidden',
+        overflowX: 'auto',
       }}
     >
       {children}

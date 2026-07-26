@@ -223,57 +223,68 @@ function NewRuleForm({ categories, submitting, onSubmit }: NewRuleFormProps) {
     <form onSubmit={handleSubmit}>
       <div
         style={{
-          display: 'grid',
-          gridTemplateColumns: '2fr 1fr 1fr 2fr 100px auto',
+          display: 'flex',
+          flexWrap: 'wrap',
           gap: spacing.sm,
           alignItems: 'flex-end',
+          maxWidth: layout.pageNarrow,
         }}
       >
-        <TextInput
-          label="Patrón"
-          value={pattern}
-          onChange={(e) => setPattern(e.target.value)}
-          placeholder="MERCADONA, RESTAURANT, etc."
-          maxLength={255}
-          required
-        />
-        <Select
-          label="Tipo"
-          value={matchType}
-          onChange={(e) => setMatchType(e.target.value as RuleMatchType)}
-        >
-          {Object.entries(MATCH_TYPE_LABELS).map(([k, v]) => (
-            <option key={k} value={k}>
-              {v}
-            </option>
-          ))}
-        </Select>
-        <Select
-          label="Campo"
-          value={field}
-          onChange={(e) => setField(e.target.value as RuleField)}
-        >
-          {Object.entries(FIELD_LABELS).map(([k, v]) => (
-            <option key={k} value={k}>
-              {v}
-            </option>
-          ))}
-        </Select>
-        <CategoryCombobox
-          label="Categoría"
-          categories={categories}
-          value={categoryId}
-          onChange={setCategoryId}
-        />
-        <TextInput
-          label="Prioridad"
-          type="number"
-          value={priority}
-          onChange={(e) => setPriority(e.target.value)}
-          min={0}
-          max={10_000}
-        />
-        <div style={{ marginBottom: spacing.md }}>
+        <div style={{ flex: '1 1 220px' }}>
+          <TextInput
+            label="Patrón"
+            value={pattern}
+            onChange={(e) => setPattern(e.target.value)}
+            placeholder="MERCADONA, RESTAURANT, etc."
+            maxLength={255}
+            required
+          />
+        </div>
+        <div style={{ flex: '1 1 140px' }}>
+          <Select
+            label="Tipo"
+            value={matchType}
+            onChange={(e) => setMatchType(e.target.value as RuleMatchType)}
+          >
+            {Object.entries(MATCH_TYPE_LABELS).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div style={{ flex: '1 1 140px' }}>
+          <Select
+            label="Campo"
+            value={field}
+            onChange={(e) => setField(e.target.value as RuleField)}
+          >
+            {Object.entries(FIELD_LABELS).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div style={{ flex: '1 1 220px' }}>
+          <CategoryCombobox
+            label="Categoría"
+            categories={categories}
+            value={categoryId}
+            onChange={setCategoryId}
+          />
+        </div>
+        <div style={{ flex: '0 0 100px' }}>
+          <TextInput
+            label="Prioridad"
+            type="number"
+            value={priority}
+            onChange={(e) => setPriority(e.target.value)}
+            min={0}
+            max={10_000}
+          />
+        </div>
+        <div style={{ flex: '0 0 auto', marginBottom: spacing.md }}>
           <Button type="submit" disabled={submitting}>
             {submitting ? '…' : 'Añadir'}
           </Button>
@@ -318,6 +329,7 @@ function RuleRow({ rule, category, onAskDelete }: RuleRowProps) {
       style={{
         padding: `${spacing.sm}px ${spacing.md}px`,
         display: 'flex',
+        flexWrap: 'wrap',
         alignItems: 'center',
         gap: spacing.sm,
         opacity: rule.enabled ? 1 : 0.5,
@@ -356,6 +368,7 @@ function RuleRow({ rule, category, onAskDelete }: RuleRowProps) {
           fontSize: fontSize.sm,
           color: colors.text,
           width: 180,
+          minWidth: 0,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',

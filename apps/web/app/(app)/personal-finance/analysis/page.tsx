@@ -399,7 +399,7 @@ export default function AnalysisPage() {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))',
           gap: spacing.md,
           marginBottom: spacing.md,
         }}
