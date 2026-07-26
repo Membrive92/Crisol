@@ -111,7 +111,14 @@
       "PowerShell($c = Get-NetTCPConnection -LocalPort 8002 -State Listen -ErrorAction SilentlyContinue; if \\($c\\) { $procId=\\($c|Select-Object -First 1\\).OwningProcess; \"8002 still held by pid $procId \\($\\(\\(Get-Process -Id $procId -ErrorAction SilentlyContinue\\).ProcessName\\)\\) - killing\"; Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800 } else { \"8002 free\" })",
       "Bash(curl -s -o /dev/null -w \"web / status=%{http_code}\\\\n\" http://localhost:3000/personal-finance/transactions)",
       "Bash(python -m mypy app/modules/personal_finance/transfers)",
-      "Bash(python -m ruff check app/modules/personal_finance/transfers tests/test_transfers.py)"
+      "Bash(python -m ruff check app/modules/personal_finance/transfers tests/test_transfers.py)",
+      "PowerShell(docker compose ps --format \"table {{.Service}}\\\\t{{.Status}}\\\\t{{.Ports}}\")",
+      "PowerShell(Get-NetTCPConnection -State Listen -LocalPort 8000,3000,5432 -ErrorAction SilentlyContinue)",
+      "PowerShell(python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000)",
+      "PowerShell(Get-NetTCPConnection -State Listen -LocalPort 8000,3000 -ErrorAction SilentlyContinue)",
+      "PowerShell(Start-Process -FilePath 'cmd.exe' -ArgumentList '/c','pnpm dev:web > \"%TEMP%\\\\crisol-web.log\" 2>&1' -WorkingDirectory $root -WindowStyle Hidden)",
+      "PowerShell($root = 'C:\\\\Users\\\\membr\\\\Desktop\\\\Projects\\\\TrackingFinance')",
+      "PowerShell(Get-Content \"$env:TEMP\\\\crisol-web.log\" -Tail 40)"
     ],
     "deny": [
       "Bash(rm -rf /)",
