@@ -8,6 +8,7 @@ ADRs (Architecture Decision Records), catálogo de endpoints y schema de BD.
 
 ## Índice
 
+- **[HANDOFF.md](HANDOFF.md) — dónde estamos y qué sigue (empieza por aquí)**
 - [architecture.md](architecture.md) — arquitectura del sistema
 - [development-spec.md](development-spec.md) — metodología y fases
 - [lessons.md](lessons.md) — errores y reglas aprendidas
@@ -443,13 +444,14 @@ y [`improvements/ARCHITECTURE-investment-module.md`](improvements/ARCHITECTURE-i
 
 | Fase | Nombre                                                       | Estado | PR |
 |------|--------------------------------------------------------------|--------|----|
-| 44.1 | Cimientos: 8 enums nativos + 13 tablas (catálogo/fundamentales/umbrales/precios globales · cartera/análisis scoped) + migración reversible (`alembic check` verde) + ADR-0007 tablas globales + tests de modelo | 🚧 | — |
-| 44.2 | Engine puro Capa 1: `CanonicalStatement` (48 partidas) + convenciones §4.5 (media t/t−1, guardas, hueco ≠ 0) + 17 derivaciones §4.4 + 27 métricas base con bandas + DuPont + banderas `ebt_divergence`/`fcf_divergence` | 🚧 | — |
-| 44.3 | Engine capas 1.5 y 2: evolutiva (E1 horizontal · E2 common-size · E3 σ de márgenes · E4 crecimiento sostenible · cruces C1-C8) + forense (M-Score, Z'', F-Score, accruals, F5, F6, FZ, F7 con desglose) + catálogo agregado de 37 métricas | 🚧 | — |
-| 44.4 | Engine Capa 3 (dividendo): cobertura D1-D8 · calidad de caja Q1-Q5 (Q4 anomalía fiscal) · soporte de balance B1-B4 (B4 dividendo financiado con deuda) · trayectoria T1-T4 · ajuste REIT sobre FFO · helpers `population_stdev`/`cagr` compartidos · catálogo agregado de 51 métricas | 🚧 | — |
-| 44.5 | Engine capas 3.5 y 4 (**cierra el engine**): stress paramétrico (ST1 shock de ingresos · ST2 shock de tipos · ST3 breakeven) + síntesis (4 preguntas con semáforo por regla · matriz Conservador/Vigilar/Evitar · `dividend_verdict` · confianza = completitud × frescura · matriz de banderas) | 🚧 | — |
-| 44.6 | Adapter EDGAR — **cruzado + ingesta pura + adapter**. `pretax_income` entra como partida canónica 49; el `concept_map` pasa del script al módulo con sus 4 mecanismos (candidatos · combinación · `dei` · signo) + normalización + cuadres; y el adapter monta `edgartools==5.43.0` pineada con reparto explícito: la librería identifica y parsea, nosotros guardamos el crudo y anclamos los hechos al ejercicio por fecha de cierre. Falta persistencia (`IngestionJob`, endpoints) y la prueba en vivo | 🚧 | — |
-| 44.7 | **Módulo completo (BE + web + móvil) en un solo commit.** Persistencia + API (catálogo/fundamentales/análisis/cartera/precios) sobre las 13 tablas de 44.1 (cero migraciones) · ingesta síncrona por job · seed de umbrales (1440 filas) + hash · builder BD→engine + serializador JSONB + `AnalysisRun` · golden con MCD/O/JNJ reales · FIFO + acciones corporativas (split/stock_dividend) + dividendos · `PriceAdapter`/Finnhub (sin key → desactivado) + `/portfolio/summary` · web (Tab Análisis + Cartera, registro `enabled`, `AccountsGuard` eximido) · móvil (shell + tabs + veredicto) | 🚧 | — |
+| 44.1 | Cimientos: 8 enums nativos + 13 tablas (catálogo/fundamentales/umbrales/precios globales · cartera/análisis scoped) + migración reversible (`alembic check` verde) + ADR-0007 tablas globales + tests de modelo | ✅ | — |
+| 44.2 | Engine puro Capa 1: `CanonicalStatement` (48 partidas) + convenciones §4.5 (media t/t−1, guardas, hueco ≠ 0) + 17 derivaciones §4.4 + 27 métricas base con bandas + DuPont + banderas `ebt_divergence`/`fcf_divergence` | ✅ | — |
+| 44.3 | Engine capas 1.5 y 2: evolutiva (E1 horizontal · E2 common-size · E3 σ de márgenes · E4 crecimiento sostenible · cruces C1-C8) + forense (M-Score, Z'', F-Score, accruals, F5, F6, FZ, F7 con desglose) + catálogo agregado de 37 métricas | ✅ | — |
+| 44.4 | Engine Capa 3 (dividendo): cobertura D1-D8 · calidad de caja Q1-Q5 (Q4 anomalía fiscal) · soporte de balance B1-B4 (B4 dividendo financiado con deuda) · trayectoria T1-T4 · ajuste REIT sobre FFO · helpers `population_stdev`/`cagr` compartidos · catálogo agregado de 51 métricas | ✅ | — |
+| 44.5 | Engine capas 3.5 y 4 (**cierra el engine**): stress paramétrico (ST1 shock de ingresos · ST2 shock de tipos · ST3 breakeven) + síntesis (4 preguntas con semáforo por regla · matriz Conservador/Vigilar/Evitar · `dividend_verdict` · confianza = completitud × frescura · matriz de banderas) | ✅ | — |
+| 44.6 | Adapter EDGAR — **cruzado + ingesta pura + adapter**. `pretax_income` entra como partida canónica 49; el `concept_map` pasa del script al módulo con sus 4 mecanismos (candidatos · combinación · `dei` · signo) + normalización + cuadres; y el adapter monta `edgartools==5.43.0` pineada con reparto explícito: la librería identifica y parsea, nosotros guardamos el crudo y anclamos los hechos al ejercicio por fecha de cierre. Falta persistencia (`IngestionJob`, endpoints) y la prueba en vivo | ✅ | — |
+| 44.7 | **Módulo completo (BE + web + móvil) en un solo commit.** Persistencia + API (catálogo/fundamentales/análisis/cartera/precios) sobre las 13 tablas de 44.1 (cero migraciones) · ingesta síncrona por job · seed de umbrales (1440 filas) + hash · builder BD→engine + serializador JSONB + `AnalysisRun` · golden con MCD/O/JNJ reales · FIFO + acciones corporativas (split/stock_dividend) + dividendos · `PriceAdapter`/Finnhub (sin key → desactivado) + `/portfolio/summary` · web (Tab Análisis + Cartera, registro `enabled`, `AccountsGuard` eximido) · móvil (shell + tabs + veredicto) | ✅ | — |
+| 44.8 | Buscador de valores **local-first** (ADR-0008). E1: el servidor decide la plaza (`venues.py`; un país no es un mercado) e identidad por `(cik, ticker)` — el cliente mandaba `exchange:'US'` y duplicaba filas · regla única de analizabilidad con motivo (`capabilities.py`) respaldada por evidencia contada en la SEC y persistida en `securities.analysis_status` (MCD 33 10-K → `ok`; SPY 0/0 → `no_annual`; SAN 0 10-K + 25 20-F → `non_gaap`) · 500→404, 422 con motivo, debounce 250 ms con suelo de 2 caracteres y aviso, key de búsqueda fuera de `investment.all` · fuera `PriceAdapter.symbol_search` | 🚧 E1 | — |
 
 > Detalle y checkpoint de 44.6 en [`phases/phase-44.6-edgar-crosscheck-WIP.md`](phases/phase-44.6-edgar-crosscheck-WIP.md).
 > Decisiones cerradas por el usuario: EBIT derivado del pretax + intereses ·
@@ -462,12 +464,10 @@ y [`improvements/ARCHITECTURE-investment-module.md`](improvements/ARCHITECTURE-i
 > así que `ebt_divergence` no se evalúa con el EBIT derivado y el cuadre de
 > balance se informa como **no verificable** — nunca como superado.
 >
-> **Parado aquí el 2026-07-22 con el adapter SIN COMMITEAR.** Pendiente antes de
-> cerrar: (a) relanzar la suite completa en `backend/.venv` (985 colectados) y
-> (b) `EDGAR_IDENTITY="..." .venv/Scripts/python.exe scripts/edgar_smoke.py MCD O JNJ`
-> — la cache del cruzado ya no está en la máquina, así que el pipeline está
-> validado con hechos sintéticos de forma real pero **nunca ejecutado contra las
-> tres empresas**. Estado completo y siguientes pasos en el doc de la fase.
+> **Cerrado y en `origin/main` el 2026-07-26** (commit `140725d`, junto con
+> PHASE-44.8 E1). El smoke en vivo contra MCD/O/JNJ se ejecutó y cazó el bug del
+> `getattr` sobre un método (ver `lessons.md`); el análisis de MCD se ha
+> verificado a mano en la web.
 
 > Detalle en [`phases/phase-44.1-investment-foundations.md`](phases/phase-44.1-investment-foundations.md)
 > y ADR [`decisions/0007-investment-global-tables.md`](decisions/0007-investment-global-tables.md).

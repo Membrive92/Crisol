@@ -21,7 +21,7 @@
 
 ---
 
-## UI-2026-07-24 — Auditoría responsive del frontend web (aplicada, sin commitear)
+## UI-2026-07-24 — Auditoría responsive del frontend web (aplicada y commiteada, `8c2927c`)
 
 Origen: un falso positivo de "cards con demasiado aire" que resultó ser **zoom
 del navegador** (ver `lessons.md` → `[ui-diagnosis]`). A raíz de eso, auditoría
@@ -195,12 +195,17 @@ Limitaciones conscientes del módulo. El engine (6 capas), el adapter EDGAR, la
 persistencia, la API y el frontend están **construidos** (PHASE-44.7); lo de aquí
 es lo que queda.
 
-### ⏳ PENDIENTE DE PROBAR — validación manual del módulo (bloquea el commit)
+### ✅ HECHO — validación manual del módulo (2026-07-26, ya no bloquea nada)
 
 - **[PHASE-44.7] Prueba manual en vivo del módulo completo — SIN HACER.** El
   código está verde en tests automáticos (BE 1042 · FE lint/typecheck/tests/knip),
   pero **la app nunca se ha ejecutado end-to-end contra la SEC real con la UI**.
-  Hasta hacerla, el módulo NO se commitea (decisión del usuario, 2026-07-23).
+  **Hecha el 2026-07-26**: el flujo Análisis (MCD) se verificó en la web —
+  informe completo, MCD NO marcada como financiera— y el smoke en vivo contra
+  MCD/O/JNJ cazó el bug del `getattr` sobre un método. El módulo está
+  commiteado (`140725d`) y en `origin/main`. Lo que queda sin recorrer a mano:
+  las ramas de `O` y `JNJ` en la UI, el flujo de Cartera completo (venta FIFO,
+  split) y la paridad móvil.
   Playbook paso a paso en
   [`investment-module-guide.md` §9](investment-module-guide.md).
   Qué falta validar:
