@@ -321,6 +321,104 @@ def _apply_derivations(work: _Working) -> None:
         )
 
 
+# ── Escala de las acciones ────────────────────────────────────────────
+
+#: Partidas de recuento de acciones. Comparten escala: si una está en millones,
+#: todas lo están, porque salen del mismo estado de resultados.
+_SHARE_ITEMS = ("shares_basic", "shares_diluted")
+
+#: Desfase mínimo para considerarlo un cambio de escala y no ruido contable.
+#: Mil, no diez: un emisor puede presentar en miles, millones o billones, pero
+#: nunca en "decenas". Un desfase de 2× es otra cosa y no se toca.
+_MIN_SCALE_EXPONENT = 3
+
+#: Cuánto puede alejarse el cociente de la potencia de 10 exacta. Las acciones
+#: medias del ejercicio y las del cierre difieren por las recompras del año —en
+#: MCD, un 0,4%—, así que el cociente ronda 10^k pero no lo clava.
+_SCALE_TOLERANCE = Decimal("0.20")
+
+
+def detect_scale_exponent(value: Decimal, reference: Decimal) -> int | None:
+    """Exponente de 10 que separa dos magnitudes que deberían ser comparables.
+
+    `None` cuando el desfase no es una potencia de 10 limpia: eso ya no es un
+    problema de escala sino de otra cosa, y corregirlo a ojo sería inventar.
+    Sólo se afirma lo que el testigo demuestra.
+    """
+    if value == _ZERO or reference == _ZERO:
+        return None
+    ratio = abs(reference) / abs(value)
+    if ratio <= _ZERO:
+        return None
+    exponent = int(ratio.log10().to_integral_value())
+    if abs(exponent) < _MIN_SCALE_EXPONENT:
+        return None
+    expected = Decimal(10) ** exponent
+    if abs(ratio - expected) / expected > _SCALE_TOLERANCE:
+        return None
+    return exponent
+
+
+def _rescale_shares(raw: RawFiling, work: _Working) -> dict[str, Any] | None:
+    """Corrige el recuento de acciones cuando el emisor lo presenta en millones.
+
+    **Por qué hace falta.** El XBRL declara la unidad `shares` tanto si el valor
+    va en unidades como si va en millones: nada en el fichero distingue
+    `746300000` de `746.3`. McDonald's cambió de una a otra en su 10-K de 2023 y
+    reexpresó los ejercicios anteriores, así que la política `is_latest_view`
+    —quedarse con la revisión más reciente, que es lo correcto— importó toda la
+    serie en millones mientras el dinero seguía en unidades. Resultado: la caja
+    libre por acción salía 9.515.610 $ en vez de 9,52 $.
+
+    **El testigo es `shares_outstanding_eop`**, las acciones en circulación al
+    cierre. Viene del namespace `dei` (la portada del filing), que siempre las
+    publica en unidades reales, y es la MISMA magnitud que las medias del
+    ejercicio: difieren por las recompras del año, jamás por un factor de mil.
+
+    El BPA reportado sería un testigo más exacto —`resultado/acciones = BPA` es
+    una identidad— pero **no llega hasta aquí**: `annual._is_per_share` descarta
+    los ratios por acción a propósito, para que un `EarningsPerShareBasic` no se
+    cuele como si fuera un importe. Comprobado ejecutando el pipeline, no
+    deducido: en los 205 hechos de MCD 2021 el EPS no aparece.
+
+    Si el desfase no es una potencia de 10 limpia no se toca nada, y si falta el
+    testigo tampoco — pero entonces el cuadre de `validation.py` deja la bandera
+    para que no pase inadvertido.
+    """
+    shares_basic = work.values.get("shares_basic")
+    reference = work.values.get("shares_outstanding_eop")
+    if shares_basic is None or reference is None:
+        return None
+
+    exponent = detect_scale_exponent(shares_basic, reference)
+    if exponent is None or exponent <= 0:
+        return None
+
+    factor = Decimal(10) ** exponent
+    corrected: dict[str, str] = {}
+    for item in _SHARE_ITEMS:
+        current = work.values.get(item)
+        if current is None:
+            continue
+        work.values[item] = current * factor
+        corrected[item] = f"{current} -> {current * factor}"
+
+    if not corrected:
+        return None
+    return {
+        "rule": "shares_scale",
+        "factor": str(factor),
+        "witness": "shares_outstanding_eop",
+        "witness_value": str(reference),
+        "corrected": corrected,
+        "note": (
+            f"El emisor presenta las acciones medias en unidades de {factor}. Detectado "
+            f"porque no eran del mismo orden que las acciones en circulación al cierre "
+            f"({reference}), que el namespace dei publica siempre en unidades."
+        ),
+    }
+
+
 # ── Entrada pública ───────────────────────────────────────────────────
 
 
@@ -335,6 +433,10 @@ def normalize(raw: RawFiling) -> CanonicalStatement:
     _map_items(raw, work)
     net_line_notes = _apply_net_lines(raw, work)
     _impute_zeros(work)
+    # La escala se arregla ANTES de derivar: hay derivaciones que dividen entre
+    # acciones, y corregirlas después dejaría el valor derivado con la escala
+    # vieja mientras la partida de origen ya estaría bien.
+    scale_fix = _rescale_shares(raw, work)
     _apply_derivations(work)
 
     source_ref: dict[str, Any] = {
@@ -342,6 +444,8 @@ def normalize(raw: RawFiling) -> CanonicalStatement:
         "mapping": work.mapping,
         "notes": net_line_notes,
     }
+    if scale_fix is not None:
+        source_ref["scale_corrections"] = [scale_fix]
     statement = CanonicalStatement(
         fiscal_year=raw.fiscal_year,
         fiscal_year_end=raw.fiscal_year_end,

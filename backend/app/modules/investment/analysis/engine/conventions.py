@@ -33,6 +33,16 @@ from app.modules.investment.fundamentals.canonical import (
 
 DAY_COUNT = Decimal(365)
 
+STALENESS_FRESH_DAYS = 274  # ~9 meses
+STALENESS_STALE_DAYS = 548  # ~18 meses
+"""Cuánto puede envejecer un ejercicio antes de que compararse con él engañe.
+
+Viven aquí y no en `synthesis` desde PHASE-44.12: los usan la síntesis (para
+degradar la confianza del veredicto) y la valoración (para avisar de que un
+múltiplo cruza un precio de hoy con cuentas viejas). Es la MISMA idea, así que
+tiene una sola definición — y `conventions` es hoja del grafo de imports, con lo
+que ambas pueden leerla sin ciclo."""
+
 ZERO = Decimal(0)
 ONE = Decimal(1)
 

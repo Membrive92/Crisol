@@ -1,11 +1,15 @@
 import type {
   AnalysisRun,
   AnalysisRunListResponse,
+  CanonicalItemCatalogResponse,
+  CanonicalItemDefinition,
   CorporateAction,
   CorporateActionCreateRequest,
   Dividend,
   DividendCreateRequest,
   FinancialStatement,
+  MetricCatalogResponse,
+  Valuation,
   IngestionJob,
   IngestRequest,
   Lot,
@@ -100,6 +104,46 @@ export const investmentApi = {
   async getRun(runId: string): Promise<AnalysisRun> {
     const response = await apiClient.get<AnalysisRun>(`/investment/analysis/runs/${runId}`);
     return response.data;
+  },
+
+  /**
+   * El último análisis de un valor, con todo el desglose. Lanza 404 si no hay
+   * ninguno — es la señal de "aún no se ha analizado", no un error.
+   */
+  async getLatestRun(securityId: string): Promise<AnalysisRun> {
+    const response = await apiClient.get<AnalysisRun>(
+      `/investment/analysis/${securityId}/runs/latest`,
+    );
+    return response.data;
+  },
+
+  /**
+   * Múltiplos de valoración contra la cotización viva (PHASE-44.12).
+   *
+   * `price` simula otra entrada y también cubre los valores que el proveedor no
+   * cotiza. Nunca lanza por falta de cotización: responde con `available:false`
+   * y el motivo, que es lo que la pantalla enseña.
+   */
+  async getValuation(securityId: string, price?: string): Promise<Valuation> {
+    const response = await apiClient.get<Valuation>(
+      `/investment/analysis/${securityId}/valuation`,
+      price ? { params: { price } } : undefined,
+    );
+    return response.data;
+  },
+
+  /** El catálogo de las 52 métricas del engine. Estático: se cachea largo. */
+  async getMetricCatalog(): Promise<MetricCatalogResponse> {
+    const response = await apiClient.get<MetricCatalogResponse>('/investment/analysis/metrics');
+    return response.data;
+  },
+
+  /** Las 49 partidas canónicas con su etiqueta y su bloque. Estático. */
+  async getCanonicalItems(): Promise<CanonicalItemDefinition[]> {
+    const response = await apiClient.get<CanonicalItemCatalogResponse>(
+      '/investment/fundamentals/items',
+    );
+    return response.data.items;
   },
 
   // ── Cartera ─────────────────────────────────────────────────────

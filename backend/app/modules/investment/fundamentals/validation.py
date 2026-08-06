@@ -188,6 +188,67 @@ def _components_within_total(statement: CanonicalStatement) -> list[QualityFlag]
     return flags
 
 
+#: Pares (partida grande, partida pequeña) que comparten unidad y guardan entre
+#: sí una proporción acotada. No es una identidad contable: es una comprobación
+#: de ORDEN DE MAGNITUD, que es justo lo que se rompe cuando dos partidas de la
+#: misma naturaleza llegan en escalas distintas.
+_SAME_SCALE_PAIRS: tuple[tuple[str, str, Decimal], ...] = (
+    # Acciones medias del ejercicio vs acciones al cierre. Difieren por las
+    # recompras del año —un 5% es mucho—, jamás por un factor de mil.
+    ("shares_outstanding_eop", "shares_basic", Decimal(100)),
+    ("shares_outstanding_eop", "shares_diluted", Decimal(100)),
+    # Activo total vs patrimonio: el apalancamiento más extremo no llega a 100x.
+    ("total_assets", "equity", Decimal(1000)),
+)
+
+SCALE_RATIO_ALARM = Decimal(1000)
+"""A partir de aquí no es apalancamiento ni recompra: es un cambio de unidad."""
+
+
+def _scale_coherence(statement: CanonicalStatement) -> list[QualityFlag]:
+    """Partidas de la misma naturaleza que llegan en escalas distintas.
+
+    El XBRL no distingue `746300000` de `746.3`: ambas declaran la unidad
+    `shares`. Cuando un emisor cambia su presentación a millones —McDonald's lo
+    hizo en el 10-K de 2023— nada en el fichero lo delata, y el número entra
+    dividido por un millón sin romper ningún cuadre contable: el balance sigue
+    cuadrando, los márgenes siguen en rango, y sólo se nota si alguien se fija
+    en que la caja libre por acción son nueve millones de dólares.
+
+    Este cuadre existe porque los otros tres miran identidades DENTRO de una
+    misma magnitud y son ciegos a que dos magnitudes relacionadas hayan dejado
+    de ser comparables entre sí.
+    """
+    flags: list[QualityFlag] = []
+    for big_item, small_item, normal_ratio in _SAME_SCALE_PAIRS:
+        big = getattr(statement, big_item, None)
+        small = getattr(statement, small_item, None)
+        if big is None or small is None or small == _ZERO or big == _ZERO:
+            continue
+        ratio = abs(big) / abs(small)
+        if ratio < SCALE_RATIO_ALARM and ratio > (Decimal(1) / SCALE_RATIO_ALARM):
+            continue
+        flags.append(
+            QualityFlag(
+                key=f"scale_mismatch:{big_item}/{small_item}",
+                severity="red",
+                message=(
+                    f"«{big_item}» y «{small_item}» deberían ser del mismo orden "
+                    f"(como mucho {normal_ratio}x) y difieren {ratio:.0f}x: una de las dos "
+                    "viene en otra unidad. Cualquier cálculo que las mezcle con importes "
+                    "estará mal por ese factor."
+                ),
+                evidence={
+                    "fiscal_year": statement.fiscal_year,
+                    big_item: str(big),
+                    small_item: str(small),
+                    "ratio": str(ratio.quantize(Decimal("0.01"))),
+                },
+            )
+        )
+    return flags
+
+
 def validate_statement(statement: CanonicalStatement) -> tuple[QualityFlag, ...]:
     """Todos los cuadres de un ejercicio. Sin banderas = todo cuadró.
 
@@ -203,4 +264,5 @@ def validate_statement(statement: CanonicalStatement) -> tuple[QualityFlag, ...]
         if flag is not None:
             flags.append(flag)
     flags.extend(_components_within_total(statement))
+    flags.extend(_scale_coherence(statement))
     return tuple(flags)

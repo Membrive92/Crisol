@@ -11,7 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.modules.investment.analysis.engine.catalog import ALL_DEFAULT_THRESHOLDS
 from app.modules.investment.enums import AccountingStd, SectorInternal
 from app.modules.investment.thresholds import repository as repo
-from app.modules.investment.thresholds.seed import FORENSIC_KEYS, build_threshold_rows
+from app.modules.investment.thresholds.seed import (
+    FORENSIC_KEYS,
+    NOT_FOR_FINANCIALS,
+    build_threshold_rows,
+)
 from app.modules.investment.thresholds.service import (
     load_thresholds,
     seed_if_empty,
@@ -47,11 +51,42 @@ def test_forenses_no_aplican_en_financieras() -> None:
 
 def test_no_forenses_si_aplican_en_financieras() -> None:
     rows = build_threshold_rows()
-    non_forensic = next(k for k in ALL_DEFAULT_THRESHOLDS if k not in FORENSIC_KEYS)
+    non_forensic = next(
+        k for k in ALL_DEFAULT_THRESHOLDS if k not in FORENSIC_KEYS and k not in NOT_FOR_FINANCIALS
+    )
     financials = [
         r for r in rows if r.sector is SectorInternal.FINANCIALS and r.metric_key == non_forensic
     ]
     assert financials and all(r.applies for r in financials)
+
+
+def test_el_endeudamiento_no_se_aplica_en_financieras() -> None:
+    """S7 (pasivo/patrimonio) está calibrada para negocios con activo tangible.
+
+    En un banco el apalancamiento ES el negocio: un 10× es normal y el corte de
+    3 pintaría un rojo permanente que no informa de nada. Se siembra sin aplicar
+    —el número se ve, sin semáforo— en vez de esperar a la recalibración por
+    sector (PHASE-44.10). Es el mismo mecanismo que ya usaban los forenses.
+    """
+    rows = build_threshold_rows()
+    financieras = [
+        r for r in rows if r.sector is SectorInternal.FINANCIALS and r.metric_key == "S7"
+    ]
+    industriales = [
+        r for r in rows if r.sector is SectorInternal.INDUSTRIALS and r.metric_key == "S7"
+    ]
+    assert financieras and all(not r.applies for r in financieras)
+    assert industriales and all(r.applies for r in industriales)
+
+
+def test_la_calidad_de_la_deuda_si_aplica_en_financieras() -> None:
+    """S8 mide qué parte de la deuda vence a menos de un año. Eso significa lo
+    mismo en un banco que en una fábrica, así que no se exime."""
+    rows = build_threshold_rows()
+    financieras = [
+        r for r in rows if r.sector is SectorInternal.FINANCIALS and r.metric_key == "S8"
+    ]
+    assert financieras and all(r.applies for r in financieras)
 
 
 def test_ifrs_pgc_uncalibrated() -> None:

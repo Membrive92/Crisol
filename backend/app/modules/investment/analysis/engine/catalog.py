@@ -12,7 +12,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from app.modules.investment.analysis.engine import base_ratios, dividend, evolution, forensic
+from app.modules.investment.analysis.engine import (
+    base_ratios,
+    dividend,
+    evolution,
+    forensic,
+    valuation,
+)
 from app.modules.investment.analysis.engine.metrics import MetricDefinition, thresholds_from
 from app.modules.investment.analysis.engine.types import ThresholdSpec
 
@@ -21,13 +27,20 @@ ALL_METRIC_DEFINITIONS: tuple[MetricDefinition, ...] = (
     + evolution.METRIC_CATALOG
     + forensic.METRIC_CATALOG
     + dividend.METRIC_CATALOG
+    + valuation.METRIC_CATALOG
 )
 
 ALL_METRIC_KEYS: tuple[str, ...] = tuple(definition.key for definition in ALL_METRIC_DEFINITIONS)
 
 ALL_DEFAULT_THRESHOLDS: Mapping[str, ThresholdSpec] = thresholds_from(ALL_METRIC_DEFINITIONS)
 """Bandas por defecto (US-GAAP genérico) de todas las capas juntas. `compute` de
-cada capa acepta este mapa entero: cada una coge las suyas y ignora el resto."""
+cada capa acepta este mapa entero: cada una coge las suyas y ignora el resto.
+
+Las métricas de valoración (V1-V7) están en el catálogo pero NO aquí: su
+`direction` es `None`, así que `thresholds_from` las descarta. Están catalogadas
+para que la UI tenga su etiqueta y su unidad de una sola fuente —escribirlas a
+mano es como tres etiquetas acabaron mintiendo en PHASE-44.9— y fuera del seed
+porque sin comparables de sector una banda sería una opinión disfrazada."""
 
 
 def definition_for(metric_key: str) -> MetricDefinition | None:

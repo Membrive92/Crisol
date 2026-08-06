@@ -132,6 +132,71 @@ export function useAnalysisRun(runId: string | null) {
   });
 }
 
+/**
+ * El último análisis persistido de un valor (PHASE-44.9).
+ *
+ * Es lo que abre la pantalla de informe. Antes el informe vivía en la respuesta
+ * de la mutación `useRunAnalysis` y desaparecía al recargar la página.
+ *
+ * Un 404 aquí NO es un fallo: significa «este valor todavía no se ha
+ * analizado». Por eso no se reintenta — reintentar un 404 sólo retrasa el
+ * momento en que la pantalla puede ofrecer el botón de analizar.
+ */
+export function useLatestAnalysisRun(securityId: string | null) {
+  return useQuery({
+    queryKey: queryKeys.investment.latestRun(securityId ?? ''),
+    queryFn: () => investmentApi.getLatestRun(securityId as string),
+    enabled: Boolean(securityId),
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+}
+
+/**
+ * Múltiplos de valoración contra la cotización viva (PHASE-44.12).
+ *
+ * `staleTime` corto y no compartido con el análisis: el veredicto forense sale
+ * de cuentas cerradas y aguanta minutos, pero esto depende del precio. `price`
+ * entra en la query key, así que simular otra entrada es una consulta distinta
+ * y no reutiliza la anterior.
+ *
+ * No reintenta: cuando no hay cotización el backend responde 200 con el motivo,
+ * así que un fallo aquí es de red y reintentar sólo retrasa el mensaje.
+ */
+export function useValuation(securityId: string | null, price?: string) {
+  return useQuery({
+    queryKey: queryKeys.investment.valuation(securityId ?? '', price),
+    queryFn: () => investmentApi.getValuation(securityId as string, price),
+    enabled: Boolean(securityId),
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
+/**
+ * El catálogo de métricas del engine: etiqueta, familia, unidad y cortes.
+ *
+ * Es la definición del motor, no datos del usuario: no cambia hasta que cambia
+ * `engine_version`. De ahí el `staleTime` de una hora y la key fuera de
+ * `investment.all` — una mutación del módulo no debe volver a pedirlo.
+ */
+export function useMetricCatalog() {
+  return useQuery({
+    queryKey: queryKeys.investment.metricCatalog(),
+    queryFn: () => investmentApi.getMetricCatalog(),
+    staleTime: 60 * 60_000,
+  });
+}
+
+/** Las 49 partidas canónicas con su etiqueta en español y su bloque. Estático. */
+export function useCanonicalItems() {
+  return useQuery({
+    queryKey: queryKeys.investment.canonicalItems(),
+    queryFn: () => investmentApi.getCanonicalItems(),
+    staleTime: 60 * 60_000,
+  });
+}
+
 // ── Cartera ───────────────────────────────────────────────────────────
 
 export function useLots(securityId?: string) {

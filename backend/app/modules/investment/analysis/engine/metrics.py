@@ -9,6 +9,7 @@ agrega.
 
 from __future__ import annotations
 
+import enum
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
@@ -21,9 +22,41 @@ from app.modules.investment.analysis.engine.types import (
 from app.modules.investment.enums import ThresholdDirection
 
 
+class MetricUnit(enum.StrEnum):
+    """Escala en la que se lee el valor de una métrica (PHASE-44.9).
+
+    Vive en el engine y NO se persiste: es la unidad de la fórmula, no un dato
+    del usuario. Existe porque 51 métricas heterogéneas viajaban como números
+    desnudos y el cliente no podía saber si un `0,42` era 42 %, 0,42 veces o 42
+    días — así que la web imprimía márgenes como `0,42`.
+
+    Es campo OBLIGATORIO de `MetricDefinition` a propósito: con default, añadir
+    una métrica sin pensar la unidad la etiquetaría mal en silencio.
+    """
+
+    PERCENT = "percent"
+    """Tanto por uno que se presenta como porcentaje (márgenes, payouts, ROE)."""
+    TIMES = "times"
+    """Veces (×): coberturas, múltiplos de deuda, rotaciones."""
+    DAYS = "days"
+    """Días (los ×365 de la capa de actividad)."""
+    YEARS = "years"
+    """Años (repago de deuda, años de dividendo en caja)."""
+    PP = "pp"
+    """Puntos porcentuales — σ de un margen o de un payout. NO es un %: un
+    "2 pp" es dispersión, no proporción."""
+    SCORE = "score"
+    """Puntuación de un modelo publicado (Beneish, Altman, Zmijewski): número
+    adimensional que sólo significa algo contra sus propios cortes."""
+    COUNT = "count"
+    """Conteo de tests superados (F-Score 0-9, C-Score 0-6)."""
+    CURRENCY_PER_SHARE = "currency_per_share"
+    """Importe por acción, en la divisa del estado financiero."""
+
+
 @dataclass(frozen=True)
 class MetricDefinition:
-    """Definición estática de una métrica: identidad + banda por defecto.
+    """Definición estática de una métrica: identidad + unidad + banda por defecto.
 
     `direction=None` significa **sin banda absoluta**: la métrica solo se juzga
     por su deriva o se muestra como serie (un DSO de 45 días es excelente en
@@ -33,6 +66,7 @@ class MetricDefinition:
     key: str
     label: str
     family: str
+    unit: MetricUnit
     direction: ThresholdDirection | None = None
     low_alarm: Decimal | None = None
     low_ok: Decimal | None = None

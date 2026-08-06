@@ -30,14 +30,21 @@ from decimal import Decimal
 from typing import Literal
 
 from app.modules.investment.analysis.engine.base_ratios import BaseRatiosResult
+from app.modules.investment.analysis.engine.catalog import definition_for
+from app.modules.investment.analysis.engine.conventions import (
+    STALENESS_FRESH_DAYS,
+    STALENESS_STALE_DAYS,
+)
 from app.modules.investment.analysis.engine.dividend import DividendResult
 from app.modules.investment.analysis.engine.evolution import EvolutionResult
+from app.modules.investment.analysis.engine.flag_catalog import flag_label
 from app.modules.investment.analysis.engine.forensic import ForensicResult
 from app.modules.investment.analysis.engine.stress import StressResult
 from app.modules.investment.analysis.engine.types import (
     Band,
     Flag,
     MetricResult,
+    MetricStatus,
     Severity,
     StatementSeries,
 )
@@ -57,14 +64,48 @@ CORE_ITEMS: tuple[str, ...] = (
 )
 """Partidas núcleo para la completitud [DESIGN §5]: sin ellas no hay análisis."""
 
-STALENESS_FRESH_DAYS = 274  # ~9 meses
-STALENESS_STALE_DAYS = 548  # ~18 meses
-
 DividendVerdict = Literal["healthy", "caution", "stressed", "not_applicable"]
 SafetyLabel = Literal["conservative", "watch", "avoid"]
 
 
 # ── Salida ────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class QuestionSignal:
+    """Una señal candidata de una pregunta, HAYA PUNTUADO O NO (PHASE-44.9).
+
+    Hasta ahora una pregunta sólo publicaba dos tuplas de cadenas con los
+    nombres de lo que salió rojo o ámbar. Eso impedía tres cosas a la vez:
+
+    1. **Enseñar el valor** junto a la señal. El nombre no se podía cruzar con
+       la métrica: por clave no viajaba, y por etiqueta ya divergían («M-Score»
+       aquí vs «M-Score de Beneish» en el catálogo).
+    2. **Distinguir verde de sin-evidencia.** En una financiera los 8 forenses
+       salen `not_computable`, ninguna señal de contabilidad se evalúa y
+       `_aggregate` cae al `else` → la pregunta pinta VERDE por ausencia de
+       prueba. Con `counted` y los contadores, quien pinta puede decir «no se
+       ha podido comprobar» en vez de «sano».
+    3. **Listar lo que se comprobó y salió bien**, que es la mitad del porqué.
+    """
+
+    key: str
+    """La clave REAL: `m_score`, `B4_dividend_funded_externally`, `stress`…"""
+    label: str
+    kind: Literal["metric", "flag", "derived"]
+    """`derived` = señal que no es ni métrica ni bandera del catálogo: la
+    tendencia del FCF y el peor escenario de stress, que la síntesis compone."""
+    band: Band | None
+    value: Decimal | None
+    status: MetricStatus | None
+    counted: bool
+    """Si aportó al semáforo. `False` no es «está bien»: es «no cuenta»."""
+    reason: str | None = None
+    """Por qué no contó, en español. Obligatorio si `counted` es `False`."""
+
+    def __post_init__(self) -> None:
+        if not self.counted and not self.reason:
+            raise ValueError(f"{self.key}: una señal que no puntúa DEBE explicar por qué")
 
 
 @dataclass(frozen=True)
@@ -74,6 +115,14 @@ class QuestionVerdict:
     verdict: Band
     red_signals: tuple[str, ...] = ()
     amber_signals: tuple[str, ...] = ()
+    signals: tuple[QuestionSignal, ...] = ()
+    """TODAS las señales candidatas, con su valor y su banda. `red_signals` y
+    `amber_signals` se conservan porque los runs ya guardados las tienen."""
+    evaluated_count: int = 0
+    """Cuántas señales tenían banda conocida y por tanto puntuaron."""
+    unavailable_count: int = 0
+    """Cuántas se miraron y no pudieron puntuar. Si `evaluated_count` es 0 y
+    esta no, el veredicto es «sin evidencia», no «sano»."""
 
 
 @dataclass(frozen=True)
@@ -111,34 +160,109 @@ class SynthesisResult:
 
 # ── Señales ───────────────────────────────────────────────────────────
 
-_Signal = tuple[str, Band]
-"""(nombre legible, severidad). Solo se recogen señales con severidad conocida;
-las `not_computable`/`None` no cuentan ni a favor ni en contra."""
+
+def _band_signal(key: str, metric: MetricResult | None) -> QuestionSignal:
+    """Señal a partir de una métrica. Siempre devuelve algo: una métrica que no
+    se pudo calcular es información, no ausencia."""
+    label = definition_for(key)
+    name = label.label if label is not None else key
+    if metric is None:
+        return QuestionSignal(
+            key=key,
+            label=name,
+            kind="metric",
+            band=None,
+            value=None,
+            status=None,
+            counted=False,
+            reason="no se calculó en este ejercicio",
+        )
+    if metric.band is None:
+        return QuestionSignal(
+            key=key,
+            label=name,
+            kind="metric",
+            band=None,
+            value=metric.value,
+            status=metric.status,
+            counted=False,
+            reason=(
+                metric.reason
+                if metric.status == "not_computable"
+                else "no tiene banda absoluta que aplicar"
+            ),
+        )
+    return QuestionSignal(
+        key=key,
+        label=name,
+        kind="metric",
+        band=metric.band,
+        value=metric.value,
+        status=metric.status,
+        counted=True,
+    )
 
 
-def _band_signal(name: str, metric: MetricResult | None) -> _Signal | None:
-    if metric is None or metric.band is None:
-        return None
-    return (name, metric.band)
+def _flag_signal(key: str, flags: Mapping[str, Severity]) -> QuestionSignal:
+    """Señal a partir de una bandera: `red`→stressed, `amber`→caution.
 
-
-def _flag_signal(name: str, flags: Mapping[str, Severity]) -> _Signal | None:
-    """Una flag presente aporta señal según su severidad: `red`→stressed,
-    `amber`→caution. Las `info` no entran en el semáforo (son informativas)."""
-    severity = flags.get(name)
+    Las `info` NO entran en el semáforo por diseño, y una bandera que no ha
+    saltado tampoco — pero ambas se publican: «se comprobó y no se encendió» es
+    justo lo que el usuario necesita para fiarse de un verde.
+    """
+    severity = flags.get(key)
+    name = flag_label(key)
     if severity == "red":
-        return (name, "stressed")
-    if severity == "amber":
-        return (name, "caution")
-    return None
+        band: Band = "stressed"
+    elif severity == "amber":
+        band = "caution"
+    else:
+        return QuestionSignal(
+            key=key,
+            label=name,
+            kind="flag",
+            band=None,
+            value=None,
+            status=None,
+            counted=False,
+            reason=(
+                "bandera informativa: no puntúa" if severity == "info" else "no se ha encendido"
+            ),
+        )
+    return QuestionSignal(
+        key=key, label=name, kind="flag", band=band, value=None, status=None, counted=True
+    )
 
 
-def _aggregate(question: str, key: str, signals: list[_Signal | None]) -> QuestionVerdict:
+def _derived_signal(key: str, label: str, band: Band | None, reason: str | None) -> QuestionSignal:
+    """Señal compuesta por la propia síntesis (tendencia del FCF, stress)."""
+    if band is None:
+        return QuestionSignal(
+            key=key,
+            label=label,
+            kind="derived",
+            band=None,
+            value=None,
+            status=None,
+            counted=False,
+            reason=reason or "no se pudo evaluar",
+        )
+    return QuestionSignal(
+        key=key, label=label, kind="derived", band=band, value=None, status=None, counted=True
+    )
+
+
+def _aggregate(question: str, key: str, signals: list[QuestionSignal]) -> QuestionVerdict:
     """Semáforo de una pregunta: rojo si ≥1 rojo; ámbar si ≥2 ámbar; verde
-    resto (DESIGN §5)."""
-    present = [s for s in signals if s is not None]
-    reds = tuple(name for name, band in present if band == "stressed")
-    ambers = tuple(name for name, band in present if band == "caution")
+    resto (DESIGN §5).
+
+    Ojo con el «verde el resto»: si NINGUNA señal puntúa, el resultado también
+    es verde. Por eso se publican `evaluated_count` y `unavailable_count` — sin
+    ellos, «sano» y «no hay evidencia» son indistinguibles desde fuera.
+    """
+    counted = [s for s in signals if s.counted]
+    reds = tuple(s.label for s in counted if s.band == "stressed")
+    ambers = tuple(s.label for s in counted if s.band == "caution")
     if reds:
         verdict: Band = "stressed"
     elif len(ambers) >= 2:
@@ -146,7 +270,14 @@ def _aggregate(question: str, key: str, signals: list[_Signal | None]) -> Questi
     else:
         verdict = "healthy"
     return QuestionVerdict(
-        key=key, question=question, verdict=verdict, red_signals=reds, amber_signals=ambers
+        key=key,
+        question=question,
+        verdict=verdict,
+        red_signals=reds,
+        amber_signals=ambers,
+        signals=tuple(signals),
+        evaluated_count=len(counted),
+        unavailable_count=len(signals) - len(counted),
     )
 
 
@@ -210,11 +341,11 @@ def _question_accounting(
     """¿La contabilidad es de fiar? ← M-Score + F7 + accruals + Q3/Q4/Q5 +
     C1/C2/C3 (restatements se añaden cuando exista su fase)."""
     signals = [
-        _band_signal("M-Score", forensic.get("m_score", year)),
-        _band_signal("C-Score (Montier)", forensic.get("F7", year)),
-        _band_signal("Accruals", forensic.get("accruals", year)),
-        _band_signal("Divergencia FCF", dividend.get("Q3", year)),
-        _band_signal("Peso de extraordinarios", dividend.get("Q5", year)),
+        _band_signal("m_score", forensic.get("m_score", year)),
+        _band_signal("F7", forensic.get("F7", year)),
+        _band_signal("accruals", forensic.get("accruals", year)),
+        _band_signal("Q3", dividend.get("Q3", year)),
+        _band_signal("Q5", dividend.get("Q5", year)),
         _flag_signal("Q4_tax_anomaly", flags),
         _flag_signal("Q4_tax_persistently_low", flags),
         _flag_signal("C1_receivables_vs_revenue", flags),
@@ -233,13 +364,13 @@ def _question_cash(
 ) -> QuestionVerdict:
     """¿Genera caja de verdad? ← Q1/Q2 + F-Score + R7/R9b/R10 + E3 + tendencia FCF."""
     signals = [
-        _band_signal("Conversión CFO/beneficio", dividend.get("Q1", year)),
-        _band_signal("Conversión FCF/EBITDA", dividend.get("Q2", year)),
-        _band_signal("F-Score", forensic.get("f_score", year)),
-        _band_signal("Margen FCF", base.get("R7", year)),
-        _band_signal("CROIC", base.get("R9b", year)),
-        _band_signal("Rentabilidad bruta sobre activos", base.get("R10", year)),
-        _band_signal("Estabilidad de márgenes", evolution.get("E3", year)),
+        _band_signal("Q1", dividend.get("Q1", year)),
+        _band_signal("Q2", dividend.get("Q2", year)),
+        _band_signal("f_score", forensic.get("f_score", year)),
+        _band_signal("R7", base.get("R7", year)),
+        _band_signal("R9b", base.get("R9b", year)),
+        _band_signal("R10", base.get("R10", year)),
+        _band_signal("E3", evolution.get("E3", year)),
         _fcf_trend_signal(evolution),
     ]
     return _aggregate("¿Genera caja de verdad?", "cash", signals)
@@ -250,12 +381,12 @@ def _question_dividend(
 ) -> QuestionVerdict:
     """¿El dividendo cabe en la caja? ← D2/D3/D4/D5 (o D6) + B1/B2/B3/B4."""
     signals = [
-        _band_signal("Payout sobre FCF", dividend.get("D2", year)),
-        _band_signal("Cobertura FCF", dividend.get("D3", year)),
-        _band_signal("Payout ajustado por SBC", dividend.get("D4", year)),
-        _band_signal("Retorno total sobre FCF", dividend.get("D5", year)),
-        _band_signal("Payout REIT", dividend.get("D6", year)),
-        _band_signal("Años de dividendo en caja", dividend.get("B3", year)),
+        _band_signal("D2", dividend.get("D2", year)),
+        _band_signal("D3", dividend.get("D3", year)),
+        _band_signal("D4", dividend.get("D4", year)),
+        _band_signal("D5", dividend.get("D5", year)),
+        _band_signal("D6", dividend.get("D6", year)),
+        _band_signal("B3", dividend.get("B3", year)),
         _flag_signal("B1_debt_competes_with_dividend", flags),
         _flag_signal("B2_interest_priority", flags),
         _flag_signal("B4_dividend_funded_externally", flags),
@@ -268,30 +399,39 @@ def _question_resilience(
 ) -> QuestionVerdict:
     """¿Aguanta un golpe? ← ST1-ST3 + Z'' + FZ + L4 + S2/S4/S5/S6."""
     signals = [
-        _band_signal("Z''-Score", forensic.get("z_score", year)),
-        _band_signal("X-Score (Zmijewski)", forensic.get("FZ", year)),
-        _band_signal("Muro de vencimientos", base.get("L4", year)),
-        _band_signal("Cobertura de intereses", base.get("S2", year)),
-        _band_signal("Deuda neta / EBITDA", base.get("S4", year)),
-        _band_signal("Años de repago", base.get("S5", year)),
-        _band_signal("Cobertura de intereses por caja", base.get("S6", year)),
+        _band_signal("z_score", forensic.get("z_score", year)),
+        _band_signal("FZ", forensic.get("FZ", year)),
+        _band_signal("L4", base.get("L4", year)),
+        _band_signal("S2", base.get("S2", year)),
+        _band_signal("S4", base.get("S4", year)),
+        _band_signal("S5", base.get("S5", year)),
+        _band_signal("S6", base.get("S6", year)),
         _stress_signal(stress),
     ]
     return _aggregate("¿Aguanta un golpe?", "resilience", signals)
 
 
-def _fcf_trend_signal(evolution: EvolutionResult) -> _Signal | None:
+def _fcf_trend_signal(evolution: EvolutionResult) -> QuestionSignal:
     """Tendencia de la caja libre (E1): un CAGR negativo del FCF es mala señal
     de generación de caja, más allá de la foto del último año."""
     fcf = evolution.series_for("fcf_cfo")
     if fcf is None or fcf.cagr is None:
-        return None
+        return _derived_signal(
+            "fcf_trend",
+            "Tendencia de la caja libre",
+            None,
+            (fcf.cagr_reason if fcf is not None else None) or "no hay serie de caja libre",
+        )
     if fcf.cagr < 0:
-        return ("Tendencia FCF (decreciente)", "stressed")
-    return None
+        return _derived_signal(
+            "fcf_trend", "Tendencia de la caja libre (decreciente)", "stressed", None
+        )
+    return _derived_signal(
+        "fcf_trend", "Tendencia de la caja libre", None, "la caja libre no decrece"
+    )
 
 
-def _stress_signal(stress: StressResult) -> _Signal | None:
+def _stress_signal(stress: StressResult) -> QuestionSignal:
     """Los escenarios de stress (ST1-ST3): si algún shock razonable deja de
     cubrir el dividendo, la resiliencia está comprometida.
 
@@ -305,7 +445,9 @@ def _stress_signal(stress: StressResult) -> _Signal | None:
         if coverage is None:
             continue
         if coverage < Decimal(1):
-            return ("Escenario de stress (deja de cubrir)", "stressed")
+            return _derived_signal(
+                "stress", "Escenario de stress (deja de cubrir)", "stressed", None
+            )
         if coverage < Decimal("1.15"):
             worst = "caution"
     if (
@@ -315,8 +457,13 @@ def _stress_signal(stress: StressResult) -> _Signal | None:
     ):
         worst = "caution"
     if worst is not None:
-        return ("Escenario de stress (al límite)", worst)
-    return None
+        return _derived_signal("stress", "Escenario de stress (al límite)", worst, None)
+    return _derived_signal(
+        "stress",
+        "Escenario de stress",
+        None,
+        stress.not_computable_reason or "ningún escenario compromete la cobertura",
+    )
 
 
 # ── Matriz de seguridad ───────────────────────────────────────────────

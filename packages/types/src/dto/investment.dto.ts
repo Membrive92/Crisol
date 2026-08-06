@@ -36,6 +36,11 @@ export interface LotCreateRequest {
   trade_date: string;
   quantity: string;
   price: string;
+  /**
+   * Tipo de cambio nativa→EUR de la operación. **Omitirlo no significa `1`**:
+   * significa "no lo sé", y el servidor lo deriva del tipo del BCE a la fecha
+   * de la operación. Envíalo sólo si tienes el cambio real de tu bróker.
+   */
   fx_rate_at_trade?: string;
   fees?: string;
 }
@@ -45,6 +50,11 @@ export interface SaleCreateRequest {
   trade_date: string;
   quantity: string;
   price: string;
+  /**
+   * Tipo de cambio nativa→EUR de la operación. **Omitirlo no significa `1`**:
+   * significa "no lo sé", y el servidor lo deriva del tipo del BCE a la fecha
+   * de la operación. Envíalo sólo si tienes el cambio real de tu bróker.
+   */
   fx_rate_at_trade?: string;
   fees?: string;
 }

@@ -195,6 +195,18 @@ export const queryKeys = {
     job: (id: string) => [...queryKeys.investment.all, 'job', id] as const,
     runs: (securityId: string) => [...queryKeys.investment.all, 'runs', securityId] as const,
     run: (id: string) => [...queryKeys.investment.all, 'run', id] as const,
+    latestRun: (securityId: string) =>
+      [...queryKeys.investment.all, 'run', 'latest', securityId] as const,
+    // El precio entra en la key: cambiar el precio simulado es OTRA consulta,
+    // no la misma cacheada. Sin él, teclear un precio distinto devolvería los
+    // múltiplos del anterior.
+    valuation: (securityId: string, price?: string) =>
+      [...queryKeys.investment.all, 'valuation', securityId, price ?? 'market'] as const,
+    // Los dos catálogos cuelgan de una raíz HERMANA por el mismo motivo que la
+    // búsqueda: son ESTÁTICOS (definición del engine, no datos del usuario), así
+    // que una invalidación del módulo no debe volver a pedirlos.
+    metricCatalog: () => ['investment-catalog', 'metrics'] as const,
+    canonicalItems: () => ['investment-catalog', 'items'] as const,
     lots: (securityId?: string) =>
       [...queryKeys.investment.all, 'lots', securityId ?? 'all'] as const,
     sales: () => [...queryKeys.investment.all, 'sales'] as const,

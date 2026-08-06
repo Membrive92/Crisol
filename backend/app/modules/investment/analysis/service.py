@@ -9,11 +9,15 @@ aquí.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, date, datetime
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
+from app.modules.currency import service as currency_service
 from app.modules.investment.analysis import repository as repo
 from app.modules.investment.analysis.engine import (
     base_ratios,
@@ -30,6 +34,11 @@ from app.modules.investment.analysis.engine.types import (
     SecuritySnapshot,
     StatementSeries,
 )
+from app.modules.investment.analysis.engine.valuation import (
+    ValuationInputs,
+    ValuationResult,
+    compute_valuation,
+)
 from app.modules.investment.analysis.engine.version import ENGINE_VERSION
 from app.modules.investment.analysis.models import AnalysisRun
 from app.modules.investment.analysis.serialization import to_json_safe
@@ -43,7 +52,25 @@ from app.modules.investment.fundamentals.canonical import (
     Provenance,
 )
 from app.modules.investment.fundamentals.models import FinancialStatement
+from app.modules.investment.pricing.adapters.base import PriceAdapter
+from app.modules.investment.pricing.service import quote_security
 from app.modules.investment.thresholds.service import load_thresholds, thresholds_hash
+
+
+@dataclass(frozen=True)
+class ValuationOutcome:
+    """Múltiplos, o el motivo por el que no hay ninguno.
+
+    `reason` no es un log: es la frase que lee el usuario en la pantalla, así
+    que dice qué falta y qué puede hacer al respecto."""
+
+    result: ValuationResult | None
+    reason: str | None
+    price_is_override: bool
+    provider_status: str = "cached"
+    """Estado del proveedor. Viaja también cuando NO hay múltiplos: es
+    justamente cuando el usuario necesita saber si el servicio está caído o si
+    es que este valor no se cotiza."""
 
 
 def _statement_from_row(row: FinancialStatement) -> CanonicalStatement:
@@ -166,6 +193,10 @@ async def run_analysis(
         run_date=run_at,
         engine_version=ENGINE_VERSION,
         thresholds_version=thresholds_version,
+        # El juego EFECTIVO, no una referencia a él: `scoring_thresholds` se
+        # muta in situ al resembrar y el hash es irreversible, así que sin
+        # guardar los cortes aquí el run no se puede explicar más tarde.
+        thresholds_used=to_json_safe(thresholds),
         years_covered=list(series.years),
         m_score=_value(forensic_result.get("m_score", last_year)),
         z_score=_value(forensic_result.get("z_score", last_year)),
@@ -205,3 +236,139 @@ async def get_run(db: AsyncSession, run_id: uuid.UUID, user_id: uuid.UUID) -> An
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Análisis no encontrado.")
     return run
+
+
+async def get_latest_run(
+    db: AsyncSession, security_id: uuid.UUID, user_id: uuid.UUID
+) -> AnalysisRun:
+    """El último análisis de un valor. 404 si nunca se ha ejecutado ninguno."""
+    run = await repo.get_latest_run(db, security_id, user_id)
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Este valor no tiene ningún análisis todavía.",
+        )
+    return run
+
+
+# ── Valoración por múltiplos (PHASE-44.12) ────────────────────────────
+#
+# La capa impura de `engine/valuation.py`: resuelve el precio y el tipo de
+# cambio y se los da ya masticados al módulo puro. Todo el IO vive aquí porque
+# el gate `test_el_engine_no_importa_io` prohíbe `pricing` y `currency` dentro
+# del engine — y esa frontera es la que permite probar los múltiplos con un
+# estado sintético y un Decimal.
+#
+# NO se persiste nada. Un múltiplo se mueve con la cotización, así que meterlo
+# en el `AnalysisRun` haría que reejecutar un run antiguo diera otro número y se
+# perdería la reproducibilidad que justifica todo el motor forense.
+
+
+async def compute_security_valuation(
+    db: AsyncSession,
+    adapter: PriceAdapter,
+    security_id: uuid.UUID,
+    *,
+    price_override: Decimal | None = None,
+    as_of: date | None = None,
+) -> ValuationOutcome:
+    """Múltiplos de un valor contra su cotización viva.
+
+    `price_override` permite simular ("¿y si entrara a 250 $?") y también cubre
+    a los valores que el proveedor no cotiza. Se declara en la respuesta para
+    que nadie confunda un precio inventado con uno de mercado.
+
+    ⚠️ Puede COMMITEAR: `quote_security` asegura los tipos de cambio del día y
+    ésos se confirman por dentro (ADR-0009). No la llames en mitad de una unidad
+    de trabajo propia.
+    """
+    security = await get_security(db, security_id)
+    today = as_of or datetime.now(UTC).date()
+    series = await build_series(db, security, as_of=today)
+
+    if series.latest is None:
+        return ValuationOutcome(
+            result=None,
+            reason="Este valor no tiene ningún ejercicio ingerido todavía.",
+            price_is_override=price_override is not None,
+        )
+
+    statement_currency = (series.latest.currency or "").upper()
+
+    if price_override is not None:
+        inputs = ValuationInputs(
+            price=price_override,
+            quote_as_of=today,
+            quote_currency=statement_currency,
+            # Con precio a mano no se ha consultado a nadie: decir "live" sería
+            # afirmar que el proveedor responde sin haberlo comprobado.
+            provider_status="cached",
+        )
+        return ValuationOutcome(
+            result=compute_valuation(series, inputs),
+            reason=None,
+            price_is_override=True,
+        )
+
+    quoted = await quote_security(db, adapter, security)
+    quote = quoted.quote
+    if quote is None:
+        return ValuationOutcome(
+            result=None,
+            reason=(
+                "El proveedor de cotizaciones no ha respondido y no hay ningún precio "
+                "guardado de antes. Puedes introducir uno a mano."
+                if quoted.provider_status == "unreachable"
+                else "No hay cotización de este valor, así que no se pueden calcular "
+                "los múltiplos. Puedes introducir un precio a mano."
+            ),
+            price_is_override=False,
+            provider_status=quoted.provider_status,
+        )
+
+    price = quote.price
+    quote_currency = (quote.currency or "").upper()
+    fx_rate: Decimal | None = None
+    fx_as_of: date | None = None
+
+    if quote_currency and statement_currency and quote_currency != statement_currency:
+        # `convert` NO lanza cuando falta la tasa: devuelve el importe sin
+        # convertir y `rate=1` (ADR-0009). Tomarlo por bueno mezclaría divisas
+        # en un múltiplo sin que se notara, así que se comprueba el fallback.
+        conversion = await currency_service.convert(
+            db,
+            amount=Decimal(1),
+            from_currency=quote_currency,
+            to_currency=statement_currency,
+            at_date=quote.as_of.date(),
+        )
+        if conversion.fallback == "missing":
+            return ValuationOutcome(
+                result=None,
+                reason=(
+                    f"No hay tipo de cambio {quote_currency}→{statement_currency} para "
+                    "convertir la cotización a la divisa de las cuentas."
+                ),
+                price_is_override=False,
+                provider_status=quoted.provider_status,
+            )
+        fx_rate = conversion.rate
+        fx_as_of = conversion.rate_date
+        price = price * conversion.rate
+
+    ttl = timedelta(hours=settings.price_ttl_hours)
+    inputs = ValuationInputs(
+        price=price,
+        quote_as_of=quote.as_of.date(),
+        quote_currency=quote_currency or statement_currency,
+        quote_stale=(datetime.now(UTC) - quote.fetched_at) >= ttl,
+        provider_status=quoted.provider_status,
+        fx_rate=fx_rate,
+        fx_as_of=fx_as_of,
+    )
+    return ValuationOutcome(
+        result=compute_valuation(series, inputs),
+        reason=None,
+        price_is_override=False,
+        provider_status=quoted.provider_status,
+    )

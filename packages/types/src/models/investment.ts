@@ -199,12 +199,120 @@ export interface EngineFlag {
   evidence: Record<string, unknown>;
 }
 
+/** Cómo se lee el valor de una métrica. Lo declara el catálogo del engine. */
+export type MetricUnit =
+  | 'percent'
+  | 'times'
+  | 'days'
+  | 'years'
+  | 'pp'
+  | 'score'
+  | 'count'
+  | 'currency_per_share';
+
+export type ThresholdDirection = 'lower_better' | 'higher_better' | 'band';
+
+/** Los cuatro cortes de una banda. Los mismos campos en el catálogo y en
+ *  `AnalysisRun.thresholds_used`. */
+export interface ThresholdSpec {
+  metric_key: string;
+  direction: ThresholdDirection;
+  low_alarm: string | null;
+  low_ok: string | null;
+  high_ok: string | null;
+  high_alarm: string | null;
+  model_variant: string | null;
+  applies: boolean;
+}
+
+/**
+ * Una métrica del catálogo del engine (PHASE-44.9).
+ *
+ * Antes de que este catálogo viajara por API, la web escribía las etiquetas a
+ * mano y tres acabaron mintiendo sobre el número que enseñaban. Ahora la
+ * etiqueta tiene una sola fuente.
+ */
+export interface MetricDefinition {
+  key: string;
+  label: string;
+  family: string;
+  unit: MetricUnit;
+  /** `null` = **sin banda absoluta**. NO significa «sana». */
+  direction: ThresholdDirection | null;
+  low_alarm: string | null;
+  low_ok: string | null;
+  high_ok: string | null;
+  high_alarm: string | null;
+  model_variant: string | null;
+  note: string;
+}
+
+export interface MetricCatalogResponse {
+  items: MetricDefinition[];
+  engine_version: string;
+}
+
+// ── Catálogo de partidas canónicas ────────────────────────────────────
+
+export type StatementKind = 'balance' | 'income' | 'cashflow';
+
+export type ItemGroup =
+  | 'assets_current'
+  | 'assets_noncurrent'
+  | 'liabilities_current'
+  | 'liabilities_noncurrent'
+  | 'equity'
+  | 'income_gross'
+  | 'income_operating'
+  | 'income_financial'
+  | 'income_tax'
+  | 'income_result'
+  | 'income_shares'
+  | 'cashflow_operating'
+  | 'cashflow_investing'
+  | 'cashflow_financing';
+
+/** Una de las 49 partidas, con su nombre en español y su bloque. */
+export interface CanonicalItemDefinition {
+  key: string;
+  label: string;
+  statement: StatementKind;
+  group: ItemGroup;
+  note: string;
+}
+
+export interface CanonicalItemCatalogResponse {
+  items: CanonicalItemDefinition[];
+}
+
+/**
+ * Una señal candidata de una pregunta, haya puntuado o no (PHASE-44.9).
+ *
+ * `counted: false` **no** es «está bien»: es «no cuenta», y entonces `reason`
+ * explica por qué. Si todas las señales de una pregunta llegan sin contar, el
+ * verde es por ausencia de prueba y hay que pintarlo gris.
+ */
+export interface QuestionSignal {
+  key: string;
+  label: string;
+  kind: 'metric' | 'flag' | 'derived';
+  band: MetricBand | null;
+  value: string | null;
+  status: MetricStatus | null;
+  counted: boolean;
+  reason: string | null;
+}
+
 export interface QuestionVerdict {
   key: string;
   question: string;
   verdict: MetricBand;
   red_signals: string[];
   amber_signals: string[];
+  /** Vacío en los runs anteriores a PHASE-44.9. */
+  signals: QuestionSignal[];
+  evaluated_count: number;
+  unavailable_count: number;
 }
 
 export interface SafetyProfile {
@@ -221,18 +329,132 @@ export interface Confidence {
   days_stale: number | null;
 }
 
+/** Un escenario de stress con su frase ya redactada por el motor. */
+export interface StressScenario {
+  key: string;
+  parameter: string;
+  coverage_before: string | null;
+  coverage_after: string | null;
+  sentence: string;
+  /** Siempre «escenario hipotético». El motor lo fija para que nadie lo lea
+   *  como una previsión. */
+  label: string;
+}
+
+export interface StressBlock {
+  scenarios: StressScenario[];
+  /** `null` → ST1 no se calculó y `not_computable_reason` dice por qué. */
+  contribution_margin: string | null;
+  breakeven_fcf_drop: string | null;
+  not_computable_reason: string | null;
+}
+
 export interface VerdictBlock {
   questions: QuestionVerdict[];
   safety_profile: SafetyProfile;
   dividend_verdict: DividendVerdict;
-  stress: Record<string, unknown>;
+  stress: StressBlock;
 }
 
-/** Colección de métricas de una capa (forensic / base / dividend / evolution). */
-export interface MetricCollection {
+/**
+ * Las dos descomposiciones del ROE, por ejercicio.
+ *
+ * - 3 factores: `margen neto × rotación × apalancamiento`.
+ * - 5 factores: `margen operativo × efecto fiscal × coste financiero ×
+ *   rotación × apalancamiento` — desdobla el margen neto en de dónde sale.
+ */
+export interface DuPontDecomposition {
+  fiscal_year: number;
+  net_margin: MetricResult;
+  asset_turnover: MetricResult;
+  equity_multiplier: MetricResult;
+  operating_margin: MetricResult;
+  tax_effect: MetricResult;
+  financial_cost: MetricResult;
+  /**
+   * `(producto de los factores) − ROE`. Debe ser 0.
+   *
+   * `null` es **no verificable** (falta algún factor), que NO es lo mismo que
+   * verificado: un cuadre que no se ha podido comprobar nunca se presenta como
+   * superado.
+   */
+  check_three: string | null;
+  check_five: string | null;
+}
+
+export interface BaseRatiosBlock {
   metrics: MetricResult[];
-  flags?: EngineFlag[];
-  [key: string]: unknown;
+  flags: EngineFlag[];
+  dupont: DuPontDecomposition[];
+}
+
+/**
+ * Desglose de un score forense. Sólo 4 de las 8 claves lo emiten, y de forma
+ * condicional: `accruals`, `F5`, `F6` y `FZ` **nunca** lo traen por diseño.
+ */
+export interface ScoreBreakdown {
+  key: string;
+  fiscal_year: number;
+  /** M-Score: sus 8 variables. Z'': X1-X4. Vacío en los de sólo checks. */
+  components: Record<string, string>;
+  /** F-Score: sus 9 tests. C-Score: sus 6. Vacío en los de componentes. */
+  checks: Record<string, boolean>;
+}
+
+export interface ForensicBlock {
+  metrics: MetricResult[];
+  breakdowns: ScoreBreakdown[];
+  flags: EngineFlag[];
+}
+
+export interface HorizontalPoint {
+  fiscal_year: number;
+  value: string | null;
+  yoy: string | null;
+}
+
+/** Una de las 7 magnitudes de la evolutiva, con su etiqueta ya en español. */
+export interface HorizontalSeries {
+  key: string;
+  label: string;
+  points: HorizontalPoint[];
+  cagr: string | null;
+  /** Por qué no hay CAGR (signo cambiado, serie corta…). */
+  cagr_reason: string | null;
+}
+
+/** Common-size: peso de una partida sobre su base, por ejercicio. */
+export interface VerticalPoint {
+  fiscal_year: number;
+  item: string;
+  base: string;
+  weight: string | null;
+}
+
+export interface EvolutionBlock {
+  metrics: MetricResult[];
+  horizontal: HorizontalSeries[];
+  vertical: VerticalPoint[];
+  flags: EngineFlag[];
+}
+
+export interface DpsPoint {
+  fiscal_year: number;
+  dps: string | null;
+}
+
+export interface DividendTrajectory {
+  /** Años seguidos sin recorte. Es una **cota inferior**: la serie es la
+   *  ingerida, no el histórico completo de la empresa. */
+  streak_no_cut: number;
+  momentum_slowdown: boolean;
+}
+
+export interface DividendBlock {
+  metrics: MetricResult[];
+  dps_series: DpsPoint[];
+  trajectory: DividendTrajectory;
+  flags: EngineFlag[];
 }
 
 export interface AnalysisRun {
@@ -241,6 +463,12 @@ export interface AnalysisRun {
   run_date: string;
   engine_version: string;
   thresholds_version: string;
+  /**
+   * Los cortes EFECTIVOS de este run, `metric_key → spec` (PHASE-44.9). `{}` en
+   * los runs anteriores: su calibración no es recuperable, porque el seed muta
+   * las filas in situ y `thresholds_version` es un hash irreversible.
+   */
+  thresholds_used: Record<string, ThresholdSpec>;
   years_covered: number[];
   m_score: string | null;
   z_score: string | null;
@@ -251,9 +479,9 @@ export interface AnalysisRun {
   fcf_coverage: string | null;
   dividend_verdict: DividendVerdict | null;
   confidence: string;
-  scores_detail: { forensic: MetricCollection; base_ratios: MetricCollection };
-  dividend_analysis: MetricCollection;
-  evolution: MetricCollection;
+  scores_detail: { forensic: ForensicBlock; base_ratios: BaseRatiosBlock };
+  dividend_analysis: DividendBlock;
+  evolution: EvolutionBlock;
   flags: EngineFlag[];
   verdict: VerdictBlock;
   data_completeness: Confidence;
@@ -339,11 +567,40 @@ export interface Position {
 
 export interface PositionSummary extends Position {
   has_quote: boolean;
+  /**
+   * Por qué la posición no entra en los totales — `null` si sí entra. "Sin
+   * cotización" a secas obliga a adivinar si el problema es el proveedor, la
+   * plaza o la falta de tipo de cambio.
+   */
+  exclusion_reason: string | null;
   last_price: string | null;
   prev_close: string | null;
   quote_as_of: string | null;
   quote_stale: boolean;
+  /** Divisa que declaró el proveedor de precios, ya normalizada a ISO-4217. */
+  quote_currency: string | null;
+  /**
+   * La divisa del proveedor no coincide con la del catálogo (PHASE-44.11 D4).
+   * La posición se valora con la del proveedor —es quien emitió el precio— pero
+   * la discrepancia se muestra: significa que el catálogo afirma una plaza o
+   * divisa que el mercado contradice.
+   */
+  currency_mismatch: boolean;
   market_value: string | null;
+  /** Valor de mercado en la divisa base de la cartera. `null` si falta la tasa. */
+  market_value_base: string | null;
+  /**
+   * Coste en base al tipo de la FECHA DE COMPRA, no al de hoy: reexpresarlo a
+   * tipo de hoy escondería el efecto divisa que la descomposición aísla.
+   */
+  cost_basis_base: string;
+  unrealized_pnl_base: string | null;
+  fx_rate: string | null;
+  /**
+   * Fecha EFECTIVA del tipo aplicado — no siempre es hoy (un lunes se usa el
+   * del viernes). Un valor con precio de hoy y tasa de hace días debe decirlo.
+   */
+  fx_as_of: string | null;
   unrealized_pnl: string | null;
   unrealized_pnl_pct: string | null;
   price_effect: string | null;
@@ -354,16 +611,85 @@ export interface PositionSummary extends Position {
   weight_pct: string | null;
 }
 
+/** Exposición de la cartera a una divisa, valorada en la divisa base. */
+export interface CurrencyExposure {
+  currency: string;
+  market_value_base: string;
+  weight_pct: string;
+}
+
 export interface PortfolioSummary {
   pricing_enabled: boolean;
+  /** Divisa en la que se agregan los totales (`total_*_base`). */
+  base_currency: string;
   base_note: string;
+  /** Suma en divisa NATIVA. Sólo interpretable si la cartera es monodivisa. */
   total_cost_basis: string;
+  total_cost_basis_base: string;
   total_market_value: string;
+  total_market_value_base: string;
+  /** Suma en divisa NATIVA — usa `total_unrealized_pnl_base` para agregar. */
   total_unrealized_pnl: string;
+  total_unrealized_pnl_base: string;
   total_realized_pnl: string;
   total_dividends_net: string;
   daily_pnl: string;
   quoted_count: number;
   unquoted_count: number;
+  currency_exposure: CurrencyExposure[];
   positions: PositionSummary[];
+}
+
+// ── Valoración por múltiplos (PHASE-44.12) ────────────────────────────
+
+/** Un múltiplo. `value` es `null` si y sólo si no se puede calcular. */
+export interface ValuationMetric {
+  key: string;
+  value: string | null;
+  status: string;
+  /** Por qué no se puede calcular, en español y para el usuario. */
+  reason: string | null;
+}
+
+/**
+ * Los múltiplos de un valor contra su cotización.
+ *
+ * NO sale del `AnalysisRun` y no se persiste: se calcula al vuelo cruzando el
+ * último ejercicio cerrado con el precio del momento. Un análisis forense es
+ * reproducible porque no depende del precio; esto sí, y por eso vive aparte y
+ * la UI lo separa del veredicto.
+ */
+export interface Valuation {
+  available: boolean;
+  /** Por qué no hay múltiplos. `null` cuando sí los hay. */
+  reason: string | null;
+  /** El precio lo puso el usuario, no el proveedor. */
+  price_is_override: boolean;
+  metrics: ValuationMetric[];
+  fiscal_year: number | null;
+  fiscal_year_end: string | null;
+  statement_currency: string | null;
+  market_cap: string | null;
+  enterprise_value: string | null;
+  quote_as_of: string | null;
+  quote_stale: boolean;
+  /**
+   * Estado del proveedor de cotizaciones en ESTA consulta:
+   * - `live` — se le pidió y respondió.
+   * - `cached` — no se le pidió (la cotización guardada seguía fresca), así que
+   *   de su estado no se sabe nada. No es lo mismo que «está bien».
+   * - `unreachable` — se le pidió y falló; se sirve el último precio registrado.
+   */
+  provider_status: 'live' | 'cached' | 'unreachable';
+  fx_rate: string | null;
+  fx_as_of: string | null;
+  /**
+   * Distancia entre el precio y las cuentas con que se compara. La mitad del
+   * «doble staleness»: un PER con precio de hoy sobre un beneficio de hace
+   * catorce meses no es falso, pero tiene que decirlo.
+   */
+  days_since_fiscal_year_end: number | null;
+  /** `null` | `aging` (≥9 meses) | `stale` (≥18 meses). */
+  staleness: string | null;
+  notes: string[];
 }

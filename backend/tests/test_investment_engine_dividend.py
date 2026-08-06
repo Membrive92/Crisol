@@ -574,9 +574,14 @@ def test_un_hueco_deja_la_metrica_sin_calcular() -> None:
 
 
 def test_el_catalogo_agregado_incluye_la_capa_dividendo() -> None:
-    """27 base + 2 evolutivas + 8 forenses + 14 dividendo = 51 métricas."""
-    assert len(catalog.ALL_METRIC_DEFINITIONS) == 51
-    assert len(set(catalog.ALL_METRIC_KEYS)) == 51
+    """33 base + 2 evolutivas + 8 forenses + 14 dividendo + 7 valoración = 64.
+
+    Las 7 de valoración (PHASE-44.12) están catalogadas para que la UI lea su
+    etiqueta de una sola fuente, pero NO siembran umbral: su `direction` es
+    `None`, así que `ALL_DEFAULT_THRESHOLDS` no crece con ellas.
+    """
+    assert len(catalog.ALL_METRIC_DEFINITIONS) == 64
+    assert len(set(catalog.ALL_METRIC_KEYS)) == 64
 
 
 def test_el_catalogo_dividendo_tiene_14_metricas() -> None:
