@@ -55,6 +55,14 @@ backend/alembic/versions/__pycache__/
 .DS_Store
 Thumbs.db
 
+# Ofimática: material de referencia que se pasa a Claude, no del proyecto.
+# `*~` (arriba) NO cubre los bloqueos de Office: casan por SUFIJO tilde, y el
+# owner file de Excel lleva el `~$` como PREFIJO.
+~$*
+*.xlsx
+*.xls
+*.docx
+
 # Environment variables
 .env
 .env.local
