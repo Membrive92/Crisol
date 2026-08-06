@@ -45,7 +45,9 @@ pnpm format           # Prettier
 - [tooling/typescript/base.json](../../tooling/typescript/base.json) — reglas TS estrictas.
 - [tooling/eslint/base.js](../../tooling/eslint/base.js) — flat config compartido.
 - [apps/web/app/page.tsx](../../apps/web/app/page.tsx), [apps/web/app/layout.tsx](../../apps/web/app/layout.tsx) — hello world web.
-- [apps/mobile/app/index.tsx](../../apps/mobile/app/index.tsx), [apps/mobile/app/_layout.tsx](../../apps/mobile/app/_layout.tsx) — hello world mobile.
+- `apps/mobile/app/index.tsx` (retirado después, al entrar el enrutado por
+  grupos), [apps/mobile/app/_layout.tsx](../../apps/mobile/app/_layout.tsx) —
+  hello world mobile.
 - [.github/workflows/ci.yml](../../.github/workflows/ci.yml) — CI frontend.
 
 ## Verificación

@@ -1,8 +1,9 @@
 # API endpoints
 
 > Catálogo del backend. Se actualiza cada vez que una fase añade o
-> modifica endpoints. Última actualización: PHASE-37 (módulo `analytics`,
-> series de deuda/patrimonio, operaciones en bloque, `flow`/`is_exceptional`).
+> modifica endpoints. Última actualización: PHASE-44.9 (módulo `investment`
+> documentado por primera vez — 28 endpoints; cubre también la deuda documental
+> de 44.7 y 44.8).
 
 Convenciones generales:
 
@@ -572,6 +573,75 @@ Reglas:
   conversiones X→Y se componen vía EUR en `currency.service`.
 - `amount` es `Decimal` serializado como string. El endpoint lo
   parsea con `Decimal(...)` y rechaza con 422 si no encaja.
+
+---
+
+## Investment (`PHASE-44.1` … `PHASE-44.9`)
+
+Módulo de inversión: catálogo de valores, ingesta de fundamentales desde EDGAR,
+motor de análisis forense y cartera. **28 endpoints**, todos con auth.
+
+Alcance de datos: `securities`, `financial_statements`, `scoring_thresholds` y
+los precios son **globales** (ADR-0007 — un 10-K es el mismo para todos); los
+`analysis_runs`, los lotes y las ventas son **scoped por usuario**.
+
+### Catálogo de valores
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/investment/securities/search` | Busca en el catálogo local por ticker o nombre. `q` mínimo 2 caracteres. |
+| POST | `/investment/securities/resolve` | Crea (o reutiliza) un `Security` desde su ticker. La plaza la decide el servidor, no el cliente (ADR-0008). 404 si EDGAR no lo reconoce. |
+| GET | `/investment/securities/{security_id}` | Un valor por id, con `analysis_available` y su motivo. |
+
+### Fundamentales
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/investment/fundamentals/items` | **(44.9)** Las 49 partidas canónicas con etiqueta ES, `statement` (balance/income/cashflow) y `group`. Estático. |
+| POST | `/investment/fundamentals/{security_id}/ingest` | `202` — descarga y persiste los últimos `filings_back` ejercicios vía job síncrono. |
+| GET | `/investment/fundamentals/jobs/{job_id}` | Estado del job (polling). |
+| GET | `/investment/fundamentals/{security_id}/statements` | Estados por ejercicio, ascendente. `view=latest\|all`. |
+| GET | `/investment/fundamentals/{security_id}/restatements` | Reexpresiones detectadas entre filings. |
+
+### Análisis
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/investment/analysis/metrics` | **(44.9)** Las métricas del engine con `label`, `family`, `unit`, `direction`, los 4 cortes por defecto y su `note`. Estático; el recuento sale del propio catálogo. |
+| POST | `/investment/analysis/{security_id}/run` | Ejecuta las 6 capas y persiste el `AnalysisRun`. `409` si no hay estados ingeridos; `422` con motivo si el valor **no es analizable** (sin CIK, sin 10-K…). |
+| GET | `/investment/analysis/{security_id}/runs/latest` | **(44.9)** El último run con todo el desglose. `404` si no hay ninguno. |
+| GET | `/investment/analysis/{security_id}/valuation` | **(44.12)** Múltiplos de valoración (PER, P/ventas, P/VC, P/FCF, EV/EBITDA + valor contable por acción y rentabilidad de la caja libre) cruzando la cotización viva con el último ejercicio cerrado. `?price=` simula otro precio y cubre los valores sin cobertura del proveedor. **No sale del `AnalysisRun` y no se persiste**: un múltiplo se mueve con el precio y el run tiene que poder reejecutarse dando lo mismo. Nunca falla por falta de cotización — responde `200` con `available:false` y el motivo. `provider_status` (`live`/`cached`/`unreachable`) alimenta el semáforo: «no lo he preguntado» no es «está bien». |
+| GET | `/investment/analysis/{security_id}/runs` | Histórico ligero (sin los JSONB). |
+| GET | `/investment/analysis/runs/{run_id}` | Un run por id con todo el desglose. `404` si es de otro usuario. |
+
+Notas del `AnalysisRun`:
+
+- `thresholds_version` es un SHA-256 del juego de umbrales: **detecta** deriva,
+  no la reconstruye. Para eso está `thresholds_used` (44.9), que trae los cortes
+  efectivos `metric_key → spec`. Vacío `{}` en los runs anteriores a 44.9.
+- `verdict.questions[].signals[]` (44.9) trae **todas** las señales candidatas de
+  cada pregunta con `key`, `label`, `kind`, `band`, `value`, `counted` y el
+  `reason` de las que no puntuaron, más `evaluated_count` /
+  `unavailable_count`. Sin esos contadores, «sano» y «no hay evidencia» son
+  indistinguibles: en una financiera los 8 forenses salen `not_computable` y la
+  pregunta de contabilidad cae en verde por ausencia de prueba.
+- `band: null` **no significa sana**: significa que no hay banda que aplicar.
+
+### Cartera y precios
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET · POST | `/investment/portfolio/lots` | Lotes de compra. |
+| DELETE | `/investment/portfolio/lots/{lot_id}` | Borra un lote. |
+| GET · POST | `/investment/portfolio/sales` | Ventas; el POST casa contra los lotes vía FIFO (`409` si vendes más de lo que tienes). |
+| DELETE | `/investment/portfolio/sales/{sale_id}` | Borra la venta; sus allocations caen en cascada. |
+| GET · POST | `/investment/portfolio/dividends` | Dividendos cobrados. |
+| DELETE | `/investment/portfolio/dividends/{dividend_id}` | Borra un dividendo. |
+| GET · POST | `/investment/portfolio/corporate-actions` | Acciones corporativas registradas (el POST **no** las aplica). |
+| POST | `/investment/portfolio/corporate-actions/{action_id}/apply` | Aplica split / stock dividend a los lotes, auditado. `400` para los tipos no soportados. |
+| GET | `/investment/portfolio/positions` | Posiciones derivadas (lotes − allocations): cantidad, coste base y P&L. |
+| GET | `/investment/portfolio/summary` | Resumen con valor de mercado, en divisa nativa **y en EUR** (`*_base`, tipos del BCE vía `currency` — ADR-0009) con `fx_as_of` por posición, descomposición precio/divisa y exposición por divisa. Una posición sin cotización **o sin tipo de cambio** queda fuera de los totales con su `exclusion_reason`; nunca se estima. |
+| POST | `/investment/pricing/refresh` | Fuerza el refresco de cotizaciones ignorando el TTL. `pricing_enabled` refleja si el proveedor ACTIVO puede cotizar: con `PRICE_PROVIDER=yfinance` (default) siempre; con `finnhub`, sólo si hay `FINNHUB_API_KEY`. |
 
 ---
 

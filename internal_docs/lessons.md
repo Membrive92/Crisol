@@ -556,6 +556,89 @@ retirar X, busca los comentarios que lo nombran (`grep`). Y si la premisa es
 "alguien lo usa", mejor que un comentario: que lo diga el detector de
 alcanzabilidad, que sí se recalcula en cada `verify`.
 
+### [AUDIT-2026-08] Una media mensual mezclada con un importe mensual REAL exige que la ventana no tenga meses sin observar
+**Error:** La tasa de esfuerzo ampliada de Deuda promediaba el ingreso y la
+cuota sobre **todos los meses cerrados del rango**, incluidos los anteriores a
+que el usuario tuviera datos. Con `range=year` el 1 de agosto y datos desde
+febrero, enero entraba en la ventana: ingreso medio 12.000/**7** = 1.714,29 en
+vez de 12.000/**6** = 2.000. El ratio ampliado pasaba de 0,350 a 0,367 y cruzaba
+el 35 % del Banco de España — **sobreendeudamiento inventado por un mes vacío**.
+**Causa:** mezclar dos cosas de naturaleza distinta en la misma suma.
+`avg_monthly_debt_payment` y `monthly_income` son **medias** sobre `n` meses;
+`non_debt_fixed` es un **importe mensual real** que no se divide por nada. En el
+ratio ESTRICTO la distorsión se cancela sola (numerador y denominador se dividen
+por el mismo `n`, así que `n` desaparece) y por eso pasó desapercibida; en el
+AMPLIADO, no. Lo llamativo: el autor **ya había razonado esto** —excluyó el mes
+EN CURSO precisamente para no «romper la coherencia con el término de gastos
+fijos»— pero sólo cerró un extremo de la ventana.
+**Solución:** acotar la ventana también por la izquierda, al primer mes con
+ingreso observado (`first_income_month`), y sumar el ingreso desde ahí y no desde
+`range_start` — si se acota `n` pero no la suma, el error se invierte y la media
+sale inflada.
+**Regla:** cuando una fórmula sume una **media** y un **importe mensual real**,
+la ventana de la media tiene que contener sólo meses REALMENTE observados; si no,
+el término que no se diluye domina. Y cuidado con la señal: que el ratio
+«hermano» salga bien no prueba nada — un `n` incorrecto se cancela en un cociente
+de dos medias y sólo asoma cuando algo entra sin dividir. Corolario de test: el
+que destapó esto **fallaba de agosto a diciembre y pasaba de febrero a julio**,
+porque sembraba «6 meses hacia atrás» y consultaba un rango de año natural. Un
+test cuyo resultado depende del mes en que se ejecute es una bomba de relojería:
+la regresión que lo sustituye usa un rango **fijo y pasado**.
+
+### [PHASE-44.10] «Nunca dos pytest a la vez» tiene un vector nuevo: los agentes que tú mismo lanzas
+**Error:** Lancé la suite completa del backend en segundo plano y, mientras
+corría, un workflow multi-agente que había arrancado antes seguía vivo. Dos de
+sus agentes ejecutaron `pytest` para verificar sus hallazgos. Resultado: **406
+failed, 902 errors** con `sqlalchemy.exc.ProgrammingError` — todos FALSOS. La
+misma suite, relanzada sola, pasa entera.
+**Causa:** los tests del backend comparten UNA base (`crisol_test`) y el fixture
+recrea el schema; dos ejecuciones simultáneas se lo tiran mutuamente. La regla ya
+estaba escrita, pero pensada para el caso obvio —dos terminales del humano— y no
+para éste: **un subagente que ejecuta comandos también es un segundo pytest**, y
+además invisible, porque corre en segundo plano y no aparece en la consola.
+Agravante: el prompt del workflow decía «NO edites código: esto es análisis y
+diseño», lo que impide escribir pero **no impide ejecutar**.
+**Solución:** parar el workflow y relanzar la suite sola. Diagnóstico rápido
+porque la firma es inconfundible: cientos de errores de SQLAlchemy en tests que
+no se han tocado, incluidos módulos ajenos al cambio (`test_webauthn`).
+**Regla:** antes de lanzar la suite completa, comprueba que **no hay ningún
+agente ni tarea en segundo plano viva** que pueda tocar la BD. Y si delegas
+verificación a subagentes, prohíbeles explícitamente ejecutar `pytest` (o dales
+una base propia): «no edites código» no cubre «no ejecutes tests». Señal de
+diagnóstico: si fallan tests de módulos que tu cambio no toca, sospecha del
+entorno antes que del código — es la misma familia que el zoom del navegador y
+que el intérprete equivocado.
+
+### [PHASE-44.9] A la SÉPTIMA vez que una premisa caduca, la respuesta no es otra lección: es un detector — y la clave es qué documento tiene derecho a envejecer
+**Error:** `backlog.md` —el fichero que el índice declara como sitio de la deuda
+técnica— llevaba días afirmando cosas que habían dejado de ser ciertas: que el
+módulo no tenía tests de componente FE (los tenía desde el día anterior), que el
+informe era «veredicto + tablas de métricas», y citaba `BE 1042` y un head de
+Alembic viejo.
+**Causa:** la MISMA raíz que ya está escrita dos veces en este fichero
+([PHASE-43] «una premisa escrita caduca en silencio») y que ya había mordido
+cinco veces más: `position-hero.tsx`, el README declarando PHASE-39 pendiente,
+un análisis citando un saldo retractado, las etiquetas F5/F6/D8 escritas a mano,
+y el docstring de `version.py` afirmando un gate inexistente. Siete en total.
+**Solución:** aplicar la regla que el propio fichero ya tiene ([PHASE-34]: «si
+parcheas la misma raíz ≥2 veces, mueve la fuente de verdad») en vez de escribir
+la lección por séptima vez. `scripts/check_docs.py`, cableado a `make verify`,
+a `pnpm docs:check` y a CI, comprueba lo que SÍ es comprobable: que los enlaces
+relativos resuelvan, que las revisiones de Alembic citadas existan, que quien
+declare un head nombre el head real, y que los documentos **vivos** no lleven
+números volátiles.
+**Regla:** distingue **documento vivo** de **foto fechada**. Una phase doc es
+historia: un recuento de tests o un head de Alembic allí envejece bien, porque su
+valor es decir cómo estaban las cosas ENTONCES. `backlog.md`, `HANDOFF.md` y las
+tablas de estado describen el AHORA: un número que cambia cada fase es
+podredumbre garantizada, porque nadie vuelve a actualizarlo. Y cuando construyas
+el detector, **acota su alcance a los documentos vivos**: marcar como error que
+la phase doc de 44.1 diga que el head era `f9v25x7us9w8v4` genera ruido, y un
+verificador ruidoso se ignora — que es la forma más cara de no tener verificador.
+Corolario: prueba que el detector DETECTA (rompe un documento a propósito y
+comprueba que sale exit 1); un gate que nunca falla no es un gate, es lo que le
+pasaba al golden test de `ENGINE_VERSION` durante tres fases.
+
 ### [PHASE-43] En un backend declarativo (FastAPI/Pydantic/SQLAlchemy) un detector de llamadas da 95% de ruido — filtra por la CAPA, no por la confianza
 **Error:** Correr `vulture app/` en el backend devolvió 273 hallazgos. Tomarlos
 al pie de la letra habría borrado TODOS los endpoints (`*_endpoint`, los
@@ -731,6 +814,132 @@ vacío, es entorno, no código — no toques nada. No compares capturas de pági
 distintas como prueba de regresión. Los estilos en px escalan con el zoom, así
 que las proporciones se mantienen: el zoom no "rompe" el layout, solo agranda
 todo de forma uniforme.
+
+### [PHASE-44.11] Un valor por defecto es una AFIRMACIÓN dormida: despierta el día que alguien empieza a usar el campo
+**Error:** `inv_lots.fx_rate_at_trade` tenía `Field(default=Decimal(1))`. Nadie
+lo cuestionó durante cuatro fases porque el consumidor lo neutralizaba: el
+summary hacía `current_fx = cost_fx`, así que `fx_effect` salía **siempre 0** y
+daba igual qué valor tuviera. Al cablear el FX vivo en 44.11.E ese `1` pasó a
+significar «la compra se hizo a 1 USD = 1 EUR» y la pantalla mostraba un efecto
+divisa de cientos de euros que **nadie había introducido**. El único lote real
+del usuario (JNJ/USD) estaba exactamente así.
+**Causa:** un default rellena un hueco con un valor **plausible**, y eso lo hace
+indistinguible de un dato real. Mientras el campo no se lee, el error no existe;
+cuando se lee, ya no hay forma de saber si el `1` lo puso una persona o el
+schema. La trampa es que el commit que introduce el bug **no toca el default**:
+lo introduce el que cambia el consumidor, meses después y en otro fichero.
+**Solución:** el campo pasa a ser opcional (`None` = «no lo sé», que es lo que
+de verdad pasaba) y el servidor **deriva** el dato de la fuente que lo tiene
+—el tipo del BCE a la fecha de la operación, vía `currency`—. Si el usuario lo
+declara, manda él. La corrección de lo ya persistido va en un script auditado
+con dry-run, no en una migración ([PHASE-34]).
+**Regla:** un default numérico en un campo que describe un HECHO del mundo
+(un tipo de cambio, una fecha, una cantidad) es deuda desde el minuto uno,
+aunque hoy nadie lo lea. Distingue «ausente» de «cero/uno» con `None` y deriva
+el valor de su fuente, o exígelo. Y cuando conectes un cálculo que empieza a
+leer un campo que antes se ignoraba, **audita primero qué hay realmente en esa
+columna** —una consulta de una línea— en vez de asumir que quien la rellenó lo
+hizo a conciencia. Señal de alarma: un término de una fórmula que salía siempre
+0 y de pronto no; ese 0 estaba tapando el dato, no confirmándolo.
+
+### [PHASE-44.12] Un emisor puede cambiar la ESCALA de presentación sin que el fichero lo diga, y ningún cuadre contable lo detecta
+**Error:** La caja libre por acción de McDonald's salía **9.515.610 $** en
+pantalla. El valor real es **9,52 $**: un factor de 10⁶.
+**Causa:** MCD pasó en su 10-K de 2023 a expresar las acciones medias en
+MILLONES (`746.3`) donde antes usaba unidades (`746300000`), y **reexpresó los
+ejercicios anteriores**. El XBRL declara la unidad `shares` en los dos casos:
+nada en el fichero distingue una escala de otra. La política `is_latest_view`
+—quedarse con la revisión más reciente, que es lo CORRECTO— importó toda la
+serie en millones mientras el dinero seguía en unidades. Es decir: el bug lo
+produjo una regla acertada aplicada a un dato que había cambiado de significado.
+**Por qué no saltó nada.** Los tres cuadres existentes miran identidades DENTRO
+de una magnitud: el balance cuadraba, los componentes no se pasaban de su total,
+el margen neto estaba en rango. Ninguno compara si dos magnitudes RELACIONADAS
+siguen siendo del mismo orden. Y el daño era parcial de una forma engañosa: todo
+lo que es un ratio entre ejercicios (CAGR del dividendo, racha sin recorte,
+crecimiento de acciones) sale BIEN porque el factor se cancela arriba y abajo.
+Sólo mienten los valores absolutos, así que una revisión rápida no lo delata.
+**Solución:** corregir en la ingesta con un testigo verificable —las acciones al
+cierre del namespace `dei`, que siempre van en unidades reales y son la misma
+magnitud— y sólo cuando el desfase es una potencia de 10 limpia; si no lo es, no
+se toca, porque sería otro problema y corregirlo a ojo convierte un dato dudoso
+en uno falso. Más un cuadre nuevo de coherencia de escala, con un test que
+comprueba que un banco con 20× de apalancamiento NO lo dispara.
+**Regla:** cuando ingieras datos de terceros, no des por hecho que la UNIDAD de
+una partida es estable en el tiempo, aunque el formato la declare: un emisor
+puede cambiar su presentación y reexpresar el histórico. Para toda magnitud que
+vayas a mezclar con otra en una división, ten un testigo independiente de su
+orden de magnitud. Y cuando escribas cuadres, incluye al menos uno que compare
+magnitudes RELACIONADAS entre sí, no sólo identidades internas: el error que
+respeta todas las identidades y aun así es falso es el que llega a producción.
+
+### [PHASE-44.12] Elegir el testigo perfecto no sirve de nada si no llega hasta donde lo necesitas
+**Error:** Implementé la detección de escala usando el BPA reportado, que es el
+testigo ideal: `resultado / acciones = BPA` es una identidad exacta, no una
+aproximación. Escribí la función, los tests con hechos sintéticos pasaron en
+verde, y al ejecutar la re-ingesta real **no cambió ni un dato**. El job decía
+`done` y los números seguían mal.
+**Causa:** `EarningsPerShareBasic` nunca llega a la normalización.
+`annual._is_per_share` descarta los ratios por acción a propósito —para que un
+BPA no se cuele como si fuera un importe— y lo hace bien. O sea: asumí la forma
+de los datos que recibe mi función en vez de comprobarla, y mis tests no lo
+destaparon porque yo mismo fabricaba la entrada con el hecho dentro.
+**Solución:** ejecutar el pipeline e imprimir lo que de verdad llega. En los 205
+hechos de MCD 2021 el EPS no está. Cambio de testigo a `shares_outstanding_eop`,
+que sí llega. La ironía: el filtro que me lo tapaba existe por la lección
+[PHASE-44.6], la misma que yo estaba incumpliendo.
+**Regla:** un test con entrada sintética prueba tu lógica, no tu integración. Si
+tu función depende de que cierto dato esté presente, comprueba **ejecutando el
+pipeline real** que ese dato llega — antes de escribir la lógica que lo usa. Y
+desconfía especialmente cuando el modo de fallo sea «no hace nada»: un `done`
+sin cambios se lee como éxito.
+
+### [PHASE-44.11] «Cero red en los tests» no es cierto porque esté escrito: hay que impedirlo, y el día que lo impides descubres cuántos dependían de ella
+**Error:** El plan exigía «sin red en CI; todo mockeado» y la suite lo cumplía
+*de palabra*: el bloqueo de `client.fetch_rates` existía como fixture local en
+**dos** ficheros de test, no en `conftest.py`. Al añadir a la cartera la
+petición de tasa del día, tests que no mencionan divisas empezaron a salir a
+Frankfurter — y **pasaban por eso**. Cuando puse el bloqueo global, un test que
+llevaba verde toda la fase (1163 en verde) se cayó: dependía de que la red le
+trajera la tasa real de hoy.
+**Causa:** un requisito negativo («esto NO debe pasar») no se cumple
+documentándolo ni mockeando en los sitios donde te acuerdas. Mientras el mock sea
+local, cada test nuevo nace sin él y el fallo es **silencioso en la dirección
+buena**: la red funciona, el test pasa, nadie mira. Sólo se manifiesta en CI sin
+salida a internet, o el día que la API de terceros cambia.
+**Solución:** subir el bloqueo a `conftest.py` como fixture `autouse` de toda la
+suite, y sembrar tasas explícitas donde los tests las necesiten. El fallo que
+apareció al hacerlo no era una regresión: era la prueba de que el bloqueo hacía
+falta.
+**Regla:** un invariante de la suite (no hay red, no hay reloj real, no hay
+sistema de ficheros) se implementa en `conftest.py` con `autouse`, nunca fichero
+a fichero — si depende de que alguien lo recuerde, no es un invariante, es una
+costumbre. Y cuando lo actives por primera vez, **espera que algo se rompa**: lo
+que se rompe es lo que llevaba tiempo mintiendo. Hermana de [AUDIT-2026-08]: un
+test cuyo resultado depende del entorno o de la fecha de ejecución es una bomba
+de relojería, y la red es entorno.
+
+### [PHASE-44.11] El vocabulario de tu propia columna se comprueba contra la función que lo produce, no contra lo que suena natural
+**Error:** El plan de la fase traía la tabla de sufijos de mercado escrita como
+`{NYSE:'', LSE:'.L', BME:'.MC', XETRA:'.DE', EPA:'.PA', ...}`. Implementada tal
+cual, no habría acertado **ni una fila** europea: `catalog/venues.normalize_venue`
+sólo produce las cuatro etiquetas de la SEC, un MIC ISO 10383 de **4**
+caracteres o `UNKNOWN` — así que `'LSE'` (3 caracteres) y `'XETRA'` (5) se
+normalizan a `UNKNOWN` y nunca pueden estar en `securities.exchange`.
+**Causa:** las etiquetas coloquiales de bolsa son las que uno escribe de memoria,
+y el plan las heredó sin contrastarlas con el normalizador que gobierna la
+columna. El fallo habría sido **silencioso y total**: toda posición europea
+cayendo en «plaza sin mapeo» → excluida con un motivo que suena razonable.
+**Solución:** reescribir la tabla sobre MIC (`XLON`, `XMAD`, `XETR`…) y dejar un
+test que afirma que las coloquiales **no** son el vocabulario, para que nadie las
+reintroduzca por parecer más legibles.
+**Regla:** antes de escribir un diccionario cuyas claves son valores de una
+columna, ejecuta la función que normaliza esa columna sobre las claves que ibas
+a usar. Es la lección [PHASE-44.6] («la forma de salida se prueba, no se
+deduce») aplicada hacia dentro: el contrato que no verificas no es sólo el de la
+librería de terceros, también el tuyo de hace tres fases. Y desconfía
+especialmente cuando el modo de fallo es «no encuentra nada»: eso se lee como
+«no hay datos», no como un bug.
 
 ---
 

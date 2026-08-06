@@ -14,13 +14,16 @@ ADRs (Architecture Decision Records), catálogo de endpoints y schema de BD.
 - [lessons.md](lessons.md) — errores y reglas aprendidas
 - [backlog.md](backlog.md) — deuda técnica, limitaciones y follow-ups
 - [investment-module-guide.md](investment-module-guide.md) — **guía completa del módulo Inversión**: lógica, decisiones, scripts y playbook de pruebas manuales
+- [investment-threshold-divergences.md](investment-threshold-divergences.md) — umbrales y fórmulas: **cuaderno del usuario vs. motor** (manda el motor; aquí queda qué tocar si algún día se cambia)
 - [api/endpoints.md](api/endpoints.md) — catálogo de endpoints
 - [data-model/schema.md](data-model/schema.md) — estado del schema
 - [decisions/](decisions/) — ADRs (decisiones arquitectónicas)
 - [phases/](phases/) — un documento por fase completada
 - [audits/](audits/) — auditorías (seguridad, arquitectura, UX, rendimiento)
 - [ai-context/](ai-context/) — contexto de consulta bajo demanda para IA
-  (glosario, ejemplos, evaluaciones de modelos, prompts guardados)
+  (glosario, ejemplos, evaluaciones de modelos, prompts guardados). Incluye
+  [excel-analisis-empresas.md](ai-context/excel-analisis-empresas.md), la
+  transcripción íntegra del cuaderno de metodología del usuario
 
 ---
 
@@ -384,11 +387,11 @@ Solo web + backend (sin paridad móvil). No hay migraciones ni endpoints nuevos.
 
 | Fase | Nombre                                                       | Estado | PR |
 |------|--------------------------------------------------------------|--------|----|
-| 39   | Columna Saldo del extracto capturada por fila (`transactions.statement_balance`) + auto-anclaje del `opening_balance` al confirmar imports (misma semántica que "Cuadrar saldo", a fecha del extracto) + `accounts.anchored_statement_balance` para re-derivar al importar historia vieja + UI (mapping, preview, toast) | 🚧 | — |
+| 39   | Columna Saldo del extracto capturada por fila (`transactions.statement_balance`) + auto-anclaje del `opening_balance` al confirmar imports (misma semántica que "Cuadrar saldo", a fecha del extracto) + `accounts.anchored_statement_balance` para re-derivar al importar historia vieja + UI (mapping, preview, toast) | ✅ | — |
 
 > Detalle en [`phases/phase-39-statement-balance-anchor.md`](phases/phase-39-statement-balance-anchor.md).
-> Código completo y verde (BE: 666 tests · ruff · mypy · FE: 95 web + types/services).
-> Pendiente: prueba manual (reimportar extractos BBVA) + commit. Origen:
+> En `main` (commit `1a35bbf`). La prueba manual de reimportación sigue
+> pendiente; el código lleva commiteado desde entonces. Origen:
 > auditoría de integridad [`audits/2026-07-13-data-integrity-pending-check.md`](audits/2026-07-13-data-integrity-pending-check.md).
 
 ### Fase 40 — Flag `counts_as_debt` (tarjeta revolving fuera de deuda)
@@ -451,7 +454,25 @@ y [`improvements/ARCHITECTURE-investment-module.md`](improvements/ARCHITECTURE-i
 | 44.5 | Engine capas 3.5 y 4 (**cierra el engine**): stress paramétrico (ST1 shock de ingresos · ST2 shock de tipos · ST3 breakeven) + síntesis (4 preguntas con semáforo por regla · matriz Conservador/Vigilar/Evitar · `dividend_verdict` · confianza = completitud × frescura · matriz de banderas) | ✅ | — |
 | 44.6 | Adapter EDGAR — **cruzado + ingesta pura + adapter**. `pretax_income` entra como partida canónica 49; el `concept_map` pasa del script al módulo con sus 4 mecanismos (candidatos · combinación · `dei` · signo) + normalización + cuadres; y el adapter monta `edgartools==5.43.0` pineada con reparto explícito: la librería identifica y parsea, nosotros guardamos el crudo y anclamos los hechos al ejercicio por fecha de cierre. Falta persistencia (`IngestionJob`, endpoints) y la prueba en vivo | ✅ | — |
 | 44.7 | **Módulo completo (BE + web + móvil) en un solo commit.** Persistencia + API (catálogo/fundamentales/análisis/cartera/precios) sobre las 13 tablas de 44.1 (cero migraciones) · ingesta síncrona por job · seed de umbrales (1440 filas) + hash · builder BD→engine + serializador JSONB + `AnalysisRun` · golden con MCD/O/JNJ reales · FIFO + acciones corporativas (split/stock_dividend) + dividendos · `PriceAdapter`/Finnhub (sin key → desactivado) + `/portfolio/summary` · web (Tab Análisis + Cartera, registro `enabled`, `AccountsGuard` eximido) · móvil (shell + tabs + veredicto) | ✅ | — |
+| 44.10 | **Las métricas que el cuaderno pedía.** DuPont extendido de 5 factores con la identidad que CIERRA —usa el EBIT reportado en el margen operativo y en el coste financiero; con el limpio arriba y el reportado abajo el ROE reconstruido salía inflado hasta 4 puntos porcentuales en JNJ 2023, en silencio y sólo en los años con deterioros— más sus dos filas de comprobación · `S7` endeudamiento (banda 1-2, `applies=False` en financieras) y `S8` calidad de la deuda · tres piezas del motor que nadie llamaba (caja libre de mantenimiento, circulante operativo y fondo de maniobra) cableadas como series de la evolutiva. 57 métricas, motor 1.2.0, sin migración | ✅ | — |
+| 44.9 | **Informe de análisis con pestañas.** Backend: el catálogo de métricas y las 49 partidas viajan por API con etiqueta y unidad · `analysis_runs.thresholds_used` persiste los cortes efectivos (eran irrecuperables: el seed muta la fila in situ y el hash es irreversible) · `QuestionVerdict.signals[]` con valor, banda y motivo de las que no puntúan — antes 8 señales eran la clave en crudo y una financiera pintaba verde por ausencia de prueba sin poder detectarse · `runs/latest` (el informe moría al recargar) · `DUPONT_EM` catalogada (52 métricas) · gate de `ENGINE_VERSION` que se afirmaba desde 44.2 y no existía. Web: hero persistente + 6 pestañas en la URL (Estados · Ratios · Evolución · Forense · Dividendo · Veredicto), matriz métrica × ejercicio multi-año, formato por unidad (un margen ya no se lee «0,42») y el perfil como checklist auditable. Retirados los 4 componentes viejos | ✅ | — |
 | 44.8 | Buscador de valores **local-first** (ADR-0008). E1: el servidor decide la plaza (`venues.py`; un país no es un mercado) e identidad por `(cik, ticker)` — el cliente mandaba `exchange:'US'` y duplicaba filas · regla única de analizabilidad con motivo (`capabilities.py`) respaldada por evidencia contada en la SEC y persistida en `securities.analysis_status` (MCD 33 10-K → `ok`; SPY 0/0 → `no_annual`; SAN 0 10-K + 25 20-F → `non_gaap`) · 500→404, 422 con motivo, debounce 250 ms con suelo de 2 caracteres y aviso, key de búsqueda fuera de `investment.all` · fuera `PriceAdapter.symbol_search` | 🚧 E1 | — |
+| 44.11 | **Precios vivos y valoración en euros.** Adapter `yfinance` pineado (primario, multi-mercado, sin credencial) tras selector `PRICE_PROVIDER`; Finnhub convive. El `PriceAdapter` pasa a lote quotes-only y **la divisa la declara el proveedor**, no el catálogo — antes se persistía la del catálogo junto a un precio de fuera, y un valor de Londres en peniques etiquetado como libras vale 100 veces más. FX sin piezas nuevas: `exchange_rates` vía `currency` ([ADR-0009](decisions/0009-single-fx-source-currency-transversal.md)), con `fx_as_of` efectivo por posición y exclusión estándar cuando falta tasa (`convert` devuelve el importe SIN convertir, no un error). Corregido un **dato ficticio**: `fx_rate_at_trade` tenía `default=1`, inocuo mientras `fx_effect` salía 0 y falso en cuanto se cableó el FX real — ahora se deriva del BCE a la fecha de compra | 🚧 pendiente prueba manual | — |
+| 44.12 | **Múltiplos de valoración** (la «hoja 10» del cuaderno). Capa PURA `engine/valuation.py` con 7 métricas —PER, precio/ventas, precio/valor contable, precio/caja libre, EV/EBITDA + valor contable por acción y rentabilidad de la caja libre— que cruzan la cotización viva con el último ejercicio. **Fuera del `AnalysisRun`**: un múltiplo se mueve con el precio y el run tiene que poder reejecutarse dando lo mismo, así que se calcula al vuelo y la UI lo separa del veredicto («¿es seguro?» y «¿está cara?» son preguntas distintas). Ninguna lleva banda: sin comparables de sector, un semáforo sería una opinión disfrazada de dato. Capitalización única para los cinco (`precio × shares_outstanding_eop`), guard de denominador ≤ 0, valor de empresa ≤ 0 interceptado antes de dividir, doble staleness visible y semáforo del proveedor de 3 estados. Motor **1.3.0**, 64 métricas catalogadas y 42 con umbral | 🚧 pendiente prueba manual | — |
+
+> Detalle de 44.9 en [`phases/phase-44.9-analysis-report-contract.md`](phases/phase-44.9-analysis-report-contract.md)
+> y plan completo (wireframes, criterios de aceptación) en
+> [`improvements/phase-44.9-investment-analysis-report.md`](improvements/phase-44.9-investment-analysis-report.md).
+> Origen: la pantalla pintaba 22 de 52 métricas, de un solo ejercicio, moría al
+> recargar (vivía en una mutación) y **tres etiquetas mentían sobre su propio
+> número** (F5, F6, D8) — el mecanismo de [PHASE-43] «una premisa escrita a mano
+> caduca en silencio». Verde: BE **1106 tests** (409 de inversión) · ruff · black
+> · mypy 212 · `alembic upgrade/downgrade` reversibles, cabeza única, sin drift ·
+> FE typecheck · lint · knip · **133 tests web** + 18 móvil. La valoración por
+> múltiplos del cuaderno del usuario **no entra** (el engine no recibe precio por
+> diseño) y se declara en pantalla; los umbrales del cuaderno vs. los del motor
+> quedan en [`investment-threshold-divergences.md`](investment-threshold-divergences.md).
+> **Pendiente**: prueba manual del usuario y paridad móvil.
 
 > Detalle y checkpoint de 44.6 en [`phases/phase-44.6-edgar-crosscheck-WIP.md`](phases/phase-44.6-edgar-crosscheck-WIP.md).
 > Decisiones cerradas por el usuario: EBIT derivado del pretax + intereses ·

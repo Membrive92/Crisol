@@ -56,6 +56,26 @@
 | `b5r81t3qo5s4r0` | AUDIT-2026-07 | `transactions.absorbed_as_mirror` (BOOLEAN NOT NULL DEFAULT FALSE) — cargo espejo absorbido. |
 | `c6s92u4rp6t5s1` | 37.3 | `transactions.is_exceptional` (BOOLEAN NULL) — override estructural/puntual. |
 | `d7t03v5sq7u6t2` | 39   | `transactions.statement_balance` (NUMERIC(14,2) NULL) + `accounts.anchored_statement_balance` (NUMERIC(14,2) NULL) — saldo del extracto por movimiento + ancla persistida del saldo real. |
+| `d4e15f9a3b7c62` | 44.9 | `analysis_runs.thresholds_used` (JSONB NOT NULL DEFAULT `'{}'`) — los cortes EFECTIVOS del run. Aditiva y reversible. |
+
+> **Deuda documental**: las 13 tablas del módulo Inversión (PHASE-44.1) y las
+> migraciones intermedias entre `d7t03v5sq7u6t2` y `cc3d69e1f4a8b2` no están
+> recogidas en esta tabla. Su modelo vive en
+> [`phases/phase-44.1-investment-foundations.md`](../phases/phase-44.1-investment-foundations.md)
+> y el ADR [`0007`](../decisions/0007-investment-global-tables.md). El head real
+> se consulta SIEMPRE con `alembic heads`, nunca por el nombre del fichero
+> (lección PHASE-44.1).
+
+### `analysis_runs.thresholds_used` (PHASE-44.9)
+
+Por qué una columna y no una referencia a `scoring_thresholds`: esa tabla tiene
+la unique `(sector, accounting_std, metric_key)` **sin versión ni vigencia** y el
+seed **muta la fila existente in situ**, así que la calibración con la que se
+juzgó un run pasado desaparece al resembrar. `thresholds_version` es un SHA-256:
+sirve para DETECTAR que dos runs se midieron distinto, nunca para reconstruir
+cómo. Sin esta columna, la pantalla no puede decir «6,8× frente a un mínimo de
+6». Va en columna propia y no dentro de `verdict` porque son dos cosas
+ortogonales — el dictamen y la vara de medir (lección PHASE-23.1).
 
 ---
 

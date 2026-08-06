@@ -1,161 +1,135 @@
-# Dónde estamos — 2026-07-26
+# Dónde estamos — 2026-07-31
 
-Punto de continuación tras la sesión del 25-26 de julio. Se lee de arriba abajo;
+Punto de continuación tras la sesión del 30-31 de julio. Se lee de arriba abajo;
 lo que hay que decidir está al final.
 
 ---
 
-## Lo que ha quedado en `origin/main`
+## Lo primero al retomar
 
-Push directo, fast-forward `f34d580..140725d`. Subieron **10 commits de golpe**:
-`origin/main` llevaba parada desde PHASE-43, así que con este push viajó la
-familia entera del módulo de Inversión, de los cimientos de 44.1 al buscador de
-hoy.
+**Hay trabajo terminado y SIN COMMITEAR: 63 ficheros.** Es PHASE-44.9 entera
+(backend + web). Está verde en todas las verificaciones automáticas, pero **falta
+tu prueba manual** — y la convención del proyecto es no commitear hasta que la
+des por buena.
 
-Los tres de esta sesión:
+`origin/main` sigue en `d98c96f`. El árbol de trabajo tiene 35 ficheros
+modificados y 28 nuevos.
 
-| Commit | Qué |
+Si al abrirlo algo no cuadra, **no empieces por el código**: la migración nueva
+ya está aplicada a la BD local y Docker quedó levantado.
+
+---
+
+## Qué se hizo en esta sesión
+
+### 1. Se transcribió el cuaderno del usuario
+
+El Excel `Analisis empresas.xlsx` resultó ser una **guía de metodología, no un
+modelo**: no tiene ni una fórmula viva sobre cifras de empresa (las dos únicas
+son los *checks* de DuPont) y las series de sus 10 gráficos apuntan a un libro
+del escritorio del usuario. Sus 10 hojas están transcritas —imágenes incluidas,
+que la hoja de Valoración es sólo capturas— en
+[`ai-context/excel-analisis-empresas.md`](ai-context/excel-analisis-empresas.md).
+
+**El `.xlsx` NO se versiona**: era material de referencia, no del proyecto. Se
+añadió al `.gitignore` junto al patrón `~$*` de los bloqueos de Office (el `*~`
+que había casa por sufijo, no por prefijo, así que el fichero de bloqueo estaba
+a un `git add .` de entrar en el commit).
+
+### 2. PHASE-44.9 — el informe con pestañas
+
+**Backend** (E1): el catálogo de las 52 métricas y las 49 partidas viajan por API
+con etiqueta y unidad · `analysis_runs.thresholds_used` persiste los cortes
+efectivos · `QuestionVerdict.signals[]` con valor, banda y motivo de las que no
+puntúan · `GET /runs/latest` · `DUPONT_EM` catalogada · gate de `ENGINE_VERSION`
+(que el docstring afirmaba desde 44.2 y **no existía**) · `ENGINE_VERSION` a
+**1.1.0**.
+
+**Web** (E2-E4): hero persistente + seis pestañas en la URL (Estados · Ratios ·
+Evolución · Forense · Dividendo · Veredicto) · matriz métrica × ejercicio
+multi-año · formato por unidad · el perfil como checklist auditable. Retirados
+`analysis-report`, `metrics-card`, `metric-row` y `verdict-card`.
+
+Detalle completo en
+[`phases/phase-44.9-analysis-report-contract.md`](phases/phase-44.9-analysis-report-contract.md).
+
+### 3. `docs-check` — el detector de podredumbre documental
+
+Al revisar si la deuda estaba documentada salió que `backlog.md` llevaba días
+afirmando cosas falsas. Es la **séptima** vez que pasa lo mismo en este proyecto,
+y la lección ya estaba escrita dos veces, así que se aplicó la otra regla del
+fichero: mover la fuente de verdad en vez de añadir otro guardarraíl.
+
+`scripts/check_docs.py` (stdlib pura) comprueba en cada `make verify`, en
+`pnpm docs:check` y en CI: enlaces relativos que resuelvan · revisiones de
+Alembic citadas que existan · que quien declare un head nombre el head real ·
+que los documentos **vivos** no lleven números volátiles.
+
+La distinción que lo hace útil: una phase doc es una **foto fechada** y tiene
+derecho a envejecer; `backlog.md` y este fichero describen el AHORA y no.
+
+### 4. Documento de divergencias de umbrales
+
+Decisión del usuario: **manda el motor**, pero las 13 divergencias con su
+cuaderno quedan escritas en
+[`investment-threshold-divergences.md`](investment-threshold-divergences.md),
+ordenadas por coste de adopción — cuatro son gratis (una fila en
+`scoring_thresholds`), dos exigen ADR porque cambiarían veredictos.
+
+---
+
+## Los defectos que esta fase cerró
+
+Sirven para entender por qué el cambio es tan grande:
+
+| Defecto | Estado |
 |---|---|
-| `8c2927c` | `fix(web)`: pase responsive — rejillas `auto-fit`, `overflowX` en la tabla, formulario de reglas a flex-wrap (19 ficheros) |
-| `53f537b` | `chore(dev)`: permisos de herramientas del ciclo |
-| `140725d` | `feat(investment)`: módulo completo (44.7) + buscador que deja de adivinar el mercado (44.8 E1) — 102 ficheros |
-
-**Por qué 44.7 y 44.8 comparten commit**: no se podían separar en dos commits
-sanos. La E1 modificó ficheros que 44.7 nunca había commiteado —
-`catalog/service.py` y `schemas.py` son nuevos y ya importan `capabilities.py` y
-leen `analysis_status` — así que un commit de 44.7 «puro» no habría compilado.
-Se prefirió un commit honesto con el cuerpo explicando las dos partes a dos
-commits de los cuales uno estaría roto.
-
-**Sin verificar**: el CI. `gh` no está instalado en esta máquina, así que **hay
-que mirar GitHub Actions**. Dos cosas sólo se ven allí: la migración nueva
-aplicada sobre una base limpia desde `f34d580` (en local es reversible, cabeza
-única y sin drift) y la instalación de `edgartools==5.43.0` con sus transitivas,
-que entran en este push y nunca se han instalado en el runner.
+| La pantalla pintaba **22 de 52** métricas, y todas del último ejercicio | ✅ matriz multi-año completa |
+| El informe vivía en una **mutación** y desaparecía al recargar | ✅ lee el run persistido |
+| Tres etiquetas **mentían** sobre su número (F5, F6, D8) | ✅ catálogo por API + test |
+| Un margen del 42 % se imprimía **`0,42`** | ✅ formato por unidad |
+| Ocho señales del veredicto salían como **clave cruda** en pantalla | ✅ con test de regresión |
+| Los cortes de un run pasado eran **irrecuperables** | ✅ `thresholds_used` |
+| Una financiera pintaba **verde por ausencia de prueba**, indetectable | ✅ «Sin evidencia» |
+| El stress perdía 3 de 6 escenarios **sin decir por qué** | ✅ motivo por familia |
+| El gate de `ENGINE_VERSION` estaba **declarado y no existía** | ✅ huella de la forma |
 
 ---
 
-## Estado del módulo de Inversión
+## Estado de verificación
 
-**El motor está cerrado y funciona.** Seis capas puras, 51 métricas con banda,
-y el análisis de MCD verificado a mano en la web: veredicto Evitar por X-Score,
-confianza 100%, cinco ejercicios (2021-2025).
+**Todo verde**, con el intérprete del proyecto (`.venv`, Python 3.12.10 — el
+mismo que CI):
 
-**El buscador va por la Entrega 1 de cinco.** Plan completo en
-[`improvements/phase-44.8-investment-search-hybrid.md`](improvements/phase-44.8-investment-search-hybrid.md),
-decisión en [`decisions/0008-investment-symbol-search.md`](decisions/0008-investment-symbol-search.md).
+- Backend: la suite completa · `ruff` · `black` · `mypy` · `alembic
+  upgrade`/`downgrade`/`upgrade` reversibles, **una sola cabeza**, sin drift.
+- Frontend: `typecheck` · `lint` · `knip` · los tests de web, móvil, services,
+  ui y store.
+- Documentación: `make docs-check` (enlaces, migraciones citadas, head declarado
+  y números volátiles).
 
-Verde al cerrar: BE **1091 tests** · mypy 211 ficheros · ruff · black ·
-`alembic upgrade/downgrade` reversibles, cabeza única, sin drift · web **105
-tests** · móvil 18 · typecheck · lint · knip.
+Los recuentos exactos salen de `make verify`; aquí no se escriben a propósito —
+un número que cambia cada fase no puede vivir en un documento que describe el
+presente, y este fichero es justo eso. Las cifras de una fase concreta están en
+su phase doc, que sí es una foto fechada.
 
-### Datos reales en la BD local
+Head de Alembic: `d4e15f9a3b7c62`. Engine: `1.1.0`.
 
-Dos valores, ambos normalizados a su plaza real en esta sesión (estaban con
-`exchange='US'`, que es un país):
-
-```
- ticker | exchange |    cik     | analysis_status
---------+----------+------------+-----------------
- JNJ    | NYSE     | 0000200406 | (NULL, anterior a la columna)
- MCD    | NYSE     | 0000063908 | (NULL, anterior a la columna)
-```
-
-`NULL` = no comprobado, y la regla responde entonces igual que antes de existir
-la columna. Se rellenará solo la próxima vez que se resuelva cada valor.
+**Lo que NO se ha verificado**: la prueba manual, y el CI de GitHub Actions —
+`gh` sigue sin estar instalado en esta máquina, así que el push anterior
+(`140725d`) tampoco se llegó a comprobar allí. Dos cosas sólo se ven en el
+runner: la migración sobre base limpia y la instalación de `edgartools` con sus
+transitivas.
 
 ---
 
-## Lo que sigue, por orden de valor
+## Lo siguiente, por orden
 
-### 1. Pantalla de estados financieros + DuPont + evolutiva
-
-**Es la petición del usuario y es casi todo frontend.** Verificado contra el run
-real de MCD: el motor ya calcula, guarda y sirve mucho más de lo que la pantalla
-pinta.
-
-| Ya en la BD y en la API | ¿Se pinta? |
-|---|---|
-| **DuPont** año a año (`scores_detail.base_ratios.dupont`): margen × rotación × apalancamiento, con sus notas de aproximación | ❌ |
-| **Vertical** (common-size) y **horizontal** (año contra año), en `evolution` | ❌ |
-| **Stress** (shock de ingresos, de tipos, breakeven), en `verdict.stress` | ❌ |
-| **49 partidas** por ejercicio en `financial_statements`, con `GET /investment/fundamentals/{id}/statements` que la web **ya llama** | ❌ |
-| Banderas de divergencia y completitud por partida | ❌ |
-| 51 métricas con banda | **22** |
-
-O sea: la pantalla muestra ~40% de lo calculado. **Falta el Excel del usuario**
-(lo va a pasar) para tres cosas que no se deducen del código: qué fórmulas usa
-que el motor no tenga, en qué orden las leía, y si sus umbrales discrepan de los
-1.440 sembrados.
-
-### 2. Entrega 2 del buscador — índice de la SEC
-
-Lo que hace falta para que buscar por nombre funcione como la gente escribe. Hoy
-sólo se encuentra por ticker exacto o por el nombre literal de la SEC: en la
-sesión, `Mac` → `Macdi` → `Macdo` → `Macdod` → `Macdonadl` dieron **cero
-resultados**, y sólo `MCD` encontró McDonald's. No es un bug: es `ILIKE` contra
-`MCDONALDS CORP`.
-
-Contenido: índice en memoria de los ~10.400 emisores desde el parquet que
-`edgartools` ya empaqueta (sin red, sin key, sin tabla nueva), `ranking.py` con
-relevancia y alias, colapso por CIK, y `POST /adopt` con `listing_key` opaco.
-Criterios de aceptación concretos en el plan (§8, E2).
-
-### 3. Entregas 3-5
-
-El combobox accesible con fila rica (E3), la paridad móvil (E4) y la capa
-externa multi-mercado (E5, la que responde a la petición original y la que
-arrastra la decisión de licencia).
-
----
-
-## Decisiones abiertas
-
-1. **¿Twelve Data para el multi-mercado (E5)?** Es la única fuente verificada
-   que da símbolo + nombre + bolsa + MIC + divisa + tipo, y funciona sin API
-   key, pero su ToS prohíbe cachear en local y prohíbe el uso comercial del plan
-   gratis. Para uso personal es defendible; condiciona la feature a que Crisol
-   no se comercialice. El canje verificado si algún día se comercializa: EODHD,
-   €399/mes uso interno o €2.499/mes con display a clientes.
-2. **¿Por dónde seguir?** La pantalla de estados financieros y la E2 del buscador
-   son independientes y no se pisan.
-
----
-
-## Comprobado en esta sesión y cerrado (para no repetirlo)
-
-- **La confianza al 100% con un cierre de hace 207 días NO es un bug.** La
-  frescura sí entra en la fórmula (`completitud × factor`), y el corte de
-  «fresco» son 274 días (~9 meses). Para datos anuales, el 10-K de 2025 es lo
-  más reciente que existe.
-- **El buscador no estaba roto en Cartera.** El componente es el mismo que en
-  Análisis y funciona; lo que faltaba era feedback por debajo de 2 caracteres —
-  se tecleaba una letra y no pasaba nada. Arreglado, con tres tests.
-- **`backend/data/` entero se ignora ahora.** La regla anterior nombraba
-  `edgar_cache/`, pero `EDGAR_CACHE_DIR` es configurable y las sondas habían
-  escrito 5,8 MB de payloads crudos en `edgar_probe_cache/`, a punto de entrar
-  en el commit.
-
-## Deuda declarada (en ADR-0008, no se ha olvidado)
-
-- `resolve_security` sigue escribiendo `currency='USD'` y `accounting_std=GAAP`.
-  Hoy no mueve ningún número, **pero es un acoplamiento latente**: el 20-F de un
-  ADR no entra en el pipeline porque `annual.ANNUAL_FORMS` sólo admite `10-K`. El
-  día que alguien añada `20-F` para dar soporte a IFRS, esa etiqueta pasa a ser
-  load-bearing de golpe y esos estados se analizarían con cortes calibrados en
-  US-GAAP sin decirlo. **Quien toque `ANNUAL_FORMS` arregla `accounting_std` en
-  el mismo commit.**
-- `pandas` entra como transitiva de `edgartools` y no está declarada en
-  `pyproject.toml`. La E2 la necesita para leer el parquet: importarla **dentro**
-  de la función, no a nivel de módulo (~1 s en cada arranque).
-
----
-
-## Arranque rápido
+### 1. Probar la pantalla (es el paso que bloquea el commit)
 
 ```bash
-docker compose up -d                      # postgres + minio + ollama
-cd backend && .venv/Scripts/python.exe -m alembic upgrade head
+docker compose up -d                      # ya estaba levantado al cerrar
+cd backend && .venv/Scripts/python.exe -m alembic upgrade head   # ya aplicada
 cd backend && .venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8002
 pnpm dev:web                              # http://localhost:3000
 ```
@@ -163,10 +137,90 @@ pnpm dev:web                              # http://localhost:3000
 El backend va en **8002**, no en 8000: es lo que espera `BACKEND_ORIGIN` de
 `apps/web/.env.local`. Con el 8000 del Makefile, `/api/*` devuelve 500.
 
-Verificación (siempre con el intérprete del proyecto, nunca el del PATH):
+Recorrido sugerido: **MCD** (le falta `cogs`, así que varias métricas salen no
+calculables con su motivo), **Realty Income** (socimi: balance no clasificado, la
+liquidez casi entera cae) y **JNJ**. En cada uno: las seis pestañas, recargar en
+cada una, y comprobar que ninguna métrica ausente aparece como hueco mudo.
+
+**Importante**: los análisis ya guardados salen sin señales ni umbrales — se
+ejecutaron antes de que el motor los publicara. Hay que pulsar «Volver a
+analizar» para ver el dictamen completo. La pantalla lo declara en vez de
+fingirlo.
+
+### 2. Commit
+
+Cuando dé el visto bueno. Mensaje en inglés, `— Refs: PHASE-44.9`.
+
+### 3. Después, a elegir
+
+- **Paridad móvil** de la pantalla nueva (hoy el móvil conserva su vista
+  resumida).
+- **Entrega 2 del buscador** (PHASE-44.8): el índice en memoria de los ~10.400
+  emisores de la SEC. Hoy buscar «Macdonald» da cero; sólo funciona el ticker
+  exacto. Plan en
+  [`improvements/phase-44.8-investment-search-hybrid.md`](improvements/phase-44.8-investment-search-hybrid.md).
+- **Capa de valoración**, si se activa una API key de precios (ver decisiones).
+
+---
+
+## Decisiones abiertas
+
+1. **¿Twelve Data para el multi-mercado?** (E5 del buscador, viene de la sesión
+   anterior). Única fuente verificada con símbolo + nombre + bolsa + MIC + divisa
+   sin API key, pero su ToS prohíbe cachear en local y el uso comercial del plan
+   gratis. Para uso personal es defendible; condiciona la feature a que Crisol no
+   se comercialice. Canje verificado: EODHD, €399/mes uso interno.
+2. **¿Se activa Finnhub para la valoración?** La hoja 10 del cuaderno (PER,
+   P/Ventas, P/VC, P/FCF, EV/EBITDA, Gordon) necesita precio de mercado. El
+   engine **no lo recibe por diseño** —un score que se mueve con la cotización no
+   sería reproducible— así que tendría que ser una capa **fuera** del
+   `AnalysisRun`. Además la comparativa «vs sector» del ejemplo
+   Donaldson/Evoqua no tiene fuente en el proyecto.
+3. **¿Se adopta algún umbral del cuaderno?** Ver el documento de divergencias.
+   Cambiar una banda cambia el veredicto de los runs futuros: exige ADR.
+
+---
+
+## Deuda declarada
+
+**Vive en [`backlog.md`](backlog.md), sección «Módulo Inversión»** — ese es el
+sitio durable. Este fichero se reescribe entero cada sesión, así que lo que sólo
+se anote aquí se pierde; el 2026-08-01 se descubrió que dos entradas del backlog
+llevaban días diciendo cosas que habían dejado de ser ciertas.
+
+Lo más punzante, para no tener que abrirlo:
+
+- **`resolve_security` escribe `currency='USD'` y `accounting_std=GAAP` para
+  todo.** Inocuo hoy, **load-bearing el día que alguien admita `20-F`** en
+  `annual.ANNUAL_FORMS`: se analizarían cuentas IFRS con cortes calibrados en
+  US-GAAP sin decirlo. Quien lo toque, lo arregla en el mismo commit.
+- **Cuatro piezas del motor construidas y sin cablear** (`maintenance_capex`,
+  `wc_operating`, `wc_total`, `total_debt_incl_leases`). El cuaderno del usuario
+  pide tres de ellas. Es el arreglo más barato de la lista.
+- Las **13 tablas del módulo** siguen fuera de `data-model/schema.md`.
+
+---
+
+## Comprobado y cerrado (para no repetirlo)
+
+- **jest-dom no está en el proyecto.** Los tests web usan `toBeTruthy()`,
+  `toBeNull()` y `getAttribute()`, no `toBeInTheDocument()`.
+- **`exactOptionalPropertyTypes` sigue mordiendo**: una prop opcional que vaya a
+  recibir `undefined` explícito del padre se declara `prop?: T | undefined`.
+- **La forma del JSONB del run se comprobó ejecutando el motor**, no leyendo las
+  dataclasses. Los tipos TS de `AnalysisRun` ya no son un saco con index
+  signature.
+
+---
+
+## Verificación completa
 
 ```bash
-cd backend && .venv/Scripts/python.exe -m pytest tests/ -q    # ~11,5 min
-cd backend && .venv/Scripts/python.exe -m mypy app/ && .venv/Scripts/python.exe -m ruff check app tests scripts
+cd backend && .venv/Scripts/python.exe -m pytest tests/ -q    # ~12 min
+cd backend && .venv/Scripts/python.exe -m mypy app/
+cd backend && .venv/Scripts/python.exe -m ruff check app tests scripts
+cd backend && .venv/Scripts/python.exe -m black --check app tests scripts
 pnpm typecheck && pnpm lint && pnpm test && pnpm knip
 ```
+
+Nunca dos `pytest` a la vez: `crisol_test` es una sola base compartida.

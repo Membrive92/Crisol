@@ -18,6 +18,11 @@
 >   el commit).
 > - 2026-07-24: alta de **UI-2026-07-24 — auditoría responsive** (aplicada, sin
 >   commitear, pendiente de validación visual).
+> - 2026-08-01: puesta al día del bloque de Inversión con PHASE-44.8 y
+>   PHASE-44.9. **Dos entradas de 44.7 habían caducado en silencio** (decían que
+>   no había tests de componente FE y que el informe era «veredicto + tablas»);
+>   corregidas en vez de tachadas. Es la lección [PHASE-43] aplicada a este
+>   propio fichero: una premisa escrita deja de ser cierta sin que nadie lo note.
 
 ---
 
@@ -191,35 +196,31 @@ Si quieres atacar trabajo real, por orden de valor:
 
 ## Módulo Inversión — follow-ups (fase 44)
 
-Limitaciones conscientes del módulo. El engine (6 capas), el adapter EDGAR, la
-persistencia, la API y el frontend están **construidos** (PHASE-44.7); lo de aquí
-es lo que queda.
+Limitaciones conscientes del módulo. El engine (6 capas, 57 métricas), el adapter
+EDGAR, la persistencia, la API (28 endpoints) y el informe web con seis pestañas
+están **construidos** (44.7, 44.8 E1 y 44.9); lo de aquí es lo que queda.
 
-### ✅ HECHO — validación manual del módulo (2026-07-26, ya no bloquea nada)
+> **Este fichero es el sitio DURABLE de la deuda del módulo.** `HANDOFF.md` la
+> repite para la sesión en curso, pero se reescribe entero cada vez — lo que sólo
+> viva allí se pierde. Si detectas deuda nueva, escríbela aquí.
 
-- **[PHASE-44.7] Prueba manual en vivo del módulo completo — SIN HACER.** El
-  código está verde en tests automáticos (BE 1042 · FE lint/typecheck/tests/knip),
-  pero **la app nunca se ha ejecutado end-to-end contra la SEC real con la UI**.
-  **Hecha el 2026-07-26**: el flujo Análisis (MCD) se verificó en la web —
-  informe completo, MCD NO marcada como financiera— y el smoke en vivo contra
-  MCD/O/JNJ cazó el bug del `getattr` sobre un método. El módulo está
-  commiteado (`140725d`) y en `origin/main`. Lo que queda sin recorrer a mano:
-  las ramas de `O` y `JNJ` en la UI, el flujo de Cartera completo (venta FIFO,
-  split) y la paridad móvil.
-  Playbook paso a paso en
-  [`investment-module-guide.md` §9](investment-module-guide.md).
-  Qué falta validar:
-  - Flujo Análisis en web: `resolve` (MCD) → `ingest` (descarga real ~3,5 MB) →
-    `run` → informe (veredicto de 4 preguntas + paneles). Comprobar que MCD **no**
-    sale marcada como financiera (regresión del bug `is_financial_institution`).
-  - Casos de rama: `O` (REIT → EBIT derivado, forenses `not_computable`) y `JNJ`
-    (EBIT derivado desde 2015).
-  - Flujo Cartera: alta de compra, posición con coste base, badge "sin cotización"
-    (sin Finnhub key), venta con FIFO (409 al vender de más), split aplicado.
-  - Paridad móvil: shell + tabs + veredicto.
-  - **Estado del entorno de prueba** (2026-07-23): Postgres arriba, BD dev en head
-    (`bb2c58d0e3f7a1`), backend en `:8002` (el puerto del proxy web), web en
-    `:3000`, seed de umbrales con 1440 filas, rutas registradas (401, no 404).
+### Validación manual pendiente
+
+El flujo Análisis con MCD se validó a mano el 2026-07-26 (y el smoke en vivo
+cazó el bug del `getattr` sobre un método). Lo que **sigue sin recorrerse**:
+
+- **[PHASE-44.9] El informe con seis pestañas, entero.** Es lo que bloquea el
+  commit de 44.9. Recorrido: MCD (le falta `cogs` → varias métricas no
+  calculables con motivo), Realty Income (socimi: balance no clasificado, la
+  liquidez casi entera cae) y JNJ. En cada uno, las seis pestañas y **recargar en
+  cada una**. Los análisis guardados antes de 44.9 hay que reejecutarlos.
+- **[PHASE-44.7] Flujo Cartera completo**: alta de compra, posición con coste
+  base, badge «sin cotización» (sin Finnhub key), venta con FIFO (409 al vender
+  de más), split aplicado.
+- **[PHASE-44.7] Paridad móvil**: shell + tabs + veredicto.
+
+Playbook paso a paso en
+[`investment-module-guide.md` §9](investment-module-guide.md).
 
 ### Follow-ups funcionales
 
@@ -233,15 +234,16 @@ es lo que queda.
 - **[PHASE-44.7] `spinoff` y `return_of_capital`**: se registran pero aplicarlas
   devuelve 400. El modelo `CorporateAction` (un `ratio` escalar) no expresa el
   security destino ni la fracción de base; exige ampliar el modelo + migración.
-- **[PHASE-44.7] Informe sin charts**: evolución common-size, stress y heatmap de
-  Δ% están diferidos; el informe MVP muestra veredicto + tablas de métricas.
-  Falta también el `statement-viewer` (canónico + toggle a `raw_source_ref`).
-- **[PHASE-44.7] Paridad móvil parcial del informe**: sólo el veredicto. Los
-  paneles de métricas y los charts (gifted-charts, 0% reutilizable desde web) son
-  ~2-3 entregas más.
-- **[PHASE-44.7] Sin tests de componente FE** específicos del módulo. La lógica
-  está cubierta en backend (1042) + services (endpoints), pero las cards del
-  informe y la tabla de cartera no tienen test propio.
+- **[PHASE-44.9] Informe sin charts**: el informe web ya tiene seis pestañas con
+  los estados financieros, las matrices de métricas multi-año, los desgloses
+  forenses y el dictamen auditable — pero **todo en tablas**. Siguen diferidos
+  los gráficos: evolución common-size, escenarios de stress y heatmap de Δ%.
+- **[PHASE-44.9] Paridad móvil del informe**: el móvil se quedó en la vista
+  resumida (sólo veredicto) mientras la web pasaba a seis pestañas, así que la
+  brecha es ahora MUCHO mayor que cuando se anotó en 44.7. Los charts de móvil
+  (gifted-charts) son 0% reutilizables desde web.
+- **[PHASE-44.9] La tabla de cartera sigue sin test de componente.** El informe
+  sí tiene: `tabs.test.tsx`, `metric-format.test.ts` y `tab-verdict.test.tsx`.
 - **[PHASE-44.7] Reconciliación con el patrimonio (ARCH §9, fase 40.9)**: decidido
   dejar Inversión como espacio SEPARADO (no entra en el patrimonio neto del
   Dashboard) y eximir `/investments` del `AccountsGuard`. Integrarlo exige decidir
@@ -254,6 +256,51 @@ es lo que queda.
   metadatos del módulo). El enrutado sí existe (`investment/router.py` agrega los
   5 sub-routers); falta sólo el fichero de metadatos, sin precedente en otros
   módulos.
+- **[PHASE-44.1] Las 13 tablas del módulo no están en
+  [`data-model/schema.md`](data-model/schema.md)**, ni las migraciones
+  intermedias entre `d7t03v5sq7u6t2` y `d4e15f9a3b7c62`. Su modelo vive en la
+  phase doc de 44.1 y en el ADR-0007. Anotado también en el propio `schema.md`.
+
+### Deuda del buscador (fase 44.8)
+
+- **[PHASE-44.8] Sólo la Entrega 1 de 5.** Buscar por nombre no funciona como
+  escribe la gente: `Mac`, `Macdo`, `Macdonald` dan **cero**; sólo encuentra por
+  ticker exacto o por el nombre literal de la SEC. No es un bug, es un `ILIKE`
+  contra `MCDONALDS CORP`. Lo arregla la E2 (índice en memoria de los ~10.400
+  emisores). Plan en
+  [`improvements/phase-44.8-investment-search-hybrid.md`](improvements/phase-44.8-investment-search-hybrid.md).
+- **[PHASE-44.8] `resolve_security` escribe `currency='USD'` y
+  `accounting_std=GAAP` para todo**, ADR extranjeros incluidos. Hoy no mueve
+  ningún número **pero es un acoplamiento latente**: el 20-F de un ADR no entra
+  en el pipeline porque `annual.ANNUAL_FORMS` sólo admite `10-K`. El día que
+  alguien añada `20-F` para dar soporte a IFRS, esa etiqueta pasa a ser
+  load-bearing de golpe y esos estados se analizarían con cortes calibrados en
+  US-GAAP sin decirlo. **Quien toque `ANNUAL_FORMS` arregla `accounting_std` en
+  el mismo commit.** (También en el ADR-0008.)
+- **[PHASE-44.8] `pandas` no está declarada en `backend/pyproject.toml`**: entra
+  como transitiva de `edgartools`. La E2 la necesita para leer el parquet;
+  importarla **dentro** de la función, no a nivel de módulo (~1 s en cada
+  arranque).
+
+### Deuda del informe (fase 44.9)
+
+- **[PHASE-44.10] `total_debt_incl_leases` sigue sin consumidor, a propósito.**
+  Existe para comparabilidad IFRS16/ASC842 y el cuaderno del usuario no la pide.
+  Las otras tres piezas huérfanas (`maintenance_capex`, `wc_operating`,
+  `wc_total`) ya se cablearon como series de la capa evolutiva.
+- **[PHASE-44.9] El «% común» no cubre el flujo de caja ni 4 partidas del P&L**
+  (`pretax_income` y los tres recuentos de acciones). La pantalla lo avisa, pero
+  la cobertura real está en `evolution.VERTICAL_INCOME_ITEMS`.
+- **[PHASE-44.9] Los runs anteriores a esta fase no se pueden explicar.**
+  Tienen `thresholds_used = {}` y `signals = []`: se ejecutaron antes de que el
+  motor los publicara. La pantalla lo declara y basta con reejecutar el análisis;
+  no se inventa la calibración retroactivamente.
+- **[PHASE-44.10] `S7` está calibrada sólo para negocios con activo tangible.**
+  La banda 1-2 del cuaderno sale de que el pasivo financie entre la mitad y dos
+  tercios del activo. En financieras se siembra `applies=False` (el número se ve,
+  sin semáforo), pero en **intensivas en intangibles** —software, farmacia— el
+  rango también se queda corto y ahí sí se aplica. La solución real es calibrar
+  por sector: son filas de `scoring_thresholds`, no código.
 
 ### Calibración del engine (necesita empresas reales ingeridas)
 

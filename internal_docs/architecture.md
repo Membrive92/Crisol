@@ -1,10 +1,11 @@
 # Arquitectura — Crisol
 
 > Documento vivo. Se actualiza cuando una fase introduce cambios arquitectónicos.
-> Última actualización: refactor a `personal_finance/` — los sub-features de
-> finanzas personales (categorías, transacciones, dashboard, imports, receipts)
-> viven bajo un único módulo de dominio. `auth/`, `users/` y `ai/` siguen
-> top-level como infraestructura transversal.
+> Última actualización (PHASE-44.11, [ADR-0009](decisions/0009-single-fx-source-currency-transversal.md)):
+> `currency/` queda declarado módulo **transversal** —lo era de facto desde
+> PHASE-8.1— y `exchange_rates` es la única fuente de tipos de cambio de la
+> aplicación. Antes: refactor a `personal_finance/`, con los sub-features de
+> finanzas personales bajo un único módulo de dominio.
 
 ---
 
@@ -170,14 +171,20 @@ Hay dos niveles:
    `inversiones/`, `inmuebles/`…). Cada uno agrupa los sub-features que
    pertenecen a esa "cartera". Son **sumar carpetas** — el MVP entrega
    sólo `personal_finance/`.
-2. **Módulos transversales** (`auth/`, `users/`, `ai/`). Servicios de
-   infraestructura que cualquier módulo de dominio puede usar.
+2. **Módulos transversales** (`auth/`, `users/`, `ai/`, `currency/`).
+   Servicios de infraestructura que cualquier módulo de dominio puede usar,
+   **siempre a través de su `service.py`** (nunca importando sus `models`
+   ni sus clientes HTTP).
 
 ```
 backend/app/modules/
 ├── auth/                    # cross-cutting
 ├── users/                   # cross-cutting
 ├── ai/                      # cross-cutting (cliente Ollama, prompts)
+├── currency/                # cross-cutting (tipos de cambio BCE —
+│                            #   `exchange_rates` es la ÚNICA fuente de
+│                            #   tipos de la app, ADR-0009)
+├── investment/              # módulo de dominio
 └── personal_finance/        # módulo de dominio
     ├── __init__.py
     ├── categories/
@@ -202,8 +209,10 @@ Cada sub-módulo sigue siempre la misma estructura interna:
 **Reglas no negociables**:
 - Los sub-módulos dentro de `personal_finance/` pueden importar entre sí
   por ser parte del mismo dominio (`transactions` enlaza `categories`).
-  **Distintos módulos de dominio** (cuando existan) no se importan entre
-  sí — comparten vía core o eventos.
+  **Distintos módulos de dominio** (`personal_finance` ↔ `investment`) no se
+  importan entre sí — comparten vía core o eventos. Esta regla **no** aplica a
+  los transversales: consumir `currency.service` desde un módulo de dominio es
+  lo esperado, no una excepción ([ADR-0009](decisions/0009-single-fx-source-currency-transversal.md)).
 - `repository.py` **nunca** usa string interpolation en SQL — siempre bind params.
 - `service.py` recibe `db` y `user_id` como parámetros, nunca accede al `Request`.
 - Todas las queries de dominio filtran por `user_id`.
@@ -217,6 +226,7 @@ Cada sub-módulo sigue siempre la misma estructura interna:
 | `auth`                            | ✅     | Registro, login, refresh token con rotación, logout, `/me`, "Recordarme 30 días" |
 | `auth.webauthn`                   | ✅     | Passkeys (Touch ID / Windows Hello / llaves físicas) — registro y login sin password |
 | `ai`                              | ✅     | Cliente Ollama + `/ai/health` + extract_receipt + extract_bank_statement_page |
+| `currency`                        | ✅     | Tipos de cambio del BCE (vía Frankfurter) + cron nocturno. **Única fuente de tipos de la app** ([ADR-0009](decisions/0009-single-fx-source-currency-transversal.md)); se consume por `currency.service` |
 | `personal_finance.categories`     | ✅     | Categorías de gasto/ingreso por usuario                        |
 | `personal_finance.transactions`   | ✅     | CRUD de transacciones, filtros, aislamiento, `import_hash`     |
 | `personal_finance.dashboard`      | ✅     | Agregaciones y KPIs (read-only sobre transactions/categories)  |

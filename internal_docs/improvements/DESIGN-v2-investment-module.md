@@ -87,7 +87,10 @@ El DDL completo vive en ARCHITECTURE §2. Aquí las entidades y su papel:
   `inv_lot_adjustments` (aplicación auditada y reversible [Dec.9]).
   La posición NO es tabla: se deriva de lotes − allocations.
 - **`PriceQuote`** (global): una quote viva por security, refresh
-  on-access con TTL, staleness visible. Finnhub MVP.
+  on-access con TTL, staleness visible. Primario **yfinance** tras
+  selector `PRICE_PROVIDER` (Finnhub convive, US-only); la divisa
+  persistida es la del proveedor, no la del catálogo (PHASE-44.11 D4).
+  FX vía módulo transversal `currency` (PHASE-44.11 D1).
 
 ---
 
@@ -502,7 +505,8 @@ motor".
 | Fuente | Papel | Coste | Límite |
 |---|---|---|---|
 | **EDGAR XBRL** (edgartools) | Fundamentales MVP | Gratis | Solo US + ADRs; identidad SEC obligatoria; ~10 req/s → descargas serializadas [Dec.18]; cache local de crudos como evidencia [Dec.18] |
-| **Finnhub** | Quotes cartera (~~+ symbol search~~) | Free tier 60 req/min | Real-time limitado; suficiente para EOD/1h staleness-tolerant. **PHASE-44.8 / ADR-0008**: el symbol search se retira — su `/search` no devuelve la bolsa (sólo `description`, `displaySymbol`, `symbol`, `type`), así que no puede alimentar un buscador multi-mercado |
+| **yfinance** | Quotes cartera (primario) | 0 € (no oficial) | Multi-mercado US+LSE+BME+XETRA+Euronext; roturas ocasionales absorbidas por el diseño staleness-tolerant; versión pineada |
+| Finnhub | Quotes US (convive tras selector) | Free 60 req/min | US-only; símbolo sin cobertura → exclusión estándar. `symbol_search` NO vive en pricing (ADR-0008: slot del catálogo) |
 | FMP / EODHD | Fundamentales EU (futuro) | De pago | Adapter futuro tras D2/D3 |
 | PDF + LLM | Fallback manual | — | Frágil; fuera de MVP |
 

@@ -92,10 +92,30 @@ backend/app/modules/investment/
     models.py                    # PriceQuote
     schemas.py repository.py service.py router.py
     adapters/
-      base.py                    # Protocol PriceAdapter:
-                                 #   async quote(security) -> Quote
-                                 #   async symbol_search(q) -> [SymbolHit]
-      finnhub.py                 # implementación MVP
+      base.py                    # Protocol PriceAdapter — SOLO quotes:
+                                 #   async quotes(symbols) ->
+                                 #     dict[sym, Quote | QuoteError]
+                                 #   symbol_search NO vive aquí (ADR-0008:
+                                 #   catalog/adapters/symbol_search/).
+                                 #   Quote lleva `currency` DEL PROVEEDOR
+                                 #   (PHASE-44.11 D4): se persiste esa, no
+                                 #   la del catálogo; discrepancia con
+                                 #   Security.currency → quality flag
+      yfinance.py                # PRIMARIO multi-mercado (US+LSE+BME+
+                                 #   XETRA+Euronext, sufijos Yahoo). NO
+                                 #   oficial: throttling ~1 req/s, batch.
+                                 #   ★ Normaliza GBp/GBX→GBP (÷100;
+                                 #   currency SIEMPRE ISO real)
+      finnhub.py                 # Convive tras selector PRICE_PROVIDER
+                                 #   (default yfinance). US-only: símbolo
+                                 #   sin cobertura → exclusión estándar
+                                 #   "sin cotización", nunca error
+      eodhd.py                   # fallback de pago documentado (All-World
+                                 #   19,99 €/mes) — NO implementar salvo
+                                 #   rotura recurrente de yfinance
+                                 # FX: NO es adapter de pricing. Se consume
+                                 #   el módulo transversal `currency`
+                                 #   (exchange_rates, BCE — PHASE-44.11 D1)
     refresh.py                   # política TTL + refresh on-access
   thresholds/
     models.py                    # ScoringThresholds (Dec.8)
@@ -329,6 +349,12 @@ CREATE TABLE price_quotes (
   UNIQUE (security_id)                 -- una fila viva por security;
                                        -- histórico de precios NO es objetivo
 );
+
+-- FX: SIN tabla propia (superseded — PHASE-44.11 D1). Única fuente de
+-- tipos de la aplicación = `exchange_rates` del módulo transversal
+-- `currency` (datos BCE vía Frankfurter, cron nocturno PHASE-11.1,
+-- `ensure_rates_for_dates` + `rate_date` en el resultado). El módulo
+-- investment la consume vía `currency.service`, nunca directamente.
 
 -- ─── análisis (scoped) ─── Dec.7
 CREATE TABLE analysis_runs (
@@ -597,7 +623,7 @@ dato intradía requerido). Por posición:
 | avg_cost (nativa y EUR) | coste ponderado de lots abiertos; EUR con fx_rate_at_trade |
 | cost_basis | quantity × avg_cost (+fees prorrateadas) |
 | last_price, quote_as_of, quote_stale | de price_quotes; `quote_stale=true` si fetched_at > TTL y el refresh falló |
-| market_value (nativa y EUR) | quantity × last_price; EUR con fx actual |
+| market_value (nativa y EUR) | quantity × last_price; EUR vía el servicio transversal `currency` (`exchange_rates`, datos BCE, única fuente de tipos de la app — PHASE-44.11 D1) con el `rate_date` aplicado visible en el payload |
 | unrealized_pnl / unrealized_pnl_pct | market_value − cost_basis, **descompuesto en price_effect y fx_effect** (regla §3.2 del DESIGN) |
 | daily_change / daily_change_pct | quantity × (last_price − prev_close) |
 | realized_pnl | Σ de inv_sale_allocations (FIFO) |
