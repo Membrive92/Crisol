@@ -17,7 +17,13 @@ class LotCreate(BaseModel):
     trade_date: date
     quantity: Decimal = Field(gt=0)
     price: Decimal = Field(ge=0)
-    fx_rate_at_trade: Decimal = Field(default=Decimal(1), gt=0)
+    fx_rate_at_trade: Decimal | None = Field(default=None, gt=0)
+    """Tipo de cambio nativa→EUR de la operación.
+
+    Omitirlo NO significa «1»: significa «no lo sé», y el servidor lo deriva del
+    tipo del BCE a la fecha de la operación. El default anterior era un `1`
+    literal, que afirmaba paridad con el euro y producía un efecto divisa
+    inventado en cuanto la valoración empezó a usar FX vivo (PHASE-44.11.E)."""
     fees: Decimal = Field(default=Decimal(0), ge=0)
 
 
@@ -44,7 +50,13 @@ class SaleCreate(BaseModel):
     trade_date: date
     quantity: Decimal = Field(gt=0)
     price: Decimal = Field(ge=0)
-    fx_rate_at_trade: Decimal = Field(default=Decimal(1), gt=0)
+    fx_rate_at_trade: Decimal | None = Field(default=None, gt=0)
+    """Tipo de cambio nativa→EUR de la operación.
+
+    Omitirlo NO significa «1»: significa «no lo sé», y el servidor lo deriva del
+    tipo del BCE a la fecha de la operación. El default anterior era un `1`
+    literal, que afirmaba paridad con el euro y producía un efecto divisa
+    inventado en cuanto la valoración empezó a usar FX vivo (PHASE-44.11.E)."""
     fees: Decimal = Field(default=Decimal(0), ge=0)
 
 

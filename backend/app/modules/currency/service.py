@@ -243,6 +243,35 @@ async def refresh_rates(
     return await repository.upsert_rates(db, rows)
 
 
+async def missing_exact_rates(
+    db: AsyncSession,
+    *,
+    on: date,
+    quotes: Iterable[str],
+    base: str = CANONICAL_BASE,
+) -> list[str]:
+    """De `quotes`, cuáles NO tienen tasa **exacta** para `on`.
+
+    Lectura pura, sin red. La expone el servicio —y no se deja que cada módulo
+    consulte el repositorio— porque `currency` es transversal y su frontera es
+    `service` ([ADR-0009](../../../internal_docs/decisions/0009-single-fx-source-currency-transversal.md)).
+
+    Existe para quien necesita frescura ESTRICTA y no le sirve el fallback de
+    `ensure_rates_for_dates`, que da por buena cualquier tasa dentro de su
+    ventana: valorar una cartera a día de hoy con el tipo de hace dos semanas es
+    correcto según esa política y engañoso en pantalla. Quien la use decide qué
+    hacer con las que faltan (normalmente `refresh_rates`); esta función no
+    cambia nada.
+    """
+    base_norm = _normalize(base)
+    wanted = sorted({_normalize(q) for q in quotes if _normalize(q) != base_norm})
+    missing: list[str] = []
+    for quote in wanted:
+        if await repository.get_rate(db, rate_date=on, base=base_norm, quote=quote) is None:
+            missing.append(quote)
+    return missing
+
+
 async def ensure_rates_for_dates(
     db: AsyncSession,
     dates: Iterable[date],

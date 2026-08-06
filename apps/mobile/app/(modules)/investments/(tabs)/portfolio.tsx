@@ -7,24 +7,42 @@ import { colors, fontSize, fontWeight, radius, spacing, formatAmount } from '@cr
 export default function PortfolioScreen() {
   const summary = usePortfolioSummary();
   const data = summary.data;
-  const currency = data?.positions.find((p) => p.currency)?.currency ?? 'USD';
+  // Los agregados van en la divisa BASE que declara el backend. Antes se
+  // formateaban con la divisa de la primera posición, lo que etiquetaba una
+  // suma de divisas mezcladas como si fuera toda de una (PHASE-44.11.E).
+  const base = data?.base_currency ?? 'EUR';
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      {!data?.pricing_enabled ? (
+      {data && !data.pricing_enabled ? (
         <Text style={styles.note}>
-          Cotizaciones desactivadas (sin API key): posiciones a coste, sin valor de mercado.
+          Proveedor de cotizaciones desactivado: posiciones a coste, sin valor de mercado.
         </Text>
       ) : null}
 
       <View style={styles.kpiRow}>
-        <Kpi label="Valor mercado" value={data ? formatAmount(data.total_market_value, currency) : '—'} />
-        <Kpi label="P&L latente" value={data ? formatAmount(data.total_unrealized_pnl, currency) : '—'} />
+        <Kpi
+          label={`Valor mercado (${base})`}
+          value={data ? formatAmount(data.total_market_value_base, base) : '—'}
+        />
+        <Kpi
+          label={`P&L latente (${base})`}
+          value={data ? formatAmount(data.total_unrealized_pnl_base, base) : '—'}
+        />
       </View>
       <View style={styles.kpiRow}>
-        <Kpi label="P&L realizado" value={data ? formatAmount(data.total_realized_pnl, currency) : '—'} />
-        <Kpi label="Dividendos" value={data ? formatAmount(data.total_dividends_net, currency) : '—'} />
+        <Kpi label="P&L realizado" value={data ? formatAmount(data.total_realized_pnl, base) : '—'} />
+        <Kpi label="Dividendos" value={data ? formatAmount(data.total_dividends_net, base) : '—'} />
       </View>
+
+      {data && data.unquoted_count > 0 ? (
+        <Text style={styles.note}>
+          {data.unquoted_count === 1
+            ? '1 posición fuera de los totales'
+            : `${data.unquoted_count} posiciones fuera de los totales`}
+          : cada una indica su motivo.
+        </Text>
+      ) : null}
 
       {summary.isLoading ? (
         <Text style={styles.muted}>Cargando cartera…</Text>
@@ -40,12 +58,14 @@ export default function PortfolioScreen() {
 function PositionRow({ position: p }: { position: PositionSummary }) {
   const unrealized = p.unrealized_pnl;
   const color = unrealized === null ? colors.textMuted : Number(unrealized) >= 0 ? colors.success : colors.danger;
+  // La divisa del precio la declara el proveedor (PHASE-44.11 D4).
+  const priceCurrency = p.quote_currency ?? p.currency;
   return (
     <View style={styles.card}>
       <View style={styles.rowBetween}>
         <Text style={styles.ticker}>{p.ticker}</Text>
         <Text style={styles.value}>
-          {p.market_value ? formatAmount(p.market_value, p.currency) : 'sin cotización'}
+          {p.market_value ? formatAmount(p.market_value, priceCurrency) : 'sin valorar'}
         </Text>
       </View>
       <View style={styles.rowBetween}>
@@ -54,9 +74,17 @@ function PositionRow({ position: p }: { position: PositionSummary }) {
           {p.avg_cost ? formatAmount(p.avg_cost, p.currency) : '—'}
         </Text>
         <Text style={[styles.muted, { color }]}>
-          {unrealized ? formatAmount(unrealized, p.currency) : '—'}
+          {unrealized ? formatAmount(unrealized, priceCurrency) : '—'}
         </Text>
       </View>
+      {p.exclusion_reason ? <Text style={styles.note}>{p.exclusion_reason}</Text> : null}
+      {p.currency_mismatch ? (
+        <Text style={styles.warn}>
+          El catálogo dice {p.currency} y el proveedor devuelve {p.quote_currency}; se valora con la
+          del proveedor.
+        </Text>
+      ) : null}
+      {p.quote_stale ? <Text style={styles.note}>Última cotización guardada (no refrescada).</Text> : null}
     </View>
   );
 }
@@ -73,6 +101,7 @@ function Kpi({ label, value }: { label: string; value: string }) {
 const styles = StyleSheet.create({
   container: { padding: spacing.md, gap: spacing.sm },
   note: { color: colors.textSubtle, fontSize: fontSize.xs },
+  warn: { color: colors.warning, fontSize: fontSize.xs },
   muted: { color: colors.textMuted, fontSize: fontSize.sm },
   kpiRow: { flexDirection: 'row', gap: spacing.sm },
   kpi: { flex: 1 },

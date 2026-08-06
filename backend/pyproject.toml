@@ -31,6 +31,12 @@ dependencies = [
   # frontera del adapter, y un cambio de semántica entre versiones movería los
   # números sin tocar una línea de nuestro código.
   "edgartools==5.43.0",
+  # Cotizaciones (PHASE-44.11). PINEADA: no es un API oficial sino un cliente de
+  # los endpoints públicos de Yahoo, así que su forma de salida puede cambiar
+  # entre versiones sin previo aviso — y el desajuste no lanzaría, simplemente
+  # dejaría de haber precios. La 1.5.2 es con la que se verificó el contrato
+  # (`fast_info` → float, `'GBp'` en Londres, KeyError en símbolo inexistente).
+  "yfinance==1.5.2",
 ]
 
 [project.optional-dependencies]
@@ -92,9 +98,22 @@ disallow_untyped_decorators = false
 module = ["edgar.*"]
 ignore_missing_imports = true
 
+# yfinance no publica `py.typed`. El adapter lo aísla en un único método
+# (`_fast_info`) y convierte todo a `Decimal` en la frontera, así que el
+# `Any` no se propaga más allá de esa función.
+[[tool.mypy.overrides]]
+module = ["yfinance.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 filterwarnings = [
   "ignore::DeprecationWarning",
+]
+markers = [
+  # Exime del bloqueo global de `currency.client.fetch_rates` (conftest). Sólo
+  # para los tests del PROPIO cliente: a ésos el bloqueo les parchearía justo lo
+  # que quieren verificar. No implica red — mockean `httpx` por dentro.
+  "real_fx_client: el test verifica el cliente de tipos de cambio en sí",
 ]

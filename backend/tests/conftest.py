@@ -11,6 +11,7 @@ se crea on-demand. Nunca tocan la BD de desarrollo.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from unittest.mock import AsyncMock, patch
 
 import asyncpg
 import pytest_asyncio
@@ -30,6 +31,7 @@ from app.modules.auth.webauthn.models import (  # noqa: F401
     WebAuthnChallenge,
     WebAuthnCredential,
 )
+from app.modules.currency.exceptions import FrankfurterUnavailableError
 from app.modules.currency.models import ExchangeRate  # noqa: F401
 from app.modules.investment.analysis.models import AnalysisRun  # noqa: F401
 from app.modules.investment.catalog.models import Security  # noqa: F401
@@ -119,6 +121,36 @@ async def test_engine() -> AsyncIterator[None]:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
         await engine.dispose()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _offline_frankfurter(request) -> AsyncIterator[None]:  # type: ignore[no-untyped-def]
+    """Bloquea el fetch real de tipos de cambio en TODA la suite.
+
+    Varios caminos disparan `client.fetch_rates` sin que se vea en el test que
+    los invoca: el dashboard cross-currency vía `ensure_rates_for_dates`, y
+    desde PHASE-44.11 también `/portfolio/summary`, que exige la tasa del día y
+    la pide si falta. Sin este bloqueo la suite depende de la red **y de la
+    fecha real en que se ejecute**, que es la clase de test-bomba-de-relojería
+    que ya mordió en AUDIT-2026-08.
+
+    Vivía duplicado como fixture local en dos ficheros; está aquí porque la
+    regla es de la suite entera, no de quien se acuerde de ponerlo. La única
+    fuente de tasas en tests son los seeds explícitos.
+
+    Los tests del PROPIO cliente se marcan con `@pytest.mark.real_fx_client`:
+    parchearles `fetch_rates` sería parchear justo lo que quieren probar. No
+    hacen red — mockean `httpx` por dentro.
+    """
+    if request.node.get_closest_marker("real_fx_client"):
+        yield
+        return
+    with patch(
+        "app.modules.currency.client.fetch_rates",
+        new_callable=AsyncMock,
+        side_effect=FrankfurterUnavailableError("suite offline"),
+    ):
+        yield
 
 
 @pytest_asyncio.fixture(autouse=True)

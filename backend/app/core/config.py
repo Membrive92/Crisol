@@ -128,15 +128,20 @@ class Settings(BaseSettings):
     edgar_timeout_seconds: int = 60
 
     # ---------- Precios (módulo Inversión) ----------
-    # Proveedor de cotizaciones. Sin `finnhub_api_key` las cotizaciones y la
-    # búsqueda externa quedan DESACTIVADAS (la cartera funciona con datos
-    # manuales; el valor de mercado sale "sin cotización"), no rompe nada.
-    price_provider: str = "finnhub"
+    # Proveedor de cotizaciones: "yfinance" (default desde PHASE-44.11) o
+    # "finnhub". yfinance no pide credencial y cubre varios mercados; Finnhub es
+    # US-only y sin `finnhub_api_key` queda DESACTIVADO (la cartera funciona con
+    # datos manuales y las posiciones salen "sin cotización", no rompe nada).
+    price_provider: str = "yfinance"
     finnhub_api_key: str = ""
     # Frescura máxima antes de refrescar on-access. 24h por defecto; poner 1
     # para refresco horario.
     price_ttl_hours: int = 24
     price_timeout_seconds: int = 15
+    # Pausa entre símbolos al cotizar un lote. yfinance no es un API oficial: una
+    # ráfaga corta invita a que Yahoo corte por IP, y el coste de ir despacio se
+    # paga sólo cuando caduca el TTL.
+    price_throttle_seconds: float = 1.0
 
     # ---------- CORS ----------
     cors_origins: str = "http://localhost:3000,http://localhost:8081"

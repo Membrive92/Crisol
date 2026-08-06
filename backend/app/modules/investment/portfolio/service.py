@@ -16,6 +16,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.currency import service as currency_service
 from app.modules.investment.catalog.models import Security
 from app.modules.investment.catalog.service import get_security
 from app.modules.investment.enums import CorpActionType
@@ -49,6 +50,45 @@ async def _ensure_security(db: AsyncSession, security_id: uuid.UUID) -> Security
 # ── Lotes ─────────────────────────────────────────────────────────────
 
 
+async def resolve_trade_fx(
+    db: AsyncSession,
+    *,
+    declared: Decimal | None,
+    security_currency: str,
+    trade_date: date,
+) -> Decimal:
+    """Tipo de cambio nativa→base de una operación.
+
+    Si el cliente lo declara, manda el cliente: puede tener el cambio real de su
+    bróker, que es mejor dato que la referencia del BCE.
+
+    Si NO lo declara, se **deriva** del tipo del BCE a la fecha de la operación
+    (PHASE-44.11.E, decisión del usuario 2026-08-02). Antes el schema ponía `1`
+    por defecto, lo que era inocuo mientras nadie usaba el dato —`fx_effect` era
+    siempre 0— y pasó a ser una afirmación falsa («compraste a 1 USD = 1 EUR»)
+    en cuanto la valoración empezó a usar FX vivo: la pantalla mostraba un
+    efecto divisa que nadie había introducido.
+
+    Si no hay tipo para esa fecha (`fallback="missing"`), se cae a `1`: es lo
+    único que se puede persistir en una columna NOT NULL, y la lectura vuelve a
+    tratarlo como desconocido. Ocurre sólo con divisas fuera de la cobertura del
+    BCE.
+    """
+    if declared is not None:
+        return declared
+    currency = (security_currency or "").strip().upper()
+    if not currency or currency == currency_service.CANONICAL_BASE:
+        return Decimal(1)
+    result = await currency_service.convert(
+        db,
+        amount=Decimal(1),
+        from_currency=currency,
+        to_currency=currency_service.CANONICAL_BASE,
+        at_date=trade_date,
+    )
+    return Decimal(1) if result.fallback == "missing" else result.rate
+
+
 async def create_lot(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -57,11 +97,11 @@ async def create_lot(
     trade_date: date,
     quantity: Decimal,
     price: Decimal,
-    fx_rate_at_trade: Decimal,
+    fx_rate_at_trade: Decimal | None,
     fees: Decimal,
     account_id: uuid.UUID | None,
 ) -> Lot:
-    await _ensure_security(db, security_id)
+    security = await _ensure_security(db, security_id)
     lot = Lot(
         user_id=user_id,
         security_id=security_id,
@@ -69,7 +109,12 @@ async def create_lot(
         trade_date=trade_date,
         quantity=quantity,
         price=price,
-        fx_rate_at_trade=fx_rate_at_trade,
+        fx_rate_at_trade=await resolve_trade_fx(
+            db,
+            declared=fx_rate_at_trade,
+            security_currency=security.currency,
+            trade_date=trade_date,
+        ),
         fees=fees,
     )
     return await repo.add_lot(db, lot)
@@ -99,10 +144,16 @@ async def create_sale(
     trade_date: date,
     quantity: Decimal,
     price: Decimal,
-    fx_rate_at_trade: Decimal,
+    fx_rate_at_trade: Decimal | None,
     fees: Decimal,
 ) -> Sale:
-    await _ensure_security(db, security_id)
+    security = await _ensure_security(db, security_id)
+    sale_fx = await resolve_trade_fx(
+        db,
+        declared=fx_rate_at_trade,
+        security_currency=security.currency,
+        trade_date=trade_date,
+    )
     lots = await repo.list_lots(db, user_id, security_id=security_id)
     consumed = await repo.consumed_by_lot(db, user_id)
     open_lots = [
@@ -131,7 +182,7 @@ async def create_sale(
             trade_date=trade_date,
             quantity=quantity,
             price=price,
-            fx_rate_at_trade=fx_rate_at_trade,
+            fx_rate_at_trade=sale_fx,
             fees=fees,
         ),
     )
@@ -299,6 +350,9 @@ class PositionCore:
     security_id: uuid.UUID
     ticker: str
     name: str
+    exchange: str
+    """Plaza normalizada. La necesita el adapter de precios para construir el
+    símbolo del proveedor: `(ticker, exchange)` → `'ULVR.L'` (PHASE-44.11.B)."""
     currency: str
     quantity: Decimal
     avg_cost: Decimal | None
@@ -374,6 +428,7 @@ async def compute_position_cores(db: AsyncSession, user_id: uuid.UUID) -> list[P
                 security_id=sid,
                 ticker=security.ticker if security else "",
                 name=security.name if security else "",
+                exchange=security.exchange if security else "UNKNOWN",
                 currency=security.currency if security else "USD",
                 quantity=qty,
                 avg_cost=(cost_open[sid] / qty) if qty > 0 and sid in cost_open else None,

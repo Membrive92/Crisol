@@ -16,6 +16,11 @@ from app.modules.currency.exceptions import (
     FrankfurterUnavailableError,
 )
 
+#: Este módulo prueba el cliente HTTP en sí, así que el bloqueo global de
+#: `fetch_rates` (conftest) le parchearía justo lo que quiere verificar. No hay
+#: red: `httpx` está mockeado dentro de cada test.
+pytestmark = pytest.mark.real_fx_client
+
 
 def _build_mock_client(*, status: int = 200, body: dict | None = None) -> MagicMock:
     """Construye un AsyncClient mockeado con un .get que devuelve body."""

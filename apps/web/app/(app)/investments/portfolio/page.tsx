@@ -15,7 +15,10 @@ export default function PortfolioPage() {
   const [showForm, setShowForm] = useState(false);
 
   const data = summary.data;
-  const currency = data?.positions.find((p) => p.currency)?.currency ?? 'USD';
+  // Los agregados van en la divisa BASE que declara el backend. Antes se
+  // formateaban con la divisa de la primera posición, lo que etiquetaba una
+  // suma de divisas mezcladas como si fuera toda de una (PHASE-44.11.E).
+  const base = data?.base_currency ?? 'EUR';
 
   return (
     <div
@@ -58,19 +61,43 @@ export default function PortfolioPage() {
         </Card>
       ) : null}
 
-      {!data?.pricing_enabled ? (
+      {data && !data.pricing_enabled ? (
         <p style={{ color: colors.textSubtle, fontSize: fontSize.xs, margin: 0 }}>
-          Cotizaciones desactivadas (sin API key de Finnhub): las posiciones se muestran a coste y
-          sin valor de mercado.
+          El proveedor de cotizaciones está desactivado: las posiciones se muestran a coste y sin
+          valor de mercado.
         </p>
       ) : null}
 
       <div style={{ display: 'grid', gap: spacing.md, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
-        <Kpi label="Valor de mercado" value={data ? formatAmount(data.total_market_value, currency) : '—'} />
-        <Kpi label="P&L latente" value={data ? formatAmount(data.total_unrealized_pnl, currency) : '—'} />
-        <Kpi label="P&L realizado" value={data ? formatAmount(data.total_realized_pnl, currency) : '—'} />
-        <Kpi label="Dividendos (neto)" value={data ? formatAmount(data.total_dividends_net, currency) : '—'} />
+        <Kpi
+          label={`Valor de mercado (${base})`}
+          value={data ? formatAmount(data.total_market_value_base, base) : '—'}
+        />
+        <Kpi
+          label={`P&L latente (${base})`}
+          value={data ? formatAmount(data.total_unrealized_pnl_base, base) : '—'}
+        />
+        <Kpi label="P&L realizado" value={data ? formatAmount(data.total_realized_pnl, base) : '—'} />
+        <Kpi label="Dividendos (neto)" value={data ? formatAmount(data.total_dividends_net, base) : '—'} />
       </div>
+
+      {data && data.currency_exposure.length > 1 ? (
+        <p style={{ color: colors.textMuted, fontSize: fontSize.xs, margin: 0 }}>
+          Exposición por divisa:{' '}
+          {data.currency_exposure
+            .map((row) => `${row.currency} ${(Number(row.weight_pct) * 100).toFixed(1)}%`)
+            .join(' · ')}
+        </p>
+      ) : null}
+
+      {data && data.unquoted_count > 0 ? (
+        <p style={{ color: colors.textSubtle, fontSize: fontSize.xs, margin: 0 }}>
+          {data.unquoted_count === 1
+            ? '1 posición queda fuera de los totales'
+            : `${data.unquoted_count} posiciones quedan fuera de los totales`}
+          : no se valoran a coste como sustituto, y cada una indica su motivo.
+        </p>
+      ) : null}
 
       <Card style={{ padding: 0, overflow: 'hidden' }}>
         {summary.isLoading ? (
@@ -110,27 +137,73 @@ function PositionRow({ position: p }: { position: PositionSummary }) {
   const unrealized = p.unrealized_pnl;
   const unrealizedColor =
     unrealized === null ? colors.textMuted : Number(unrealized) >= 0 ? colors.success : colors.danger;
+  // La divisa del precio la declara el proveedor; la del catálogo sólo se usa
+  // si no la declaró. Formatear con la del catálogo cuando discrepan pintaría
+  // libras donde el mercado dio dólares (PHASE-44.11 D4).
+  const priceCurrency = p.quote_currency ?? p.currency;
   return (
     <tr style={{ borderTop: `1px solid ${colors.border}` }}>
       <td style={{ ...td, textAlign: 'left' }}>
         <strong style={{ color: colors.text }}>{p.ticker}</strong>{' '}
         <span style={{ color: colors.textMuted }}>{p.name}</span>
+        {p.currency_mismatch ? (
+          <Badge
+            tone={colors.warning}
+            title={`El catálogo dice ${p.currency} y el proveedor devuelve ${p.quote_currency}. Se valora con la del proveedor.`}
+          >
+            divisa {p.quote_currency}
+          </Badge>
+        ) : null}
+        {p.quote_stale ? (
+          <Badge tone={colors.textSubtle} title="No se ha podido refrescar: es la última cotización guardada.">
+            precio antiguo
+          </Badge>
+        ) : null}
       </td>
       <td style={num}>{Number(p.quantity).toLocaleString('es-ES', { maximumFractionDigits: 4 })}</td>
       <td style={num}>{p.avg_cost ? formatAmount(p.avg_cost, p.currency) : '—'}</td>
-      <td style={num}>{p.last_price ? formatAmount(p.last_price, p.currency) : '—'}</td>
+      <td style={num}>{p.last_price ? formatAmount(p.last_price, priceCurrency) : '—'}</td>
       <td style={num}>
         {p.market_value ? (
-          formatAmount(p.market_value, p.currency)
+          formatAmount(p.market_value, priceCurrency)
         ) : (
-          <span style={{ color: colors.textSubtle, fontSize: fontSize.xs }}>sin cotización</span>
+          <span style={{ color: colors.textSubtle, fontSize: fontSize.xs }}>
+            {p.exclusion_reason ?? 'sin cotización'}
+          </span>
         )}
       </td>
       <td style={{ ...num, color: unrealizedColor }}>
-        {unrealized ? formatAmount(unrealized, p.currency) : '—'}
+        {unrealized ? formatAmount(unrealized, priceCurrency) : '—'}
       </td>
       <td style={num}>{p.weight_pct ? `${(Number(p.weight_pct) * 100).toFixed(1)}%` : '—'}</td>
     </tr>
+  );
+}
+
+function Badge({
+  children,
+  tone,
+  title,
+}: {
+  children: React.ReactNode;
+  tone: string;
+  title: string;
+}) {
+  return (
+    <span
+      title={title}
+      style={{
+        marginLeft: spacing.xs,
+        padding: `1px ${spacing.xs}px`,
+        borderRadius: radius.sm,
+        border: `1px solid ${tone}`,
+        color: tone,
+        fontSize: fontSize.xs,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {children}
+    </span>
   );
 }
 

@@ -114,6 +114,7 @@ def _mock_httpx_client(body: dict[str, object]) -> MagicMock:
     return mock_client
 
 
+@pytest.mark.real_fx_client
 async def test_fetch_rates_rejects_zero_rate() -> None:
     with (
         patch(
@@ -125,6 +126,7 @@ async def test_fetch_rates_rejects_zero_rate() -> None:
         await client.fetch_rates(target_date=date(2026, 4, 1), quotes=["USD"])
 
 
+@pytest.mark.real_fx_client
 async def test_fetch_rates_rejects_negative_rate() -> None:
     with (
         patch(
@@ -136,6 +138,7 @@ async def test_fetch_rates_rejects_negative_rate() -> None:
         await client.fetch_rates(target_date=date(2026, 4, 1), quotes=["USD"])
 
 
+@pytest.mark.real_fx_client
 async def test_fetch_rates_accepts_positive_rate() -> None:
     with patch(
         "app.modules.currency.client.httpx.AsyncClient",

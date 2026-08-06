@@ -23,6 +23,7 @@ from app.modules.investment.pricing.schemas import (
 )
 from app.modules.investment.pricing.service import (
     compute_portfolio_summary,
+    pricing_enabled,
     refresh_portfolio,
 )
 
@@ -37,13 +38,9 @@ async def refresh_endpoint(
     body: RefreshRequest, user: CurrentUser, db: Db, adapter: PriceAdapterDep
 ) -> RefreshResponse:
     """Fuerza el refresh de las cotizaciones de la cartera (botón manual)."""
-    from app.core.config import settings
-
     refreshed = await refresh_portfolio(db, adapter, user.id, security_ids=body.security_ids)
     await db.commit()
-    return RefreshResponse(
-        refreshed=refreshed, pricing_enabled=bool(settings.finnhub_api_key.strip())
-    )
+    return RefreshResponse(refreshed=refreshed, pricing_enabled=pricing_enabled())
 
 
 @router.get("/portfolio/summary", response_model=PortfolioSummaryResponse)

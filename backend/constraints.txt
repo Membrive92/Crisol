@@ -20,6 +20,7 @@ charset-normalizer==3.4.7
 click==8.3.2
 colorama==0.4.6
 cryptography==46.0.7
+curl_cffi==0.16.0
 dnspython==2.8.0
 edgartools==5.43.0
 email-validator==2.3.0
@@ -43,6 +44,7 @@ markdown-it-py==4.2.0
 MarkupSafe==3.0.3
 mdurl==0.1.2
 minio==7.2.20
+multitasking==0.0.13
 mypy==1.20.1
 mypy_extensions==1.1.0
 nest-asyncio==1.6.0
@@ -54,9 +56,11 @@ pandas==3.0.3
 pathspec==1.0.4
 pdfminer.six==20251230
 pdfplumber==0.11.9
+peewee==4.3.0
 pillow==12.2.0
 platformdirs==4.9.6
 pluggy==1.6.0
+protobuf==7.35.1
 pyarrow==25.0.0
 pyasn1==0.6.3
 pycparser==3.0
@@ -75,10 +79,12 @@ python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
 python-multipart==0.0.26
 pytokens==0.4.1
+pytz==2026.3.post1
 PyYAML==6.0.3
 rank-bm25==0.2.2
 RapidFuzz==3.14.5
 reportlab==4.4.10
+requests==2.34.2
 rich==15.0.0
 ruff==0.15.10
 six==1.17.0
@@ -103,3 +109,4 @@ vulture==2.16
 watchfiles==1.1.1
 webauthn==2.7.1
 websockets==16.0
+yfinance==1.5.2
