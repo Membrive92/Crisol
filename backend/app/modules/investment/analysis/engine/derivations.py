@@ -357,6 +357,22 @@ def maintenance_capex(statement: CanonicalStatement) -> Amount:
     )
 
 
+def fcf_maintenance(statement: CanonicalStatement) -> Amount:
+    """`cfo − maintenance_capex` — caja libre de MANTENIMIENTO (PHASE-44.10).
+
+    La caja que queda tras reponer la capacidad instalada, sin descontar la
+    inversión de crecimiento. Frente a `fcf_cfo` (que resta el capex ENTERO), es
+    la que no castiga a una empresa por invertir en crecer: el capex de expansión
+    es discrecional, el de mantenimiento no.
+
+    Hereda el `ESTIMATED` de `maintenance_capex`, que es un proxy
+    (`min(capex, D&A)`) porque el desglose no se publica. Se expone como SERIE,
+    no como métrica con banda: es un importe absoluto, y su nivel sano depende
+    del tamaño de la empresa — lo que informa es su trayectoria.
+    """
+    return subtract(sourced(statement, "cfo"), maintenance_capex(statement))
+
+
 def ffo(statement: CanonicalStatement) -> Amount:
     """`net_income + depreciation_amortization + impairments −
     gains_on_sale_of_business` — Funds From Operations.

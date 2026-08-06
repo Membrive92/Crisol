@@ -1,6 +1,6 @@
 """Capa 1 — métricas base (PHASE-44.2, DESIGN §5).
 
-27 métricas en cuatro familias: liquidez (L), actividad (A), solvencia (S) y
+33 métricas en cuatro familias: liquidez (L), actividad (A), solvencia (S) y
 rentabilidad (R). Cada una se calcula para CADA ejercicio de la serie, de modo
 que el informe pueda enseñar la evolución y no solo la foto del último año.
 
@@ -35,6 +35,7 @@ from app.modules.investment.analysis.engine.conventions import (
 )
 from app.modules.investment.analysis.engine.metrics import (
     MetricDefinition,
+    MetricUnit,
     thresholds_from,
     to_metric_result,
 )
@@ -58,13 +59,20 @@ _LOWER = ThresholdDirection.LOWER_BETTER
 
 METRIC_CATALOG: tuple[MetricDefinition, ...] = (
     # ── Liquidez ──────────────────────────────────────────────────
-    MetricDefinition("L1", "Ratio corriente", "liquidez", _HIGHER, _d("1.0"), _d("1.5")),
-    MetricDefinition("L2", "Prueba ácida", "liquidez", _HIGHER, _d("0.7"), _d("1.0")),
-    MetricDefinition("L3", "Ratio de caja", "liquidez", _HIGHER, _d("0.15"), _d("0.3")),
+    MetricDefinition(
+        "L1", "Ratio corriente", "liquidez", MetricUnit.TIMES, _HIGHER, _d("1.0"), _d("1.5")
+    ),
+    MetricDefinition(
+        "L2", "Prueba ácida", "liquidez", MetricUnit.TIMES, _HIGHER, _d("0.7"), _d("1.0")
+    ),
+    MetricDefinition(
+        "L3", "Ratio de caja", "liquidez", MetricUnit.TIMES, _HIGHER, _d("0.15"), _d("0.3")
+    ),
     MetricDefinition(
         "L4",
         "Muro de vencimientos",
         "liquidez",
+        MetricUnit.TIMES,
         _HIGHER,
         _d("1.0"),
         _d("1.5"),
@@ -75,29 +83,57 @@ METRIC_CATALOG: tuple[MetricDefinition, ...] = (
         ),
     ),
     # ── Actividad (medias [Dec.3]; sin banda absoluta) ────────────
-    MetricDefinition("A1", "Días de cobro (DSO)", "actividad"),
-    MetricDefinition("A2", "Días de inventario (DIO)", "actividad"),
-    MetricDefinition("A3", "Días de pago (DPO)", "actividad"),
-    MetricDefinition("A4", "Rotación de activos", "actividad"),
+    MetricDefinition("A1", "Días de cobro (DSO)", "actividad", MetricUnit.DAYS),
+    MetricDefinition("A2", "Días de inventario (DIO)", "actividad", MetricUnit.DAYS),
+    MetricDefinition("A3", "Días de pago (DPO)", "actividad", MetricUnit.DAYS),
+    MetricDefinition("A4", "Rotación de activos", "actividad", MetricUnit.TIMES),
     MetricDefinition(
         "A5",
         "Ciclo de conversión de caja",
         "actividad",
+        MetricUnit.DAYS,
         note="Su deriva (>15 días vs mediana de 3 años) se evalúa en la capa 1.5.",
     ),
     # ── Solvencia ─────────────────────────────────────────────────
     MetricDefinition(
-        "S1", "Apalancamiento", "solvencia", _LOWER, high_ok=_d("0.6"), high_alarm=_d("0.75")
+        "S1",
+        "Apalancamiento",
+        "solvencia",
+        MetricUnit.PERCENT,
+        _LOWER,
+        high_ok=_d("0.6"),
+        high_alarm=_d("0.75"),
+        note=(
+            "Pasivo total sobre activo total. NO confundir con el 'apalancamiento "
+            "financiero' del análisis DuPont (activo / patrimonio), que es DUPONT_EM."
+        ),
     ),
-    MetricDefinition("S2", "Cobertura de intereses", "solvencia", _HIGHER, _d("3"), _d("6")),
-    MetricDefinition("S3", "Autonomía financiera", "solvencia", _HIGHER, _d("0.2"), _d("0.35")),
     MetricDefinition(
-        "S4", "Deuda neta / EBITDA", "solvencia", _LOWER, high_ok=_d("2"), high_alarm=_d("3.5")
+        "S2", "Cobertura de intereses", "solvencia", MetricUnit.TIMES, _HIGHER, _d("3"), _d("6")
+    ),
+    MetricDefinition(
+        "S3",
+        "Autonomía financiera",
+        "solvencia",
+        MetricUnit.PERCENT,
+        _HIGHER,
+        _d("0.2"),
+        _d("0.35"),
+    ),
+    MetricDefinition(
+        "S4",
+        "Deuda neta / EBITDA",
+        "solvencia",
+        MetricUnit.TIMES,
+        _LOWER,
+        high_ok=_d("2"),
+        high_alarm=_d("3.5"),
     ),
     MetricDefinition(
         "S4b",
         "Deuda neta / EBIT",
         "solvencia",
+        MetricUnit.TIMES,
         _LOWER,
         high_ok=_d("3"),
         high_alarm=_d("5"),
@@ -110,6 +146,7 @@ METRIC_CATALOG: tuple[MetricDefinition, ...] = (
         "S5",
         "Años de repago",
         "solvencia",
+        MetricUnit.YEARS,
         _LOWER,
         high_ok=_d("4"),
         high_alarm=_d("8"),
@@ -119,6 +156,7 @@ METRIC_CATALOG: tuple[MetricDefinition, ...] = (
         "S6",
         "Cobertura de intereses por caja",
         "solvencia",
+        MetricUnit.TIMES,
         _HIGHER,
         _d("4"),
         _d("8"),
@@ -127,17 +165,55 @@ METRIC_CATALOG: tuple[MetricDefinition, ...] = (
             "Si S2 sale verde y S6 rojo, el devengo está mintiendo."
         ),
     ),
+    MetricDefinition(
+        "S7",
+        "Ratio de endeudamiento",
+        "solvencia",
+        MetricUnit.TIMES,
+        ThresholdDirection.BAND,
+        low_ok=_d("1"),
+        high_ok=_d("2"),
+        high_alarm=_d("3"),
+        note=(
+            "Pasivo total sobre patrimonio neto. Banda central 1-2: por debajo de 1 "
+            "sale ÁMBAR, no rojo — poca deuda no es un riesgo, sólo puede ser "
+            "capital ocioso. El corte rojo (3) es la traducción exacta del de S1 "
+            "(pasivo/activo 0,75), para que las dos métricas no se contradigan. "
+            "Calibrado para negocios con activo tangible: en bancos, aseguradoras "
+            "e intensivas en intangibles este rango se queda corto, y por eso en "
+            "financieras se siembra sin aplicar."
+        ),
+    ),
+    MetricDefinition(
+        "S8",
+        "Calidad de la deuda",
+        "solvencia",
+        MetricUnit.PERCENT,
+        _LOWER,
+        high_ok=_d("0.40"),
+        high_alarm=_d("0.80"),
+        note=(
+            "Qué parte de la deuda vence en menos de doce meses. Cuanto más alta, "
+            "más depende la empresa de poder refinanciar; complementa a L4, que "
+            "mira si tiene con qué pagarla."
+        ),
+    ),
     # ── Rentabilidad ──────────────────────────────────────────────
-    MetricDefinition("R1", "Margen bruto", "rentabilidad"),
-    MetricDefinition("R2", "Margen EBITDA", "rentabilidad"),
-    MetricDefinition("R3", "Margen EBIT", "rentabilidad"),
-    MetricDefinition("R4", "Margen neto", "rentabilidad"),
-    MetricDefinition("R5", "ROE", "rentabilidad", _HIGHER, _d("0.08"), _d("0.12")),
-    MetricDefinition("R6", "ROA", "rentabilidad", _HIGHER, _d("0.02"), _d("0.05")),
+    MetricDefinition("R1", "Margen bruto", "rentabilidad", MetricUnit.PERCENT),
+    MetricDefinition("R2", "Margen EBITDA", "rentabilidad", MetricUnit.PERCENT),
+    MetricDefinition("R3", "Margen EBIT", "rentabilidad", MetricUnit.PERCENT),
+    MetricDefinition("R4", "Margen neto", "rentabilidad", MetricUnit.PERCENT),
+    MetricDefinition(
+        "R5", "ROE", "rentabilidad", MetricUnit.PERCENT, _HIGHER, _d("0.08"), _d("0.12")
+    ),
+    MetricDefinition(
+        "R6", "ROA", "rentabilidad", MetricUnit.PERCENT, _HIGHER, _d("0.02"), _d("0.05")
+    ),
     MetricDefinition(
         "R7",
         "Margen FCF",
         "rentabilidad",
+        MetricUnit.PERCENT,
         _HIGHER,
         _d("0.03"),
         _d("0.08"),
@@ -147,6 +223,7 @@ METRIC_CATALOG: tuple[MetricDefinition, ...] = (
         "R8",
         "FCF por acción",
         "rentabilidad",
+        MetricUnit.CURRENCY_PER_SHARE,
         note=(
             "Sin banda: es serie. Contrapartida por acción de la dilución — el FCF total "
             "puede crecer mientras el FCF por acción cae."
@@ -156,6 +233,7 @@ METRIC_CATALOG: tuple[MetricDefinition, ...] = (
         "R9",
         "ROIC",
         "rentabilidad",
+        MetricUnit.PERCENT,
         _HIGHER,
         _d("0.06"),
         _d("0.10"),
@@ -165,6 +243,7 @@ METRIC_CATALOG: tuple[MetricDefinition, ...] = (
         "R9b",
         "CROIC",
         "rentabilidad",
+        MetricUnit.PERCENT,
         _HIGHER,
         _d("0.04"),
         _d("0.08"),
@@ -174,12 +253,68 @@ METRIC_CATALOG: tuple[MetricDefinition, ...] = (
         "R10",
         "Rentabilidad bruta sobre activos",
         "rentabilidad",
+        MetricUnit.PERCENT,
         _HIGHER,
         _d("0.18"),
         _d("0.33"),
         note=(
             "Novy-Marx: el factor de calidad con mejor respaldo empírico. Margen bruto por "
             "unidad de activo, difícil de manipular por estar arriba de la cascada contable."
+        ),
+    ),
+    MetricDefinition(
+        "DUPONT_EM",
+        "Apalancamiento financiero",
+        "rentabilidad",
+        MetricUnit.TIMES,
+        note=(
+            "Activo total medio / patrimonio medio: el tercer factor de DuPont. Se calculaba "
+            "desde PHASE-44.2 pero vivía FUERA del catálogo, así que viajaba sin etiqueta ni "
+            "unidad y el cliente tenía que inventárselas (PHASE-44.9). Sin banda: el nivel "
+            "sano depende del sector — un banco vive en 10× sin patología."
+        ),
+    ),
+    # ── Factores del DuPont extendido (PHASE-44.10) ───────────────
+    # Los tres van SIN banda a propósito: son piezas de una identidad
+    # aritmética, no ratios de salud. Un efecto fiscal de 0,75 no es bueno ni
+    # malo. Como efecto secundario deseable, al no llevar banda no siembran
+    # ninguna fila en `scoring_thresholds` y el `thresholds_version` de los runs
+    # no se mueve por su culpa.
+    MetricDefinition(
+        "DUPONT_OM",
+        "Margen operativo (DuPont)",
+        "rentabilidad",
+        MetricUnit.PERCENT,
+        note=(
+            "EBIT REPORTADO sobre ventas. No confundir con R3, que usa el EBIT limpio de "
+            "deterioros y plusvalías: aquí hace falta el reportado para que la identidad de "
+            "cinco factores CIERRE. Con el limpio en este factor y el reportado en el coste "
+            "financiero, el EBIT no se cancela y la comprobación saldría distinta de cero "
+            "justo en los años con deterioros — inflando el ROE reconstruido."
+        ),
+    ),
+    MetricDefinition(
+        "DUPONT_TAX",
+        "Efecto fiscal",
+        "rentabilidad",
+        MetricUnit.PERCENT,
+        note=(
+            "Resultado neto sobre resultado antes de impuestos: qué fracción del beneficio "
+            "sobrevive a Hacienda. Un valor que sube de forma sostenida puede ser eficiencia "
+            "fiscal real o el aviso que da el cuaderno — mejorar el beneficio por acción "
+            "pagando menos impuestos no es mejorar el negocio."
+        ),
+    ),
+    MetricDefinition(
+        "DUPONT_FIN",
+        "Coste financiero",
+        "rentabilidad",
+        MetricUnit.PERCENT,
+        note=(
+            "Resultado antes de impuestos sobre EBIT reportado: qué fracción del resultado "
+            "operativo sobrevive a los gastos financieros. Es el complementario del límite "
+            "que pide el cuaderno (que los intereses no se coman más del 20% del EBIT, o "
+            "sea que este factor no baje de 0,80)."
         ),
     ),
 )
@@ -200,16 +335,37 @@ las de BD calibradas por (sector × norma) cuando existan [Dec.8]."""
 
 @dataclass(frozen=True)
 class DuPontDecomposition:
-    """`ROE = margen neto × rotación de activos × multiplicador de patrimonio`.
+    """Las dos descomposiciones del ROE, de 3 y de 5 factores.
 
     Explicativa, sin banda propia: dice QUÉ movió el ROE. Un ROE que sube solo
     por el multiplicador no es mejora del negocio, es deuda.
+
+    - **3 factores**: `margen neto × rotación × apalancamiento`.
+    - **5 factores** (PHASE-44.10): `margen operativo × efecto fiscal × coste
+      financiero × rotación × apalancamiento`. Desdobla el margen neto en de
+      dónde sale: cuánto gana el negocio, cuánto se lleva la financiación y
+      cuánto Hacienda.
+
+    Las dos comparten rotación y apalancamiento, así que se emiten juntas.
     """
 
     fiscal_year: int
     net_margin: MetricResult
     asset_turnover: MetricResult
     equity_multiplier: MetricResult
+    operating_margin: MetricResult
+    tax_effect: MetricResult
+    financial_cost: MetricResult
+    check_three: Decimal | None = None
+    """`(margen × rotación × apalancamiento) − ROE`. Debe ser 0.
+
+    `None` significa **no verificable** —falta algún factor o el propio ROE—, que
+    NO es lo mismo que verificado: un cuadre que no se ha podido comprobar jamás
+    se presenta como superado (misma regla que el cuadre de balance en la
+    ingesta, PHASE-44.6)."""
+    check_five: Decimal | None = None
+    """`(margen op. × efecto fiscal × coste financiero × rotación ×
+    apalancamiento) − ROE`. Debe ser 0."""
 
 
 @dataclass(frozen=True)
@@ -243,7 +399,7 @@ def compute(
     series: StatementSeries,
     thresholds: Mapping[str, ThresholdSpec] | None = None,
 ) -> BaseRatiosResult:
-    """Calcula las 27 métricas de la Capa 1 para todos los ejercicios.
+    """Calcula las 33 métricas de la Capa 1 para todos los ejercicios.
 
     `thresholds=None` usa las bandas por defecto del catálogo (US-GAAP
     genérico). Una métrica sin umbral sale con `band=None` — que NO significa
@@ -259,23 +415,27 @@ def compute(
         year_metrics = {metric.key: metric for metric in _compute_year(series, statement, specs)}
         metrics.extend(year_metrics.values())
 
-        equity_multiplier = _result(
-            "DUPONT_EM",
-            year,
-            divide(
-                avg_balance(series, "total_assets", year),
-                avg_balance(series, "equity", year),
-                denominator_label="patrimonio medio",
-                require_positive_denominator=True,
-            ),
-            specs,
-        )
+        roe = year_metrics["R5"]
         dupont.append(
             DuPontDecomposition(
                 fiscal_year=year,
                 net_margin=year_metrics["R4"],
                 asset_turnover=year_metrics["A4"],
-                equity_multiplier=equity_multiplier,
+                equity_multiplier=year_metrics["DUPONT_EM"],
+                operating_margin=year_metrics["DUPONT_OM"],
+                tax_effect=year_metrics["DUPONT_TAX"],
+                financial_cost=year_metrics["DUPONT_FIN"],
+                check_three=_identity_check(
+                    roe, year_metrics["R4"], year_metrics["A4"], year_metrics["DUPONT_EM"]
+                ),
+                check_five=_identity_check(
+                    roe,
+                    year_metrics["DUPONT_OM"],
+                    year_metrics["DUPONT_TAX"],
+                    year_metrics["DUPONT_FIN"],
+                    year_metrics["A4"],
+                    year_metrics["DUPONT_EM"],
+                ),
             )
         )
 
@@ -285,6 +445,24 @@ def compute(
 
     flags.extend(dv.fcf_divergence_flags(series))
     return BaseRatiosResult(metrics=tuple(metrics), flags=tuple(flags), dupont=tuple(dupont))
+
+
+def _identity_check(roe: MetricResult, *factors: MetricResult) -> Decimal | None:
+    """`(producto de los factores) − ROE`. Cero si la identidad cierra.
+
+    Devuelve `None` —**no verificable**— en cuanto falte un solo factor o el
+    propio ROE. Un cuadre que no se ha podido comprobar nunca se reporta como
+    superado: es la misma regla que aplica la ingesta al cuadre del balance
+    cuando el pasivo total viene derivado (PHASE-44.6).
+    """
+    if roe.value is None:
+        return None
+    product = Decimal(1)
+    for factor in factors:
+        if factor.value is None:
+            return None
+        product *= factor.value
+    return product - roe.value
 
 
 def _compute_year(
@@ -419,6 +597,30 @@ def _compute_year(
                 denominator_label="gasto financiero",
             ),
         ),
+        metric(
+            "S7",
+            divide(
+                sourced(statement, "total_liabilities"),
+                sourced(statement, "equity"),
+                denominator_label="patrimonio neto",
+                # Con patrimonio negativo el cociente sale POSITIVO y parece
+                # sano justo en la empresa más frágil. Misma guarda que R5.
+                require_positive_denominator=True,
+            ),
+        ),
+        metric(
+            "S8",
+            divide(
+                add(
+                    sourced(statement, "short_term_debt"),
+                    sourced(statement, "ltd_current_portion"),
+                ),
+                dv.total_debt(statement),
+                # Sin deuda no hay calidad de la deuda que medir: sale
+                # `not_computable` con «denominador cero», que es la verdad.
+                denominator_label="deuda total",
+            ),
+        ),
         # ── Rentabilidad ──────────────────────────────────────────
         metric(
             "R1",
@@ -489,6 +691,55 @@ def _compute_year(
         metric(
             "R10",
             divide(gross_profit, total_assets_avg, denominator_label="activo total medio"),
+        ),
+        # Tercer factor de DuPont. Se emite aquí (y no aparte, como hasta
+        # PHASE-44.9) para que exista UNA sola instancia: la fila de la matriz y
+        # la de la descomposición son el mismo `MetricResult`, así que no pueden
+        # divergir.
+        metric(
+            "DUPONT_EM",
+            divide(
+                total_assets_avg,
+                equity_avg,
+                denominator_label="patrimonio medio",
+                require_positive_denominator=True,
+            ),
+        ),
+        # ── Factores 1, 2 y 3 del DuPont extendido ────────────────
+        # El EBIT de DUPONT_OM y el de DUPONT_FIN tienen que ser EL MISMO para
+        # que se cancelen en el producto. Se usa el REPORTADO en ambos, no
+        # `ebit_clean`: con el limpio arriba y el reportado abajo la identidad
+        # se infla por el factor (limpio/reportado) —exactamente el peso de los
+        # deterioros— y la comprobación saldría ≠ 0 por construcción.
+        metric(
+            "DUPONT_OM",
+            divide(
+                sourced(statement, "ebit"),
+                revenue,
+                denominator_label="ventas",
+                require_positive_denominator=True,
+            ),
+        ),
+        metric(
+            "DUPONT_TAX",
+            # Sin `require_positive_denominator`: con resultado antes de
+            # impuestos NEGATIVO la identidad sigue cerrando (el signo se
+            # cancela contra DUPONT_FIN). El factor se vuelve difícil de leer,
+            # pero bloquearlo rompería la descomposición de un año en pérdidas,
+            # que es justo cuando interesa mirarla.
+            divide(
+                net_income,
+                dv.ebt(statement),
+                denominator_label="resultado antes de impuestos",
+            ),
+        ),
+        metric(
+            "DUPONT_FIN",
+            divide(
+                dv.ebt(statement),
+                sourced(statement, "ebit"),
+                denominator_label="EBIT reportado",
+            ),
         ),
     ]
 

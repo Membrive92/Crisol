@@ -72,12 +72,16 @@ knip: ## Código muerto — sólo lo inequívoco (ficheros + deps). Bloquea en v
 knip-all: ## Código muerto — informe completo, incluidos exports sin usar (asesor)
 	pnpm knip:all
 
-verify: ## Verificación completa (lint + typecheck + tests + código muerto)
+docs-check: ## Podredumbre documental — enlaces, migraciones citadas, head, números volátiles
+	@python scripts/check_docs.py
+
+verify: ## Verificación completa (lint + typecheck + tests + código muerto + docs)
 	@echo "🔍 Ejecutando verificación completa..."
 	@make lint
 	@make typecheck
 	@make test
 	@make knip
+	@make docs-check
 	@echo "✅ Todo OK — fase lista para documentar y commitear."
 
 # ═══════════════════════════════════════

@@ -153,6 +153,25 @@ def compute(series: StatementSeries, params: StressParams | None = None) -> Stre
     margin = estimate_contribution_margin(series)
 
     scenarios: list[StressScenario] = []
+    # Por qué falta cada familia de escenarios. Sin esto, cuando ST1 no se puede
+    # calcular el resultado traía 3 escenarios en vez de 6 y `not_computable_reason`
+    # llegaba a `None`: desaparecían la mitad sin que nada lo explicara
+    # (se rellenaba SOLO en el caso de serie vacía). PHASE-44.9.
+    reasons: list[str] = []
+    if margin is None:
+        reasons.append(
+            "no se pudo estimar el apalancamiento operativo (hacen falta dos ejercicios "
+            "consecutivos con ventas y EBIT, y una relación Δ EBIT/Δ ventas dentro de "
+            "[0, 1]), así que el shock de ingresos no se calcula"
+        )
+    elif latest.revenue is None:
+        reasons.append("sin ventas del último ejercicio no se puede aplicar el shock de ingresos")
+    if dv.total_debt(latest).value is None:
+        reasons.append("sin deuda total no se puede aplicar el shock de tipos")
+    if fcf_base is None:
+        reasons.append(
+            "sin caja libre del último ejercicio no hay base sobre la que aplicar ningún shock"
+        )
 
     # ── ST1 — shock de ingresos ──
     if margin is not None and fcf_base is not None and latest.revenue is not None:
@@ -202,6 +221,7 @@ def compute(series: StatementSeries, params: StressParams | None = None) -> Stre
         scenarios=tuple(scenarios),
         contribution_margin=margin,
         breakeven_fcf_drop=breakeven,
+        not_computable_reason="; ".join(dict.fromkeys(reasons)) or None,
     )
 
 

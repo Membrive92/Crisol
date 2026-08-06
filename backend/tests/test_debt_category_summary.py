@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 
+import pytest
 from httpx import AsyncClient
 
 
@@ -965,3 +966,68 @@ async def test_summary_outstanding_zero_without_debt(client: AsyncClient) -> Non
     body = r.json()
     assert Decimal(body["outstanding_at_end"]) == Decimal("0.00")
     assert body["outstanding_by_type"] == []
+
+
+# ── Ventana de la tasa de esfuerzo (AUDIT-2026-08-01) ─────────────────
+
+
+async def test_los_meses_sin_datos_no_diluyen_el_ingreso_medio(
+    client: AsyncClient,
+    test_engine,  # type: ignore[no-untyped-def]
+) -> None:
+    """Un mes anterior al primer ingreso NO cuenta como observación mensual.
+
+    El bug: la ventana promediaba sobre todos los meses cerrados del rango,
+    incluidos los previos a que el usuario tuviera datos. Eso divide el ingreso
+    por meses vacíos y `monthly_income_avg` sale a la baja. En el ratio ESTRICTO
+    la distorsión se cancela (numerador y denominador se dividen por el mismo n),
+    pero el AMPLIADO suma un gasto fijo mensual REAL que no se diluye, así que
+    el ratio se infla e inventa sobreendeudamiento.
+
+    Medido el día que se detectó: seis meses con 2.000 € de ingreso y 500 € de
+    cuota, más 200 € de gasto fijo, sobre un rango con un mes vacío por delante
+    → 0,350 (frontera) pasaba a 0,367, cruzando el 35 % del Banco de España.
+
+    El rango es FIJO y pasado a propósito: el test que destapó esto fallaba sólo
+    de agosto a diciembre, y un test que depende del calendario es una bomba de
+    relojería.
+    """
+    token = await _register(client, "effort_window@example.com")
+    cte = await _create_account(
+        client, token, name="Cte", type="bank", currency="EUR", opening_balance="5000"
+    )
+    salary_id = await _create_category(client, token, "Salario", kind="income")
+    cap_id = await _create_category(client, token, "Préstamos e hipotecas", role="DEBT_PAYMENT")
+
+    # Rango de 3 meses; los datos empiezan en el SEGUNDO. El primero está vacío.
+    for month in (2, 3):
+        iso = f"2020-0{month}-15T12:00:00Z"
+        await _post_tx(client, token, cte["id"], salary_id, "2000.00", iso)
+        await _post_tx(client, token, cte["id"], cap_id, "500.00", iso)
+
+    await _create_category(client, token, "Netflix", kind="expense")
+    user_id, netflix_id = await _fetch_user_and_category_ids(
+        test_engine, "effort_window@example.com", "Netflix"
+    )
+    await _insert_fixed_expense(
+        test_engine,
+        user_id=user_id,
+        merchant="NETFLIX",
+        amount=Decimal("200.00"),
+        category_id=netflix_id,
+    )
+
+    r = await client.get(
+        "/debt/category-summary?range=custom&date_from=2020-01-01&date_to=2020-03-31",
+        headers=_auth(token),
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    # Con enero dentro de la ventana el ingreso medio saldría 4.000/3 = 1.333,33.
+    assert Decimal(body["monthly_income_avg"]) == Decimal("2000.00")
+    assert Decimal(body["monthly_debt_payment_avg"]) == Decimal("500.00")
+    # 500/2000 = 0,25 · (500+200)/2000 = 0,35 → frontera, NO sobreendeudamiento.
+    assert body["effort_ratio_strict"] == pytest.approx(0.25)
+    assert body["effort_ratio_extended"] == pytest.approx(0.35)
+    assert body["effort_ratio_extended_status"] in {"healthy", "caution"}

@@ -163,9 +163,11 @@ def _metric(result: BaseRatiosResult, key: str, year: int = 2024) -> MetricResul
 # ── Catálogo ──────────────────────────────────────────────────────────
 
 
-def test_catalogo_tiene_27_metricas_con_claves_unicas() -> None:
-    assert len(METRIC_CATALOG) == 27
-    assert len(set(METRIC_KEYS)) == 27
+def test_catalogo_tiene_33_metricas_con_claves_unicas() -> None:
+    """33 desde PHASE-44.10: 28 (44.9) + S7, S8 y los tres factores que faltaban
+    del DuPont extendido."""
+    assert len(METRIC_CATALOG) == 33
+    assert len(set(METRIC_KEYS)) == 33
 
 
 def test_catalogo_cubre_las_cuatro_familias() -> None:
@@ -174,8 +176,31 @@ def test_catalogo_cubre_las_cuatro_familias() -> None:
 
 
 def test_las_metricas_sin_banda_absoluta_no_tienen_umbral_por_defecto() -> None:
-    """A1-A5, R1-R4 y R8 se juzgan por deriva (capa 1.5), no por banda."""
-    sin_banda = {"A1", "A2", "A3", "A4", "A5", "R1", "R2", "R3", "R4", "R8"}
+    """A1-A5, R1-R4, R8 y DUPONT_EM se juzgan por deriva (capa 1.5) o por
+    sector, no por banda global.
+
+    Que DUPONT_EM entre en el catálogo SIN `direction` es deliberado: así no
+    añade ni una fila a `scoring_thresholds` (el seed itera las banded) y el
+    `thresholds_version` de los runs no se mueve.
+    """
+    sin_banda = {
+        "A1",
+        "A2",
+        "A3",
+        "A4",
+        "A5",
+        "R1",
+        "R2",
+        "R3",
+        "R4",
+        "R8",
+        "DUPONT_EM",
+        # Los tres factores del DuPont extendido: piezas de una identidad
+        # aritmética, no ratios de salud. Sin banda no siembran filas.
+        "DUPONT_OM",
+        "DUPONT_TAX",
+        "DUPONT_FIN",
+    }
     assert set(METRIC_KEYS) - set(DEFAULT_THRESHOLDS) == sin_banda
 
 
@@ -920,8 +945,25 @@ def test_avg_balance_solo_acepta_partidas_de_balance(series: StatementSeries) ->
 def test_el_engine_no_importa_io() -> None:
     """El engine no toca BD, red ni reloj. Si alguien mete un `import
     sqlalchemy` aquí, la promesa de "testeable con sintéticos" se cae y este
-    test lo caza en el acto."""
-    prohibidos = {"sqlalchemy", "httpx", "requests", "asyncpg", "app.core.database"}
+    test lo caza en el acto.
+
+    Los dos módulos de `app` de la lista no son IO por sí mismos, pero arrastran
+    sesión y red por dentro: `currency.service` consulta `exchange_rates` y llama
+    a Frankfurter, y `pricing.service` cotiza contra el proveedor. Su raíz es
+    `app`, así que pasaban limpias por el filtro de raíz y la pureza dependía de
+    la disciplina de quien escribiera el módulo. PHASE-44.12 los añade porque la
+    valoración es el primer cálculo del engine que necesita un precio y un tipo
+    de cambio: la tentación de importarlos aquí dentro es real y concreta, y la
+    frontera tiene que vigilarla el gate y no un comentario."""
+    prohibidos = {
+        "sqlalchemy",
+        "httpx",
+        "requests",
+        "asyncpg",
+        "app.core.database",
+        "app.modules.currency",
+        "app.modules.investment.pricing",
+    }
     engine_dir = Path(__file__).resolve().parents[1] / "app/modules/investment/analysis/engine"
     modulos = sorted(engine_dir.glob("*.py"))
     assert modulos, "no se encontraron módulos del engine"
@@ -937,6 +979,13 @@ def test_el_engine_no_importa_io() -> None:
                 continue
             for nombre in nombres:
                 raiz = nombre.split(".")[0]
+                # Por PREFIJO, no por igualdad: `app.modules.currency.service` no
+                # es igual a `app.modules.currency`, y comparando exacto se
+                # colaría justo el import que se quiere prohibir.
+                prefijo = next(
+                    (p for p in prohibidos if nombre == p or nombre.startswith(p + ".")),
+                    None,
+                )
                 assert (
-                    raiz not in prohibidos and nombre not in prohibidos
+                    raiz not in prohibidos and prefijo is None
                 ), f"{modulo.name} importa '{nombre}': el engine debe ser puro"

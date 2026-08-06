@@ -110,3 +110,10 @@ jobs:
 
       - name: Pytest
         run: pytest -v --tb=short
+
+      # Corre en el job de backend porque necesita Python y leer
+      # `alembic/versions/`. No depende de las deps del backend (stdlib pura),
+      # así que da igual el orden respecto a los pasos de arriba.
+      - name: Docs check (podredumbre documental)
+        working-directory: .
+        run: python scripts/check_docs.py

@@ -16,7 +16,10 @@ from app.core.database import get_db
 from app.core.deps import CurrentUser
 from app.modules.investment.fundamentals.adapters.base import FundamentalsAdapter
 from app.modules.investment.fundamentals.adapters.factory import get_fundamentals_adapter
+from app.modules.investment.fundamentals.canonical import CANONICAL_ITEM_DEFINITIONS
 from app.modules.investment.fundamentals.schemas import (
+    CanonicalItemCatalogResponse,
+    CanonicalItemResponse,
     IngestionJobResponse,
     IngestRequest,
     RestatementListResponse,
@@ -34,6 +37,19 @@ from app.modules.investment.fundamentals.service import (
 router = APIRouter(prefix="/fundamentals", tags=["investment:fundamentals"])
 
 FundAdapter = Annotated[FundamentalsAdapter, Depends(get_fundamentals_adapter)]
+
+
+@router.get("/items", response_model=CanonicalItemCatalogResponse)
+async def canonical_items_endpoint(user: CurrentUser) -> CanonicalItemCatalogResponse:
+    """Las 49 partidas canónicas con su etiqueta en español y su bloque.
+
+    Estático (no toca BD). Lo consume la pantalla de estados financieros para
+    agrupar y rotular las columnas de `GET /{security_id}/statements`, que llegan
+    como 49 claves planas en snake_case.
+    """
+    return CanonicalItemCatalogResponse(
+        items=[CanonicalItemResponse.model_validate(d) for d in CANONICAL_ITEM_DEFINITIONS]
+    )
 
 
 @router.get("/jobs/{job_id}", response_model=IngestionJobResponse)

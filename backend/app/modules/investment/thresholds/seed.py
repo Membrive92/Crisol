@@ -30,6 +30,17 @@ FORENSIC_KEYS: frozenset[str] = frozenset(d.key for d in forensic.METRIC_CATALOG
 """Las métricas forenses (Beneish/Altman/Piotroski…), tomadas del catálogo del
 engine para no divergir. En financieras salen `applies=False`."""
 
+NOT_FOR_FINANCIALS: frozenset[str] = frozenset({"S7"})
+"""Métricas NO forenses cuyos cortes tampoco tienen sentido en una financiera.
+
+`S7` (pasivo / patrimonio) está calibrada para negocios con activo tangible: la
+banda 1-2 sale de que el pasivo financie entre la mitad y dos tercios del activo.
+En un banco el apalancamiento ES el negocio y un 10× es normal, así que aplicarle
+ese corte pintaría un rojo permanente que no informa de nada. Se siembra con
+`applies=False` en vez de esperar a la recalibración por sector: el número se
+sigue viendo, pero sin semáforo — que es lo honesto mientras no haya un corte
+propio (PHASE-44.10)."""
+
 UNCALIBRATED = "uncalibrated"
 """`model_variant` para IFRS/PGC: los cortes son US-GAAP, sin recalibrar."""
 
@@ -56,8 +67,8 @@ def build_threshold_rows() -> list[ThresholdRow]:
     for sector in SectorInternal:
         for std in AccountingStd:
             for metric_key, spec in ALL_DEFAULT_THRESHOLDS.items():
-                is_forensic = metric_key in FORENSIC_KEYS
-                applies = not (sector is SectorInternal.FINANCIALS and is_forensic)
+                uncalibrated_here = metric_key in FORENSIC_KEYS or metric_key in NOT_FOR_FINANCIALS
+                applies = not (sector is SectorInternal.FINANCIALS and uncalibrated_here)
                 model_variant = spec.model_variant if std is AccountingStd.GAAP else UNCALIBRATED
                 rows.append(
                     ThresholdRow(

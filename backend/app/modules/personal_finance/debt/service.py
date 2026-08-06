@@ -15,6 +15,7 @@ from app.modules.personal_finance.accounts.debt_health import (
     DEFAULT_REFERENCE_CURRENCY,
     classify_effort,
     compute_debt_health,
+    first_income_month,
     windowed_income_total,
 )
 from app.modules.personal_finance.accounts.debt_history import _scheduled_remaining_at
@@ -909,10 +910,30 @@ async def compute_category_summary(
     # del mes en curso) → ratio `None`: a mitad de mes no se puede saber.
     current_month_start = _start_of_month(today)
     closed_idx = [i for i, b in enumerate(monthly_buckets) if b < current_month_start]
+
+    # …y por el mismo motivo se descartan los meses ANTERIORES al primer
+    # ingreso observado. Es el caso simétrico que faltaba: con `range=year` en
+    # enero o febrero, el rango arranca el 1-ene y arrastra meses en los que el
+    # usuario no tenía datos. Esos meses vacíos dividen el ingreso igual que lo
+    # haría un mes a medias, y entonces `monthly_income_avg` miente a la baja.
+    #
+    # En el ratio ESTRICTO la distorsión se cancela (numerador y denominador se
+    # dividen por el mismo n), pero en el AMPLIADO no: el término de gastos
+    # fijos es un importe mensual real que no se diluye, así que sumarlo a una
+    # media diluida y dividir por otra media diluida infla el ratio. Medido el
+    # 2026-08-01 con seis meses de datos: 0,350 → 0,367, cruzando el 35% del
+    # Banco de España e inventando sobreendeudamiento.
+    first_income = await first_income_month(
+        db, user_id, native_currency, not_before=range_start, target_currency=target_currency
+    )
+    if first_income is not None:
+        closed_idx = [i for i in closed_idx if monthly_buckets[i] >= first_income]
+
     if closed_idx:
         n_closed = len(closed_idx)
         debt_closed = sum((monthly_series[i].payments for i in closed_idx), Decimal("0"))
         avg_monthly_debt_payment = (debt_closed / Decimal(n_closed)).quantize(Decimal("0.01"))
+        window_start = monthly_buckets[closed_idx[0]]
         last_closed = monthly_buckets[closed_idx[-1]]
         income_end = date(
             last_closed.year,
@@ -923,7 +944,10 @@ async def compute_category_summary(
             db,
             user_id,
             native_currency,
-            start=range_start,
+            # Desde el primer mes de la ventana ACOTADA, no desde `range_start`:
+            # si se sumara el ingreso de meses que ya no están en `n_closed`, la
+            # media saldría inflada — el error contrario.
+            start=window_start,
             end=income_end,
             target_currency=target_currency,
         )

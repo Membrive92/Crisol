@@ -21,6 +21,7 @@ from sqlalchemy import (
     Numeric,
     SmallInteger,
     String,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -41,6 +42,16 @@ class AnalysisRun(Base):
     thresholds_version: Mapped[str] = mapped_column(String(64), nullable=False)
     """Hash del set de umbrales usado — parte de la clave de reproducibilidad."""
     years_covered: Mapped[list[int]] = mapped_column(ARRAY(SmallInteger), nullable=False)
+
+    thresholds_used: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    """El juego de cortes EFECTIVO de este run, `metric_key → spec` (PHASE-44.9).
+
+    `thresholds_version` detecta que dos runs se midieron distinto; esto permite
+    decir CUÁNTO. Es imprescindible para explicar el veredicto: sin los cortes no
+    se puede pintar «6,8× frente a un mínimo de 6». Los runs anteriores a la
+    columna quedan en `{}` y no se pueden explicar retroactivamente."""
 
     # ── Scores de primer nivel (en columnas → consultables en serie) ──
     m_score: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)

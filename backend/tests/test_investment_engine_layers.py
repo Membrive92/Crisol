@@ -254,7 +254,9 @@ def test_e1_cagr(series: StatementSeries) -> None:
     assert revenue.cagr_reason is None
 
 
-def test_e1_cubre_las_siete_magnitudes(series: StatementSeries) -> None:
+def test_e1_cubre_las_diez_magnitudes(series: StatementSeries) -> None:
+    """Las tres últimas entraron en PHASE-44.10: eran derivaciones que el motor
+    calculaba y no consumía nadie, y el cuaderno del usuario las pide."""
     keys = {h.key for h in evolution.compute(series).horizontal}
     assert keys == {
         "revenue",
@@ -262,8 +264,11 @@ def test_e1_cubre_las_siete_magnitudes(series: StatementSeries) -> None:
         "net_income",
         "cfo",
         "fcf_cfo",
+        "fcf_maintenance",
         "dividends_paid",
         "shares_basic",
+        "wc_operating",
+        "wc_total",
     }
 
 

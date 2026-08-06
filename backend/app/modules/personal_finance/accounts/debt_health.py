@@ -264,6 +264,63 @@ async def windowed_income_total(
     return total if total > 0 else Decimal("0")
 
 
+async def first_income_month(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    currency: str,
+    *,
+    not_before: date,
+    target_currency: str | None = None,
+) -> date | None:
+    """Primer mes (día 1) en el que hay ingreso observado, desde `not_before`.
+
+    Existe para acotar la ventana de la tasa de esfuerzo por su extremo
+    IZQUIERDO. `windowed_income_total` promedia sobre los meses cerrados del
+    rango, y si el rango arranca antes de que el usuario tuviera datos —el caso
+    típico es `range=year` en enero o febrero— esos meses vacíos **diluyen el
+    ingreso medio** y la app le dice que gana menos de lo que gana.
+
+    Es el mismo razonamiento por el que ya se excluía el mes EN CURSO: un mes
+    incompleto no es una observación mensual. Un mes anterior a cualquier dato,
+    tampoco.
+
+    Limitación consciente: un mes con ingreso genuinamente CERO al principio del
+    rango se trata como «sin datos» y se excluye, en vez de diluir. No se pueden
+    distinguir con esta consulta, y el error va en la dirección segura — diluir
+    inventaría estrés financiero que no existe, y hacerlo cada enero convertiría
+    el indicador en ruido.
+
+    `None` si no hay ningún ingreso en la ventana; entonces el caller conserva su
+    ventana original y el ratio saldrá `None` por falta de denominador.
+    """
+    window_start = datetime(not_before.year, not_before.month, not_before.day, 0, 0, 0, tzinfo=UTC)
+    amount_expr = (
+        converted_amount_expr(target_currency)
+        if target_currency is not None
+        else Transaction.amount
+    )
+    query = (
+        select(func.min(Transaction.occurred_at))
+        .select_from(Transaction)
+        .join(Category, Category.id == Transaction.category_id)
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.deleted_at.is_(None))
+        .where(Transaction.transfer_pair_id.is_(None))
+        # Mismos predicados que `windowed_income_total`: si divergieran, la
+        # ventana se acotaría por un mes que luego no aporta ingreso.
+        .where(_is_income())
+        .where(_is_internal_transfer().is_(False))
+        .where(Transaction.occurred_at >= window_start)
+        .where(amount_expr > 0)
+    )
+    if target_currency is None:
+        query = query.where(Transaction.currency == currency)
+    earliest = (await db.execute(query)).scalar_one_or_none()
+    if earliest is None:
+        return None
+    return date(earliest.year, earliest.month, 1)
+
+
 async def _interest_paid_ytd(
     db: AsyncSession,
     user_id: uuid.UUID,

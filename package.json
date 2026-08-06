@@ -17,6 +17,7 @@
     "test": "turbo run test",
     "knip": "knip --include files,dependencies,unlisted,unresolved",
     "knip:all": "knip",
+    "docs:check": "python scripts/check_docs.py",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\" --ignore-path .gitignore",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\" --ignore-path .gitignore",
     "clean": "turbo run clean && rm -rf node_modules"

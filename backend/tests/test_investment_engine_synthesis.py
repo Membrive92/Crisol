@@ -10,6 +10,8 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
+import pytest
+
 from app.modules.investment.analysis.engine import (
     base_ratios,
     synthesis,
@@ -358,29 +360,116 @@ def test_b4_rojo_fuerza_evitar() -> None:
     assert profile.label == "avoid"
 
 
+def _señal(nombre: str, band: str | None, *, reason: str | None = None) -> synthesis.QuestionSignal:
+    """Señal de prueba. `band=None` = candidata que no puntúa."""
+    return synthesis.QuestionSignal(
+        key=nombre,
+        label=nombre,
+        kind="metric",
+        band=band,  # type: ignore[arg-type]
+        value=None,
+        status=None,
+        counted=band is not None,
+        reason=None if band is not None else (reason or "no calculable"),
+    )
+
+
 def test_una_pregunta_es_roja_si_una_señal_nucleo_es_roja() -> None:
     """El semáforo: rojo si ≥1 rojo (no media ponderada)."""
     verdict = synthesis._aggregate(
         "test",
         "k",
-        [("a", "healthy"), ("b", "healthy"), ("c", "stressed")],
+        [_señal("a", "healthy"), _señal("b", "healthy"), _señal("c", "stressed")],
     )
     assert verdict.verdict == "stressed"
     assert verdict.red_signals == ("c",)
+    assert verdict.evaluated_count == 3 and verdict.unavailable_count == 0
 
 
 def test_una_pregunta_es_ambar_solo_con_dos_o_mas_ambar() -> None:
-    un_ambar = synthesis._aggregate("t", "k", [("a", "healthy"), ("b", "caution")])
+    un_ambar = synthesis._aggregate("t", "k", [_señal("a", "healthy"), _señal("b", "caution")])
     assert un_ambar.verdict == "healthy", "un solo ámbar no tiñe la pregunta"
-    dos_ambar = synthesis._aggregate("t", "k", [("a", "caution"), ("b", "caution")])
+    dos_ambar = synthesis._aggregate("t", "k", [_señal("a", "caution"), _señal("b", "caution")])
     assert dos_ambar.verdict == "caution"
 
 
 def test_las_señales_no_computables_no_cuentan() -> None:
     """Una métrica sin banda (not_computable) no aporta ni verde ni rojo."""
-    verdict = synthesis._aggregate("t", "k", [None, None, ("a", "healthy")])
+    verdict = synthesis._aggregate(
+        "t", "k", [_señal("x", None), _señal("y", None), _señal("a", "healthy")]
+    )
     assert verdict.verdict == "healthy"
     assert verdict.red_signals == () and verdict.amber_signals == ()
+
+
+def test_una_señal_que_no_puntua_sigue_publicandose_con_su_motivo() -> None:
+    """Lo que se comprobó y no pudo puntuar es información, no silencio: sin
+    esto, «sano» y «no hay evidencia» son indistinguibles desde el cliente."""
+    verdict = synthesis._aggregate(
+        "t", "k", [_señal("x", None, reason="falta la partida 'cogs'"), _señal("a", "healthy")]
+    )
+    assert len(verdict.signals) == 2
+    assert verdict.evaluated_count == 1
+    assert verdict.unavailable_count == 1
+    no_contada = next(s for s in verdict.signals if not s.counted)
+    assert no_contada.reason == "falta la partida 'cogs'"
+
+
+def test_una_señal_sin_banda_exige_explicar_por_que() -> None:
+    """El invariante que impide un 'no cuenta' mudo en pantalla."""
+    with pytest.raises(ValueError, match="DEBE explicar por qué"):
+        synthesis.QuestionSignal(
+            key="x",
+            label="X",
+            kind="metric",
+            band=None,
+            value=None,
+            status=None,
+            counted=False,
+        )
+
+
+def test_todas_las_preguntas_publican_sus_señales_candidatas() -> None:
+    """Las cuatro preguntas traen su lista completa, no sólo lo que salió mal."""
+    resultado = _synthesize(_healthy_series())
+    esperado = {"accounting": 10, "cash": 8, "dividend": 9, "resilience": 8}
+    for question in resultado.questions:
+        assert len(question.signals) == esperado[question.key], question.key
+        assert question.evaluated_count + question.unavailable_count == len(question.signals)
+
+
+def test_ninguna_señal_viaja_como_clave_cruda() -> None:
+    """La regresión de la pantalla del veredicto: se llegó a imprimir
+    `M-Score · B4_dividend_funded_externally` porque la señal ERA la clave."""
+    resultado = _synthesize(_healthy_series())
+    for question in resultado.questions:
+        for signal in question.signals:
+            assert signal.label != signal.key, f"{signal.key} viaja sin etiqueta"
+            assert "_" not in signal.label, f"{signal.key}: {signal.label!r} parece una clave"
+
+
+def test_una_financiera_no_puede_pintar_verde_por_ausencia_de_prueba() -> None:
+    """En una financiera los 8 forenses salen `not_computable`, así que la
+    pregunta de contabilidad cae al `else` del semáforo y sale VERDE. El
+    veredicto no cambia (es la regla del DESIGN), pero ahora el cliente PUEDE
+    detectarlo: las señales forenses vienen con `counted=False` y su motivo."""
+    serie = _healthy_series()
+    financiera = StatementSeries(
+        security=SecuritySnapshot(
+            ticker="BANK",
+            sector=SectorInternal.FINANCIALS,
+            accounting_std=AccountingStd.GAAP,
+            is_financial=True,
+        ),
+        statements=serie.statements,
+        as_of=serie.as_of,
+    )
+    accounting = _synthesize(financiera).question("accounting")
+    assert accounting is not None
+    forenses = [s for s in accounting.signals if s.key in {"m_score", "F7", "accruals"}]
+    assert len(forenses) == 3
+    assert all(not s.counted for s in forenses), "ningún forense debería puntuar en una financiera"
+    assert all(s.reason for s in forenses), "y cada uno explica por qué"
 
 
 # ── Perfil "Evitar" ───────────────────────────────────────────────────

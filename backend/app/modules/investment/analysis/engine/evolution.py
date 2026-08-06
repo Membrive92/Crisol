@@ -40,6 +40,7 @@ from app.modules.investment.analysis.engine.conventions import (
 )
 from app.modules.investment.analysis.engine.metrics import (
     MetricDefinition,
+    MetricUnit,
     thresholds_from,
     to_metric_result,
 )
@@ -74,6 +75,7 @@ METRIC_CATALOG: tuple[MetricDefinition, ...] = (
         "E3",
         "Estabilidad del margen EBIT",
         "evolución",
+        MetricUnit.PP,
         ThresholdDirection.LOWER_BETTER,
         high_ok=Decimal(2),
         high_alarm=Decimal(5),
@@ -87,6 +89,7 @@ METRIC_CATALOG: tuple[MetricDefinition, ...] = (
         "E4",
         "Tasa de crecimiento sostenible",
         "evolución",
+        MetricUnit.PERCENT,
         note=(
             "g = ROE × (1 − payout): lo que la empresa puede crecer "
             "autofinanciándose. Sin banda absoluta — se juzga contra el "
@@ -121,11 +124,22 @@ HORIZONTAL_ITEMS: tuple[tuple[str, str, _Extractor], ...] = (
     ("net_income", "Resultado neto", _item("net_income")),
     ("cfo", "Flujo de explotación", _item("cfo")),
     ("fcf_cfo", "Caja libre", dv.fcf_cfo),
+    ("fcf_maintenance", "Caja libre de mantenimiento", dv.fcf_maintenance),
     ("dividends_paid", "Dividendos pagados", _item("dividends_paid")),
     ("shares_basic", "Acciones en circulación", _item("shares_basic")),
+    ("wc_operating", "Circulante operativo", dv.wc_operating),
+    ("wc_total", "Fondo de maniobra", dv.wc_total),
 )
-"""Las 7 magnitudes de E1. `shares_basic` está aquí porque la dilución es la vía
-silenciosa por la que el accionista pierde sin que ninguna magnitud total caiga."""
+"""Las 10 magnitudes de E1. `shares_basic` está aquí porque la dilución es la vía
+silenciosa por la que el accionista pierde sin que ninguna magnitud total caiga.
+
+Las tres últimas entraron en PHASE-44.10 para cablear piezas que el motor ya
+calculaba y no consumía nadie. Van como SERIE y no como métrica con banda porque
+son **importes absolutos**: no hay corte global que aplicar a un fondo de
+maniobra, y lo que el cuaderno del usuario pide de ellas es literalmente «mirar
+cuándo hay variaciones». `wc_operating` coincide exactamente con su definición de
+working capital —inventarios + cobrar − pagar, **sin efectivo**—, y la caja libre
+de mantenimiento es la que él marca como recomendada frente a la puritana."""
 
 
 @dataclass(frozen=True)

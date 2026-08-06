@@ -19,6 +19,28 @@ from app.modules.investment.enums import (
     PeriodType,
     StatementSource,
 )
+from app.modules.investment.fundamentals.canonical import ItemGroup, StatementKind
+
+
+class CanonicalItemResponse(BaseModel):
+    """Una de las 49 partidas canónicas, con su nombre y su bloque (PHASE-44.9).
+
+    Se sirve para que el cliente pinte los tres estados financieros agrupados sin
+    duplicar 49 literales: los bloques vivían como comentarios de Python sobre
+    las tuplas de `canonical.py`, invisibles desde fuera.
+    """
+
+    model_config = {"from_attributes": True}
+
+    key: str
+    label: str
+    statement: StatementKind
+    group: ItemGroup
+    note: str
+
+
+class CanonicalItemCatalogResponse(BaseModel):
+    items: list[CanonicalItemResponse]
 
 
 class IngestRequest(BaseModel):
