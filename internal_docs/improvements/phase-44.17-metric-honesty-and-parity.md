@@ -180,24 +180,42 @@ decisión centralizada— pero **no se puede implementar tal cual**:
    rehidrata a dataclasses; el `__post_init__` sólo corre al calcular— pero en
    TypeScript `outcome` **debe ser opcional**, por la misma regla de la unión de
    versiones de 44.16.
-7. **Hay un TERCER modo de ausencia que el diseño no contempla: el cero
-   IMPUTADO** — y es justo el que se activa en el caso que motiva la fase.
-   `inventory` está en `IMPUTABLE_ZERO_ITEMS` y llega como `Decimal(0)` con
-   procedencia `IMPUTED_ZERO`, mientras que `cogs` está deliberadamente fuera.
-   Así que en MCD el numerador de C3 llega como `_growth(0, 0)` → «el anterior
-   valía cero», **no** «falta el dato». Redactar ahí «el ejercicio anterior valía
-   cero» sustituiría un silencio por una **mentira**. Lo mismo en B4
-   (`dividends_paid` también es imputable) y en C5. El precedente de que la
+7. **Hay un TERCER modo de ausencia: el cero IMPUTADO.** `inventory`,
+   `dividends_paid` y `acquisitions` están en `IMPUTABLE_ZERO_ITEMS` y llegan
+   como `Decimal(0)` con procedencia `IMPUTED_ZERO` cuando el filing no los
+   publica, mientras que `cogs` está **deliberadamente fuera** (su docstring: un
+   cero ahí «convertiría un margen imposible en un número creíble»). Para una
+   empresa cuyo inventario sea imputado, `_growth(0, 0)` devuelve `None` por
+   «el anterior valía cero» y no por «falta el dato», así que redactar el motivo
+   sin mirar la procedencia produciría una frase falsa. El precedente de que la
    procedencia importa ya está en el fichero: `_confidence` se niega a contar un
    `IMPUTED_ZERO` como sourced.
+
+   > **Corrección (2026-08-09).** La revisión afirmaba que este caso se daba en
+   > McDonald's, y **es falso**: verificado contra la BD, su inventario es dato
+   > REAL (55,6 M · 52 M · 53 M · 56 M · 61 M, procedencia `sourced`) y lo que
+   > falta es `cogs`. El motivo que se redactaría para MCD —«falta la partida
+   > cogs»— sería **correcto**. El problema de diseño sigue en pie para otras
+   > empresas; lo que no es cierto es que muerda en el caso que motivó la fase.
+   > Baja de «el que más cambia las cosas» a «hay que mirar la procedencia».
 8. **El perfil de seguridad se queda fuera** y es lo primero que se lee:
    `_safety_profile` sigue consultando el mapa optimista, así que una B4 no
    computable se lee como «no está en rojo» y no bloquea el sello que pinta el
    hero.
 
 **Consecuencia para el plan**: 44.17 es más grande de lo estimado y su diseño
-necesita otra pasada antes de escribirse. El hallazgo (7) es el que más cambia
-las cosas — obliga a mirar la **procedencia** del dato, no sólo su presencia.
+necesita otra pasada antes de escribirse.
+
+Lo que de verdad bloquea, tras verificar los ocho uno a uno, son **(1), (2) y
+(3)**: el inventario de sitios está mal en las dos direcciones, el default
+pesimista sin gate de cobertura cambia un falso verde por un falso gris
+universal, y el criterio de «suficientes años» es aritméticamente incorrecto
+porque `_runs` busca rachas **consecutivas** y no un cardinal. Con (4) encima
+—C7 salta con un solo año— queda claro que se puede centralizar la DECISIÓN pero
+no el UMBRAL.
+
+Los tres son de diseño, no de esfuerzo: implementarlos mal metería en el motor
+exactamente la clase de defecto que esta fase viene a quitar.
 
 ### 3.2 Los contadores que mezclan cuatro cosas
 
