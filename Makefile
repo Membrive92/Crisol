@@ -37,11 +37,11 @@ dev-backend: ## Solo backend (FastAPI)
 
 lint: ## Lint frontend + backend
 	pnpm lint
-	cd backend && ruff check app tests && black --check app tests
+	cd backend && ruff check app tests scripts && black --check app tests scripts
 
 typecheck: ## TypeScript + mypy
 	pnpm typecheck
-	cd backend && mypy app/
+	cd backend && mypy app/ scripts/
 
 test: ## Todos los tests
 	pnpm test
@@ -55,7 +55,7 @@ test-module: ## Tests de un módulo. Uso: make test-module MOD=auth
 
 format: ## Formatear todo
 	pnpm format
-	cd backend && black app/ tests/
+	cd backend && black app/ tests/ scripts/
 
 deps-lock: ## Regenerar backend/constraints.txt (pin exacto → CI reproducible)
 	cd backend && ( \

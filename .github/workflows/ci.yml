@@ -42,6 +42,15 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # Código muerto. Es un eje ORTOGONAL a lint y typecheck, no un extra de
+      # ellos: `noUnusedLocals` y `no-unused-vars` son de ámbito fichero y un
+      # `export` está usado por definición, así que ninguno de los dos puede ver
+      # que nadie importa un módulo (lección PHASE-43). Vivía sólo en
+      # `make verify`, que NO es lo que corre en un push: entre PHASE-43 y
+      # PHASE-44.21 no se ejecutó en ningún commit.
+      - name: Knip (código muerto)
+        run: pnpm knip
+
       - name: Build web
         run: pnpm --filter @crisol/web build
 
@@ -94,14 +103,19 @@ jobs:
           # que CI instale lo mismo que local y no diverjan versiones (mypy/SQLAlchemy).
           python -m pip install -e ".[dev]" -c constraints.txt
 
+      # `scripts/` entra: son los data-fix y los seeds, que se ejecutan CONTRA
+      # LOS DATOS DEL USUARIO. Quedaban fuera de lo que verifica CI —y de
+      # `make lint`— mientras la verificación a mano sí los incluía, así que un
+      # fallo de estilo o un import sin usar en un script de migración de datos
+      # sólo aparecía si alguien se acordaba de escribir la ruta.
       - name: Ruff (lint)
-        run: ruff check app tests
+        run: ruff check app tests scripts
 
       - name: Black (format check)
-        run: black --check app tests
+        run: black --check app tests scripts
 
       - name: Mypy (typecheck)
-        run: mypy app
+        run: mypy app scripts
 
       - name: Alembic upgrade + parity check (migrations <-> models)
         run: |
