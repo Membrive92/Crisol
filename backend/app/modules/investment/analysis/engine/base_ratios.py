@@ -17,7 +17,7 @@ No inventar métricas fuera del catálogo (ARCHITECTURE §4.2).
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 
 from app.modules.investment.analysis.engine import derivations as dv
@@ -392,6 +392,37 @@ class BaseRatiosResult:
 _result = to_metric_result
 
 
+#: Métricas de esta capa cuyos CORTES no están calibrados para una financiera
+#: (PHASE-44.18). No es lo mismo que «no se puede calcular»: el número sale
+#: igual, pero sin semáforo, porque la vara no sirve.
+#:
+#: `S7` (pasivo / patrimonio) está calibrada para negocios con activo tangible:
+#: la banda 1-2 sale de que el pasivo financie entre la mitad y dos tercios del
+#: activo. En un banco el apalancamiento ES el negocio y un 10× es normal, así
+#: que aplicarle ese corte pintaría un rojo permanente que no informa de nada.
+#:
+#: **Vive en el engine y no en el seed a propósito.** La misma exención estaba
+#: declarada en `thresholds/seed.py` desde PHASE-44.10 y era INERTE: dependía de
+#: que existiera una fila en `scoring_thresholds`, S7 nunca se sembró (el seed
+#: se cierra en cuanto la tabla tiene una fila), y `ThresholdSpec.applies` vale
+#: `True` por defecto. Una exención razonada, documentada y que nunca llegó a
+#: ejecutarse. Aquí no puede perderse: no depende de la BD, así que una base
+#: recién creada se comporta igual que una sembrada.
+NOT_CALIBRATED_FOR_FINANCIALS: frozenset[str] = frozenset({"S7"})
+
+
+def _drop_bands_for_financials(
+    specs: Mapping[str, ThresholdSpec],
+) -> Mapping[str, ThresholdSpec]:
+    """Apaga el semáforo (no el cálculo) de las métricas sin calibrar para bancos."""
+    adjusted = dict(specs)
+    for key in NOT_CALIBRATED_FOR_FINANCIALS:
+        spec = adjusted.get(key)
+        if spec is not None and spec.applies:
+            adjusted[key] = replace(spec, applies=False)
+    return adjusted
+
+
 # ── Cálculo ───────────────────────────────────────────────────────────
 
 
@@ -406,6 +437,8 @@ def compute(
     "sana", sino "no hay banda que aplicar".
     """
     specs = DEFAULT_THRESHOLDS if thresholds is None else thresholds
+    if series.security.is_financial:
+        specs = _drop_bands_for_financials(specs)
     metrics: list[MetricResult] = []
     dupont: list[DuPontDecomposition] = []
     flags: list[Flag] = []

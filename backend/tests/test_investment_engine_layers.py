@@ -16,7 +16,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.modules.investment.analysis.engine import catalog, evolution, forensic
+from app.modules.investment.analysis.engine import base_ratios, catalog, evolution, forensic
 from app.modules.investment.analysis.engine.forensic import (
     NOT_APPLICABLE_TO_FINANCIALS,
     ZMIJEWSKI_P_CUTOFFS,
@@ -818,3 +818,33 @@ def test_las_capas_aceptan_el_mapa_de_umbrales_completo(series: StatementSeries)
     todos = catalog.ALL_DEFAULT_THRESHOLDS
     assert evolution.compute(series, todos).get("E3", 2024) is not None
     assert forensic.compute(series, todos).get("m_score", 2024) is not None
+
+
+def test_s7_pierde_el_semaforo_en_una_financiera_sin_depender_de_la_bd() -> None:
+    """PHASE-44.18 — la exención que llevaba dos fases sin ejecutarse.
+
+    `S7` (pasivo / patrimonio) está calibrada para negocios con activo tangible.
+    En un banco el apalancamiento ES el negocio, así que aplicarle la banda 1-2
+    pintaría un rojo permanente que no informa de nada.
+
+    Eso estaba declarado desde PHASE-44.10 en `thresholds/seed.py`… y era INERTE:
+    dependía de que existiera una fila en `scoring_thresholds`, S7 nunca se
+    sembró, y `ThresholdSpec.applies` vale `True` por defecto. Ahora la
+    aplicabilidad vive en el engine, así que **no depende de la BD**: este test
+    llama a `compute` sin pasar umbrales, que es justo el camino de fallback.
+
+    El número se sigue viendo — la exención apaga el semáforo, no el cálculo.
+    """
+    financiera = base_ratios.compute(_series_of(*_statements(), is_financial=True))
+    normal = base_ratios.compute(_series_of(*_statements()))
+
+    s7_banco = [m for m in financiera.metrics if m.key == "S7"]
+    s7_normal = [m for m in normal.metrics if m.key == "S7"]
+    assert s7_banco, "S7 no puede desaparecer en una financiera: el número es válido"
+
+    assert all(m.band is None for m in s7_banco), "un banco no puede recibir la banda 1-2 de S7"
+    assert any(
+        m.value is not None for m in s7_banco
+    ), "la exención apaga el semáforo, no el cálculo"
+    # Y no se ha apagado de más: en una no financiera S7 sigue teniendo banda.
+    assert any(m.band is not None for m in s7_normal)

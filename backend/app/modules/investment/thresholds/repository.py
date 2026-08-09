@@ -35,3 +35,20 @@ async def get_one(
 
 async def count(db: AsyncSession) -> int:
     return (await db.execute(select(func.count()).select_from(ScoringThresholds))).scalar_one()
+
+
+async def existing_keys(db: AsyncSession) -> set[tuple[SectorInternal, AccountingStd, str]]:
+    """Los tripletes ya sembrados, en UNA consulta.
+
+    El sembrado incremental (PHASE-44.18) necesita saber qué falta sobre ~2.300
+    combinaciones; preguntarlo fila a fila con `get_one` serían otras tantas
+    consultas en cada arranque. La clave es el triplete completo y no sólo la
+    `metric_key` porque el día que se añada un sector o una norma contable, las
+    filas nuevas de una métrica YA sembrada también harían falta.
+    """
+    stmt = select(
+        ScoringThresholds.sector,
+        ScoringThresholds.accounting_std,
+        ScoringThresholds.metric_key,
+    )
+    return {(sector, std, key) for sector, std, key in (await db.execute(stmt)).all()}

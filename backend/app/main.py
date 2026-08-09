@@ -18,7 +18,7 @@ from app.modules.auth.router import router as auth_router
 from app.modules.auth.webauthn.router import router as webauthn_router
 from app.modules.currency.router import router as currency_router
 from app.modules.investment.router import router as investment_router
-from app.modules.investment.thresholds.service import seed_if_empty
+from app.modules.investment.thresholds.service import seed_on_startup
 from app.modules.personal_finance.accounts.router import router as accounts_router
 from app.modules.personal_finance.analytics.router import router as analytics_router
 from app.modules.personal_finance.bank_mappings.router import router as bank_mappings_router
@@ -54,10 +54,12 @@ async def lifespan(app_: FastAPI) -> AsyncIterator[None]:
         scheduler.start()
         # Stash para que tests / debugging puedan inspeccionarlo.
         app_.state.scheduler = scheduler
-    # Siembra los umbrales de inversión si la tabla está vacía (idempotente y
-    # defensivo: un fallo de BD al arrancar no debe tumbar el proceso).
+    # Completa los umbrales de inversión que falten (idempotente, sólo-inserción
+    # y defensivo: un fallo de BD al arrancar no debe tumbar el proceso).
+    # Antes era `seed_if_empty`, que se rendía en cuanto la tabla tenía una fila
+    # y dejaba fuera para siempre toda métrica añadida después (PHASE-44.18).
     try:
-        await seed_if_empty()
+        await seed_on_startup()
     except Exception:
         logging.getLogger("crisol").warning(
             "No se pudo sembrar scoring_thresholds al arrancar", exc_info=True

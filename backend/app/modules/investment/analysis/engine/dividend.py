@@ -464,12 +464,19 @@ class DividendResult:
 # ── Cálculo por ejercicio ─────────────────────────────────────────────
 
 
+NOT_APPLICABLE_TO_FINANCIALS_CASH = (
+    "el modelo de cobertura sobre caja libre no describe a una financiera: "
+    "su negocio es mover dinero, así que el cociente sale y no significa nada"
+)
+
+
 def _year_metrics(
     series: StatementSeries,
     statement: CanonicalStatement,
     specs: Mapping[str, ThresholdSpec],
     *,
     is_reit: bool,
+    is_financial: bool = False,
 ) -> list[MetricResult]:
     year = statement.fiscal_year
     dividends = sourced(statement, "dividends_paid")
@@ -486,24 +493,51 @@ def _year_metrics(
     def metric(key: str, amount: Amount) -> MetricResult:
         return to_metric_result(key, year, amount, specs)
 
+    def cash_based(amount: Amount) -> Amount:
+        """Las ratios que dividen por caja libre no describen a una financiera.
+
+        En un banco la «caja libre» del esquema CFO − capex no significa lo que
+        significa en una empresa industrial: su negocio ES mover dinero, así que
+        el cociente sale y no quiere decir nada. Se marca igual que D6 hace con
+        las socimis — `not_computable` con motivo, nunca omitido (PHASE-44.19).
+
+        Hasta ahora esto no se veía porque la pestaña entera se ocultaba para
+        toda financiera; al dejar de ocultarla, estas cinco habrían salido con
+        banda y color, que es peor que no enseñarlas.
+        """
+        if not is_financial:
+            return amount
+        return Amount(
+            value=None,
+            provenance=Provenance.DERIVED,
+            status="not_computable",
+            reason=NOT_APPLICABLE_TO_FINANCIALS_CASH,
+        )
+
     results = [
+        # D1 divide por BENEFICIO, no por caja: es contable y vale igual en un
+        # banco que en una fábrica, así que no se exime.
         metric("D1", divide(dividends, profit, denominator_label="beneficio repartible")),
-        metric("D2", divide(dividends, cash, denominator_label=cash_label)),
-        metric("D3", divide(cash, dividends, denominator_label="dividendos")),
+        metric("D2", cash_based(divide(dividends, cash, denominator_label=cash_label))),
+        metric("D3", cash_based(divide(cash, dividends, denominator_label="dividendos"))),
         metric(
             "D4",
-            divide(
-                dividends,
-                subtract(fcf, sourced(statement, "sbc_expense")),
-                denominator_label="caja libre menos retribución en acciones",
+            cash_based(
+                divide(
+                    dividends,
+                    subtract(fcf, sourced(statement, "sbc_expense")),
+                    denominator_label="caja libre menos retribución en acciones",
+                )
             ),
         ),
         metric(
             "D5",
-            divide(
-                add(dividends, sourced(statement, "buybacks")),
-                fcf,
-                denominator_label="caja libre",
+            cash_based(
+                divide(
+                    add(dividends, sourced(statement, "buybacks")),
+                    fcf,
+                    denominator_label="caja libre",
+                )
             ),
         ),
         metric(
@@ -519,7 +553,12 @@ def _year_metrics(
                 )
             ),
         ),
-        metric("D8", divide(subtract(cash, dividends), revenue, denominator_label="ventas")),
+        # D8 también divide por caja libre (`cash − dividendos`), pese a que su
+        # nombre —«margen de seguridad»— no lo sugiere.
+        metric(
+            "D8",
+            cash_based(divide(subtract(cash, dividends), revenue, denominator_label="ventas")),
+        ),
         # Calidad de la caja
         metric(
             "Q1",
@@ -639,7 +678,13 @@ def compute(
     metrics: list[MetricResult] = []
     payouts_over_fcf: list[Decimal] = []
     for statement in series.statements:
-        year_metrics = _year_metrics(series, statement, specs, is_reit=is_reit)
+        year_metrics = _year_metrics(
+            series,
+            statement,
+            specs,
+            is_reit=is_reit,
+            is_financial=series.security.is_financial,
+        )
         metrics.extend(year_metrics)
         d2 = next((m for m in year_metrics if m.key == "D2"), None)
         if d2 is not None and d2.value is not None:

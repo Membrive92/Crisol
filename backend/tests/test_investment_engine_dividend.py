@@ -93,18 +93,21 @@ def _year(
     )
 
 
-def _security(*, is_reit: bool = False) -> SecuritySnapshot:
+def _security(*, is_reit: bool = False, is_financial: bool = False) -> SecuritySnapshot:
     return SecuritySnapshot(
         ticker="DIV",
         sector=SectorInternal.CONSUMER_STAPLES,
         accounting_std=AccountingStd.GAAP,
         is_reit=is_reit,
+        is_financial=is_financial,
     )
 
 
-def _series_of(*statements: CanonicalStatement, is_reit: bool = False) -> StatementSeries:
+def _series_of(
+    *statements: CanonicalStatement, is_reit: bool = False, is_financial: bool = False
+) -> StatementSeries:
     return StatementSeries(
-        security=_security(is_reit=is_reit),
+        security=_security(is_reit=is_reit, is_financial=is_financial),
         statements=tuple(statements),
         as_of=date(2025, 3, 31),
     )
@@ -595,3 +598,38 @@ def test_no_hay_claves_repetidas_con_otras_capas() -> None:
 def test_dividend_acepta_el_mapa_de_umbrales_completo(series: StatementSeries) -> None:
     result = dividend.compute(series, catalog.ALL_DEFAULT_THRESHOLDS)
     assert result.get("D2", 2024) is not None
+
+
+def test_en_una_financiera_las_ratios_sobre_caja_libre_no_se_calculan() -> None:
+    """PHASE-44.19 — la cobertura sobre caja libre no describe a un banco.
+
+    Hasta ahora esto no hacía falta porque la pestaña entera se ocultaba para
+    toda financiera. Al dejar de ocultarla —lo que recupera ocho métricas ya
+    calculadas— estas cinco habrían salido con banda y color, que es peor que no
+    enseñarlas: en un banco la caja libre del esquema CFO − capex no significa lo
+    que significa en una industrial.
+
+    Se marcan igual que D6 con las socimis: `not_computable` CON motivo, jamás
+    omitidas (regla dura de ARCHITECTURE §4.2).
+    """
+    sobre_caja = {"D2", "D3", "D4", "D5", "D8"}
+    banco = dividend.compute(_series_of(_latest(), is_financial=True), None)
+    normal = dividend.compute(_series_of(_latest()), None)
+
+    for key in sobre_caja:
+        del_banco = [m for m in banco.metrics if m.key == key]
+        assert del_banco, f"{key} no puede desaparecer: se lista con motivo"
+        for metric in del_banco:
+            assert metric.status == "not_computable", f"{key} no debería calcularse en un banco"
+            assert metric.reason and "financiera" in metric.reason
+            assert metric.band is None
+
+    # D1 divide por BENEFICIO, no por caja: es contable y vale en un banco igual
+    # que en una fábrica. Si se eximiera también, la pestaña quedaría vacía y no
+    # habríamos arreglado nada.
+    d1_banco = [m for m in banco.metrics if m.key == "D1"]
+    assert any(m.value is not None for m in d1_banco), "D1 sí aplica a una financiera"
+
+    # Y no se ha apagado de más: en una no financiera siguen calculándose.
+    for key in sobre_caja:
+        assert any(m.value is not None for m in normal.metrics if m.key == key), key

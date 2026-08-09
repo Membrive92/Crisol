@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-from app.modules.investment.analysis.engine import forensic
+from app.modules.investment.analysis.engine import base_ratios, forensic
 from app.modules.investment.analysis.engine.catalog import ALL_DEFAULT_THRESHOLDS
 from app.modules.investment.enums import (
     AccountingStd,
@@ -30,16 +30,19 @@ FORENSIC_KEYS: frozenset[str] = frozenset(d.key for d in forensic.METRIC_CATALOG
 """Las métricas forenses (Beneish/Altman/Piotroski…), tomadas del catálogo del
 engine para no divergir. En financieras salen `applies=False`."""
 
-NOT_FOR_FINANCIALS: frozenset[str] = frozenset({"S7"})
+NOT_FOR_FINANCIALS: frozenset[str] = base_ratios.NOT_CALIBRATED_FOR_FINANCIALS
 """Métricas NO forenses cuyos cortes tampoco tienen sentido en una financiera.
 
-`S7` (pasivo / patrimonio) está calibrada para negocios con activo tangible: la
-banda 1-2 sale de que el pasivo financie entre la mitad y dos tercios del activo.
-En un banco el apalancamiento ES el negocio y un 10× es normal, así que aplicarle
-ese corte pintaría un rojo permanente que no informa de nada. Se siembra con
-`applies=False` en vez de esperar a la recalibración por sector: el número se
-sigue viendo, pero sin semáforo — que es lo honesto mientras no haya un corte
-propio (PHASE-44.10)."""
+**La lista la posee el ENGINE** (`base_ratios.NOT_CALIBRATED_FOR_FINANCIALS`),
+no este fichero. Aquí sólo se refleja para que la fila sembrada coincida con lo
+que el motor aplica.
+
+El motivo del traslado (PHASE-44.18): mientras la exención vivió sólo aquí fue
+**inerte**. Dependía de que existiera una fila en `scoring_thresholds`; S7 nunca
+se sembró —el seed se cerraba en cuanto la tabla tenía una fila— y
+`ThresholdSpec.applies` vale `True` por defecto. Una exención razonada,
+documentada y que nunca llegó a ejecutarse. En el engine no puede perderse, y una
+base recién creada se comporta igual que una sembrada."""
 
 UNCALIBRATED = "uncalibrated"
 """`model_variant` para IFRS/PGC: los cortes son US-GAAP, sin recalibrar."""
