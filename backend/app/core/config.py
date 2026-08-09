@@ -84,9 +84,17 @@ class Settings(BaseSettings):
     # primavera 2026; usamos el destino directo para evitar el hop.
     frankfurter_base_url: str = "https://api.frankfurter.dev/v1"
     frankfurter_timeout_seconds: int = 10
+    # Timeout del camino de FONDO (cron). Medido el 2026-08-07: una fecha
+    # histórica tarda 13-17 s y la del día 9,3 s — con los 10 s de arriba el cron
+    # fallaba sistemáticamente la pata de "ayer" y aprobaba la de "hoy" por tres
+    # décimas. Se separa en vez de subir el global porque ese lo sufre el usuario
+    # esperando en `/portfolio/summary`; aquí no espera nadie.
+    frankfurter_background_timeout_seconds: int = 45
 
-    # Cron nocturno que dispara `ensure_rates_for_dates([yesterday, today])`
+    # Cron nocturno que dispara `ensure_exact_rates_for_dates([yesterday, today])`
     # — cubre el lazy fetch para usuarios que pasan días sin abrir la app.
+    # La variante ESTRICTA es deliberada: con la laxa el job se callaba 14 días
+    # seguidos tras cada fetch (arreglado 2026-08-07, ver `scheduler.py`).
     # Default activado en prod; tests lo sobrescriben a False vía env para
     # no acoplar el suite a un timer.
     enable_currency_cron: bool = True

@@ -39,10 +39,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.modules.currency import service as currency_service
-from app.modules.currency.exceptions import (
-    FrankfurterInvalidResponseError,
-    FrankfurterUnavailableError,
-)
 from app.modules.investment.catalog.models import Security
 from app.modules.investment.portfolio.service import PositionCore, compute_position_cores
 from app.modules.investment.pricing import repository as repo
@@ -283,7 +279,10 @@ async def _ensure_fx_rates(db: AsyncSession, cores: list[PositionCore], *, on: d
     Aquí se exige tasa EXACTA de `on` y, si falta, se pide. No se cambia la
     política de `currency` —eso movería números de Deuda, Análisis y Dashboard,
     que comparten esa ventana— sino que se usa su API pública desde el módulo
-    que necesita otra frescura.
+    que necesita otra frescura. Desde 2026-08-07 esa política estricta vive en
+    `currency.service.ensure_exact_rates_for_dates` y aquí sólo se consume: el
+    cron nocturno padecía el mismo defecto y dos copias del mismo predicado
+    acaban divergiendo (lección [PHASE-38]).
 
     Es best-effort: si Frankfurter no responde, se sigue con lo que haya. La
     posición dirá con qué fecha se valoró (`fx_as_of`) o quedará excluida si no
@@ -306,19 +305,7 @@ async def _ensure_fx_rates_for_currencies(
     if not needed:
         return
 
-    missing = await currency_service.missing_exact_rates(db, on=on, quotes=sorted(needed))
-    if not missing:
-        return
-
-    try:
-        await currency_service.refresh_rates(db, target_date=on, quotes=missing)
-        await db.commit()
-    except (FrankfurterInvalidResponseError, FrankfurterUnavailableError):
-        # El BCE no publica fines de semana ni festivos, así que "no hay tasa de
-        # hoy" es lo NORMAL un domingo. Se cae al fallback de `convert`, que
-        # devuelve la última con su `rate_date` — y la pantalla lo declara.
-        logger.info("pricing: sin tasas nuevas para %s (%s)", on, ", ".join(missing))
-        await db.rollback()
+    await currency_service.ensure_exact_rates_for_dates(db, [on], quotes=sorted(needed))
 
 
 async def compute_portfolio_summary(

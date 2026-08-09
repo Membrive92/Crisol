@@ -37,6 +37,15 @@ dependencies = [
   # dejaría de haber precios. La 1.5.2 es con la que se verificó el contrato
   # (`fast_info` → float, `'GBp'` en Londres, KeyError en símbolo inexistente).
   "yfinance==1.5.2",
+  # Declaradas EXPLÍCITAMENTE aunque llegasen como transitivas de `edgartools`
+  # y `yfinance` (PHASE-44.14). Ya no son incidentales: el índice del buscador
+  # lee el parquet de emisores con pandas —la ruta pyarrow devuelve la tabla
+  # sin la columna `exchange`, así que no hay alternativa— y el parser FIRDS
+  # recorre 800 MB de XML con `lxml.iterparse`. Una transitiva sin declarar es
+  # una dependencia que desaparece el día que su padre cambie de opinión, y el
+  # fallo sería silencioso: el buscador se queda mudo, no revienta.
+  "pandas>=2.2",
+  "lxml>=5.0",
 ]
 
 [project.optional-dependencies]
@@ -116,4 +125,9 @@ markers = [
   # para los tests del PROPIO cliente: a ésos el bloqueo les parchearía justo lo
   # que quieren verificar. No implica red — mockean `httpx` por dentro.
   "real_fx_client: el test verifica el cliente de tipos de cambio en sí",
+  # Exime del vaciado global del índice de emisores de la SEC (conftest). Sólo
+  # para el test que verifica el CONTRATO con el parquet de `edgartools`: al
+  # resto le haría depender sus aserciones de 10.365 filas reales que cambian
+  # con cada bump de la librería. No implica red — el parquet va empaquetado.
+  "real_symbol_index: el test verifica el índice real de emisores de la SEC",
 ]

@@ -45,11 +45,27 @@ def _today_utc() -> date:
 
 
 async def refresh_currency_rates_job() -> None:
-    """Llama a `ensure_rates_for_dates([yesterday, today])`.
+    """Llama a `ensure_exact_rates_for_dates([yesterday, today])`.
 
     Garantiza que las fechas más recientes tienen tasas en BD para que
     el dashboard cross-currency no dependa del lazy-fetch on-request
     cuando el usuario abre la app por primera vez del día.
+
+    **Por qué la variante estricta** (2026-08-07): hasta hoy llamaba a
+    `ensure_rates_for_dates`, cuyo canario se conforma con cualquier tasa de los
+    14 días anteriores. Resultado: el día que entraba una tasa, este job dejaba
+    de pedir nada durante dos semanas y `exchange_rates` crecía una fila cada 14
+    días en vez de una al día. Se vio en los datos del usuario —la compra del
+    viernes 24-jul quedó valorada con el tipo del sábado 18— y es lo que ya
+    obligó a la cartera a resolverlo por su cuenta en PHASE-44.11. Un cron que
+    corre a diario y no pide nada no es un cron; la política laxa sigue siendo
+    la correcta para rellenar fechas pasadas y no se toca.
+
+    **Y por qué su propio timeout**: arreglado el canario, el job seguía cojo.
+    Medido contra la API el mismo día, la pata de "ayer" tarda más de los 10 s
+    del default y la de "hoy" pasaba por tres décimas — o sea que el cron habría
+    traído la mitad, y con mal día ninguna. Los dos defectos son independientes
+    y hacían falta los dos para que este job no sirviera de nada.
 
     Crea su propia `AsyncSession` — el job corre fuera del request
     context de FastAPI, así que no puede usar `get_db()`.
@@ -60,7 +76,11 @@ async def refresh_currency_rates_job() -> None:
     yesterday = today - timedelta(days=1)
     try:
         async with session_factory() as db:
-            fetched = await currency_service.ensure_rates_for_dates(db, [yesterday, today])
+            fetched = await currency_service.ensure_exact_rates_for_dates(
+                db,
+                [yesterday, today],
+                timeout=settings.frankfurter_background_timeout_seconds,
+            )
         logger.info(
             "currency cron: %s fechas refrescadas (yesterday=%s, today=%s)",
             fetched,

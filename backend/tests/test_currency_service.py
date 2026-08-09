@@ -223,3 +223,108 @@ async def test_refresh_rates_propagates_unavailable(test_engine) -> None:  # typ
             pytest.raises(FrankfurterUnavailableError),
         ):
             await service.refresh_rates(db, target_date=date(2026, 4, 1), quotes=["USD"])
+
+
+# --- Las dos políticas de frescura -------------------------------------------
+#
+# `ensure_rates_for_dates` (laxa) y `ensure_exact_rates_for_dates` (estricta)
+# difieren SÓLO en el canario, y esa diferencia es la que decide si se pide algo.
+# Los dos tests siguientes son hermanos a propósito: sembrado idéntico, veredicto
+# opuesto. Si alguien "unifica" las dos funciones, uno de los dos cae.
+
+_SEED_DAY = date(2026, 4, 1)
+_SIX_DAYS_LATER = date(2026, 4, 7)
+
+
+async def test_ensure_exact_pide_aunque_haya_una_tasa_dentro_de_la_ventana(  # type: ignore[no-untyped-def]
+    test_engine,
+) -> None:
+    """Regresión del cron muerto (2026-08-07).
+
+    Con una tasa de hace 6 días —dentro de la ventana de fallback de 14— la
+    política laxa se da por satisfecha y no pide nada. Ése era el defecto: el
+    cron nocturno llevaba desde PHASE-11.1 callado hasta que la última tasa
+    cumplía dos semanas, y por eso una compra del 24 de julio se valoró con el
+    tipo del 18.
+    """
+    async with await _session(test_engine) as db:
+        await _seed_rate(db, _SEED_DAY, "USD", "1.10")
+        await db.commit()
+
+        asked: list[date] = []
+
+        async def _fake_fetch(*, target_date, base, quotes, timeout=None):  # type: ignore[no-untyped-def]
+            asked.append(target_date)
+            return {q: Decimal("1.20") for q in quotes}
+
+        with patch("app.modules.currency.client.fetch_rates", side_effect=_fake_fetch):
+            fetched = await service.ensure_exact_rates_for_dates(
+                db, [_SIX_DAYS_LATER], quotes=["USD"]
+            )
+
+        assert fetched == 1
+        assert asked == [_SIX_DAYS_LATER]
+        stored = await repository.get_rate(db, rate_date=_SIX_DAYS_LATER, base="EUR", quote="USD")
+        assert stored is not None, "la tasa del día no se persistió"
+        assert stored.rate == Decimal("1.20")
+
+
+async def test_ensure_laxa_sigue_conformandose_con_la_ventana(test_engine) -> None:  # type: ignore[no-untyped-def]
+    """La política laxa NO cambia: es la correcta para rellenar fechas pasadas.
+
+    Mismo sembrado que el test anterior y veredicto opuesto. Está escrito para
+    que quede constancia de que la diferencia es deliberada: si esta función
+    empezara a pedir, rellenar 50 fechas históricas serían 50 round-trips.
+    """
+    async with await _session(test_engine) as db:
+        await _seed_rate(db, _SEED_DAY, "USD", "1.10")
+        await db.commit()
+
+        asked: list[date] = []
+
+        async def _fake_fetch(*, target_date, base, quotes, timeout=None):  # type: ignore[no-untyped-def]
+            asked.append(target_date)
+            return {q: Decimal("1.20") for q in quotes}
+
+        with patch("app.modules.currency.client.fetch_rates", side_effect=_fake_fetch):
+            fetched = await service.ensure_rates_for_dates(db, [_SIX_DAYS_LATER], quotes=["USD"])
+
+        assert fetched == 0
+        assert asked == []
+
+
+async def test_ensure_exact_no_gasta_peticion_si_ya_tiene_la_del_dia(test_engine) -> None:  # type: ignore[no-untyped-def]
+    """Y con la tasa exacta ya en BD no pide nada — el cron diario no machaca."""
+    async with await _session(test_engine) as db:
+        await _seed_rate(db, _SIX_DAYS_LATER, "USD", "1.15")
+        await db.commit()
+
+        with patch(
+            "app.modules.currency.client.fetch_rates",
+            new_callable=AsyncMock,
+            side_effect=AssertionError("no debería pedir nada"),
+        ):
+            fetched = await service.ensure_exact_rates_for_dates(
+                db, [_SIX_DAYS_LATER], quotes=["USD"]
+            )
+
+        assert fetched == 0
+
+
+async def test_ensure_exact_traga_el_fallo_de_frankfurter(test_engine) -> None:  # type: ignore[no-untyped-def]
+    """Un domingo el BCE no publica: "sin tasa de hoy" es lo NORMAL, no un error.
+
+    El job corre desatendido; propagar aquí tiraría el cron entero por algo que
+    pasa 104 días al año.
+    """
+    async with await _session(test_engine) as db:
+        with patch(
+            "app.modules.currency.client.fetch_rates",
+            new_callable=AsyncMock,
+            side_effect=FrankfurterUnavailableError("offline"),
+        ):
+            fetched = await service.ensure_exact_rates_for_dates(
+                db, [_SIX_DAYS_LATER], quotes=["USD"]
+            )
+
+        assert fetched == 0

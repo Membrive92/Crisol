@@ -27,6 +27,9 @@ from app.modules.auth.webauthn.models import (  # noqa: F401
 )
 from app.modules.currency.models import ExchangeRate  # noqa: F401
 from app.modules.investment.analysis.models import AnalysisRun  # noqa: F401
+from app.modules.investment.catalog.directory_models import (  # noqa: F401
+    ListingDirectoryEntry,
+)
 from app.modules.investment.catalog.models import Security  # noqa: F401
 from app.modules.investment.fundamentals.models import (  # noqa: F401
     FinancialStatement,

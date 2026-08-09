@@ -40,10 +40,10 @@ def test_create_scheduler_registers_currency_job_when_enabled() -> None:
 
 @pytest.mark.asyncio
 async def test_refresh_currency_rates_job_calls_ensure_with_today_and_yesterday() -> None:
-    """El job invoca `ensure_rates_for_dates([yesterday, today])` con fechas UTC.
+    """El job invoca `ensure_exact_rates_for_dates([yesterday, today])` en UTC.
 
-    Mockeamos `ensure_rates_for_dates` y el engine para evitar tocar BD —
-    aquí sólo verificamos el contrato de fechas.
+    Mockeamos la función y el engine para evitar tocar BD — aquí sólo
+    verificamos el contrato de fechas.
     """
     today_fake = date(2026, 5, 5)
     yesterday_fake = today_fake - timedelta(days=1)
@@ -52,7 +52,9 @@ async def test_refresh_currency_rates_job_calls_ensure_with_today_and_yesterday(
 
     with (
         patch.object(scheduler_module, "_today_utc", return_value=today_fake),
-        patch.object(scheduler_module.currency_service, "ensure_rates_for_dates", mock_ensure),
+        patch.object(
+            scheduler_module.currency_service, "ensure_exact_rates_for_dates", mock_ensure
+        ),
         patch.object(scheduler_module, "create_async_engine") as mock_engine_factory,
     ):
         # Stub mínimo del engine: dispose() debe ser awaitable.
@@ -67,13 +69,67 @@ async def test_refresh_currency_rates_job_calls_ensure_with_today_and_yesterday(
 
 
 @pytest.mark.asyncio
+async def test_refresh_currency_rates_job_usa_la_politica_estricta() -> None:
+    """El cron NO puede usar la política laxa (regresión del 2026-08-07).
+
+    `ensure_rates_for_dates` se conforma con cualquier tasa de los 14 días
+    anteriores, así que un job diario colgado de ella no pide nada durante dos
+    semanas seguidas — que es exactamente lo que llevaba pasando desde
+    PHASE-11.1. El contrato de fechas del test anterior seguía verde con el bug
+    dentro: sólo miraba QUÉ fechas se piden, no A QUIÉN.
+    """
+    laxa = AsyncMock(return_value=0)
+    estricta = AsyncMock(return_value=2)
+
+    with (
+        patch.object(scheduler_module, "_today_utc", return_value=date(2026, 5, 5)),
+        patch.object(scheduler_module.currency_service, "ensure_rates_for_dates", laxa),
+        patch.object(scheduler_module.currency_service, "ensure_exact_rates_for_dates", estricta),
+        patch.object(scheduler_module, "create_async_engine") as mock_engine_factory,
+    ):
+        mock_engine_factory.return_value.dispose = AsyncMock()
+        await scheduler_module.refresh_currency_rates_job()
+
+    assert estricta.await_count == 1
+    assert laxa.await_count == 0, "el cron volvió a la política que lo dejaba mudo"
+
+
+@pytest.mark.asyncio
+async def test_refresh_currency_rates_job_usa_el_timeout_de_fondo() -> None:
+    """El cron pide con SU timeout, no con el del camino de request.
+
+    Segundo defecto, independiente del canario y medido contra la API el
+    2026-08-07: con los 10 s del default la pata de "ayer" (13-17 s en fechas
+    históricas) fallaba siempre y la de "hoy" aprobaba por tres décimas. Aquí no
+    espera ningún usuario, así que el job usa un margen propio.
+    """
+    mock_ensure = AsyncMock(return_value=2)
+
+    with (
+        patch.object(scheduler_module, "_today_utc", return_value=date(2026, 5, 5)),
+        patch.object(
+            scheduler_module.currency_service, "ensure_exact_rates_for_dates", mock_ensure
+        ),
+        patch.object(scheduler_module, "create_async_engine") as mock_engine_factory,
+    ):
+        mock_engine_factory.return_value.dispose = AsyncMock()
+        await scheduler_module.refresh_currency_rates_job()
+
+    _, kwargs = mock_ensure.await_args
+    assert kwargs["timeout"] == settings.frankfurter_background_timeout_seconds
+    assert kwargs["timeout"] > settings.frankfurter_timeout_seconds
+
+
+@pytest.mark.asyncio
 async def test_refresh_currency_rates_job_swallows_exceptions() -> None:
     """Errores del job no deben propagarse — un fallo no tira el scheduler."""
     mock_ensure = AsyncMock(side_effect=RuntimeError("boom"))
 
     with (
         patch.object(scheduler_module, "_today_utc", return_value=date(2026, 5, 5)),
-        patch.object(scheduler_module.currency_service, "ensure_rates_for_dates", mock_ensure),
+        patch.object(
+            scheduler_module.currency_service, "ensure_exact_rates_for_dates", mock_ensure
+        ),
         patch.object(scheduler_module, "create_async_engine") as mock_engine_factory,
     ):
         mock_engine_factory.return_value.dispose = AsyncMock()

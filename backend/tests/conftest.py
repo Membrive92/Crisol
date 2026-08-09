@@ -10,13 +10,15 @@ se crea on-demand. Nunca tocan la BD de desarrollo.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from unittest.mock import AsyncMock, patch
 
 import asyncpg
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import NullPool
+from sqlalchemy import text as sa_text
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
@@ -34,6 +36,9 @@ from app.modules.auth.webauthn.models import (  # noqa: F401
 from app.modules.currency.exceptions import FrankfurterUnavailableError
 from app.modules.currency.models import ExchangeRate  # noqa: F401
 from app.modules.investment.analysis.models import AnalysisRun  # noqa: F401
+from app.modules.investment.catalog.directory_models import (  # noqa: F401
+    ListingDirectoryEntry,
+)
 from app.modules.investment.catalog.models import Security  # noqa: F401
 from app.modules.investment.fundamentals.models import (  # noqa: F401
     FinancialStatement,
@@ -113,6 +118,11 @@ async def test_engine() -> AsyncIterator[None]:
     engine = create_async_engine(settings.test_database_url, future=True, poolclass=NullPool)
 
     async with engine.begin() as conn:
+        # `listing_directory` lleva un índice GIN con `gin_trgm_ops` y la
+        # búsqueda usa `similarity()`: sin la extensión, el `create_all` y las
+        # queries del directorio revientan. En prod la crea la migración; aquí
+        # el schema sale de `create_all`, así que se crea antes.
+        await conn.execute(sa_text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         await conn.run_sync(Base.metadata.create_all)
 
     try:
@@ -151,6 +161,36 @@ async def _offline_frankfurter(request) -> AsyncIterator[None]:  # type: ignore[
         side_effect=FrankfurterUnavailableError("suite offline"),
     ):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _empty_symbol_index(request) -> Iterator[None]:  # type: ignore[no-untyped-def]
+    """Deja el índice de emisores de la SEC VACÍO en toda la suite.
+
+    Mismo motivo que el bloqueo de tipos de cambio de arriba: un test no debe
+    depender de datos que no ha sembrado. El índice trae 10.365 emisores reales,
+    así que sin esto una aserción tan inocente como «buscar `mc` devuelve MCD»
+    empieza a recibir Moelis, McKesson y Metropolitan Bank — y se rompería con
+    cada actualización de `edgartools` por motivos ajenos al código que prueba.
+
+    Va aquí y no fichero a fichero porque el índice es un **singleton de
+    proceso**: basta con que un test lo cargue para que todos los posteriores lo
+    hereden, y entonces el resultado de la suite dependería del orden.
+
+    Quien necesite el índice de verdad se marca con `real_symbol_index`; quien
+    necesite filas concretas usa `symbol_index.set_index_for_tests`.
+    """
+    from app.modules.investment.catalog import symbol_index
+
+    if request.node.get_closest_marker("real_symbol_index"):
+        symbol_index.reset_index_for_tests()
+        yield
+        symbol_index.reset_index_for_tests()
+        return
+
+    symbol_index.set_index_for_tests(())
+    yield
+    symbol_index.reset_index_for_tests()
 
 
 @pytest_asyncio.fixture(autouse=True)

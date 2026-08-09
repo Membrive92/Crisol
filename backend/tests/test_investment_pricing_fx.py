@@ -306,7 +306,7 @@ async def test_no_se_conforma_con_una_tasa_dentro_de_la_ventana_de_fallback(
 
     asked: list[tuple[date, list[str]]] = []
 
-    async def fake_refresh(db, *, target_date, quotes, base="EUR"):  # type: ignore[no-untyped-def]
+    async def fake_refresh(db, *, target_date, quotes, base="EUR", timeout=None):  # type: ignore[no-untyped-def]
         asked.append((target_date, sorted(quotes)))
         return 0
 
@@ -331,7 +331,7 @@ async def test_no_pide_tasa_si_ya_esta_la_del_dia(
 
     called = False
 
-    async def fake_refresh(db, *, target_date, quotes, base="EUR"):  # type: ignore[no-untyped-def]
+    async def fake_refresh(db, *, target_date, quotes, base="EUR", timeout=None):  # type: ignore[no-untyped-def]
         nonlocal called
         called = True
         return 0
@@ -357,7 +357,7 @@ async def test_si_el_proveedor_de_tasas_cae_se_sigue_con_lo_que_haya(
     stale_day = datetime.now(UTC).date() - timedelta(days=2)
     await _seed_rate(test_engine, "USD", "1.25", stale_day)
 
-    async def boom(db, *, target_date, quotes, base="EUR"):  # type: ignore[no-untyped-def]
+    async def boom(db, *, target_date, quotes, base="EUR", timeout=None):  # type: ignore[no-untyped-def]
         raise FrankfurterUnavailableError("sin red")
 
     monkeypatch.setattr(

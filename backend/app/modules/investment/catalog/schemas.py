@@ -77,8 +77,12 @@ class SecurityResolveRequest(BaseModel):
 
 
 class SecuritySearchHit(BaseModel):
-    """Un resultado del buscador. `in_catalog=False` marca un hit externo aún
-    no resuelto (requiere un `POST /resolve` para crear el `Security`)."""
+    """Un resultado del buscador.
+
+    `in_catalog=False` marca una fila que todavía no es un `Security`: viene del
+    índice de la SEC y se materializa al adoptarla (`POST /adopt` con
+    `listing_key`).
+    """
 
     id: uuid.UUID | None
     ticker: str
@@ -87,11 +91,75 @@ class SecuritySearchHit(BaseModel):
     in_catalog: bool = True
     analysis_available: bool = False
 
+    listing_key: str = ""
+    """Clave opaca que el cliente devuelve al elegir la fila (PHASE-44.8 E2).
+
+    Existe para que el cliente deje de decidir el mercado: mandaba `'US'` —un
+    país— y eso duplicaba filas contra la restricción única `(ticker, exchange)`.
+    Con la clave, la plaza la vuelve a resolver el servidor."""
+
+    source: str = "catalog"
+    """`catalog` (ya en el catálogo), `sec_index` (índice de la SEC) o
+    `eu_directory` (directorio FIRDS UE/UK, PHASE-44.14)."""
+
+    cik: str | None = None
+    exchange_label: str = ""
+    """Etiqueta de la plaza para pintar (`Nasdaq`, no `NASDAQ`)."""
+
+    isin: str | None = None
+    """Identidad registral de las filas del directorio: no llevan ticker (FIRDS
+    no lo publica) y el ISIN es lo que las distingue en pantalla."""
+
+    currency: str | None = None
+    """Divisa registral (`NtnlCcy`) de las filas del directorio."""
+
+    analysis_reason: str | None = None
+    """Por qué NO se puede analizar, para decirlo antes del clic. `None` cuando
+    sí se puede."""
+
+
+class SecurityAdoptRequest(BaseModel):
+    """Materializa un resultado del buscador como `Security`.
+
+    Sólo viaja la clave: ni plaza, ni divisa, ni CIK. Lo que el cliente no manda
+    no lo puede inventar.
+
+    `ticker` es la ÚNICA excepción, y sólo para claves `ext:`: es el bypass
+    manual de la resolución ISIN→símbolo cuando el proveedor no reconoce el ISIN
+    (el servidor responde 422 `ticker_required` y el formulario lo pide). Sigue
+    sin decidir nada de identidad — la plaza, el nombre y la divisa vienen del
+    directorio, y el ticker se valida contra una cotización real antes de
+    persistir nada.
+    """
+
+    listing_key: str = Field(min_length=3, max_length=128)
+    ticker: str | None = Field(default=None, max_length=12)
+
 
 class SecuritySearchResponse(BaseModel):
     """Resultados del buscador estilo broker."""
 
     results: list[SecuritySearchHit]
     external_search_available: bool = False
-    """`False` hasta que exista un `PriceAdapter` con symbol-search (Finnhub).
-    Hasta entonces el buscador sólo mira el catálogo local."""
+    """`False` mientras no haya proveedor multi-mercado (Entrega 5 de
+    PHASE-44.8). Hasta entonces el buscador mira el catálogo y el índice de la
+    SEC, ambos locales."""
+
+    index_ready: bool = False
+    """Si el índice de la SEC está cargado y con filas.
+
+    Se publica porque cero resultados significan dos cosas distintas —«no hay
+    coincidencias» y «el índice no está disponible»— y la segunda no se puede
+    presentar como la primera."""
+
+    notice: str | None = None
+    """Aviso cuando el vacío mentiría: `NESN` no devuelve nada porque SIX no
+    reporta a FIRDS (frontera suiza), no porque Nestlé no exista."""
+
+    directory_seeded_at: datetime | None = None
+    """Fecha del último seed del directorio UE/UK, o `None` si está vacío.
+
+    Se publica porque cero resultados europeos con el directorio SIN SEMBRAR
+    significa «no se ha mirado», no «no cotiza en Europa» — y la pantalla no
+    puede presentar lo primero como lo segundo. Es el «directorio actualizado
+    el X» del plan E5 §2.6."""

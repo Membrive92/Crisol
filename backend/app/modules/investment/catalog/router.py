@@ -15,17 +15,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
-from app.modules.investment.catalog.capabilities import capabilities_for
+from app.modules.investment.catalog.listing_key import InvalidListingKeyError
 from app.modules.investment.catalog.schemas import (
+    SecurityAdoptRequest,
     SecurityResolveRequest,
     SecurityResponse,
-    SecuritySearchHit,
     SecuritySearchResponse,
 )
 from app.modules.investment.catalog.service import (
+    ExternalListingResolver,
+    adopt_listing,
+    get_listing_resolver,
     get_security,
     resolve_security,
-    search_securities,
+    search_layered,
 )
 from app.modules.investment.fundamentals.adapters.base import FundamentalsAdapter
 from app.modules.investment.fundamentals.adapters.edgar import (
@@ -46,36 +49,71 @@ FundAdapter = Annotated[FundamentalsAdapter, Depends(get_fundamentals_adapter)]
 async def search_endpoint(
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
-    q: Annotated[str, Query(min_length=1, max_length=64)],
+    q: Annotated[str, Query(min_length=2, max_length=64)],
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
 ) -> SecuritySearchResponse:
-    """Busca valores en el catálogo local por ticker o nombre.
+    """Busca valores por ticker o nombre, en local.
 
-    La búsqueda externa multi-mercado (symbol-search del `PriceAdapter`) requiere
-    Finnhub y aún no está activa: `external_search_available=false`. Hasta
-    entonces sólo se ven los valores ya resueltos en el catálogo.
+    Dos capas, ninguna con red (PHASE-44.8 E2): el catálogo del usuario y el
+    índice de los ~10.400 emisores que conoce la SEC. Antes sólo había la
+    primera, así que buscar por nombre sólo funcionaba si ya habías dado de alta
+    el valor — y `Macdonald` daba cero.
+
+    La capa multi-mercado externa (Entrega 5) sigue apagada:
+    `external_search_available=false`.
     """
-    rows = await search_securities(db, q=q, limit=limit)
+    found = await search_layered(db, q=q, limit=limit)
     return SecuritySearchResponse(
-        results=[
-            SecuritySearchHit(
-                id=s.id,
-                ticker=s.ticker,
-                exchange=s.exchange,
-                name=s.name,
-                in_catalog=True,
-                # La regla NO se reescribe aquí: sale de `capabilities_for`, que es
-                # su única implementación (PHASE-44.8 E1). Duplicarla fue lo que
-                # permitió que `cik is not None` conviviera en tres sitios diciendo
-                # algo falso.
-                analysis_available=capabilities_for(
-                    cik=s.cik, analysis_status=s.analysis_status
-                ).analysis_available,
-            )
-            for s in rows
-        ],
+        results=found.hits,
         external_search_available=False,
+        index_ready=found.index_ready,
+        notice=found.notice,
+        directory_seeded_at=found.directory_seeded_at,
     )
+
+
+@router.post("/adopt", response_model=SecurityResponse, status_code=201)
+async def adopt_endpoint(
+    body: SecurityAdoptRequest,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    adapter: FundAdapter,
+    resolver: Annotated[ExternalListingResolver, Depends(get_listing_resolver)],
+) -> SecurityResponse:
+    """Materializa un resultado del buscador como valor del catálogo.
+
+    El cliente devuelve la `listing_key` que le dio el buscador y el servidor la
+    vuelve a resolver. Es lo que impide que el cliente decida el mercado, que es
+    el defecto que abrió PHASE-44.8.
+
+    Para claves `ext:` (directorio FIRDS, PHASE-44.14) el alta es VALIDADA:
+    resolución ISIN→símbolo, cross-check sufijo↔plaza y una cotización real
+    antes de persistir. 422 con `code='ticker_required'` cuando el proveedor no
+    reconoce el ISIN — el cliente reintenta con `ticker`.
+
+    404 si la SEC no reconoce el ticker (o el listing dejó el directorio); 422
+    si la clave está mal formada; 503 si falta `EDGAR_IDENTITY`.
+    """
+    try:
+        security = await adopt_listing(
+            db,
+            listing_key=body.listing_key,
+            adapter=adapter,
+            resolver=resolver,
+            ticker=body.ticker,
+        )
+    except InvalidListingKeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    except EdgarIdentityMissingError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
+    except EdgarUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    await db.commit()
+    return SecurityResponse.model_validate(security)
 
 
 @router.post("/resolve", response_model=SecurityResponse, status_code=201)

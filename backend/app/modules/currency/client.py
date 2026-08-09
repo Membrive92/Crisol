@@ -41,6 +41,7 @@ async def fetch_rates(
     target_date: date,
     base: str = "EUR",
     quotes: Iterable[str],
+    timeout: float | None = None,
 ) -> dict[str, Decimal]:
     """Pide las tasas `base→quote` para una fecha concreta.
 
@@ -50,6 +51,12 @@ async def fetch_rates(
     publicada más cercana — devolvemos las tasas tal cual y dejamos al
     caller decidir si guardarlas para `target_date` o para la fecha
     devuelta. Frankfurter expone esa fecha en el campo `date`.
+
+    `timeout` en segundos; `None` usa `frankfurter_timeout_seconds`. Lo pasa
+    quien corre en background y puede permitirse esperar: una fecha histórica
+    tarda bastante más que la del día (13-17 s medidos frente a 9,3 s) y con el
+    default se queda sin traer nada. En el camino de request NO se sube — ahí
+    hay un usuario mirando la pantalla.
 
     Esta función no escribe en BD: es responsabilidad del caller
     (`service.refresh_rates`).
@@ -67,7 +74,7 @@ async def fetch_rates(
     try:
         async with httpx.AsyncClient(
             base_url=settings.frankfurter_base_url,
-            timeout=float(settings.frankfurter_timeout_seconds),
+            timeout=float(settings.frankfurter_timeout_seconds if timeout is None else timeout),
             follow_redirects=True,
         ) as client:
             response = await client.get(path, params=params)

@@ -110,6 +110,14 @@ _SUBUNIT_UNAMBIGUOUS: dict[str, tuple[str, Decimal]] = {
 _QUANTUM = Decimal("0.000001")
 
 
+def suffix_for_venue(venue: str) -> str | None:
+    """Sufijo Yahoo de una plaza, o `None` si no hay mapeo. Acceso PÚBLICO al
+    mapa para el cross-check del alta `ext:` (PHASE-44.14): el sufijo del
+    símbolo resuelto debe casar con el MIC elegido en el directorio, y la
+    comparación tiene que usar ESTE mapa — dos copias divergirían."""
+    return _SUFFIX_BY_VENUE.get(venue.strip().upper())
+
+
 def to_yahoo_symbol(ticker: str, exchange: str) -> str | None:
     """`(ticker, exchange)` → símbolo Yahoo, o `None` si la plaza no tiene mapeo.
 
@@ -265,3 +273,52 @@ class YFinanceAdapter:
             "previous_close": fast_info.previous_close,
             "currency": fast_info.currency,
         }
+
+
+# ── Comodidades del alta desde el directorio (PHASE-44.14, ADR-0010) ──
+#
+# La IDENTIDAD del alta `ext:` viene de FIRDS y no de aquí; estas dos funciones
+# son la comodidad y la red de seguridad: resolver el símbolo de pricing por
+# ISIN y comprobar que el símbolo elegido cotiza de verdad. Van en este fichero
+# porque es el ÚNICO que conoce yfinance, y son síncronas — el caller las saca
+# del event loop con `asyncio.to_thread`.
+
+
+def search_symbols_by_isin(isin: str) -> list[str]:
+    """Símbolos de EQUITY que Yahoo asocia a un ISIN, en su orden.
+
+    Verificado en el spike del 2026-08-07: 7 de 8 ISINs devuelven exactamente
+    un símbolo (`ES0148396007` → `ITX.MC`); Unilever devuelve cero tanto aquí
+    como en `Lookup`. Por eso el alta tiene bypass manual: una lista vacía NO es
+    un error, es «escribe el ticker a mano».
+
+    Captura `Exception` a propósito, como `_fetch_one`: la lista de lo que puede
+    lanzar un cliente no oficial no es enumerable, y aquí el fallo de red y el
+    «no lo conozco» degradan igual — al formulario manual.
+    """
+    import yfinance as yf
+
+    logging.getLogger("yfinance").setLevel(logging.CRITICAL)
+    try:
+        quotes = yf.Search(isin.strip().upper(), max_results=8).quotes
+    except Exception as exc:
+        logger.info("yfinance: búsqueda por ISIN falló (%s)", type(exc).__name__)
+        return []
+    symbols: list[str] = []
+    for quote in quotes:
+        if quote.get("quoteType") == "EQUITY":
+            symbol = str(quote.get("symbol") or "").strip().upper()
+            if symbol:
+                symbols.append(symbol)
+    return symbols
+
+
+def probe_symbol(symbol: str) -> Quote | QuoteError:
+    """Valida por cotización: ¿este símbolo existe y en qué divisa cotiza?
+
+    Es la «regla universal» del alta ext: (plan E5 §4.4): nada se persiste sin
+    haber visto una cotización real. Reutiliza `_fetch_one` — la misma
+    normalización de subunidades (GBp→GBP ÷100) que el refresco de cartera, no
+    una segunda copia que pueda divergir.
+    """
+    return YFinanceAdapter(throttle_seconds=0)._fetch_one(symbol.strip().upper())

@@ -370,6 +370,11 @@ async def test_un_adr_europeo_dice_que_publica_en_ifrs_no_que_no_publica(
     assert data["analysis_status"] == "non_gaap"
     assert data["analysis_available"] is False
     assert "IFRS" in data["analysis_reason"]
+    # Y la norma contable sale de esa MISMA evidencia, no de un literal. Con el
+    # `GAAP` fijo que había antes, el día que `ANNUAL_FORMS` admitiera 20-F
+    # estas cuentas se juzgarían con cortes US-GAAP sin que nada lo dijera:
+    # `IFRS` es lo que hace que sus umbrales nazcan `uncalibrated`.
+    assert data["accounting_std"] == "IFRS"
 
 
 async def test_la_evidencia_se_refresca_al_volver_a_resolver(client: AsyncClient) -> None:
@@ -401,6 +406,39 @@ async def test_la_evidencia_se_refresca_al_volver_a_resolver(client: AsyncClient
     assert segundo.json()["id"] == primero.json()["id"]  # sigue siendo la misma fila
     assert segundo.json()["analysis_status"] == "ok"
     assert segundo.json()["analysis_available"] is True
+
+
+async def test_la_norma_contable_viaja_con_la_evidencia(client: AsyncClient) -> None:
+    """Si la etiqueta no se refrescara con el veredicto, un emisor que empieza a
+    presentar 10-K se quedaría marcado IFRS para siempre — exactamente la
+    premisa caducada que derivarla viene a evitar."""
+    token = await _register(client, "cat-std@example.com")
+
+    _override_adapter(_SAN)
+    primero = await client.post(
+        "/investment/securities/resolve", json={"ticker": "SAN"}, headers=_auth(token)
+    )
+    assert primero.json()["accounting_std"] == "IFRS"
+
+    # El mismo emisor, ahora presentando 10-K.
+    _override_adapter(
+        SecurityIdentity(
+            ticker="SAN",
+            cik="0000891478",
+            name="Banco Santander, S.A.",
+            sic="6022",
+            is_financial=True,
+            annual_report_count=1,
+            foreign_annual_report_count=25,
+        )
+    )
+    segundo = await client.post(
+        "/investment/securities/resolve", json={"ticker": "SAN"}, headers=_auth(token)
+    )
+
+    assert segundo.json()["id"] == primero.json()["id"]
+    assert segundo.json()["analysis_status"] == "ok"
+    assert segundo.json()["accounting_std"] == "GAAP"
 
 
 async def test_un_recuento_fallido_no_pisa_el_veredicto_anterior(client: AsyncClient) -> None:

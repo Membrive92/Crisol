@@ -217,12 +217,16 @@ async def refresh_rates(
     target_date: date,
     quotes: Iterable[str],
     base: str = CANONICAL_BASE,
+    timeout: float | None = None,
 ) -> int:
     """Pide tasas a frankfurter para `target_date` y persiste en BD.
 
     Devuelve el número de filas insertadas/actualizadas. Si frankfurter
     falla, propaga la excepción correspondiente — el caller decide si
     es un error duro o un swallow silencioso (background task).
+
+    `timeout` se pasa tal cual al cliente (ver su docstring): `None` usa el del
+    camino de request; el cron pasa el suyo, más generoso.
     """
     base_norm = _normalize(base)
     quotes_norm = sorted({_normalize(q) for q in quotes if _normalize(q) != base_norm})
@@ -231,7 +235,7 @@ async def refresh_rates(
 
     try:
         fetched = await client.fetch_rates(
-            target_date=target_date, base=base_norm, quotes=quotes_norm
+            target_date=target_date, base=base_norm, quotes=quotes_norm, timeout=timeout
         )
     except (FrankfurterUnavailableError, FrankfurterInvalidResponseError):
         raise
@@ -272,6 +276,58 @@ async def missing_exact_rates(
     return missing
 
 
+async def ensure_exact_rates_for_dates(
+    db: AsyncSession,
+    dates: Iterable[date],
+    *,
+    base: str = CANONICAL_BASE,
+    quotes: Iterable[str] | None = None,
+    timeout: float | None = None,
+) -> int:
+    """Hermana ESTRICTA de `ensure_rates_for_dates`: exige tasa exacta.
+
+    La diferencia está en el canario, y es la que decide si se pide algo o no:
+    `ensure_rates_for_dates` da por buena cualquier tasa dentro de la ventana de
+    fallback de 14 días, así que **el día que se guarda una tasa deja de pedir
+    durante dos semanas**. Esa política es correcta para convertir movimientos
+    PASADOS —el último día hábil publicado *es* el dato bueno— y es un desastre
+    para quien refresca a diario: el cron nocturno (PHASE-11.1) llevaba desde
+    entonces sin traer nada, y por eso una compra del viernes 24-jul se valoró
+    con el tipo del 18.
+
+    Aquí se pide fecha a fecha lo que falte de forma exacta. Devuelve el número
+    de fechas para las que se hizo una petición.
+
+    Best-effort igual que su hermana: el BCE no publica fines de semana ni
+    festivos, así que "no hay tasa de hoy" un domingo es lo NORMAL y se traga.
+    Nótese que Frankfurter responde a una fecha no hábil con la última publicada
+    y la persistimos bajo la fecha PEDIDA — que es justo lo que hace que
+    `convert(at_date=domingo)` resuelva, porque la tasa de referencia del BCE
+    sigue vigente hasta la siguiente publicación.
+
+    Commitea por dentro, como `ensure_rates_for_dates` ([ADR-0009](../../../internal_docs/decisions/0009-single-fx-source-currency-transversal.md)):
+    no la llames en mitad de un upsert ajeno o confirmarás trabajo a medias.
+    """
+    base_norm = _normalize(base)
+    quote_list = tuple(quotes) if quotes is not None else COMMON_QUOTES
+
+    fetched = 0
+    for target in sorted(set(dates)):
+        missing = await missing_exact_rates(db, on=target, quotes=quote_list, base=base_norm)
+        if not missing:
+            continue
+        try:
+            await refresh_rates(
+                db, target_date=target, quotes=missing, base=base_norm, timeout=timeout
+            )
+            await db.commit()
+            fetched += 1
+        except (FrankfurterUnavailableError, FrankfurterInvalidResponseError):
+            await db.rollback()
+            continue
+    return fetched
+
+
 async def ensure_rates_for_dates(
     db: AsyncSession,
     dates: Iterable[date],
@@ -289,6 +345,12 @@ async def ensure_rates_for_dates(
     canónica dentro del rango exacto, o si hay una tasa anterior
     suficientemente cercana (la ventana de fallback del repository
     cubre el caso).
+
+    **Elige a conciencia entre ésta y `ensure_exact_rates_for_dates`**: esa
+    ventana de 14 días hace que ésta calle durante dos semanas tras un fetch.
+    Es lo que quieres al rellenar huecos de fechas PASADAS —evita 50
+    round-trips para 50 fechas— y NO lo que quieres para refrescar el día en
+    curso. Ahí va la estricta.
 
     Devuelve el número de fechas efectivamente fetcheadas (útil para
     métricas / logs futuros).

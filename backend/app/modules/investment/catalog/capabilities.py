@@ -31,6 +31,8 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass
 
+from app.modules.investment.enums import AccountingStd
+
 
 class AnalysisCapability(enum.StrEnum):
     """Si el motor fundamental puede correr sobre este valor."""
@@ -141,6 +143,32 @@ def capabilities_for(*, cik: str | None, analysis_status: str | None = None) -> 
     except ValueError:
         return CapabilitySet(analysis=AnalysisCapability.UNKNOWN, reason=_UNVERIFIED)
     return _STATUS_MAP[status]
+
+
+def accounting_std_from_status(analysis_status: str | None) -> AccountingStd:
+    """Norma contable que la EVIDENCIA respalda, no la que se supone.
+
+    `non_gaap` significa exactamente una cosa comprobada: este emisor no
+    presenta 10-K y sí presenta 20-F con taxonomía `ifrs-full` (SAN: 0 y 25).
+    Etiquetarlo `IFRS` no es cosmético — `thresholds/seed.py` siembra sus cortes
+    con `model_variant='uncalibrated'`, que es la declaración honesta de «estos
+    cutoffs son US-GAAP y aquí se aplican sin recalibrar».
+
+    **Por qué se deriva ahora y no antes.** Hasta PHASE-44.8 no había evidencia
+    que consultar, así que la alternativa a `GAAP` era adivinar. Y hasta
+    PHASE-44.9 los runs no persistían `thresholds_used`, así que mover la
+    etiqueta habría hecho irreproducibles los análisis viejos. Con las dos
+    piezas puestas, dejar el `GAAP` fijo pasó de ser prudencia a ser una mina:
+    el día que alguien admita `20-F` en `annual.ANNUAL_FORMS`, unas cuentas
+    IFRS se juzgarían con cortes US-GAAP **sin que nada lo dijera**.
+
+    Todo lo demás es `GAAP`: quien presenta 10-K lo hace en US-GAAP por
+    definición, y un valor sin CIK no llega hasta aquí (el alta `ext:` fija su
+    norma por separado).
+    """
+    if analysis_status == AnalysisStatus.NON_GAAP.value:
+        return AccountingStd.IFRS
+    return AccountingStd.GAAP
 
 
 def status_from_evidence(

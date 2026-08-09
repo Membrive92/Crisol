@@ -31,10 +31,20 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+import app.main  # noqa: F401  (ver nota)
 from app.core.config import settings
 from app.modules.currency import service as currency_service
 from app.modules.investment.catalog.models import Security
 from app.modules.investment.portfolio.models import Lot, Sale
+
+# El import de `app.main` es por EFECTO LATERAL: registra todos los modelos en
+# el metadata de SQLAlchemy. `inv_lots` tiene FK a `accounts` y a `users`, y sin
+# esas tablas registradas el flush del `--apply` revienta con
+# `NoReferencedTableError`. El dry-run no lo destapaba —hace un SELECT con el
+# join explícito, que no necesita resolver la FK— así que este script se había
+# probado sólo por la mitad. Se importa la app entera y no la lista de modelos
+# porque esa lista ya está duplicada en `alembic/env.py` y `tests/conftest.py`;
+# una tercera copia es una más que mantener sincronizada.
 
 _ONE = Decimal(1)
 
@@ -65,14 +75,17 @@ async def _run(apply: bool) -> int:
                     at_date=row.trade_date,
                 )
                 if result.fallback == "missing":
+                    # Sin flechas Unicode a propósito: la consola de Windows usa
+                    # cp1252 por defecto y un `→` aborta el script con
+                    # UnicodeEncodeError justo al imprimir el informe.
                     print(
                         f"  ! {label} {ticker} {row.trade_date}: sin tasa "
-                        f"{currency}→{currency_service.CANONICAL_BASE}, se deja en 1"
+                        f"{currency}->{currency_service.CANONICAL_BASE}, se deja en 1"
                     )
                     skipped += 1
                     continue
                 print(
-                    f"  {label} {ticker} {row.trade_date}: 1 → {result.rate} "
+                    f"  {label} {ticker} {row.trade_date}: 1 -> {result.rate} "
                     f"(tasa de {result.rate_date}, {result.fallback})"
                 )
                 if apply:
