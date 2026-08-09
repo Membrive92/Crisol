@@ -1268,6 +1268,126 @@ de móvil, casteado con `as unknown as AnalysisRun`, llevaba una forma
 **imposible** (señales presentes y contadores ausentes): un cast apaga la única
 comprobación que tenías.
 
+### [PHASE-44.17] Un gate que compara NOMBRES no ve un cambio de SIGNIFICADO — y el que más falta hace es el que nunca ha fallado
+**Error:** Al subir el motor a 1.4.0 por un cambio de contrato —`MetricStatus`
+gana `not_applicable`, un estado con reglas propias— la huella de
+`ENGINE_SHAPE_FINGERPRINTS` salió **idéntica** a la de 1.3.0. O sea que el gate
+que existe desde PHASE-44.9 para «impedir tocar el motor en silencio» no habría
+exigido el bump: la fase entera dependía de que alguien se acordara.
+**Causa:** la huella enumera `fields()` de cada dataclass y las claves de métrica
+y bandera. El DOMINIO de un alias `Literal` no es un campo, así que añadirle un
+valor —o quitárselo— no mueve el hash. El gate medía la forma de los
+contenedores, no la de los valores que pueden contener.
+**Solución:** la huella incluye ahora los dominios de los `Literal` que el engine
+publica, indexados por NOMBRE y no por módulo (`MetricStatus` se importa en media
+docena de sitios y clavarle el módulo haría que mover un import cambiara el
+hash). Probado rompiéndolo: añadir un valor a `Band` lo tumba.
+**Regla:** cuando escribas un gate que «congela un contrato», enumera qué partes
+del contrato mira y cuáles NO — y escríbelo al lado. Un gate que nunca ha fallado
+no está demostrando que el contrato es estable: puede estar mirando a otro lado.
+Corolario de método: la ocasión de descubrirlo es justo cuando el gate te da
+verde en un cambio que tú sabes que es incompatible; si eso pasa, el bug está en
+el gate. Hermana de [PHASE-43] «un linter no sustituye a un detector de
+alcanzabilidad: son ejes ortogonales».
+
+### [PHASE-44.17] Una regla que ABORTA y una que se comprueba y no salta producen la misma ausencia — y el default decide cuál se cree
+**Error:** La síntesis preguntaba «¿hay bandera con esta clave?» y traducía el no
+a **«no se ha encendido»**, que se lee como *comprobado y limpio*. Pero el cruce
+C3 (inventario vs coste de ventas) hace `continue` en cuanto falta un dato: sin
+coste de ventas **no se ejecuta ni un año**, no emite bandera, y salía como
+limpio. Ocho señales de las cuatro preguntas estaban así.
+**Causa:** una `Flag` sólo existe cuando salta, así que el modelo tenía dos
+estados para tres situaciones. Con dos estados, el tercero se cuela en el que
+tenga el default — y el default era el optimista.
+**Solución:** las reglas publican su evaluación (`FlagEvaluation`: encendida ·
+comprobada y limpia · no se pudo · no aplica aquí) y el default pasa a ser el
+PESIMISTA: sin evaluación, «no se ha podido comprobar». Con un matiz que la
+crítica adversarial marcó como bloqueante y tenía razón: **el default pesimista
+sin gate de cobertura cambia un falso verde por un falso gris universal**, así
+que va acompañado de un test que exige que toda clave usada tenga evaluación
+publicada, más uno estático que prohíbe colar una clave escrita a mano.
+**Regla:** cuando un modelo tenga menos estados que la realidad, el que falta se
+esconde en el que tenga el default — así que elige el default por lo que pasa
+cuando te equivocas, no por lo que pasa cuando aciertas. Y un default pesimista
+sólo es honesto **con un gate de cobertura**: sin él, el gris se vuelve universal
+y tan poco informativo como el verde que sustituye. Corolario aritmético del
+mismo arreglo: «hay suficientes años para comprobarlo» no es un cardinal si la
+regla exige una racha — con años evaluables {2016, 2018, 2020} y «dos seguidos»,
+la regla no puede encenderse JAMÁS, y decir «limpia» ahí afirma una comprobación
+imposible.
+
+### [PHASE-44.21] Una decisión razonada sin test se revierte sola, y el que la revierte eres tú mismo
+**Error:** Al escribir la whitelist de métricas que no aplican a una financiera
+apagué **S8** (qué parte de la deuda vence a menos de un año) por inercia — iba
+en el bloque de liquidez y la liquidez bancaria no es comparable. El documento de
+calibración no la lista, y la razón estaba escrita desde PHASE-44.10.
+**Causa:** una lista larga escrita de una sentada arrastra elementos por
+proximidad temática. La justificación de cada uno era buena; la de S8 no existía,
+y nada en la lista lo distinguía.
+**Solución:** lo cazó un test de PHASE-44.10 —`test_la_calidad_de_la_deuda_si_aplica_en_financieras`—
+que afirmaba lo contrario CON su motivo en el docstring: *«eso significa lo mismo
+en un banco que en una fábrica»*. Falló, y la desviación se revirtió en un minuto.
+**Regla:** cuando tomes una decisión de producto razonada —esta métrica no aplica
+aquí, esta exención sí—, **escribe el test que la afirma con su motivo dentro**.
+No es cobertura: es la única forma de que la razón sobreviva a quien la escribió,
+porque el que la va a contradecir dentro de seis meses puede ser el mismo que la
+tomó, y no se acordará. Es el mecanismo que faltaba en [PHASE-43] «una premisa
+escrita a mano caduca en silencio»: un comentario no se recalcula, un test sí.
+
+### [PHASE-44.21] Un sembrado sólo-inserción tiene un defecto simétrico: llega a las bases nuevas y nunca a la que se usa
+**Error (evitado):** PHASE-44.18 hizo el arranque sólo-inserción para no
+reescribir umbrales bajo los pies de un run ya guardado, y era correcto entonces.
+Aplicar la calibración sectorial con esa misma regla habría producido el defecto
+inverso: las bandas nuevas llegarían a cualquier base recién creada —y a CI, que
+crea una— y **nunca** a la del usuario, que lleva meses con las filas viejas. Los
+tests habrían pasado enteros.
+**Causa:** una regla defensiva escrita contra un riesgo concreto se conserva
+después de que el riesgo desaparezca. El de 44.18 era que un run viejo dejara de
+poder explicarse; PHASE-44.9 ya lo había resuelto persistiendo `thresholds_used`
+en cada run, así que la defensa protegía de algo que ya no podía pasar.
+**Solución:** el arranque vuelve a converger (inserta lo que falta, reescribe
+sólo lo que difiere, cero escrituras en régimen estacionario) y un test comprueba
+las DOS direcciones: que una métrica nueva entre en una tabla con historia, y que
+una recalibración llegue a una fila que ya existía.
+**Regla:** al conservar una regla defensiva, comprueba si el riesgo que la
+motivó sigue vivo — y si no, quítala, porque una defensa obsoleta no es neutra:
+bloquea el camino que ahora sí hace falta. Y cuando una operación de
+sincronización pueda fallar en dos direcciones (falta / difiere), el test tiene
+que caer a los dos lados: con fixtures que siempre parten de una base limpia, el
+lado «difiere» no se ejecuta nunca. Hermana de [PHASE-44.14] «un test que sólo
+verifica que el guardarraíl salta no prueba lo que el guardarraíl protege».
+
+### [dev-tooling] Redirigir la stderr de un ejecutable nativo en PowerShell 5.1 lo convierte en un error TERMINANTE — callarlo es lo que lo vuelve fatal
+**Error:** `.\dev.ps1 -Stop` abortaba a mitad: mataba el backend y moría antes de
+parar la web y los contenedores, dejando el entorno en un estado intermedio que
+nadie había pedido. El mensaje era `taskkill : ERROR: no se encontró el proceso
+"46376"`.
+**Causa:** dos cosas correctas que juntas fallan. `Stop-PortHolder` mata el árbol
+con `taskkill /T` —lo que ya se lleva a los hijos— y después recorre la lista de
+hijos que había capturado ANTES para rematarlos uno a uno; que `taskkill` no los
+encuentre es el caso **normal**. Y en PowerShell 5.1, cuando se REDIRIGE la
+stderr de un ejecutable nativo (`2>$null`, `2>&1`), cada línea se envuelve en un
+`ErrorRecord`: con `$ErrorActionPreference = 'Stop'` en la cabecera del script,
+el primero termina la ejecución. La ironía es exacta: **sin la redirección, esa
+misma stderr habría ido a la consola y no habría pasado nada**. Redirigir para
+«no hacer ruido» es lo que lo volvió mortal.
+**Alcance:** los tres sitios que redirigían estaban en caminos de «algo va mal»
+—parar procesos, Docker caído (`docker info 2>$null`), contenedor que aún no
+existe (`docker inspect 2>$null`)—, es decir, justo donde el manejo amable
+existía para dar un mensaje claro y donde en su lugar se caía. Los `docker
+compose up/down`, que NO redirigen, funcionaban perfectamente.
+**Solución:** un `Invoke-Quiet` que ejecuta el bloque con
+`$ErrorActionPreference = 'Continue'` local (y lo restaura en `finally`),
+devuelve stdout y deja el código de salida en `$script:QuietExit`.
+**Regla:** en PowerShell, `$ErrorActionPreference = 'Stop'` y la stderr de un
+nativo no se llevan bien, y el punto de fallo NO es donde el comando falla sino
+donde escribes `2>`. Si silencias la stderr de un ejecutable, hazlo en un ámbito
+con `Continue`. Y desconfía especialmente de los caminos de error: son los que
+menos se ejecutan, los que más redirigen «para no ensuciar» y, por eso mismo,
+donde este fallo se esconde hasta el día que hace falta. Hermana de [PHASE-44.15]
+«`cmd | tail` rompe el `&&`»: en las dos, la fontanería que rodea al comando
+cambia el resultado de una forma que el comando no puede ver.
+
 ---
 
 ## Ejemplos de referencia (no son lecciones reales)

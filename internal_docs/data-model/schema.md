@@ -58,6 +58,7 @@
 | `d7t03v5sq7u6t2` | 39   | `transactions.statement_balance` (NUMERIC(14,2) NULL) + `accounts.anchored_statement_balance` (NUMERIC(14,2) NULL) — saldo del extracto por movimiento + ancla persistida del saldo real. |
 | `d4e15f9a3b7c62` | 44.9 | `analysis_runs.thresholds_used` (JSONB NOT NULL DEFAULT `'{}'`) — los cortes EFECTIVOS del run. Aditiva y reversible. |
 | `f2b84a6c1d9e73` | 44.14 | `listing_directory` (GLOBAL, PK `(isin, mic)`) + extensión `pg_trgm` + índice GIN sobre `name` — el directorio oficial UE/UK de FIRDS. Aditiva y reversible (el downgrade tira la tabla; la extensión se queda, porque desinstalarla en un downgrade parcial rompería a quien la use). |
+| `g3c95b7d2e8f41` | 44.21 | `scoring_thresholds.not_applicable_reason` (`TEXT NULL`). Aditiva y reversible. **Sin backfill**: las filas existentes quedan en `NULL` hasta que la sincronización del arranque las reescriba desde la calibración del engine — inventar aquí una razón para ~1.500 filas sería escribir a mano lo que el motor deriva. |
 
 > **Deuda documental**: las 14 tablas del módulo Inversión (13 de PHASE-44.1 más
 > `listing_directory` de 44.14) y las migraciones intermedias entre
@@ -73,9 +74,10 @@
 ### `analysis_runs.thresholds_used` (PHASE-44.9)
 
 Por qué una columna y no una referencia a `scoring_thresholds`: esa tabla tiene
-la unique `(sector, accounting_std, metric_key)` **sin versión ni vigencia** y el
-seed **muta la fila existente in situ**, así que la calibración con la que se
-juzgó un run pasado desaparece al resembrar. `thresholds_version` es un SHA-256:
+la unique `(sector, accounting_std, metric_key)` **sin versión ni vigencia** y la
+sincronización **reescribe la fila existente in situ** cuando la calibración
+cambia (PHASE-44.21), así que la vara con la que se juzgó un run pasado
+desaparecería sin esta copia. Es justo lo que hace segura esa reescritura. `thresholds_version` es un SHA-256:
 sirve para DETECTAR que dos runs se midieron distinto, nunca para reconstruir
 cómo. Sin esta columna, la pantalla no puede decir «6,8× frente a un mínimo de
 6». Va en columna propia y no dentro de `verdict` porque son dos cosas
@@ -471,7 +473,7 @@ cartera y sus análisis.
 | `listing_directory` | GLOBAL | `(isin, mic)` | — | Directorio oficial UE/UK de FIRDS (ESMA + FCA). Índice GIN trigram sobre `name`. [ADR-0010](../decisions/0010-identity-official-registers.md). |
 | `financial_statements` | GLOBAL | `id` | `securities` | Las 49 partidas canónicas por ejercicio, más `raw_source_ref` (trazas de mapeo, procedencia y banderas de calidad). |
 | `restatement_flags` | GLOBAL | `id` | `securities` | Reexpresiones detectadas entre filings del mismo ejercicio. |
-| `scoring_thresholds` | GLOBAL | `id` | — | Cortes por `(sector, accounting_std, metric_key)`. `model_variant='uncalibrated'` para IFRS/PGC. |
+| `scoring_thresholds` | GLOBAL | `id` | — | Cortes por `(sector, accounting_std, metric_key)`. `model_variant='uncalibrated'` para IFRS/PGC y `'bank_capital_proxy'` para S3 en financieras. `not_applicable_reason` (PHASE-44.21) dice **por qué** una vara no aplica —«el EBITDA carece de sentido en banca»—: sin ella, un número gris se lee como «no se ha podido calcular» y el diagnóstico se va a las cuentas de la empresa. La tabla REFLEJA la calibración del engine (`analysis/engine/sector_profiles.py`), que es quien la posee: si viviera sólo aquí, una fila que nadie sembró juzgaría a un banco con cortes industriales. |
 | `price_quotes` | GLOBAL | `id` | `securities` | Última cotización con su divisa **del proveedor** (no la del catálogo) y su `as_of`. |
 | `ingestion_jobs` | SCOPED | `id` | `securities`, `users` | Job de descarga EDGAR, con estado y error legible. |
 | `analysis_runs` | SCOPED | `id` | `securities`, `users` | Un run del motor: scores, veredicto, banderas, `engine_version`, `thresholds_version` y `thresholds_used`. Inmutable. |

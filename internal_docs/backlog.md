@@ -18,6 +18,13 @@
 >   el commit).
 > - 2026-07-24: alta de **UI-2026-07-24 — auditoría responsive** (aplicada, sin
 >   commitear, pendiente de validación visual).
+> - 2026-08-09 (2): entran los tres charts del informe web (PHASE-44.22) y se
+>   borran las dos entradas de «informe sin charts».
+> - 2026-08-09: se borran seis entradas resueltas (knip en CI + `scripts/` en
+>   ruff/black/mypy, refresco del sector al re-resolver, docstring de
+>   `classify_sic`, test de la tabla de cartera, date-picker del alta móvil,
+>   auto-scroll del combobox y el motivo por celda en móvil). Traza en
+>   `phases/phase-44.17-honest-absences.md` y `phase-44.21-sector-calibration.md`.
 > - 2026-08-01: puesta al día del bloque de Inversión con PHASE-44.8 y
 >   PHASE-44.9. **Dos entradas de 44.7 habían caducado en silencio** (decían que
 >   no había tests de componente FE y que el informe era «veredicto + tablas»);
@@ -236,19 +243,19 @@ Playbook paso a paso en
 - **[PHASE-44.7] `spinoff` y `return_of_capital`**: se registran pero aplicarlas
   devuelve 400. El modelo `CorporateAction` (un `ratio` escalar) no expresa el
   security destino ni la fracción de base; exige ampliar el modelo + migración.
-- **[PHASE-44.9] Informe sin charts**: el informe ya tiene siete pestañas con
-  los estados financieros, las matrices de métricas multi-año, los desgloses
-  forenses y el dictamen auditable — pero **todo en tablas**. Siguen diferidos
-  los gráficos: evolución common-size, escenarios de stress y heatmap de Δ%.
-- **[PHASE-44.9] Sin charts en ninguna de las dos pantallas.** Es lo único
-  grande que sigue siendo «todo en tablas»: evolución common-size, escenarios de
-  stress y heatmap de Δ%.
+- **[PHASE-44.22] Los tres charts existen en WEB, no en móvil.** El heatmap de
+  Δ%, la deriva common-size y el dumbbell de stress están en el informe web;
+  móvil sigue con las tablas. El heatmap y el dumbbell son SVG/rejilla y se
+  portan sin librería (la escala divergente ya vive en `packages/ui`); la deriva
+  usa Recharts, que en RN sería `react-native-gifted-charts` — otra
+  implementación, no un port.
+- **[PHASE-44.22] Los seis charts anteriores llevan la rejilla discontinua.**
+  Los nuevos la estrenan sólida (una discontinua se lee como umbral cuando sólo
+  es una guía). Alinear los de Análisis y Deuda es una pasada cosmética aparte.
 - **[PHASE-44.13] La pestaña del informe de móvil vive en estado local**, no en
   la URL. Expo Router no tiene aquí el query param de la web y forzarlo obligaría
   a una ruta por pestaña. Las CLAVES sí son las mismas (`veredicto`, `estados`…,
   en `REPORT_TABS`), así que habilitar enlaces profundos no exige renombrar nada.
-- **[PHASE-44.9] La tabla de cartera sigue sin test de componente.** El informe
-  sí tiene, en web y en móvil.
 - **[PHASE-44.7] Reconciliación con el patrimonio (ARCH §9, fase 40.9)**: decidido
   dejar Inversión como espacio SEPARADO (no entra en el patrimonio neto del
   Dashboard) y eximir `/investments` del `AccountsGuard`. Integrarlo exige decidir
@@ -264,12 +271,6 @@ Playbook paso a paso en
 
 ### Deuda del buscador (fase 44.8)
 
-- **[PHASE-44.15] El combobox no hace auto-scroll de la opción activa.** Con el
-  `limit=20` del buscador la lista es corta y no se ha visto necesario; con
-  listas largas la opción activa podría quedar fuera de vista.
-- **[PHASE-44.15] El alta de compra en móvil pide la fecha como texto**
-  (`AAAA-MM-DD`, con validación) en vez del date-picker nativo que Finanzas
-  Domésticas ya usa desde PHASE-14.3. Reutilizarlo es barato.
 - **[PHASE-44.14] Suiza es frontera documentada**: SIX no reporta ni a ESMA ni
   a la FCA, así que Nestlé, Roche y Novartis sólo entran por alta manual o por
   su ADR estadounidense. Si algún día pesa, SIX publica listados propios y
@@ -299,23 +300,74 @@ Playbook paso a paso en
   Tienen `thresholds_used = {}` y `signals = []`: se ejecutaron antes de que el
   motor los publicara. La pantalla lo declara y basta con reejecutar el análisis;
   no se inventa la calibración retroactivamente.
-- **[PHASE-44.10] `S7` está calibrada sólo para negocios con activo tangible.**
-  La banda 1-2 del cuaderno sale de que el pasivo financie entre la mitad y dos
-  tercios del activo. En financieras se siembra `applies=False` (el número se ve,
-  sin semáforo), pero en **intensivas en intangibles** —software, farmacia— el
-  rango también se queda corto y ahí sí se aplica. La solución real es calibrar
-  por sector: son filas de `scoring_thresholds`, no código.
+- **[PHASE-44.10 · sin evidencia que lo sostenga] `S7` en intensivas en
+  intangibles.** La banda 1-2 es **del cuaderno del usuario**, no del motor, y la
+  advertencia de que «en software y farmacia el rango se queda corto» venía de
+  esa misma nota, sin ningún caso detrás. Comprobado contra la BD real
+  (2026-08-09): **JNJ sale 1,44 · 1,44 · 1,52 · 1,44 — verde, dentro de banda los
+  cinco ejercicios**, y MCD ni llega a bandearse porque su patrimonio es negativo
+  y S7 exige denominador positivo (la guarda ya está puesta, igual que en R5).
+
+  O sea que la premisa no muerde en nada del catálogo. **No se le pone delta**:
+  mover una banda del cuaderno sin un solo caso que lo pida exige un ADR y no
+  habría qué escribir en él. Se reabre con la primera empresa de software con
+  intangibles pesados. La calibración sectorial (PHASE-44.21) ya tiene el sitio
+  preparado (`sector_profiles.SECTOR_PROFILES`) el día que haya un número.
+
+### Deuda de la calibración sectorial (fase 44.21)
+
+- **[PHASE-44.21] El SIC no se persiste**, así que reclasificar un valor exige
+  volver a preguntárselo a EDGAR (`scripts/reclassify_securities.py`). Es
+  suficiente para un catálogo de cuatro valores y la cache del adapter absorbe
+  las repeticiones; persistirlo lo convertiría en un recálculo local, pero es una
+  columna más para un problema que hoy no aprieta.
+- **[PHASE-44.21] Un valor europeo no tiene SIC**, así que el alta `ext:` llama
+  a `sic_to_sector(None)` → `UNKNOWN` → perfil genérico siempre. Inocuo mientras
+  sin CIK no haya análisis; el día que entre un adapter europeo, Iberdrola sería
+  genérica en vez de utility.
+- **[PHASE-44.21] La calibración es v1: anclas editoriales, no un backtest.**
+  Y es casi toda **latente** — sin ninguna financiera ni ninguna eléctrica en el
+  catálogo, la parte más trabajada (la whitelist bancaria, 33 métricas apagadas)
+  no se ejercita fuera de los goldens sintéticos. La revisión con runs reales
+  sigue pendiente, con la regla anti-tuning delante.
+- **[PHASE-44.17] Sólo publican evaluación las 8 banderas que la síntesis usa
+  como señal.** C4-C8 no la publican: no hace falta hoy y el gate sólo exige las
+  usadas, pero si alguna pasa a ser señal habrá que acordarse — el gate lo dirá.
 
 ### Calibración del engine (necesita empresas reales ingeridas)
 
-- **[PHASE-44.3] Calibrar el corte de C2 ("beneficio sin caja")**. La regla
-  del DESIGN §5 dice "NI crece y CFO plano/cae" sin definir **qué es plano**.
-  Se implementó el criterio estricto (crecimiento de CFO ≤ 0) para no generar
-  falsos positivos, con el efecto de que un CFO creciendo un 1% frente a un
-  resultado neto creciendo un 30% **no dispara** la bandera — que es
-  exactamente el patrón que la regla quiere cazar. Decidir el umbral real
-  (¿diferencia de crecimientos > N pp?) cuando haya empresas reales ingeridas
-  contra las que medir el ruido. Mismo tipo de calibración que pide C6.
+- **[PHASE-44.3] Calibrar el corte de C2 ("beneficio sin caja")**. La regla del
+  DESIGN §5 dice "NI crece y CFO plano/cae" sin definir **qué es plano**. Se
+  implementó el criterio estricto (crecimiento de CFO ≤ 0) para no generar falsos
+  positivos, con el efecto de que un CFO creciendo un 1% frente a un resultado
+  neto creciendo un 90% **no dispara** — que es exactamente el patrón que la
+  regla quiere cazar.
+
+  **Medido en la BD real (2026-08-09), el primer caso concreto en cinco fases**:
+
+  | JNJ | Beneficio | Flujo de explotación |
+  |---|---|---|
+  | 2023 | **+95,9%** | +7,5% |
+  | 2024 | −60,0% | +6,5% |
+  | 2025 | **+90,6%** | +1,1% |
+
+  2023 y 2025 son el patrón, y la regla calla. Pero el contraargumento vive en la
+  misma tabla: esos vaivenes son **cargos extraordinarios** (litigios del talco)
+  que hunden un ejercicio y hacen que el siguiente parezca un cohete, no un
+  beneficio que se escapa de la caja.
+
+  Lo que inclina la balanza: con un corte por diferencia de crecimientos de 15 pp
+  **y la exigencia de dos años seguidos**, en estos datos no saltaría nada — 2023
+  y 2025 no son consecutivos y 2024 no crece. La racha ya filtra el ruido de los
+  extraordinarios, así que el corte por diferencia no sería tan ruidoso como se
+  temía. **Sigue haciendo falta más de una empresa** para distinguir «el corte es
+  bueno» de «no hay casos». Mismo tipo de calibración que pide C6.
+- **[PHASE-44.3] C6 (dilución) está DORMIDA en el catálogo actual.** La regla
+  exige que las acciones CREZCAN más de un 2% sin recompras; las dos empresas
+  ingeridas recompran (JNJ −3,5% y −5,0%; MCD ≈ −1,2% cada año), así que no puede
+  dispararse ni por acierto ni por error. Calibrar el 2% exige una empresa que
+  EMITA — una tecnológica joven, una biotecnológica—, y hasta entonces cualquier
+  ajuste sería a ciegas.
 - **[PHASE-44.3] C5 no distingue "sin compras" de "sin dato"**. Si
   `acquisitions` es un hueco, la regla se salta el año en vez de afirmar que
   el fondo de comercio apareció solo. Con la política de imputación del §4.5
@@ -426,6 +478,11 @@ Playbook paso a paso en
 - **[PHASE-1.1]** JWT secret de tests es corto — produce
   `InsecureKeyLengthWarning`. Producción usa ≥32 bytes (irrelevante
   pero ruido en logs de pytest).
+- **[PHASE-43] CI no ejecuta `make verify` como tal.** `knip`, `ruff`, `black`,
+  `mypy`, los tests y `check_docs.py` sí corren (cada uno como su propio paso),
+  pero un gate nuevo que se cablee ÚNICAMENTE al Makefile seguirá sin correr en
+  un push. La regla práctica, ya aplicada en 44.17 y 44.21: los detectores viven
+  en `pytest` o en `vitest`, no en el Makefile.
 
 ---
 
