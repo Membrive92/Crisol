@@ -95,6 +95,42 @@ $VenvPython = Join-Path $RepoRoot 'backend\.venv\Scripts\python.exe'
 # Salida
 # ─────────────────────────────────────────────────────────────────────────
 
+function Invoke-Quiet {
+    <#
+    .SYNOPSIS
+        Ejecuta un comando nativo silenciando su stderr, sin abortar el script.
+    .DESCRIPTION
+        En PowerShell 5.1, si se REDIRIGE la stderr de un ejecutable nativo
+        (`2>$null`, `2>&1`), cada línea se envuelve en un `ErrorRecord`. Con
+        `$ErrorActionPreference = 'Stop'` —que este script activa arriba— el
+        primero de esos registros **termina el script**, aunque el comando haya
+        hecho su trabajo. La trampa es que redirigir para «no hacer ruido» es
+        justo lo que lo vuelve fatal: sin redirección, la misma stderr va a la
+        consola y no pasa nada.
+
+        Mordió de verdad al parar el entorno: `taskkill /T` mata el árbol, así
+        que cuando el bucle siguiente intentaba matar a los hijos uno a uno,
+        `taskkill` escribía «no se encontró el proceso» —el caso NORMAL— y el
+        script moría ahí, dejando la web viva y los contenedores en pie.
+
+        Los tres sitios que redirigían están en caminos de «algo va mal»
+        (parar procesos, Docker caído, contenedor inexistente): justo donde el
+        manejo amable existía para dar un mensaje, y donde en su lugar se caía.
+    .OUTPUTS
+        Las líneas de stdout. El código de salida queda en `$script:QuietExit`.
+    #>
+    param([scriptblock]$Command)
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & $Command 2>$null
+        $script:QuietExit = $LASTEXITCODE
+        return $output
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
 function Write-Step  { param([string]$m) Write-Host "`n=> $m" -ForegroundColor Cyan }
 function Write-Ok    { param([string]$m) Write-Host "   OK  $m" -ForegroundColor Green }
 function Write-Warn2 { param([string]$m) Write-Host "   !   $m" -ForegroundColor Yellow }
@@ -324,11 +360,14 @@ function Stop-PortHolder {
 
     if ($owner.Alive) {
         # /T mata también los descendientes; /F sin contemplaciones.
-        taskkill /PID $owner.Pid /T /F 2>$null | Out-Null
+        Invoke-Quiet { taskkill /PID $owner.Pid /T /F } | Out-Null
     }
+    # Los hijos ya suelen estar muertos por el /T de arriba: aquí se recogen los
+    # que quedaron colgando de un dueño que ya no existe. Que `taskkill` no los
+    # encuentre es lo ESPERADO, no un fallo — por eso va por `Invoke-Quiet`.
     foreach ($child in $children) {
         if (Get-Process -Id $child.ProcessId -ErrorAction SilentlyContinue) {
-            taskkill /PID $child.ProcessId /T /F 2>$null | Out-Null
+            Invoke-Quiet { taskkill /PID $child.ProcessId /T /F } | Out-Null
         }
     }
 
@@ -395,8 +434,12 @@ function Wait-ForContainerHealth {
     param([string]$Container, [int]$TimeoutSeconds = 90)
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
-        $status = docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' $Container 2>$null
-        if ($LASTEXITCODE -eq 0) {
+        # Mientras el contenedor no existe todavía, `docker inspect` escribe en
+        # stderr — que es el caso normal en los primeros segundos, no un fallo.
+        $status = Invoke-Quiet {
+            docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' $Container
+        }
+        if ($script:QuietExit -eq 0) {
             if ($status -eq 'healthy') { return $true }
             # Un contenedor sin healthcheck definido (Ollama) no se puede
             # esperar así: se da por bueno en cuanto existe.
@@ -487,8 +530,8 @@ if (-not (Test-Path (Join-Path $RepoRoot 'node_modules'))) {
 }
 Write-Ok 'Dependencias de Node instaladas.'
 
-docker info 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) {
+Invoke-Quiet { docker info } | Out-Null
+if ($script:QuietExit -ne 0) {
     Write-Err 'Docker no responde. ¿Está Docker Desktop arrancado?'
     return
 }
