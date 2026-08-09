@@ -226,6 +226,8 @@ export type {
   ScoreBreakdown,
   SectorInternal,
   Security,
+  SecurityAdoptRequest,
+  TickerRequiredDetail,
   SecuritySearchHit,
   SecuritySearchResponse,
   SecurityType,

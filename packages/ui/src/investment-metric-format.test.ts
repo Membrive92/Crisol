@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { MetricDefinition } from '@crisol/types';
 
-import { formatMetricValue, formatThreshold } from './metric-format';
+import { formatMetricValue, formatThreshold } from './investment-metric-format';
 
 /**
  * El bug que este módulo cierra: hasta PHASE-44.9 había UN solo formateador que

@@ -10,6 +10,7 @@ import type {
   RunAnalysisRequest,
   SaleCreateRequest,
   Security,
+  SecurityAdoptRequest,
   SecurityResolveRequest,
 } from '@crisol/types';
 
@@ -59,6 +60,21 @@ export function useResolveSecurity() {
   const qc = useQueryClient();
   return useMutation<Security, Error, SecurityResolveRequest>({
     mutationFn: (body) => investmentApi.resolveSecurity(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.investment.all }),
+  });
+}
+
+/**
+ * Materializa un resultado del buscador (PHASE-44.8 E2).
+ *
+ * Sustituye a `useResolveSecurity` cuando se elige una fila del desplegable: la
+ * `listing_key` lleva la plaza que el índice conoce, mientras que resolver por
+ * ticker suelto la pierde y guarda el valor como `UNKNOWN`.
+ */
+export function useAdoptSecurity() {
+  const qc = useQueryClient();
+  return useMutation<Security, Error, SecurityAdoptRequest>({
+    mutationFn: (body) => investmentApi.adoptSecurity(body),
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.investment.all }),
   });
 }

@@ -4,8 +4,8 @@ import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 import type { MetricDefinition, MetricResult, ScoreBreakdown, ThresholdSpec } from '@crisol/types';
 
 import { BandChip } from './band-chip';
-import { formatMetricValue, formatThreshold } from './metric-format';
-import { effectiveThreshold, type CatalogIndex } from './metric-index';
+import { formatMetricValue, formatThreshold } from '@crisol/ui';
+import { effectiveThreshold, type CatalogIndex } from '@crisol/ui';
 
 /**
  * Las cuatro claves forenses que NUNCA emiten desglose, por diseño.

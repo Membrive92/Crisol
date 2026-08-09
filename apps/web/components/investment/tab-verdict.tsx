@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, questionEvidence, radius, spacing } from '@crisol/ui';
 import type {
   AnalysisRun,
   CanonicalItemDefinition,
@@ -18,7 +18,7 @@ import { BandChip, bandColors } from './band-chip';
 import { DegradedPanel, InlineNotice } from './degraded-panel';
 import { FlagList } from './flag-list';
 import { SignalTable } from './signal-table';
-import type { CatalogIndex } from './metric-index';
+import type { CatalogIndex } from '@crisol/ui';
 
 const SAFETY: Record<SafetyLabel, { label: string; fg: string; bg: string }> = {
   conservative: { label: 'Conservador', fg: colors.success, bg: colors.successSoft },
@@ -282,6 +282,53 @@ function RuleChecklist({
   );
 }
 
+/**
+ * Lo único que un run anterior a PHASE-44.9 sabe decir de una pregunta.
+ *
+ * Sin `signals[]` no hay desglose, pero `red_signals` y `amber_signals` SÍ están
+ * — son las claves crudas del motor, y hasta ahora no se pintaban en ninguna
+ * parte de la web. Traducirlas con el catálogo las hace legibles sin inventar
+ * nada: no hay valor, ni banda, ni motivo, y no se fingen.
+ *
+ * Se dice además que el veredicto no es auditable. Es la mitad honesta del
+ * arreglo: sin saber cuántas señales se evaluaron, un verde puede ser salud o
+ * puede ser ausencia de prueba, y de un run viejo no hay forma de distinguirlo.
+ */
+function LegacySignals({
+  question,
+  catalog,
+}: {
+  question: QuestionVerdict;
+  catalog: CatalogIndex;
+}) {
+  const label = (key: string) => catalog.definition(key)?.label ?? key;
+  const groups = [
+    { keys: question.red_signals, color: colors.danger, name: 'En rojo' },
+    { keys: question.amber_signals, color: colors.warning, name: 'En ámbar' },
+  ].filter((g) => g.keys.length > 0);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.xs }}>
+      <span style={{ color: colors.textMuted, fontSize: fontSize.xs, lineHeight: 1.5 }}>
+        Este análisis lo produjo un motor anterior, que no registraba qué señales se evaluaron.
+        El veredicto de abajo <strong>no es auditable</strong>: vuelve a ejecutar el análisis
+        para ver el desglose.
+      </span>
+      {groups.map((group) => (
+        <span key={group.name} style={{ color: colors.textMuted, fontSize: fontSize.xs }}>
+          <strong style={{ color: group.color }}>{group.name}:</strong>{' '}
+          {group.keys.map(label).join(' · ')}
+        </span>
+      ))}
+      {groups.length === 0 ? (
+        <span style={{ color: colors.textMuted, fontSize: fontSize.xs }}>
+          No registró ninguna señal en rojo ni en ámbar.
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 function QuestionBlock({
   question,
   catalog,
@@ -293,62 +340,93 @@ function QuestionBlock({
 }) {
   const [open, setOpen] = useState(false);
   const { fg, bg } = bandColors(question.verdict);
-  const noEvidence = question.evaluated_count === 0 && question.signals.length > 0;
+
+  // `signals` AUSENTE (motor < 1.1.0) no es `signals` vacío: el desglose no se
+  // registraba. El tri-estado vive en `@crisol/ui` porque esta misma regla la
+  // necesita también el hero.
+  const signals = question.signals;
+  const evidence = questionEvidence(question);
+  // Sin desglose no hay nada detrás de la flecha. Ofrecerla igualmente es la
+  // trampa que reportó el usuario: se despliega para encontrar un error.
+  const expandable = signals !== undefined && signals.length > 0;
+  const muted = evidence !== 'evaluated';
+
+  const title = (
+    <span style={{ color: colors.text, fontSize: fontSize.sm, fontWeight: fontWeight.semibold }}>
+      {expandable ? (open ? '▾ ' : '▸ ') : ''}
+      {question.question}
+    </span>
+  );
+  const chip = (
+    <BandChip
+      band={muted ? null : question.verdict}
+      label={
+        evidence === 'no-evidence'
+          ? 'Sin evidencia'
+          : evidence === 'not-recorded'
+            ? 'No auditable'
+            : undefined
+      }
+    />
+  );
+  const headerLayout = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    width: '100%',
+  } as const;
 
   return (
     <div
       style={{
         borderRadius: radius.md,
-        backgroundColor: noEvidence ? colors.surfaceMuted : bg,
-        borderLeft: `3px solid ${noEvidence ? colors.textMuted : fg}`,
+        backgroundColor: muted ? colors.surfaceMuted : bg,
+        borderLeft: `3px solid ${muted ? colors.textMuted : fg}`,
         padding: spacing.md,
         display: 'flex',
         flexDirection: 'column',
         gap: spacing.sm,
       }}
     >
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: spacing.sm,
-          background: 'none',
-          border: 'none',
-          padding: 0,
-          cursor: 'pointer',
-          textAlign: 'left',
-          width: '100%',
-        }}
-      >
-        <span
-          style={{ color: colors.text, fontSize: fontSize.sm, fontWeight: fontWeight.semibold }}
+      {expandable ? (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          style={{
+            ...headerLayout,
+            background: 'none',
+            border: 'none',
+            padding: 0,
+            cursor: 'pointer',
+            textAlign: 'left',
+          }}
         >
-          {open ? '▾' : '▸'} {question.question}
+          {title}
+          {chip}
+        </button>
+      ) : (
+        <div style={headerLayout}>
+          {title}
+          {chip}
+        </div>
+      )}
+
+      {evidence === 'not-recorded' ? (
+        <LegacySignals question={question} catalog={catalog} />
+      ) : (
+        <span style={{ color: colors.textMuted, fontSize: fontSize.xs }}>
+          {question.evaluated_count} señales evaluadas · {question.unavailable_count} sin poder
+          evaluar
+          {evidence === 'no-evidence'
+            ? ' — el verde de esta pregunta sería por ausencia de prueba, no por buena salud'
+            : ''}
         </span>
-        <BandChip
-          band={noEvidence ? null : question.verdict}
-          label={noEvidence ? 'Sin evidencia' : undefined}
-        />
-      </button>
+      )}
 
-      <span style={{ color: colors.textMuted, fontSize: fontSize.xs }}>
-        {question.evaluated_count} señales evaluadas · {question.unavailable_count} sin poder
-        evaluar
-        {noEvidence
-          ? ' — el verde de esta pregunta sería por ausencia de prueba, no por buena salud'
-          : ''}
-      </span>
-
-      {open ? (
-        <SignalTable
-          signals={question.signals}
-          catalog={catalog}
-          thresholdsUsed={thresholdsUsed}
-        />
+      {open && signals ? (
+        <SignalTable signals={signals} catalog={catalog} thresholdsUsed={thresholdsUsed} />
       ) : null}
     </div>
   );

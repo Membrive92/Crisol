@@ -73,11 +73,74 @@ export interface SecuritySearchHit {
   name: string;
   in_catalog: boolean;
   analysis_available: boolean;
+  /**
+   * Clave opaca que se devuelve al servidor para materializar la fila
+   * (PHASE-44.8 E2). El cliente NO manda plaza ni CIK: los mandaba —`'US'`, que
+   * es un país— y eso duplicaba valores contra la restricción única
+   * `(ticker, exchange)`. Lo que no se envía no se puede inventar.
+   */
+  listing_key: string;
+  /**
+   * `'catalog'` (ya en el catálogo), `'sec_index'` (índice de la SEC) o
+   * `'eu_directory'` (directorio FIRDS UE/UK, PHASE-44.14).
+   */
+  source: string;
+  cik: string | null;
+  /**
+   * Identidad registral de las filas del directorio (PHASE-44.14): no llevan
+   * ticker (FIRDS no lo publica) y el ISIN es lo que las distingue en pantalla.
+   */
+  isin: string | null;
+  /** Divisa registral de las filas del directorio. */
+  currency: string | null;
+  /** Etiqueta de la plaza para pintar (`Nasdaq`, no `NASDAQ`). */
+  exchange_label: string;
+  /** Por qué NO se puede analizar. `null` cuando sí se puede. */
+  analysis_reason: string | null;
+}
+
+export interface SecurityAdoptRequest {
+  listing_key: string;
+  /**
+   * Bypass manual de la resolución ISIN→símbolo, sólo para claves `ext:`
+   * (PHASE-44.14): cuando el proveedor de precios no reconoce el ISIN, el
+   * servidor responde 422 `ticker_required` y el formulario lo pide. La
+   * identidad (plaza, nombre, divisa) sigue viniendo del directorio, y el
+   * ticker se valida contra una cotización real antes de persistir nada.
+   */
+  ticker?: string;
+}
+
+/**
+ * El detalle estructurado del 422 `ticker_required` del alta `ext:`.
+ * `prefill` es la identidad registral, para pintarla junto al campo de ticker.
+ */
+export interface TickerRequiredDetail {
+  code: 'ticker_required';
+  message: string;
+  prefill: { isin: string; mic: string; name: string; currency: string };
 }
 
 export interface SecuritySearchResponse {
   results: SecuritySearchHit[];
   external_search_available: boolean;
+  /**
+   * Si el índice de emisores de la SEC está cargado. Cero resultados significan
+   * dos cosas distintas —«no hay coincidencias» y «el índice no está
+   * disponible»— y la segunda no se puede pintar como la primera.
+   */
+  index_ready: boolean;
+  /**
+   * Aviso cuando el vacío mentiría: `NESN` no devuelve nada porque SIX no
+   * reporta a FIRDS (frontera suiza), no porque Nestlé no exista.
+   */
+  notice: string | null;
+  /**
+   * Fecha del último seed del directorio UE/UK, o `null` si está vacío
+   * (PHASE-44.14). Cero resultados europeos SIN sembrar significa «no se ha
+   * mirado», no «no cotiza en Europa» — la pantalla debe distinguirlos.
+   */
+  directory_seeded_at: string | null;
 }
 
 // ── Fundamentales ─────────────────────────────────────────────────────
@@ -309,10 +372,23 @@ export interface QuestionVerdict {
   verdict: MetricBand;
   red_signals: string[];
   amber_signals: string[];
-  /** Vacío en los runs anteriores a PHASE-44.9. */
-  signals: QuestionSignal[];
-  evaluated_count: number;
-  unavailable_count: number;
+  /**
+   * AUSENTES en los runs anteriores a PHASE-44.9 (motor < 1.1.0) — no vacíos.
+   *
+   * Un `AnalysisRun` es JSONB persistido: lo que se guardó con el motor de
+   * entonces se lee tal cual años después, así que el tipo describe la UNIÓN de
+   * todas las versiones que puede haber en la tabla, no la que produce el motor
+   * de hoy. Declararlos obligatorios costó un crash en producción con el único
+   * valor del usuario analizado antes de 44.9 (MCD): `signals.length` sobre
+   * `undefined`. El `?` es lo que obliga a `tsc` a enumerar los consumidores.
+   *
+   * Y ausente **no es cero**: la pregunta sí evaluó señales, el motor no las
+   * registraba. Pintar `0` sería inventarse un dato — la misma convención
+   * «hueco ≠ 0» que el engine aplica desde PHASE-44.2 §4.5.
+   */
+  signals?: QuestionSignal[];
+  evaluated_count?: number;
+  unavailable_count?: number;
 }
 
 export interface SafetyProfile {
@@ -368,9 +444,14 @@ export interface DuPontDecomposition {
   net_margin: MetricResult;
   asset_turnover: MetricResult;
   equity_multiplier: MetricResult;
-  operating_margin: MetricResult;
-  tax_effect: MetricResult;
-  financial_cost: MetricResult;
+  /**
+   * Los tres factores del desdoble de 5 llegaron en PHASE-44.10 (motor < 1.2.0
+   * no los tiene). Opcionales por el mismo motivo que `QuestionVerdict.signals`:
+   * la tabla guarda runs de todas las versiones.
+   */
+  operating_margin?: MetricResult;
+  tax_effect?: MetricResult;
+  financial_cost?: MetricResult;
   /**
    * `(producto de los factores) − ROE`. Debe ser 0.
    *
@@ -378,8 +459,8 @@ export interface DuPontDecomposition {
    * verificado: un cuadre que no se ha podido comprobar nunca se presenta como
    * superado.
    */
-  check_three: string | null;
-  check_five: string | null;
+  check_three?: string | null;
+  check_five?: string | null;
 }
 
 export interface BaseRatiosBlock {

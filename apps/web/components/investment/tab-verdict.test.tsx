@@ -2,10 +2,16 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { AnalysisRun, MetricDefinition, QuestionSignal } from '@crisol/types';
+import type {
+  AnalysisRun,
+  MetricDefinition,
+  QuestionSignal,
+  QuestionVerdict,
+} from '@crisol/types';
 
-import { buildCatalogIndex } from './metric-index';
+import { buildCatalogIndex } from '@crisol/ui';
 import { TabVerdict } from './tab-verdict';
+import legacyRun from './__fixtures__/legacy-run-1.0.0.json';
 
 /**
  * Lo que se prueba aquí es el requisito estrella del usuario: entender POR QUÉ
@@ -216,5 +222,83 @@ describe('TabVerdict', () => {
   it('avisa de que el stress mide sobre caja libre y no sobre FFO', () => {
     renderVerdict(makeRun());
     expect(screen.getByText(/no sobre el FFO/)).toBeTruthy();
+  });
+});
+
+/**
+ * Un `AnalysisRun` es JSONB persistido: la tabla contiene runs de TODAS las
+ * versiones del motor que han existido. Estas regresiones cierran el fallo que
+ * reportó el usuario — desplegar una pregunta de un análisis viejo desmontaba
+ * el árbol de React y la pantalla se leía como un 404.
+ *
+ * La fixture NO está escrita a mano: se extrajo de la BD del usuario (MCD,
+ * motor 1.0.0, 2026-07-26). Una fixture inventada hoy llevaría la forma de hoy
+ * y no probaría nada — que es exactamente por qué el bug llegó a producción con
+ * la suite en verde.
+ */
+describe('TabVerdict con un análisis de un motor anterior', () => {
+  // Frontera de datos: la fixture es JSON crudo de la BD, sin tipar.
+  const legacyQuestions = legacyRun.questions as unknown as QuestionVerdict[];
+
+  function legacyRunFixture(): AnalysisRun {
+    const run = makeRun();
+    run.engine_version = legacyRun.engine_version;
+    run.verdict.questions = legacyQuestions;
+    return run;
+  }
+
+  it('la fixture no trae las claves de PHASE-44.9 (si las trae, ya no prueba nada)', () => {
+    const question = legacyQuestions[0]!;
+    expect(question.signals).toBeUndefined();
+    expect(question.evaluated_count).toBeUndefined();
+  });
+
+  it('no revienta al pintar una pregunta sin desglose de señales', () => {
+    expect(() => renderVerdict(legacyRunFixture())).not.toThrow();
+    expect(screen.getAllByText(/¿/).length).toBeGreaterThan(0);
+  });
+
+  it('no ofrece desplegar lo que no existe: sin flecha no hay trampa', () => {
+    renderVerdict(legacyRunFixture());
+    // El crash sólo se alcanzaba al desplegar. La cura no es capturar el error,
+    // es no ofrecer un botón que abre a un mensaje de fallo.
+    expect(screen.queryByRole('button', { expanded: false })).toBeNull();
+  });
+
+  it('pulsar donde el usuario pulsó no desmonta el árbol', async () => {
+    renderVerdict(legacyRunFixture());
+    // La acción literal del informe: «cuando hago click en una de estas áreas,
+    // me lleva a un 404». Cualquier botón que la pantalla ofrezca tiene que
+    // sobrevivir al clic; el crash vivía en `signals.length` sobre `undefined`.
+    for (const button of screen.queryAllByRole('button')) {
+      await userEvent.click(button);
+    }
+    expect(screen.getAllByText(/no registraba qué señales se evaluaron/).length).toBeGreaterThan(0);
+  });
+
+  it('no inventa contadores: sin dato no se escribe « señales evaluadas»', () => {
+    renderVerdict(legacyRunFixture());
+    expect(screen.queryByText(/señales evaluadas/)).toBeNull();
+    expect(screen.getAllByText(/no registraba qué señales se evaluaron/).length).toBeGreaterThan(0);
+  });
+
+  it('no presume de veredicto verificado cuando no puede auditarlo', () => {
+    renderVerdict(legacyRunFixture());
+    expect(screen.getAllByText('No auditable').length).toBe(legacyQuestions.length);
+  });
+
+  it('rescata las claves crudas que el run SÍ tiene, traducidas por el catálogo', () => {
+    const run = makeRun();
+    run.engine_version = '1.0.0';
+    run.verdict.questions = [
+      {
+        ...legacyQuestions[0]!,
+        red_signals: ['m_score'],
+        amber_signals: [],
+      },
+    ];
+    renderVerdict(run);
+    // Etiqueta del catálogo, nunca la clave cruda.
+    expect(screen.getByText(/M-Score de Beneish/)).toBeTruthy();
   });
 });

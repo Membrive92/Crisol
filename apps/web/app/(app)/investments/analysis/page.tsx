@@ -29,7 +29,10 @@ export default function InvestmentsAnalysisPage() {
           solvencia, calidad de caja y seguridad del dividendo.
         </p>
       </div>
-      <SecuritySearch onSelect={(id) => router.push(`/investments/analysis/${id}` as Route)} />
+      <SecuritySearch
+        intent="analysis"
+        onSelect={(id) => router.push(`/investments/analysis/${id}` as Route)}
+      />
     </div>
   );
 }

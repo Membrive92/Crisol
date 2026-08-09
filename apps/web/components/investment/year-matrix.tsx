@@ -3,31 +3,12 @@
 import type { CSSProperties, ReactNode } from 'react';
 
 import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
+import type { MatrixCell, MatrixRow } from '@crisol/ui';
 
-export interface MatrixCell {
-  /** Texto ya formateado. `—` para hueco. */
-  text: string;
-  /** Color del texto (el semáforo lo decide quien construye la fila). */
-  color?: string | undefined;
-  /** Fondo suave de banda. */
-  background?: string | undefined;
-  /** Explicación al pasar por encima (razón de un no-calculable, el corte…). */
-  title?: string | undefined;
-  /** Marca de aproximación / procedencia degradada. */
-  mark?: string | undefined;
-}
-
-export interface MatrixRow {
-  key: string;
-  label: string;
-  /** Nota bajo la etiqueta: el corte aplicado, o por qué no se pudo calcular. */
-  hint?: string | undefined;
-  /** Sub-cabecera de bloque (Activo corriente, Solvencia…). No lleva celdas. */
-  isGroup?: boolean | undefined;
-  /** Fila de total: se resalta. */
-  emphasis?: boolean | undefined;
-  cells: MatrixCell[];
-}
+// El modelo de fila se comparte con móvil desde PHASE-44.8 (`@crisol/ui`); aquí
+// queda sólo el renderizador HTML. Se re-exporta para no tocar los seis
+// consumidores, que lo importan de este módulo desde 44.9.
+export type { MatrixCell, MatrixRow };
 
 export interface YearMatrixProps {
   years: number[];

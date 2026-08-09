@@ -13,6 +13,9 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
+  "dependencies": {
+    "@crisol/types": "workspace:*"
+  },
   "devDependencies": {
     "@crisol/eslint-config": "workspace:*",
     "@crisol/tsconfig": "workspace:*",

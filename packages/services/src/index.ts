@@ -195,6 +195,7 @@ export {
   usePositions,
   useRefreshPricing,
   useRegisterCorporateAction,
+  useAdoptSecurity,
   useResolveSecurity,
   useRestatements,
   useRunAnalysis,

@@ -22,6 +22,7 @@ import type {
   Sale,
   SaleCreateRequest,
   Security,
+  SecurityAdoptRequest,
   SecurityResolveRequest,
   SecuritySearchResponse,
 } from '@crisol/types';
@@ -43,6 +44,18 @@ export const investmentApi = {
 
   async resolveSecurity(body: SecurityResolveRequest): Promise<Security> {
     const response = await apiClient.post<Security>('/investment/securities/resolve', body);
+    return response.data;
+  },
+
+  /**
+   * Materializa un resultado del buscador como valor del catálogo
+   * (PHASE-44.8 E2). Se manda la `listing_key` que dio el buscador y el
+   * servidor la vuelve a resolver — así la plaza real del índice no se pierde,
+   * que es lo que pasaba al resolver por ticker suelto (MCD entraba en
+   * `UNKNOWN` en vez de `NYSE`).
+   */
+  async adoptSecurity(body: SecurityAdoptRequest): Promise<Security> {
+    const response = await apiClient.post<Security>('/investment/securities/adopt', body);
     return response.data;
   },
 

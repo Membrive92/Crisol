@@ -13,13 +13,19 @@ import {
   useSecurity,
   useStatements,
 } from '@crisol/services';
-import { colors, fontSize, layout, radius, spacing } from '@crisol/ui';
+import {
+  colors,
+  DEFAULT_REPORT_TAB,
+  fontSize,
+  layout,
+  radius,
+  REPORT_TABS,
+  spacing,
+} from '@crisol/ui';
 
 import { AnalysisHero } from '@/components/investment/analysis-hero';
-import {
-  buildCatalogIndex,
-  buildMetricIndex,
-} from '@/components/investment/metric-index';
+import { StaleRunNotice } from '@/components/investment/stale-run-notice';
+import { buildCatalogIndex, buildMetricIndex, collectRunMetrics } from '@crisol/ui';
 import { TabDividend } from '@/components/investment/tab-dividend';
 import { TabEvolution } from '@/components/investment/tab-evolution';
 import { TabForensic } from '@/components/investment/tab-forensic';
@@ -32,11 +38,10 @@ import { ErrorState } from '@/components/ui/error-state';
 import { SkeletonCardList } from '@/components/ui/skeleton';
 import { TabPanel, Tabs, type TabItem } from '@/components/ui/tabs';
 
-/**
- * Pestaña por defecto. Se aterriza en el veredicto: es lo que el usuario viene a
- * ver, y desde ahí se baja a la evidencia.
- */
-const DEFAULT_TAB = 'veredicto';
+// La pestaña por defecto y la lista de ids viven en `@crisol/ui` desde
+// PHASE-44.8: móvil enseña las mismas seis, en el mismo orden y con las mismas
+// claves, así que un enlace significa lo mismo en los dos sitios.
+const DEFAULT_TAB = DEFAULT_REPORT_TAB;
 
 /** Sub-sección por defecto de cada pestaña. */
 const DEFAULT_SUB: Record<string, string> = {
@@ -45,7 +50,7 @@ const DEFAULT_SUB: Record<string, string> = {
   veredicto: 'dictamen',
 };
 
-const TAB_IDS = ['estados', 'ratios', 'evolucion', 'forense', 'dividendo', 'veredicto'] as const;
+const TAB_IDS = REPORT_TABS.map((t) => t.key);
 
 export default function SecurityAnalysisPage() {
   const { securityId } = useParams<{ securityId: string }>();
@@ -99,13 +104,9 @@ export default function SecurityAnalysisPage() {
 
   const metricIndex = useMemo(() => {
     if (!activeRun) return null;
-    const all = [
-      ...activeRun.scores_detail.base_ratios.metrics,
-      ...activeRun.scores_detail.forensic.metrics,
-      ...activeRun.evolution.metrics,
-      ...activeRun.dividend_analysis.metrics,
-    ];
-    return buildMetricIndex(all, activeRun.years_covered);
+    // La recolección vive en `@crisol/ui` (PHASE-44.8): olvidar un bloque no
+    // falla, sólo deja sus filas como huecos indistinguibles de «no calculable».
+    return buildMetricIndex(collectRunMetrics(activeRun), activeRun.years_covered);
   }, [activeRun]);
 
   const hasStatements = (statements.data?.length ?? 0) > 0;
@@ -149,6 +150,13 @@ export default function SecurityAnalysisPage() {
       <AnalysisHero
         security={sec}
         run={activeRun}
+        onRerun={() => void run.mutateAsync({ securityId })}
+        rerunning={run.isPending}
+      />
+
+      <StaleRunNotice
+        runVersion={activeRun?.engine_version}
+        engineVersion={metricCatalog.data?.engine_version}
         onRerun={() => void run.mutateAsync({ securityId })}
         rerunning={run.isPending}
       />

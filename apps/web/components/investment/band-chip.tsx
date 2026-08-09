@@ -1,29 +1,12 @@
 'use client';
 
-import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
+import { bandColors, bandLabel, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 import type { MetricBand } from '@crisol/types';
 
-/**
- * El semáforo del módulo. Una banda `null` es GRIS y dice «sin banda» — nunca
- * verde: `ThresholdSpec.band_for` del engine documenta que `None` no significa
- * «sana», sino «no hay banda que aplicar».
- */
-export function bandColors(band: MetricBand | null): { fg: string; bg: string } {
-  if (band === 'healthy') return { fg: colors.success, bg: colors.successSoft };
-  if (band === 'caution') return { fg: colors.warning, bg: colors.warningSoft };
-  if (band === 'stressed') return { fg: colors.danger, bg: colors.dangerSoft };
-  return { fg: colors.textMuted, bg: colors.surfaceMuted };
-}
-
-const BAND_LABEL: Record<MetricBand, string> = {
-  healthy: 'Sano',
-  caution: 'Vigilar',
-  stressed: 'Riesgo',
-};
-
-export function bandLabel(band: MetricBand | null): string {
-  return band ? BAND_LABEL[band] : 'Sin banda';
-}
+// `bandColors` y `bandLabel` viven en `@crisol/ui` desde PHASE-44.8: el móvil
+// necesita el MISMO semáforo y duplicarlo es cómo una pantalla acaba pintando de
+// verde lo que la otra pinta de gris. Aquí sólo queda el componente web.
+export { bandColors, bandLabel };
 
 export interface BandChipProps {
   band: MetricBand | null;

@@ -4,7 +4,7 @@ import type { MetricDefinition, MetricResult, ThresholdSpec } from '@crisol/type
  * Índices de acceso a un `AnalysisRun` (PHASE-44.9).
  *
  * Antes se buscaba con `Array.find` por cada fila. Con 22 filas de un solo año
- * daba igual; con 52 métricas × N ejercicios × 6 pestañas, no. Se construyen una
+ * daba igual; con 52 métricas × N ejercicios × 7 pestañas, no. Se construyen una
  * vez por run y se pasan hacia abajo.
  */
 
@@ -22,6 +22,26 @@ export interface MetricIndex {
   years: number[];
   /** Las claves de métrica presentes, en el orden en que llegaron. */
   keys: string[];
+}
+
+/**
+ * Todas las métricas de un run, de sus cuatro bloques.
+ *
+ * Se comparte porque olvidar un bloque no falla: las filas de ese bloque salen
+ * como huecos («—»), que es indistinguible de «el motor no lo pudo calcular».
+ * Con una sola implementación, web y móvil indexan lo mismo o no indexa ninguno.
+ */
+export function collectRunMetrics(run: {
+  scores_detail: { base_ratios: { metrics: MetricResult[] }; forensic: { metrics: MetricResult[] } };
+  evolution: { metrics: MetricResult[] };
+  dividend_analysis: { metrics: MetricResult[] };
+}): MetricResult[] {
+  return [
+    ...run.scores_detail.base_ratios.metrics,
+    ...run.scores_detail.forensic.metrics,
+    ...run.evolution.metrics,
+    ...run.dividend_analysis.metrics,
+  ];
 }
 
 export function buildMetricIndex(metrics: MetricResult[], years: number[]): MetricIndex {
@@ -69,6 +89,24 @@ export function buildCatalogIndex(definitions: MetricDefinition[] | undefined): 
 }
 
 /**
+ * El corte de una métrica más lo que hace falta para leerlo con honestidad.
+ *
+ * `applies` no está en `MetricDefinition` a propósito: el catálogo del motor no
+ * conoce el sector, así que la aplicabilidad sólo existe una vez resuelto el
+ * `(sector × norma)` del run.
+ */
+export interface EffectiveThreshold extends MetricDefinition {
+  /**
+   * `false` = los cortes NO están calibrados para este tipo de empresa, así que
+   * el número se enseña sin semáforo. No es «no se pudo calcular»: el valor es
+   * bueno, la vara no sirve. Caso vivo: S7 (pasivo/patrimonio) en una
+   * financiera, donde un 10× es normal y la banda 1-2 pintaría un rojo
+   * permanente que no informa de nada.
+   */
+  applies: boolean;
+}
+
+/**
  * El corte EFECTIVO de una métrica en un run concreto.
  *
  * Prioriza `thresholds_used` (lo que realmente se aplicó) sobre el corte por
@@ -81,9 +119,10 @@ export function effectiveThreshold(
   metricKey: string,
   thresholdsUsed: Record<string, ThresholdSpec> | undefined,
   definition: MetricDefinition | undefined,
-): MetricDefinition | undefined {
+): EffectiveThreshold | undefined {
   const used = thresholdsUsed?.[metricKey];
-  if (!used || !definition) return definition;
+  if (!definition) return undefined;
+  if (!used) return { ...definition, applies: true };
   return {
     ...definition,
     direction: used.direction,
@@ -91,5 +130,13 @@ export function effectiveThreshold(
     low_ok: used.low_ok,
     high_ok: used.high_ok,
     high_alarm: used.high_alarm,
+    // Los DOS atributos por los que la tabla de umbrales se diferencia del
+    // catálogo del motor. Se descartaban aquí (PHASE-44.18), así que la
+    // diferenciación por (sector × norma) viajaba hasta el cliente y moría en
+    // la última línea: la pantalla no podía distinguir «no se pudo colorear»
+    // de «la vara no sirve para este sector», ni declarar que unos cortes
+    // US-GAAP se están aplicando a cuentas IFRS.
+    model_variant: used.model_variant,
+    applies: used.applies,
   };
 }

@@ -9,8 +9,8 @@ import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 import { Card, CardTitle } from '@/components/ui/card';
 
 import { InlineNotice } from './degraded-panel';
-import { formatMetricValue } from './metric-format';
-import type { CatalogIndex } from './metric-index';
+import { formatMetricValue } from '@crisol/ui';
+import type { CatalogIndex } from '@crisol/ui';
 
 /**
  * Pestaña de Valoración (PHASE-44.12).
@@ -26,8 +26,9 @@ import type { CatalogIndex } from './metric-index';
  * mira.
  */
 
-const ORDER = ['V1', 'V2', 'V3', 'V4', 'V5'] as const;
-const COMPANIONS = ['V6', 'V7'] as const;
+// El orden y los acompañantes viven en `@crisol/ui` para que móvil muestre
+// exactamente los mismos múltiplos (PHASE-44.8).
+import { VALUATION_COMPANIONS as COMPANIONS, VALUATION_ORDER as ORDER } from '@crisol/ui';
 
 export interface TabValuationProps {
   securityId: string;

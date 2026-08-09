@@ -1,0 +1,228 @@
+{
+  "_comment": "Forma REAL de un AnalysisRun del motor 1.0.0, extraida de la BD del usuario (MCD, 2026-07-26). NO editar a mano: una fixture escrita hoy llevaria la forma de hoy y no probaria nada.",
+  "engine_version": "1.0.0",
+  "questions": [
+    {
+      "key": "accounting",
+      "verdict": "healthy",
+      "question": "¿La contabilidad es de fiar?",
+      "red_signals": [],
+      "amber_signals": []
+    },
+    {
+      "key": "cash",
+      "verdict": "healthy",
+      "question": "¿Genera caja de verdad?",
+      "red_signals": [],
+      "amber_signals": []
+    },
+    {
+      "key": "dividend",
+      "verdict": "stressed",
+      "question": "¿El dividendo cabe en la caja?",
+      "red_signals": [
+        "Años de dividendo en caja"
+      ],
+      "amber_signals": [
+        "Payout sobre FCF",
+        "Cobertura FCF",
+        "Payout ajustado por SBC",
+        "Retorno total sobre FCF"
+      ]
+    },
+    {
+      "key": "resilience",
+      "verdict": "stressed",
+      "question": "¿Aguanta un golpe?",
+      "red_signals": [
+        "X-Score (Zmijewski)",
+        "Escenario de stress (deja de cubrir)"
+      ],
+      "amber_signals": [
+        "Deuda neta / EBITDA",
+        "Años de repago"
+      ]
+    }
+  ],
+  "dupont": [
+    {
+      "net_margin": {
+        "key": "R4",
+        "band": null,
+        "value": "0.3249034358327340685271865271",
+        "reason": null,
+        "status": "ok",
+        "provenance": "derived",
+        "fiscal_year": 2021
+      },
+      "fiscal_year": 2021,
+      "asset_turnover": {
+        "key": "A4",
+        "band": null,
+        "value": "0.4312171915705895350974759676",
+        "reason": "sin ejercicio 2020 en la serie: se usa el saldo final de 'total_assets' en vez de la media (t, t−1)",
+        "status": "approximation",
+        "provenance": "derived",
+        "fiscal_year": 2021
+      },
+      "equity_multiplier": {
+        "key": "DUPONT_EM",
+        "band": null,
+        "value": null,
+        "reason": "denominador no positivo (patrimonio medio < 0)",
+        "status": "not_computable",
+        "provenance": "sourced",
+        "fiscal_year": 2021
+      }
+    },
+    {
+      "net_margin": {
+        "key": "R4",
+        "band": null,
+        "value": "0.2664452400465858603286891257",
+        "reason": null,
+        "status": "ok",
+        "provenance": "derived",
+        "fiscal_year": 2022
+      },
+      "fiscal_year": 2022,
+      "asset_turnover": {
+        "key": "A4",
+        "band": null,
+        "value": "0.4445859298515777593889364591",
+        "reason": null,
+        "status": "ok",
+        "provenance": "derived",
+        "fiscal_year": 2022
+      },
+      "equity_multiplier": {
+        "key": "DUPONT_EM",
+        "band": null,
+        "value": null,
+        "reason": "denominador no positivo (patrimonio medio < 0)",
+        "status": "not_computable",
+        "provenance": "derived",
+        "fiscal_year": 2022
+      }
+    },
+    {
+      "net_margin": {
+        "key": "R4",
+        "band": null,
+        "value": "0.3321958107790068251353259590",
+        "reason": null,
+        "status": "ok",
+        "provenance": "derived",
+        "fiscal_year": 2023
+      },
+      "fiscal_year": 2023,
+      "asset_turnover": {
+        "key": "A4",
+        "band": null,
+        "value": "0.4783877353799386393702560446",
+        "reason": null,
+        "status": "ok",
+        "provenance": "derived",
+        "fiscal_year": 2023
+      },
+      "equity_multiplier": {
+        "key": "DUPONT_EM",
+        "band": null,
+        "value": null,
+        "reason": "denominador no positivo (patrimonio medio < 0)",
+        "status": "not_computable",
+        "provenance": "derived",
+        "fiscal_year": 2023
+      }
+    },
+    {
+      "net_margin": {
+        "key": "R4",
+        "band": null,
+        "value": "0.3172453703703703703703703704",
+        "reason": null,
+        "status": "ok",
+        "provenance": "derived",
+        "fiscal_year": 2024
+      },
+      "fiscal_year": 2024,
+      "asset_turnover": {
+        "key": "A4",
+        "band": null,
+        "value": "0.4656468664948036899639806340",
+        "reason": null,
+        "status": "ok",
+        "provenance": "derived",
+        "fiscal_year": 2024
+      },
+      "equity_multiplier": {
+        "key": "DUPONT_EM",
+        "band": null,
+        "value": null,
+        "reason": "denominador no positivo (patrimonio medio < 0)",
+        "status": "not_computable",
+        "provenance": "derived",
+        "fiscal_year": 2024
+      }
+    },
+    {
+      "net_margin": {
+        "key": "R4",
+        "band": null,
+        "value": "0.3185047424214245862004835410",
+        "reason": null,
+        "status": "ok",
+        "provenance": "derived",
+        "fiscal_year": 2025
+      },
+      "fiscal_year": 2025,
+      "asset_turnover": {
+        "key": "A4",
+        "band": null,
+        "value": "0.4688004045441467518766837842",
+        "reason": null,
+        "status": "ok",
+        "provenance": "derived",
+        "fiscal_year": 2025
+      },
+      "equity_multiplier": {
+        "key": "DUPONT_EM",
+        "band": null,
+        "value": null,
+        "reason": "denominador no positivo (patrimonio medio < 0)",
+        "status": "not_computable",
+        "provenance": "derived",
+        "fiscal_year": 2025
+      }
+    }
+  ],
+  "metric_keys": [
+    "A1",
+    "A2",
+    "A3",
+    "A4",
+    "A5",
+    "L1",
+    "L2",
+    "L3",
+    "L4",
+    "R1",
+    "R10",
+    "R2",
+    "R3",
+    "R4",
+    "R5",
+    "R6",
+    "R7",
+    "R8",
+    "R9",
+    "R9b",
+    "S1",
+    "S2",
+    "S3",
+    "S4",
+    "S4b",
+    "S5",
+    "S6"
+  ]
+}

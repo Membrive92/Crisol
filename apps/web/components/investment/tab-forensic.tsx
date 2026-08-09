@@ -1,29 +1,16 @@
 'use client';
 
-import { colors, fontSize, spacing } from '@crisol/ui';
+import { colors, fontSize, FORENSIC_KEYS, spacing } from '@crisol/ui';
 import type { AnalysisRun, Security } from '@crisol/types';
 
 import { Card, CardTitle } from '@/components/ui/card';
 
 import { DegradedPanel, InlineNotice } from './degraded-panel';
 import { FlagList } from './flag-list';
-import { metricRow, type MetricRowOptions } from './metric-rows';
-import type { CatalogIndex, MetricIndex } from './metric-index';
+import { metricRow, type MetricRowOptions } from '@crisol/ui';
+import type { CatalogIndex, MetricIndex } from '@crisol/ui';
 import { ScoreBreakdownCard } from './score-breakdown-card';
 import { YearMatrix } from './year-matrix';
-
-/** Los ocho scores, en el orden en que se leen: primero manipulación, luego
- *  quiebra, luego calidad. */
-const FORENSIC_KEYS = [
-  'm_score',
-  'accruals',
-  'F7',
-  'F6',
-  'z_score',
-  'FZ',
-  'f_score',
-  'F5',
-] as const;
 
 export interface TabForensicProps {
   run: AnalysisRun;

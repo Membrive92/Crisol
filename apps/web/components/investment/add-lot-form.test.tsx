@@ -30,9 +30,19 @@ const hit: SecuritySearchResponse = {
       name: 'MCDONALDS CORP',
       in_catalog: true,
       analysis_available: true,
+      listing_key: 'cat:sec-1',
+      source: 'catalog',
+      cik: '0000063908',
+      isin: null,
+      currency: null,
+      exchange_label: 'NYSE',
+      analysis_reason: null,
     },
   ],
   external_search_available: false,
+  index_ready: true,
+  notice: null,
+  directory_seeded_at: null,
 };
 
 function renderWithCache(node: ReactElement, seed?: [string, SecuritySearchResponse]): void {

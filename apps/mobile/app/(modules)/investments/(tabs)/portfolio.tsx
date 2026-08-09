@@ -1,12 +1,16 @@
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { usePortfolioSummary } from '@crisol/services';
 import type { PositionSummary } from '@crisol/types';
 import { colors, fontSize, fontWeight, radius, spacing, formatAmount } from '@crisol/ui';
 
+import { AddLotForm } from '@/components/investment/add-lot-form';
+
 export default function PortfolioScreen() {
   const summary = usePortfolioSummary();
   const data = summary.data;
+  const [adding, setAdding] = useState(false);
   // Los agregados van en la divisa BASE que declara el backend. Antes se
   // formateaban con la divisa de la primera posición, lo que etiquetaba una
   // suma de divisas mezcladas como si fuera toda de una (PHASE-44.11.E).
@@ -44,10 +48,32 @@ export default function PortfolioScreen() {
         </Text>
       ) : null}
 
+      {adding ? (
+        <View style={styles.card}>
+          <View style={styles.rowBetween}>
+            <Text style={styles.value}>Nueva compra</Text>
+            <Pressable onPress={() => setAdding(false)}>
+              <Text style={styles.link}>cancelar</Text>
+            </Pressable>
+          </View>
+          <AddLotForm
+            onDone={() => {
+              setAdding(false);
+              void summary.refetch();
+            }}
+          />
+        </View>
+      ) : (
+        <Pressable onPress={() => setAdding(true)} style={styles.primaryBtn}>
+          <Text style={styles.primaryBtnText}>Añadir compra</Text>
+        </Pressable>
+      )}
+
       {summary.isLoading ? (
         <Text style={styles.muted}>Cargando cartera…</Text>
       ) : (data?.positions.length ?? 0) === 0 ? (
-        <Text style={styles.muted}>Sin posiciones todavía. Añádelas desde la web.</Text>
+        // Ya no dice «añádelas desde la web»: el flujo está aquí (PHASE-44.8 E4).
+        <Text style={styles.muted}>Sin posiciones todavía.</Text>
       ) : (
         data?.positions.map((p) => <PositionRow key={p.security_id} position={p} />)
       )}
@@ -118,4 +144,16 @@ const styles = StyleSheet.create({
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   ticker: { color: colors.text, fontSize: fontSize.md, fontWeight: fontWeight.bold },
   value: { color: colors.text, fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
+  link: { color: colors.primary, fontSize: fontSize.sm },
+  primaryBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+  },
+  primaryBtnText: {
+    color: colors.onPrimary,
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
+  },
 });

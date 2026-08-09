@@ -4,8 +4,8 @@ import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
 import type { QuestionSignal, ThresholdSpec } from '@crisol/types';
 
 import { BandChip } from './band-chip';
-import { formatMetricValue, formatThreshold } from './metric-format';
-import { effectiveThreshold, type CatalogIndex } from './metric-index';
+import { formatMetricValue, formatThreshold } from '@crisol/ui';
+import { effectiveThreshold, type CatalogIndex } from '@crisol/ui';
 
 export interface SignalTableProps {
   signals: QuestionSignal[];
@@ -22,11 +22,13 @@ export interface SignalTableProps {
  * la clave cruda (`B4_dividend_funded_externally`).
  */
 export function SignalTable({ signals, catalog, thresholdsUsed }: SignalTableProps) {
+  // Lista VACÍA, no ausente: el motor publicó el desglose y esta pregunta no
+  // tuvo ninguna señal candidata. El caso «motor anterior» lo atiende
+  // `LegacySignals`, donde la clave ni siquiera existe.
   if (signals.length === 0) {
     return (
       <p style={{ margin: 0, color: colors.textSubtle, fontSize: fontSize.xs }}>
-        Este análisis se ejecutó antes de que el motor publicara las señales. Vuelve a
-        ejecutarlo para ver el desglose.
+        Esta pregunta no evaluó ninguna señal.
       </p>
     );
   }

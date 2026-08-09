@@ -7,9 +7,9 @@ import { Card, CardTitle } from '@/components/ui/card';
 
 import { InlineNotice } from './degraded-panel';
 import { FlagList } from './flag-list';
-import { formatMetricValue, formatPercentDelta } from './metric-format';
-import { metricRow, type MetricRowOptions } from './metric-rows';
-import type { CatalogIndex, MetricIndex } from './metric-index';
+import { formatMetricValue, formatPercentDelta } from '@crisol/ui';
+import { metricRow, type MetricRowOptions } from '@crisol/ui';
+import type { CatalogIndex, MetricIndex } from '@crisol/ui';
 import { YearMatrix, type MatrixRow } from './year-matrix';
 
 export interface TabEvolutionProps {

@@ -1,42 +1,22 @@
 'use client';
 
 import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
+import { DIVIDEND_BLOCKS as BLOCKS } from '@crisol/ui';
 import type { AnalysisRun, Security } from '@crisol/types';
 
 import { Card, CardTitle } from '@/components/ui/card';
 
 import { DegradedPanel, InlineNotice } from './degraded-panel';
 import { FlagList } from './flag-list';
-import { formatMetricValue } from './metric-format';
-import { metricRow, type MetricRowOptions } from './metric-rows';
-import type { CatalogIndex, MetricIndex } from './metric-index';
+import { formatMetricValue } from '@crisol/ui';
+import { metricRow, type MetricRowOptions } from '@crisol/ui';
+import type { CatalogIndex, MetricIndex } from '@crisol/ui';
 import { YearMatrix, type MatrixRow } from './year-matrix';
 
 /** Los cuatro bloques de la capa 3, con las métricas que se calculan POR AÑO.
  *  T2 y T3 quedan fuera a propósito: el motor las emite una sola vez, para el
  *  último ejercicio, así que en una matriz saldrían con N−1 huecos
  *  indistinguibles de un «no calculable». Van en Trayectoria. */
-const BLOCKS = [
-  {
-    key: 'coverage',
-    label: 'Cobertura',
-    metrics: ['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D8'],
-    note: 'La primaria es el payout sobre caja libre: la caja, no el beneficio, es lo que paga el dividendo. Si el payout ajustado por retribución en acciones es muy superior al normal, el dividendo se está pagando diluyendo.',
-  },
-  {
-    key: 'quality',
-    label: 'Calidad de la caja',
-    metrics: ['Q1', 'Q2', 'Q3', 'Q5'],
-    note: 'Mide si la caja que paga el dividendo es real. La divergencia entre las dos formas de calcular la caja libre es la señal más útil: cuando no cuadran, una de las dos miente.',
-  },
-  {
-    key: 'balance',
-    label: 'Soporte del balance',
-    metrics: ['B3'],
-    note: 'Cuántos años de dividendo hay en caja. Las banderas de este bloque —la deuda compitiendo con el dividendo, los intereses con prioridad, el dividendo financiado fuera— están abajo.',
-  },
-] as const;
-
 export interface TabDividendProps {
   run: AnalysisRun;
   index: MetricIndex;
@@ -50,25 +30,63 @@ export function TabDividend({ run, index, catalog, security }: TabDividendProps)
   const verdictYear = years[years.length - 1];
   const options: MetricRowOptions = { index, catalog, thresholdsUsed: run.thresholds_used };
 
-  if (run.dividend_verdict === 'not_applicable') {
+  // `dividend_verdict === 'not_applicable'` colapsa DOS situaciones distintas
+  // (`synthesis.py:520`): una financiera —aunque reparta— y una empresa que no
+  // reparte. Ocultar la pestaña entera con esa etiqueta escondía ocho métricas
+  // que el motor YA había calculado, con valor y banda, entre ellas las cuatro
+  // de calidad de la caja, que no dependen del dividendo en absoluto
+  // (PHASE-44.19).
+  //
+  // La pregunta «¿reparte?» se resuelve contra el RUN y no contra la fila viva
+  // de `securities`: el run es la foto, y es lo que el usuario está mirando.
+  const paysDividend = (dividend.dps_series ?? []).some(
+    (point) => point.dps !== null && Number(point.dps) > 0,
+  );
+  const isFinancial = security?.is_financial === true;
+
+  if (!paysDividend) {
+    // Sin dividendo, la cobertura y la trayectoria no tienen nada que juzgar —
+    // pero la calidad de la caja sí, y es justo lo que se estaba perdiendo.
+    const quality = BLOCKS.find((block) => block.key === 'quality');
     return (
-      <DegradedPanel
-        title="Sin dividendo relevante"
-        reason={
-          security?.is_financial
-            ? 'Este valor es una financiera, y el análisis de dividendo del motor no se aplica a financieras.'
-            : 'El último ejercicio no registra dividendos pagados, así que no hay política de dividendo que juzgar.'
-        }
-      >
-        <div style={{ marginTop: spacing.md }}>
-          <FlagList flags={dividend.flags ?? []} emptyLabel="Sin banderas de dividendo." />
-        </div>
-      </DegradedPanel>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg }}>
+        <DegradedPanel
+          title="Sin dividendo que juzgar"
+          reason="Esta empresa no registra dividendos pagados en la serie, así que no hay política de dividendo, cobertura ni trayectoria que evaluar."
+          consequence="La calidad de la caja sí se calcula y se muestra debajo: mide si el beneficio se convierte en caja, que no depende de que se reparta o no."
+        >
+          <div style={{ marginTop: spacing.md }}>
+            <FlagList flags={dividend.flags ?? []} emptyLabel="Sin banderas de dividendo." />
+          </div>
+        </DegradedPanel>
+        {quality ? (
+          <Card>
+            <CardTitle size="sm">{quality.label}</CardTitle>
+            <div style={{ marginTop: spacing.md, display: 'grid', gap: spacing.md }}>
+              <InlineNotice>{quality.note}</InlineNotice>
+              <YearMatrix
+                years={years}
+                rows={[...quality.metrics].map((key) => metricRow(key, options))}
+                verdictYear={verdictYear}
+                firstColumnLabel="Métrica"
+              />
+            </div>
+          </Card>
+        ) : null}
+      </div>
     );
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg }}>
+      {isFinancial ? (
+        <InlineNotice>
+          Esta empresa es una <strong>financiera</strong>. Las ratios que dividen por caja libre
+          (D2 a D5 y el margen de seguridad) salen sin calcular a propósito: en un banco esa caja
+          libre no significa lo que significa en una industrial. El payout sobre beneficio, la
+          calidad de la caja y la trayectoria del dividendo sí son válidos y se muestran.
+        </InlineNotice>
+      ) : null}
       {BLOCKS.map((block) => (
         <Card key={block.key}>
           <CardTitle size="sm">{block.label}</CardTitle>

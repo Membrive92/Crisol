@@ -2,55 +2,15 @@
 
 import { useState } from 'react';
 
-import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, groupFlags, radius, spacing } from '@crisol/ui';
 import type { EngineFlag, FlagSeverity } from '@crisol/types';
+import type { GroupedFlag } from '@crisol/ui';
 
 const SEVERITY: Record<FlagSeverity, { label: string; fg: string; bg: string }> = {
   red: { label: 'Grave', fg: colors.danger, bg: colors.dangerSoft },
   amber: { label: 'Atención', fg: colors.warning, bg: colors.warningSoft },
   info: { label: 'Informativa', fg: colors.textMuted, bg: colors.surfaceMuted },
 };
-
-const SEVERITY_RANK: Record<FlagSeverity, number> = { red: 2, amber: 1, info: 0 };
-
-interface GroupedFlag {
-  key: string;
-  severity: FlagSeverity;
-  messages: string[];
-  evidence: Record<string, unknown>[];
-}
-
-/**
- * Agrupa por clave, quedándose con la peor severidad.
- *
- * El motor emite las banderas **por ejercicio o por racha** y la síntesis las
- * concatena sin deduplicar: una empresa que diluye siete años seguidos produce
- * siete tarjetas idénticas. Agrupar es la diferencia entre un hallazgo y una
- * pared de repeticiones.
- */
-function groupFlags(flags: EngineFlag[]): GroupedFlag[] {
-  const byKey = new Map<string, GroupedFlag>();
-  for (const flag of flags) {
-    const existing = byKey.get(flag.key);
-    if (!existing) {
-      byKey.set(flag.key, {
-        key: flag.key,
-        severity: flag.severity,
-        messages: [flag.message],
-        evidence: [flag.evidence],
-      });
-      continue;
-    }
-    if (SEVERITY_RANK[flag.severity] > SEVERITY_RANK[existing.severity]) {
-      existing.severity = flag.severity;
-    }
-    if (!existing.messages.includes(flag.message)) existing.messages.push(flag.message);
-    existing.evidence.push(flag.evidence);
-  }
-  return [...byKey.values()].sort(
-    (a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity],
-  );
-}
 
 export interface FlagListProps {
   flags: EngineFlag[];

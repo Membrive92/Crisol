@@ -1,6 +1,6 @@
 'use client';
 
-import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, questionEvidence, radius, spacing } from '@crisol/ui';
 import type { AnalysisRun, DividendVerdict, SafetyLabel, Security } from '@crisol/types';
 
 import { Card } from '@/components/ui/card';
@@ -89,9 +89,10 @@ export function AnalysisHero({ security, run, onRerun, rerunning }: AnalysisHero
             >
               {run.verdict.questions.map((question) => {
                 // Sin ninguna señal evaluada, un verde es ausencia de prueba y
-                // no salud: se pinta gris y se dice.
-                const noEvidence =
-                  question.evaluated_count === 0 && question.signals.length > 0;
+                // no salud: se pinta gris y se dice. Un run viejo, que no
+                // registraba el desglose, tampoco puede presumir de verde.
+                const evidence = questionEvidence(question);
+                const noEvidence = evidence !== 'evaluated';
                 return (
                   <span
                     key={question.key}
@@ -105,7 +106,13 @@ export function AnalysisHero({ security, run, onRerun, rerunning }: AnalysisHero
                   >
                     <BandDot
                       band={noEvidence ? null : question.verdict}
-                      title={noEvidence ? 'sin evidencia evaluable' : undefined}
+                      title={
+                        evidence === 'no-evidence'
+                          ? 'sin evidencia evaluable'
+                          : evidence === 'not-recorded'
+                            ? 'análisis de un motor anterior: no registró qué señales se evaluaron'
+                            : undefined
+                      }
                     />
                     {question.question}
                   </span>
