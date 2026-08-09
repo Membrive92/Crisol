@@ -5,6 +5,7 @@ export * from './plural';
 export * from './investment-matrix';
 export * from './investment-metric-format';
 export * from './investment-metric-index';
+export * from './investment-chart-scale';
 export * from './investment-metric-rows';
 export * from './investment-report-sections';
 export * from './investment-statement-rows';

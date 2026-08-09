@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { MetricDefinition, MetricResult, ThresholdSpec } from '@crisol/types';
 
 import { buildCatalogIndex } from './investment-metric-index';
-import { metricRow } from './investment-metric-rows';
+import { metricGapLegend, metricRow } from './investment-metric-rows';
 import type { MetricIndex } from './investment-metric-index';
 
 /**
@@ -74,6 +74,129 @@ describe('metricRow', () => {
   it('con un solo ejercicio ausente NO se declara ausente la métrica entera', () => {
     const row = metricRow('S7', options([undefined, NOT_COMPUTABLE]));
     expect(row.hint).not.toMatch(/no existía en la versión del motor/);
+  });
+});
+
+/**
+ * Regla 8 (PHASE-44.17) — el motivo que se enseña es el del ejercicio MÁS
+ * RECIENTE.
+ *
+ * El caso real es el M-Score de McDonald's: falla en el primer ejercicio porque
+ * no hay año anterior con el que comparar, y en todos los demás porque la
+ * empresa no publica coste de ventas anual. `Array.find` sobre la serie —que va
+ * de más antiguo a más reciente— devolvía el primero, así que el informe
+ * invitaba a ingerir más historia. Ingerirla no habría arreglado nada.
+ */
+describe('el motivo de un hueco es el del ejercicio más reciente', () => {
+  const MSCORE_CATALOG: MetricDefinition[] = [
+    {
+      key: 'm_score',
+      label: 'M-Score de Beneish',
+      family: 'forense',
+      unit: 'score',
+      direction: 'lower_better',
+      low_alarm: null,
+      low_ok: null,
+      high_ok: '-2.22',
+      high_alarm: '-1.78',
+      model_variant: null,
+      note: '',
+    },
+  ];
+
+  const YEARS = [2021, 2022, 2023];
+
+  function mcdIndex(series: (MetricResult | undefined)[]): MetricIndex {
+    return {
+      get: (_key, year) => series[YEARS.indexOf(year)],
+      series: () => series,
+      years: YEARS,
+      keys: ['m_score'],
+    };
+  }
+
+  const gap = (fiscal_year: number, reason: string): MetricResult => ({
+    key: 'm_score',
+    fiscal_year,
+    value: null,
+    band: null,
+    status: 'not_computable',
+    provenance: 'sourced',
+    reason,
+  });
+
+  const SIN_ANTERIOR = gap(2021, 'no hay ejercicio anterior con el que comparar');
+  const SIN_COGS = gap(2022, "falta la partida 'cogs'");
+
+  const mcdOptions = (series: (MetricResult | undefined)[]) => ({
+    index: mcdIndex(series),
+    catalog: buildCatalogIndex(MSCORE_CATALOG),
+    thresholdsUsed: undefined,
+  });
+
+  it('no manda a ingerir historia cuando lo que falta es una partida', () => {
+    const row = metricRow(
+      'm_score',
+      mcdOptions([SIN_ANTERIOR, SIN_COGS, { ...SIN_COGS, fiscal_year: 2023 }]),
+    );
+    expect(row.hint).toMatch(/falta la partida 'cogs'/);
+    expect(row.hint).not.toMatch(/no hay ejercicio anterior/);
+  });
+
+  it('declara que los ejercicios no fallan todos por lo mismo', () => {
+    const row = metricRow(
+      'm_score',
+      mcdOptions([SIN_ANTERIOR, SIN_COGS, { ...SIN_COGS, fiscal_year: 2023 }]),
+    );
+    expect(row.hint).toMatch(/2023: /);
+    expect(row.hint).toMatch(/otros ejercicios, por otro motivo/);
+  });
+
+  it('con un único motivo en toda la serie, lo dice sin adornos', () => {
+    const row = metricRow(
+      'm_score',
+      mcdOptions([
+        { ...SIN_COGS, fiscal_year: 2021 },
+        SIN_COGS,
+        { ...SIN_COGS, fiscal_year: 2023 },
+      ]),
+    );
+    expect(row.hint).toBe("falta la partida 'cogs'");
+  });
+
+  it('la leyenda del bloque sale del run: sin huecos no se pinta nada', () => {
+    const ok: MetricResult = {
+      key: 'm_score',
+      fiscal_year: 2021,
+      value: '-2.9',
+      band: 'healthy',
+      status: 'ok',
+      provenance: 'sourced',
+      reason: null,
+    };
+    const legend = metricGapLegend(['m_score'], {
+      index: mcdIndex([ok, { ...ok, fiscal_year: 2022 }, { ...ok, fiscal_year: 2023 }]),
+      catalog: buildCatalogIndex(MSCORE_CATALOG),
+    });
+    expect(legend).toEqual([]);
+  });
+
+  it('la leyenda nombra los ejercicios reales, no «el primero»', () => {
+    const legend = metricGapLegend(['m_score'], {
+      index: mcdIndex([SIN_ANTERIOR, SIN_COGS, { ...SIN_COGS, fiscal_year: 2023 }]),
+      catalog: buildCatalogIndex(MSCORE_CATALOG),
+    });
+    expect(legend).toHaveLength(1);
+    expect(legend[0]).toMatch(/M-Score de Beneish: sin dato en 2021-2023/);
+    expect(legend[0]).toMatch(/falta la partida 'cogs'/);
+  });
+
+  it('una métrica ausente de todo el run no entra en la leyenda: es cosa del motor', () => {
+    const legend = metricGapLegend(['m_score'], {
+      index: mcdIndex([undefined, undefined, undefined]),
+      catalog: buildCatalogIndex(MSCORE_CATALOG),
+    });
+    expect(legend).toEqual([]);
   });
 });
 

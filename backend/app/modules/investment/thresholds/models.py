@@ -18,7 +18,7 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Numeric, String, UniqueConstraint
+from sqlalchemy import Boolean, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -53,6 +53,11 @@ class ScoringThresholds(Base):
     applies: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     """FALSE = el modelo no aplica a este (sector × norma): p. ej. Beneish en
     financieras. El engine reporta `not_computable` con razón, no basura."""
+    not_applicable_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    """Por qué no aplica, en español (PHASE-44.21). Viaja en `thresholds_used` y
+    de ahí a la pantalla: un número gris sin explicación se lee como «no se ha
+    podido calcular», que es otra cosa — y el usuario acaba culpando a las
+    cuentas de la empresa de una decisión del motor."""
 
     __table_args__ = (
         UniqueConstraint(

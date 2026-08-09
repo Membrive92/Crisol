@@ -1,6 +1,7 @@
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 import type { MatrixRow } from '@crisol/ui';
 
 /**
@@ -14,6 +15,13 @@ import type { MatrixRow } from '@crisol/ui';
  * La tabla scrollea en horizontal DENTRO de su contenedor y la columna del
  * concepto queda fuera del scroll, fija: en un móvil, perder de vista de qué
  * fila es el número que estás leyendo es perder el número.
+ *
+ * **El motivo por celda es pulsable.** `MatrixCell.title` lleva el porqué de un
+ * hueco, de una aproximación o de una vara que no aplica — y en web sale como
+ * `title=`, que en táctil no existe: aquí no se pintaba NUNCA. Cuando una
+ * métrica falla por motivos distintos en años distintos, el de la fila sólo
+ * puede contar uno, así que el resto se perdía. Tocar la celda lo enseña debajo
+ * de la tabla, que es el único afordance que queda sin ratón.
  */
 export function YearMatrix({
   years,
@@ -28,6 +36,7 @@ export function YearMatrix({
   firstColumnLabel?: string;
   legend?: string | undefined;
 }) {
+  const [detail, setDetail] = useState<{ label: string; year: number; text: string } | null>(null);
   return (
     <View style={{ gap: spacing.sm }}>
       <View style={styles.table}>
@@ -71,27 +80,57 @@ export function YearMatrix({
                   ? years.map((year) => (
                       <Text key={year} style={[styles.valueCell, styles.groupFiller]} />
                     ))
-                  : row.cells.map((cell, i) => (
-                      <Text
-                        key={`${row.key}-${years[i] ?? i}`}
-                        style={[
-                          styles.valueCell,
-                          styles.bodyCell,
-                          cell.background ? { backgroundColor: cell.background } : null,
-                          { color: cell.color ?? colors.text },
-                          row.emphasis ? { fontWeight: fontWeight.semibold } : null,
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {cell.text}
-                        {cell.mark ?? ''}
-                      </Text>
-                    ))}
+                  : row.cells.map((cell, i) => {
+                      const year = years[i];
+                      const selected =
+                        detail !== null && detail.label === row.label && detail.year === year;
+                      return (
+                        <Pressable
+                          key={`${row.key}-${year ?? i}`}
+                          disabled={!cell.title}
+                          onPress={() =>
+                            cell.title && year !== undefined
+                              ? setDetail(
+                                  selected ? null : { label: row.label, year, text: cell.title },
+                                )
+                              : undefined
+                          }
+                          style={[
+                            styles.bodyCell,
+                            cell.background ? { backgroundColor: cell.background } : null,
+                            selected ? styles.cellSelected : null,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.valueCell,
+                              { color: cell.color ?? colors.text },
+                              row.emphasis ? { fontWeight: fontWeight.semibold } : null,
+                              // El punto marca que hay algo que leer detrás.
+                              cell.title ? styles.hasDetail : null,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {cell.text}
+                            {cell.mark ?? ''}
+                            {cell.title ? ' ·' : ''}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
               </View>
             ))}
           </View>
         </ScrollView>
       </View>
+      {detail ? (
+        <Pressable onPress={() => setDetail(null)} style={styles.detail}>
+          <Text style={styles.detailTitle}>
+            {detail.label} · {detail.year}
+          </Text>
+          <Text style={styles.detailText}>{detail.text}</Text>
+        </Pressable>
+      ) : null}
       {legend ? <Text style={styles.legend}>{legend}</Text> : null}
     </View>
   );
@@ -156,9 +195,19 @@ const styles = StyleSheet.create({
   },
   bodyCell: {
     height: ROW_HEIGHT,
-    lineHeight: ROW_HEIGHT,
+    justifyContent: 'center',
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
+  cellSelected: { borderWidth: 1, borderColor: colors.primary },
+  hasDetail: { textDecorationLine: 'underline', textDecorationStyle: 'dotted' },
+  detail: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.sm,
+    padding: spacing.sm,
+    gap: 2,
+  },
+  detailTitle: { color: colors.text, fontSize: fontSize.xs, fontWeight: fontWeight.semibold },
+  detailText: { color: colors.textMuted, fontSize: fontSize.xs, lineHeight: 16 },
   legend: { color: colors.textSubtle, fontSize: 10, lineHeight: 15 },
 });

@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import type { QuestionVerdict } from '@crisol/types';
 
-import { compareEngineVersions, isRunOutdated, questionEvidence } from './investment-run-version';
+import {
+  compareEngineVersions,
+  evidenceBreakdown,
+  isRunOutdated,
+  questionEvidence,
+} from './investment-run-version';
 
 /**
  * Un `AnalysisRun` es JSONB persistido: la tabla guarda runs de todas las
@@ -86,5 +91,47 @@ describe('questionEvidence', () => {
 
   it('con señales evaluadas, el veredicto se sostiene', () => {
     expect(questionEvidence(question({ evaluated_count: 3, signals: [] }))).toBe('evaluated');
+  });
+
+  it('sin un PORTANTE, la pregunta no está auditada aunque haya señales', () => {
+    // El cuarto estado (PHASE-44.21). McDonald's salía verde confiado con 3
+    // señales de 10 y las dos que responden la pregunta —M-Score y accruals—
+    // muertas: lo que decide no es cuántas, es cuáles.
+    expect(
+      questionEvidence(question({ evaluated_count: 3, signals: [], audited: false })),
+    ).toBe('not-audited');
+  });
+
+  it('un run anterior a 1.6.0 no se declara no auditado: ausente no es false', () => {
+    const legacy = question({ evaluated_count: 3, signals: [] });
+    delete legacy.audited;
+    expect(questionEvidence(legacy)).toBe('evaluated');
+  });
+});
+
+/**
+ * PHASE-44.17 — `unavailable_count` metía en un cubo cuatro cosas: no se pudo
+ * calcular, la bandera no saltó (buena noticia), es informativa por diseño, y no
+ * aplica. La frase tiene que decir la verdad sobre los tres formatos de run que
+ * puede haber en la tabla.
+ */
+describe('evidenceBreakdown', () => {
+  it('separa lo comprobado y limpio de lo que no se pudo comprobar', () => {
+    const frase = evidenceBreakdown(
+      question({ evaluated_count: 3, unavailable_count: 7, clear_count: 5, unchecked_count: 2 }),
+    );
+    expect(frase).toBe('3 señales evaluadas · 5 comprobadas y limpias · 2 sin poder comprobar');
+  });
+
+  it('un run anterior a 1.5.0 dice lo que sabe, sin inventarse el desglose', () => {
+    const frase = evidenceBreakdown(question({ evaluated_count: 3, unavailable_count: 7 }));
+    expect(frase).toBe('3 señales evaluadas · 7 sin poder evaluar');
+    expect(frase).not.toMatch(/comprobadas y limpias/);
+  });
+
+  it('un run que no registraba contadores no produce frase', () => {
+    const legacy = question();
+    delete legacy.evaluated_count;
+    expect(evidenceBreakdown(legacy)).toBe('');
   });
 });

@@ -169,7 +169,14 @@ async def run_analysis(
             ),
         )
 
-    thresholds = await load_thresholds(db, security.sector, security.accounting_std)
+    thresholds = await load_thresholds(
+        db,
+        security.sector,
+        security.accounting_std,
+        # El perfil financiero es del VALOR: un holding clasificado en otro
+        # sector puede serlo, y entonces manda su perfil sobre el del sector.
+        is_financial=security.is_financial,
+    )
     thresholds_version = thresholds_hash(thresholds)
 
     base = base_ratios.compute(series, thresholds)

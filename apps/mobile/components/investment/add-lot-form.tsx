@@ -5,6 +5,7 @@ import { formatApiError, useCreateLot } from '@crisol/services';
 import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import { SecuritySearch } from './security-search';
+import { DateInput } from '../ui/date-input';
 
 /**
  * Alta de una compra en móvil (PHASE-44.8 E4).
@@ -92,18 +93,18 @@ export function AddLotForm({ onDone }: { onDone: () => void }) {
         />
       </View>
 
-      <TextInput
+      {/* El date-picker nativo que Finanzas Domésticas usa desde PHASE-14.3, en
+          vez del `AAAA-MM-DD` tecleado a mano que había aquí. No es sólo
+          comodidad: la fecha de la operación es lo que fija el tipo de cambio
+          que el servidor deriva del BCE, así que un dedazo en el año mueve el
+          coste en euros de la posición. Y además NO se puede elegir una fecha
+          futura: no hay tipo de cambio para mañana. */}
+      <DateInput
+        label="Fecha de la compra"
         value={tradeDate}
-        onChangeText={setTradeDate}
-        placeholder="AAAA-MM-DD"
-        placeholderTextColor={colors.textSubtle}
-        autoCapitalize="none"
-        autoCorrect={false}
-        style={styles.input}
+        onChange={setTradeDate}
+        maximumDate={new Date()}
       />
-      {tradeDate && !dateValid ? (
-        <Text style={styles.error}>La fecha va como AAAA-MM-DD (p. ej. 2026-08-07).</Text>
-      ) : null}
 
       <Pressable
         onPress={() => void submit()}

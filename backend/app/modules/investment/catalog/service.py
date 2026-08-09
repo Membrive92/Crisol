@@ -398,6 +398,25 @@ async def resolve_security(
                 twin.analysis_status = status
                 twin.accounting_std = accounting_std_from_status(status)
                 changed = True
+            # Y la clasificación, por la misma razón (PHASE-44.21). Desde que el
+            # sector elige los UMBRALES, dejarlo congelado en el valor que tenía
+            # el día del alta significa que corregir `sic_mapping` no alcanza a
+            # nada de lo que ya está en el catálogo: la calibración nueva llega a
+            # las altas futuras y nunca a las que se están analizando. Es el
+            # mismo defecto que el sembrado sólo-inserción de los umbrales, en
+            # otra tabla.
+            #
+            # `is_financial` e `is_reit` viajan CON el sector porque salen de la
+            # misma resolución: separarlos dejaría a un banco reclasificado con
+            # los forenses encendidos.
+            classification = (
+                sic_to_sector(identity.sic),
+                identity.is_financial,
+                identity.is_reit,
+            )
+            if (twin.sector, twin.is_financial, twin.is_reit) != classification:
+                twin.sector, twin.is_financial, twin.is_reit = classification
+                changed = True
             if changed:
                 await db.flush()
                 await db.refresh(twin)

@@ -54,10 +54,12 @@ async def lifespan(app_: FastAPI) -> AsyncIterator[None]:
         scheduler.start()
         # Stash para que tests / debugging puedan inspeccionarlo.
         app_.state.scheduler = scheduler
-    # Completa los umbrales de inversión que falten (idempotente, sólo-inserción
-    # y defensivo: un fallo de BD al arrancar no debe tumbar el proceso).
-    # Antes era `seed_if_empty`, que se rendía en cuanto la tabla tenía una fila
-    # y dejaba fuera para siempre toda métrica añadida después (PHASE-44.18).
+    # Sincroniza los umbrales de inversión con la calibración del engine
+    # (idempotente y defensivo: un fallo de BD al arrancar no debe tumbar el
+    # proceso). Antes era `seed_if_empty`, que se rendía en cuanto la tabla tenía
+    # una fila y dejaba fuera para siempre toda métrica añadida después
+    # (PHASE-44.18); desde PHASE-44.21 también reescribe lo que difiere, para que
+    # una recalibración llegue a las bases que ya existen y no sólo a las nuevas.
     try:
         await seed_on_startup()
     except Exception:

@@ -7,6 +7,7 @@ que el veredicto y el perfil salen de las reglas explícitas del DESIGN §5.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 
@@ -14,6 +15,7 @@ import pytest
 
 from app.modules.investment.analysis.engine import (
     base_ratios,
+    flag_rules,
     synthesis,
 )
 from app.modules.investment.analysis.engine import (
@@ -29,7 +31,11 @@ from app.modules.investment.analysis.engine import (
     stress as stress_layer,
 )
 from app.modules.investment.analysis.engine.stress import StressParams
-from app.modules.investment.analysis.engine.types import SecuritySnapshot, StatementSeries
+from app.modules.investment.analysis.engine.types import (
+    FlagEvaluation,
+    SecuritySnapshot,
+    StatementSeries,
+)
 from app.modules.investment.enums import AccountingStd, SectorInternal
 from app.modules.investment.fundamentals.canonical import CanonicalStatement, Provenance
 
@@ -290,6 +296,17 @@ def _forensic_with(**bands: str) -> forensic_layer.ForensicResult:
     return forensic_layer.ForensicResult(metrics=tuple(metrics))
 
 
+def _b4_checked() -> dict[str, FlagEvaluation]:
+    """B4 comprobada y limpia. Es el estado normal de una empresa con datos, y
+    hay que declararlo: desde PHASE-44.17, una B4 que NO se ha podido comprobar
+    impide el sello de «Conservador» en vez de contarse como «no está en rojo»."""
+    return {
+        "B4_dividend_funded_externally": FlagEvaluation(
+            key="B4_dividend_funded_externally", outcome="clear", years_evaluated=(2024,)
+        )
+    }
+
+
 def test_perfil_conservador_exige_las_cinco_condiciones_en_verde() -> None:
     forensic = _forensic_with(
         m_score="healthy",
@@ -298,7 +315,7 @@ def test_perfil_conservador_exige_las_cinco_condiciones_en_verde() -> None:
         f_score="healthy",
         accruals="healthy",
     )
-    profile = synthesis._safety_profile(forensic, {}, 2024)
+    profile = synthesis._safety_profile(forensic, {}, _b4_checked(), 2024)
     assert profile.label == "conservative"
     assert profile.blocking_reasons == ()
 
@@ -311,7 +328,7 @@ def test_perfil_vigilar_lista_lo_que_impide_ser_conservador() -> None:
         f_score="caution",  # F-Score < 7
         accruals="healthy",
     )
-    profile = synthesis._safety_profile(forensic, {}, 2024)
+    profile = synthesis._safety_profile(forensic, {}, _b4_checked(), 2024)
     assert profile.label == "watch"
     assert any("F-Score" in reason for reason in profile.blocking_reasons)
 
@@ -320,7 +337,7 @@ def test_z_score_rojo_fuerza_evitar() -> None:
     forensic = _forensic_with(
         m_score="healthy", z_score="stressed", FZ="healthy", f_score="healthy", accruals="healthy"
     )
-    profile = synthesis._safety_profile(forensic, {}, 2024)
+    profile = synthesis._safety_profile(forensic, {}, _b4_checked(), 2024)
     assert profile.label == "avoid"
     assert any("insolvencia" in reason for reason in profile.blocking_reasons)
 
@@ -335,7 +352,7 @@ def test_manipulacion_probable_fuerza_evitar() -> None:
         f_score="healthy",
         accruals="stressed",
     )
-    profile = synthesis._safety_profile(forensic, {}, 2024)
+    profile = synthesis._safety_profile(forensic, {}, _b4_checked(), 2024)
     assert profile.label == "avoid"
 
 
@@ -348,7 +365,7 @@ def test_m_score_rojo_solo_no_fuerza_evitar() -> None:
         f_score="healthy",
         accruals="healthy",
     )
-    profile = synthesis._safety_profile(forensic, {}, 2024)
+    profile = synthesis._safety_profile(forensic, {}, _b4_checked(), 2024)
     assert profile.label != "avoid"
 
 
@@ -356,7 +373,9 @@ def test_b4_rojo_fuerza_evitar() -> None:
     forensic = _forensic_with(
         m_score="healthy", z_score="healthy", FZ="healthy", f_score="healthy", accruals="healthy"
     )
-    profile = synthesis._safety_profile(forensic, {"B4_dividend_funded_externally": "red"}, 2024)
+    profile = synthesis._safety_profile(
+        forensic, {"B4_dividend_funded_externally": "red"}, _b4_checked(), 2024
+    )
     assert profile.label == "avoid"
 
 
@@ -371,6 +390,7 @@ def _señal(nombre: str, band: str | None, *, reason: str | None = None) -> synt
         status=None,
         counted=band is not None,
         reason=None if band is not None else (reason or "no calculable"),
+        outcome="scored" if band is not None else "unchecked",
     )
 
 
@@ -470,6 +490,155 @@ def test_una_financiera_no_puede_pintar_verde_por_ausencia_de_prueba() -> None:
     assert len(forenses) == 3
     assert all(not s.counted for s in forenses), "ningún forense debería puntuar en una financiera"
     assert all(s.reason for s in forenses), "y cada uno explica por qué"
+
+
+# ══ PHASE-44.17 — evaluabilidad de las banderas ══════════════════════
+#
+# Una `Flag` sólo existe cuando salta, así que «no hay bandera» era la misma
+# respuesta para «comprobado y limpio» y para «la regla no llegó a ejecutarse».
+# La síntesis traducía las dos a «no se ha encendido», que se lee como limpio.
+
+
+def _sin_coste_de_ventas() -> StatementSeries:
+    """La misma empresa sana, pero sin coste de ventas — como McDonald's, que
+    presenta sus gastos por naturaleza y no publica `cogs` anual."""
+    serie = _healthy_series()
+    return StatementSeries(
+        security=serie.security,
+        statements=tuple(replace(s, cogs=None) for s in serie.statements),
+        as_of=serie.as_of,
+    )
+
+
+def _flag_signals(resultado: synthesis.SynthesisResult) -> dict[str, synthesis.QuestionSignal]:
+    return {
+        signal.key: signal
+        for question in resultado.questions
+        for signal in question.signals
+        if signal.kind == "flag"
+    }
+
+
+def test_toda_bandera_usada_como_señal_tiene_evaluacion_publicada() -> None:
+    """El gate de cobertura, simétrico al default pesimista de `_flag_signal`.
+
+    Sin él, el arreglo cambia un falso VERDE por un falso GRIS universal: si
+    alguien añade una regla y olvida publicar su evaluación, todas las empresas
+    verían «no se ha podido comprobar», incluidas aquellas donde sí se comprobó.
+    Se ejecuta sobre dos series a propósito —una completa y una degenerada de un
+    solo ejercicio— porque la evaluación tiene que publicarse SIEMPRE, también
+    cuando la regla no tiene con qué correr.
+    """
+    for serie in (_healthy_series(), _sin_coste_de_ventas()):
+        resultado = _synthesize(serie)
+        publicadas = _flag_signals(resultado)
+        assert set(synthesis.QUESTION_FLAG_KEYS) <= set(publicadas)
+        for key in synthesis.QUESTION_FLAG_KEYS:
+            reason = publicadas[key].reason or ""
+            assert "el motor no publicó la evaluación" not in reason, (
+                f"{key} llega a la síntesis sin evaluación: su capa no la publica. "
+                "Publícala en la capa que la calcula, no la excluyas de aquí."
+            )
+
+
+def test_una_regla_que_no_se_pudo_ejecutar_no_dice_que_no_se_ha_encendido() -> None:
+    """El defecto exacto: sin `cogs`, C3 (inventario vs coste de ventas) no se
+    ejecuta ni un ejercicio, no emite bandera, y salía como «no se ha encendido»
+    — que se lee como comprobado y limpio."""
+    señales = _flag_signals(_synthesize(_sin_coste_de_ventas()))
+    c3 = señales["C3_inventory_vs_cogs"]
+    assert c3.outcome == "unchecked"
+    assert c3.reason is not None
+    assert "no se ha encendido" not in c3.reason
+    assert "cogs" in c3.reason, "el motivo tiene que nombrar la partida que falta"
+
+
+def test_una_regla_comprobada_y_limpia_se_distingue_de_una_que_no_se_pudo() -> None:
+    """La otra mitad: con datos completos, C3 sí se comprueba y sale limpia."""
+    señales = _flag_signals(_synthesize(_healthy_series()))
+    assert señales["C3_inventory_vs_cogs"].outcome == "clear"
+    assert señales["C3_inventory_vs_cogs"].reason == "se comprobó y no se encendió"
+
+
+def test_los_contadores_separan_lo_limpio_de_lo_que_no_se_pudo() -> None:
+    """`unavailable_count` metía en un cubo cuatro cosas: la pantalla decía «7 no
+    disponibles» donde había 2 huecos reales y 5 banderas limpias."""
+    accounting = _synthesize(_healthy_series()).question("accounting")
+    assert accounting is not None
+    assert accounting.clear_count > 0, "las banderas limpias son evidencia, no huecos"
+    assert accounting.evaluated_count + accounting.clear_count + accounting.unchecked_count + sum(
+        1 for s in accounting.signals if s.outcome == "informational"
+    ) == len(accounting.signals)
+    # Y el total antiguo se conserva: los runs guardados lo tienen.
+    assert accounting.unavailable_count == len(accounting.signals) - accounting.evaluated_count
+
+
+def test_el_sello_conservador_no_se_hereda_de_una_b4_que_no_se_pudo_comprobar() -> None:
+    """B4 es una de las cuatro condiciones que fuerzan «Evitar». Se leía del mapa
+    de banderas encendidas, así que una B4 no evaluable se traducía en «no está
+    en rojo» y el sello subía sin haberla comprobado."""
+    forensic = _forensic_with(
+        m_score="healthy", z_score="healthy", FZ="healthy", f_score="healthy", accruals="healthy"
+    )
+    sin_evaluar = {
+        "B4_dividend_funded_externally": FlagEvaluation(
+            key="B4_dividend_funded_externally",
+            outcome="not_computable",
+            reason="falta la caja libre",
+        )
+    }
+    profile = synthesis._safety_profile(forensic, {}, sin_evaluar, 2024)
+    assert profile.label == "watch"
+    assert any("no se ha podido comprobar" in reason for reason in profile.blocking_reasons)
+
+
+def test_la_racha_evaluable_tiene_que_ser_de_anios_consecutivos() -> None:
+    """`runs` busca ventanas consecutivas, así que con años evaluables sueltos la
+    regla NO puede encenderse jamás: decir «comprobado y limpio» ahí afirmaría
+    una comprobación imposible."""
+    salteados = flag_rules.evaluate_windowed_rule(
+        "C1_receivables_vs_revenue",
+        fired=False,
+        evaluable=[2016, 2018, 2020],
+        unevaluable={},
+        sustained=2,
+    )
+    assert salteados.outcome == "not_computable"
+    seguidos = flag_rules.evaluate_windowed_rule(
+        "C1_receivables_vs_revenue",
+        fired=False,
+        evaluable=[2019, 2020],
+        unevaluable={},
+        sustained=2,
+    )
+    assert seguidos.outcome == "clear"
+
+
+def test_el_motivo_distingue_el_cero_imputado_del_dato_que_falta() -> None:
+    """Tres modos de ausencia, no dos: falta el dato, valía cero, o el filing no
+    lo publica y la ingesta lo supone cero. Redactar el motivo sin mirar la
+    procedencia produce una frase falsa."""
+    base = _healthy_year(2023, revenue=1200, dividends=72)
+    siguiente = _healthy_year(2024, revenue=1300, dividends=78)
+
+    falta = evolution_layer.growth_of("cogs", siguiente, replace(base, cogs=None))
+    assert falta.reason is not None and "falta la partida 'cogs'" in falta.reason
+
+    cero_real = evolution_layer.growth_of("inventory", siguiente, replace(base, inventory=dec(0)))
+    assert cero_real.reason is not None and "valía cero" in cero_real.reason
+
+    cero_imputado = evolution_layer.growth_of(
+        "inventory",
+        siguiente,
+        replace(
+            base,
+            inventory=dec(0),
+            item_provenance={**base.item_provenance, "inventory": Provenance.IMPUTED_ZERO},
+        ),
+    )
+    assert cero_imputado.reason is not None
+    assert "supone cero" in cero_imputado.reason
+    assert "valía cero" not in cero_imputado.reason
 
 
 # ── Perfil "Evitar" ───────────────────────────────────────────────────

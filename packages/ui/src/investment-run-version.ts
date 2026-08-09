@@ -32,12 +32,57 @@ import type { QuestionVerdict } from '@crisol/types';
  * sitios (el hero y la pestaña Veredicto) con la misma expresión copiada — dos
  * copias de una regla es una divergencia esperando el momento.
  */
-export type QuestionEvidence = 'evaluated' | 'no-evidence' | 'not-recorded';
+export type QuestionEvidence = 'evaluated' | 'no-evidence' | 'not-recorded' | 'not-audited';
 
 export function questionEvidence(question: QuestionVerdict): QuestionEvidence {
-  const { signals, evaluated_count: evaluated } = question;
+  const { signals, evaluated_count: evaluated, audited } = question;
   if (signals === undefined || evaluated === undefined) return 'not-recorded';
+  // El cuarto estado (motor ≥ 1.6.0): falta un PORTANTE, así que el veredicto no
+  // está auditado dijeran lo que dijeran las demás señales. `undefined` no es
+  // `false`: en los runs anteriores la distinción no se registraba.
+  if (audited === false) return 'not-audited';
   return evaluated === 0 && signals.length > 0 ? 'no-evidence' : 'evaluated';
+}
+
+/** Etiqueta corta de cada estado, compartida por las dos apps. */
+export const EVIDENCE_LABEL: Record<QuestionEvidence, string> = {
+  evaluated: '',
+  'no-evidence': 'Sin evidencia',
+  'not-recorded': 'No auditable',
+  'not-audited': 'No auditada',
+};
+
+/**
+ * El desglose de evidencia de una pregunta, en una frase.
+ *
+ * Vive aquí porque tiene que decir la verdad sobre TRES formatos de run a la
+ * vez: los que no registran nada (< 1.1.0), los que sólo tienen «evaluadas / no
+ * disponibles» (1.1.0-1.4.0), y los que separan «comprobadas y limpias» de «sin
+ * poder comprobar» (≥ 1.5.0).
+ *
+ * La distinción importa porque el cubo antiguo mezclaba cuatro cosas: en
+ * McDonald's, «7 sin poder evaluar» eran 2 huecos reales y 5 banderas
+ * comprobadas y limpias. La pantalla subestimaba la evidencia mientras el
+ * veredicto verde la sobreestimaba — los dos errores a la vez y en direcciones
+ * opuestas.
+ */
+export function evidenceBreakdown(question: QuestionVerdict): string {
+  const {
+    evaluated_count: evaluated,
+    unavailable_count: unavailable,
+    clear_count: clear,
+    unchecked_count: unchecked,
+  } = question;
+  if (evaluated === undefined) return '';
+  const parts = [`${evaluated} señales evaluadas`];
+  if (clear === undefined || unchecked === undefined) {
+    // Run anterior a 1.5.0: el desglose no existe, así que se dice lo que hay.
+    parts.push(`${unavailable ?? 0} sin poder evaluar`);
+    return parts.join(' · ');
+  }
+  if (clear > 0) parts.push(`${clear} comprobadas y limpias`);
+  parts.push(`${unchecked} sin poder comprobar`);
+  return parts.join(' · ');
 }
 
 /** Un `x.y.z` partido en números. Lo que no sea numérico cuenta como 0. */

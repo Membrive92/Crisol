@@ -104,6 +104,12 @@ export interface EffectiveThreshold extends MetricDefinition {
    * permanente que no informa de nada.
    */
   applies: boolean;
+  /**
+   * Y POR QUÉ no sirve, con las palabras del motor (PHASE-44.21). Un «sin
+   * semáforo» genérico deja al usuario sin saber si el problema son sus datos o
+   * la métrica; «el EBITDA carece de sentido en banca» lo cierra.
+   */
+  notApplicableReason?: string | null;
 }
 
 /**
@@ -138,5 +144,6 @@ export function effectiveThreshold(
     // US-GAAP se están aplicando a cuentas IFRS.
     model_variant: used.model_variant,
     applies: used.applies,
+    notApplicableReason: used.not_applicable_reason ?? null,
   };
 }

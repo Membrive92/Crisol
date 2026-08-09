@@ -32,6 +32,7 @@ from app.modules.investment.analysis.engine.conventions import (
     sourced,
     subtract,
 )
+from app.modules.investment.analysis.engine.flag_rules import NO_MATERIAL_INVENTORY
 from app.modules.investment.analysis.engine.metrics import (
     MetricDefinition,
     MetricUnit,
@@ -495,10 +496,35 @@ def _other_current_assets_over_revenue(statement: CanonicalStatement) -> Decimal
     return other / statement.revenue
 
 
+C_SCORE_INVENTORY_CHECK = "C3_dias_de_inventario_suben"
+
+MIN_C_SCORE_CHECKS = 4
+"""Checks aplicables por debajo de los cuales F7 no se computa.
+
+Con tres de seis, el score deja de significar lo que su banda dice: un 2 sobre 3
+y un 2 sobre 6 son cosas muy distintas, y la banda está escrita para el segundo.
+Antes que un número descontextualizado, `not_computable` con su motivo."""
+
+
 def compute_c_score(
-    current: CanonicalStatement, previous: CanonicalStatement
+    current: CanonicalStatement,
+    previous: CanonicalStatement,
+    *,
+    inapplicable_checks: frozenset[str] = frozenset(),
 ) -> tuple[Amount, dict[str, bool]]:
-    """6 checks binarios de "cocina" contable (F7)."""
+    """6 checks binarios de "cocina" contable (F7), con denominador variable.
+
+    Los checks que no se plantean en el sector salen del cómputo en vez de
+    bloquearlo (PHASE-44.21): a una eléctrica no le suben los días de inventario
+    porque no tiene inventario, y hasta ahora ese `None` hacía que TODO el
+    C-Score saliera no computable. La empresa perdía cinco comprobaciones buenas
+    por una que no le corresponde.
+
+    El valor sigue siendo el RECUENTO de checks encendidos, no un porcentaje
+    reescalado: escalar 2/5 a 2,4/6 inventaría precisión que no hay. Lo que se
+    publica junto al número es cuántos se pudieron mirar, y por eso el mínimo de
+    `MIN_C_SCORE_CHECKS` es una guarda y no un detalle.
+    """
     dso_now = _ratio(current.receivables, current.revenue)
     dso_before = _ratio(previous.receivables, previous.revenue)
     dio_now = _ratio(current.inventory, current.cogs)
@@ -534,13 +560,22 @@ def compute_c_score(
             assets_growth > Decimal("0.10") if assets_growth is not None else None
         ),
     }
-    missing = [name for name, value in checks.items() if value is None]
+    applicable = {name: value for name, value in checks.items() if name not in inapplicable_checks}
+    missing = [name for name, value in applicable.items() if value is None]
     if missing:
         return (
             _not_computable(f"no se pueden evaluar los checks {', '.join(missing)} del C-Score"),
             {},
         )
-    resolved = {name: value for name, value in checks.items() if value is not None}
+    if len(applicable) < MIN_C_SCORE_CHECKS:
+        return (
+            _not_computable(
+                f"sólo {len(applicable)} de los 6 checks del C-Score aplican a este sector: "
+                f"por debajo de {MIN_C_SCORE_CHECKS} el recuento no significa lo que dice su banda"
+            ),
+            {},
+        )
+    resolved = {name: value for name, value in applicable.items() if value is not None}
     return (
         Amount(
             value=Decimal(sum(1 for hit in resolved.values() if hit)), provenance=Provenance.DERIVED
@@ -651,6 +686,14 @@ def compute(
     reglamentaria — nunca las omite (ARCHITECTURE §4.2).
     """
     specs = DEFAULT_THRESHOLDS if thresholds is None else thresholds
+    # El check de inventario del C-Score no se plantea en un sector que no tiene
+    # inventario. Sin esto, su `None` tumbaba el score entero y la empresa perdía
+    # cinco comprobaciones buenas por una que no le corresponde (PHASE-44.21).
+    inapplicable_c_checks = (
+        frozenset({C_SCORE_INVENTORY_CHECK})
+        if series.security.sector in NO_MATERIAL_INVENTORY
+        else frozenset()
+    )
     metrics: list[MetricResult] = []
     breakdowns: list[ScoreBreakdown] = []
     flags: list[Flag] = []
@@ -723,7 +766,9 @@ def compute(
             )
         )
 
-        c_amount, c_checks = compute_c_score(statement, previous)
+        c_amount, c_checks = compute_c_score(
+            statement, previous, inapplicable_checks=inapplicable_c_checks
+        )
         metrics.append(to_metric_result("F7", year, c_amount, specs))
         if c_checks:
             breakdowns.append(

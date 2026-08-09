@@ -37,6 +37,14 @@ from app.modules.investment.analysis.engine.conventions import (
     sourced,
     subtract,
 )
+from app.modules.investment.analysis.engine.flag_rules import (
+    FlagRuleResult,
+    evaluate_single_year_rule,
+    evaluate_windowed_rule,
+    flag_applicability,
+    not_applicable_rule,
+    unevaluable_reason,
+)
 from app.modules.investment.analysis.engine.metrics import (
     MetricDefinition,
     MetricUnit,
@@ -47,11 +55,12 @@ from app.modules.investment.analysis.engine.types import (
     Amount,
     Band,
     Flag,
+    FlagEvaluation,
     MetricResult,
     StatementSeries,
     ThresholdSpec,
 )
-from app.modules.investment.enums import ThresholdDirection
+from app.modules.investment.enums import SectorInternal, ThresholdDirection
 from app.modules.investment.fundamentals.canonical import CanonicalStatement, Provenance
 
 PP = Decimal(100)
@@ -296,20 +305,49 @@ def compute_streak_no_cut(dps_points: tuple[DpsPoint, ...]) -> int:
 # ── Q4 (anomalía fiscal): flag por serie ──────────────────────────────
 
 
-def compute_tax_anomaly_flags(series: StatementSeries) -> tuple[Flag, ...]:
+def compute_tax_anomaly_flags(series: StatementSeries) -> FlagRuleResult:
     """Q4 — el tipo efectivo del año se aparta a la baja de la mediana de la
     serie (>10 pp), o lleva sostenidamente por debajo del 10%.
 
     Un crédito fiscal infla el resultado neto sin tocar la caja operativa y no se
     repite: un dividendo que se apoya en él tiene menos colchón del que aparenta.
+
+    Publica también la evaluación de las dos reglas: con menos de dos tipos
+    efectivos calculables no hay mediana contra la que comparar, y salir sin
+    banderas de ahí no es «no se ha encendido», es que no se ha mirado.
     """
     rates: list[tuple[int, Decimal]] = []
+    unevaluable: dict[int, str] = {}
     for statement in series.statements:
-        etr = dv.effective_tax_rate(statement).value
-        if etr is not None:
-            rates.append((statement.fiscal_year, etr))
+        rate = dv.effective_tax_rate(statement)
+        if rate.value is None:
+            unevaluable[statement.fiscal_year] = (
+                rate.reason or "no se pudo calcular el tipo impositivo efectivo"
+            )
+        else:
+            rates.append((statement.fiscal_year, rate.value))
+    rate_years = [year for year, _ in rates]
+
     if len(rates) < 2:
-        return ()
+        insufficient = unevaluable_reason(unevaluable, sustained=2, evaluable=rate_years)
+        return FlagRuleResult(
+            flags=(),
+            evaluations=tuple(
+                FlagEvaluation(
+                    key=key,
+                    outcome="not_computable",
+                    # La mediana de la serie es la vara de la anomalía: con un
+                    # solo tipo efectivo, el año se compararía consigo mismo.
+                    reason=(
+                        "hacen falta al menos dos ejercicios con tipo impositivo efectivo "
+                        f"para tener mediana con la que comparar (hay {len(rates)}): {insufficient}"
+                    ),
+                    years_evaluated=tuple(rate_years),
+                    years_unevaluable=tuple(sorted(unevaluable)),
+                )
+                for key in ("Q4_tax_anomaly", "Q4_tax_persistently_low")
+            ),
+        )
     median_etr = median([rate for _, rate in rates])
 
     flags: list[Flag] = []
@@ -329,6 +367,7 @@ def compute_tax_anomaly_flags(series: StatementSeries) -> tuple[Flag, ...]:
             )
 
     low_years = [year for year, etr in rates if etr < ETR_LOW_LEVEL]
+    persistently_low = False
     for first, second in itertools.pairwise(low_years):
         if second == first + 1:
             flags.append(
@@ -342,36 +381,89 @@ def compute_tax_anomaly_flags(series: StatementSeries) -> tuple[Flag, ...]:
                     evidence={"years": [first, second]},
                 )
             )
+            persistently_low = True
             break
-    return tuple(flags)
+
+    anomaly_fired = any(flag.key == "Q4_tax_anomaly" for flag in flags)
+    return FlagRuleResult(
+        flags=tuple(flags),
+        evaluations=(
+            # La anomalía se juzga año a año contra la mediana: con dos tipos
+            # efectivos ya hay comparación, aunque no sean consecutivos.
+            evaluate_windowed_rule(
+                "Q4_tax_anomaly",
+                fired=anomaly_fired,
+                evaluable=rate_years,
+                unevaluable=unevaluable,
+                sustained=1,
+            ),
+            # La persistencia exige DOS ejercicios seguidos: sin racha posible,
+            # la regla no puede encenderse y decir «limpia» sería afirmar una
+            # comprobación que no cabe hacer.
+            evaluate_windowed_rule(
+                "Q4_tax_persistently_low",
+                fired=persistently_low,
+                evaluable=rate_years,
+                unevaluable=unevaluable,
+                sustained=2,
+            ),
+        ),
+    )
 
 
 # ── Cruces de balance (B1, B2, B4): flags compuestos ──────────────────
+
+BALANCE_SUPPORT_KEYS: tuple[str, ...] = (
+    "B1_debt_competes_with_dividend",
+    "B2_interest_priority",
+    "B4_dividend_funded_externally",
+)
+"""Las tres reglas de soporte de balance. Se enumeran para poder publicar su
+evaluación también cuando la serie está vacía y ninguna llega a ejecutarse."""
 
 
 def compute_balance_support_flags(
     series: StatementSeries,
     metrics_by_key: Mapping[str, MetricResult],
     forensic_bands: Mapping[str, Band | None],
-) -> tuple[Flag, ...]:
+) -> FlagRuleResult:
     """B1, B2 y B4 — cruces que combinan la deuda con el dividendo.
 
     B1/B2 no son ratios nuevos: son la LECTURA CONJUNTA de bandas ya calculadas
     en otras capas (S4/S2 de la Capa 1, D2 de aquí). Se pasan las bandas
     relevantes en vez de recalcular, para que el cruce hable exactamente del
     mismo número que el usuario ve en su métrica.
+
+    Las tres publican su evaluación, y aquí importa especialmente: sus guardas
+    son `if` de una sola línea sobre inputs que en una financiera o en una
+    empresa sin caja libre son `None`, así que la ausencia de bandera era
+    indistinguible de una comprobación limpia. **B4 es la que más pesa**: es una
+    de las cuatro condiciones que fuerzan «Evitar» en el perfil de seguridad.
     """
     flags: list[Flag] = []
     latest = series.latest
     if latest is None:
-        return ()
+        no_series = "no hay ningún ejercicio en la serie"
+        return FlagRuleResult(
+            flags=(),
+            evaluations=tuple(
+                FlagEvaluation(key=key, outcome="not_computable", reason=no_series)
+                for key in BALANCE_SUPPORT_KEYS
+            ),
+        )
 
+    year = latest.fiscal_year
+    evaluations: list[FlagEvaluation] = []
+    inapplicable = flag_applicability(
+        series.security.sector, is_financial=series.security.is_financial
+    )
     d2 = metrics_by_key.get("D2")
     s4_band = forensic_bands.get("S4")
     s2_band = forensic_bands.get("S2")
 
     # B1 — la deuda compite con el dividendo
-    if s4_band == "stressed" and d2 is not None and d2.band in ("caution", "stressed"):
+    b1_fired = s4_band == "stressed" and d2 is not None and d2.band in ("caution", "stressed")
+    if b1_fired and d2 is not None:
         flags.append(
             Flag(
                 key="B1_debt_competes_with_dividend",
@@ -384,10 +476,27 @@ def compute_balance_support_flags(
                 evidence={"s4_band": s4_band, "d2_band": d2.band},
             )
         )
+    evaluations.append(
+        not_applicable_rule(
+            "B1_debt_competes_with_dividend", inapplicable["B1_debt_competes_with_dividend"]
+        )
+        if "B1_debt_competes_with_dividend" in inapplicable
+        else evaluate_single_year_rule(
+            "B1_debt_competes_with_dividend",
+            fired=b1_fired,
+            year=year,
+            missing=_missing_cross_input(
+                ("la banda de deuda neta / EBITDA (S4)", s4_band is None),
+                ("la banda del payout sobre caja libre (D2)", d2 is None or d2.band is None),
+                metric=d2,
+            ),
+        )
+    )
 
     # B2 — los intereses cobran antes que el accionista
     d2_value = d2.value if d2 is not None else None
-    if s2_band == "stressed" and d2_value is not None and d2_value > Decimal("0.60"):
+    b2_fired = s2_band == "stressed" and d2_value is not None and d2_value > Decimal("0.60")
+    if b2_fired and d2_value is not None:
         flags.append(
             Flag(
                 key="B2_interest_priority",
@@ -399,22 +508,50 @@ def compute_balance_support_flags(
                 evidence={"s2_band": s2_band, "d2": str(d2_value)},
             )
         )
+    evaluations.append(
+        not_applicable_rule("B2_interest_priority", inapplicable["B2_interest_priority"])
+        if "B2_interest_priority" in inapplicable
+        else evaluate_single_year_rule(
+            "B2_interest_priority",
+            fired=b2_fired,
+            year=year,
+            missing=_missing_cross_input(
+                ("la banda de cobertura de intereses (S2)", s2_band is None),
+                ("el payout sobre caja libre (D2)", d2_value is None),
+                metric=d2,
+            ),
+        )
+    )
 
     # B4 — el dividendo se financia con deuda o emisión (C7 aplicado al dividendo)
-    fcf = dv.fcf_cfo(latest).value
+    fcf = dv.fcf_cfo(latest)
     dividends = latest.dividends_paid
     debt_change = latest.debt_change
     share_issuance = latest.share_issuance
-    if (
-        fcf is not None
+    b4_fired = (
+        fcf.value is not None
         and dividends is not None
-        and dividends > fcf
+        and dividends > fcf.value
         and (
             (debt_change is not None and debt_change > ZERO)
             or (share_issuance is not None and share_issuance > ZERO)
         )
-    ):
-        gap = dividends - fcf
+    )
+    evaluations.append(
+        evaluate_single_year_rule(
+            "B4_dividend_funded_externally",
+            fired=b4_fired,
+            year=year,
+            missing=_b4_missing(
+                fcf=fcf,
+                dividends=dividends,
+                debt_change=debt_change,
+                share_issuance=share_issuance,
+            ),
+        )
+    )
+    if b4_fired and fcf.value is not None and dividends is not None:
+        gap = dividends - fcf.value
         sources = []
         if debt_change is not None and debt_change > ZERO:
             sources.append(f"{debt_change:,.0f} de más deuda")
@@ -425,20 +562,95 @@ def compute_balance_support_flags(
                 key="B4_dividend_funded_externally",
                 severity="red",
                 message=(
-                    f"El dividendo ({dividends:,.0f}) supera a la caja libre ({fcf:,.0f}) en "
+                    f"El dividendo ({dividends:,.0f}) supera a la caja libre ({fcf.value:,.0f}) en "
                     f"{gap:,.0f}, y a la vez entra dinero de {' y '.join(sources)}: el dividendo se "
                     "está pagando con financiación externa, la señal individual más predictiva de "
                     "un recorte futuro."
                 ),
                 evidence={
                     "dividends_paid": str(dividends),
-                    "fcf_cfo": str(fcf),
+                    "fcf_cfo": str(fcf.value),
                     "debt_change": str(debt_change) if debt_change is not None else None,
                     "share_issuance": str(share_issuance) if share_issuance is not None else None,
                 },
             )
         )
-    return tuple(flags)
+    # RC-2 — en una regulada, un payout alto es su modelo, no un hallazgo. Lo que
+    # informa es quién financia el exceso, y eso lo miran C7 y B4. La banda de D2
+    # ya está relajada para el sector (0,75/0,95); esto enlaza la lectura para
+    # que un ámbar no se quede en «paga mucho» sin la pregunta que sigue.
+    if (
+        series.security.sector is SectorInternal.UTILITIES
+        and d2 is not None
+        and d2.band in ("caution", "stressed")
+    ):
+        flags.append(
+            Flag(
+                key="RC2_utility_payout_needs_funding_check",
+                severity="info",
+                message=(
+                    "En una regulada, un payout alto sobre la caja libre es su modelo de "
+                    "negocio y por eso su banda ya es más ancha. La pregunta que decide no "
+                    "es «¿paga mucho?» sino «¿quién paga el exceso?»: mira C7 (retorno al "
+                    "accionista financiado con deuda) y B4 (dividendo financiado con deuda "
+                    "o emisión), que no se relajan por sector."
+                ),
+                evidence={"d2_band": d2.band, "d2": str(d2.value) if d2.value else None},
+            )
+        )
+
+    return FlagRuleResult(flags=tuple(flags), evaluations=tuple(evaluations))
+
+
+def _missing_cross_input(*inputs: tuple[str, bool], metric: MetricResult | None) -> str | None:
+    """El motivo de que un cruce de bandas no se pueda evaluar, o `None`.
+
+    Cuando lo que falta es una métrica de esta capa, se arrastra SU razón: «falta
+    el coste de ventas» explica; «falta la banda de D2» sólo traslada la pregunta.
+    """
+    missing = [label for label, absent in inputs if absent]
+    if not missing:
+        return None
+    detail = f"no se ha podido comprobar: falta {' y falta '.join(missing)}"
+    if metric is not None and metric.reason:
+        return f"{detail} ({metric.reason})"
+    return detail
+
+
+def _b4_missing(
+    *,
+    fcf: Amount,
+    dividends: Decimal | None,
+    debt_change: Decimal | None,
+    share_issuance: Decimal | None,
+) -> str | None:
+    """Por qué B4 no se puede afirmar limpia.
+
+    El orden importa. Si el dividendo NO supera a la caja libre, la regla está
+    comprobada y limpia aunque no se sepa nada de la financiación: no hay exceso
+    que financiar. Sólo cuando SÍ lo supera hace falta saber de dónde salió el
+    dinero — y ahí, una fuente desconocida no se puede leer como «no entró».
+    """
+    if fcf.value is None:
+        return f"no se ha podido comprobar: {fcf.reason or 'falta la caja libre'}"
+    if dividends is None:
+        return "no se ha podido comprobar: falta el dividendo pagado"
+    if dividends <= fcf.value:
+        return None
+    unknown = [
+        label
+        for label, value in (
+            ("la variación de deuda", debt_change),
+            ("la emisión de acciones", share_issuance),
+        )
+        if value is None
+    ]
+    if not unknown:
+        return None
+    return (
+        "el dividendo supera a la caja libre y no se sabe de dónde salió el exceso: "
+        f"falta {' y falta '.join(unknown)}"
+    )
 
 
 # ── Resultado de la capa ──────────────────────────────────────────────
@@ -450,6 +662,10 @@ class DividendResult:
     dps_series: tuple[DpsPoint, ...]
     trajectory: DividendTrajectory
     flags: tuple[Flag, ...]
+    flag_evaluations: tuple[FlagEvaluation, ...] = ()
+    """Qué reglas se pudieron comprobar (las dos de Q4 y las tres de balance).
+    Sin esto, la síntesis leía «no hay bandera B4» como «el dividendo no se
+    financia con deuda» — y B4 es una de las cuatro condiciones de «Evitar»."""
 
     def get(self, key: str, fiscal_year: int) -> MetricResult | None:
         for metric in self.metrics:
@@ -704,15 +920,16 @@ def compute(
         momentum_slowdown=_momentum_slowdown(dps_series),
     )
 
-    flags: list[Flag] = list(compute_tax_anomaly_flags(series))
+    tax = compute_tax_anomaly_flags(series)
     latest_metrics = {m.key: m for m in metrics if m.fiscal_year == last_year}
-    flags.extend(compute_balance_support_flags(series, latest_metrics, forensic_bands or {}))
+    balance = compute_balance_support_flags(series, latest_metrics, forensic_bands or {})
 
     return DividendResult(
         metrics=tuple(metrics),
         dps_series=dps_series,
         trajectory=trajectory,
-        flags=tuple(flags),
+        flags=tuple([*tax.flags, *balance.flags]),
+        flag_evaluations=tuple([*tax.evaluations, *balance.evaluations]),
     )
 
 

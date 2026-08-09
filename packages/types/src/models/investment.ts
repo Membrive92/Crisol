@@ -26,7 +26,14 @@ export type JobStatus = 'pending' | 'running' | 'done' | 'failed';
 export type CorpActionType = 'split' | 'spinoff' | 'stock_dividend' | 'return_of_capital';
 
 export type MetricBand = 'healthy' | 'caution' | 'stressed';
-export type MetricStatus = 'ok' | 'not_computable' | 'approximation';
+/**
+ * `not_applicable` llegó con el motor 1.4.0 (PHASE-44.17) y significa **la
+ * pregunta que hace la métrica no se plantea aquí**, que no es «no se ha podido
+ * responder». Puede traer banda: el muro de vencimientos de una empresa sin
+ * deuda a doce meses es el mejor resultado posible, no un hueco. Un run anterior
+ * nunca lo trae, así que la unión describe lo que puede haber en la tabla.
+ */
+export type MetricStatus = 'ok' | 'not_computable' | 'approximation' | 'not_applicable';
 export type Provenance = 'sourced' | 'derived' | 'imputed_zero' | 'estimated';
 export type FlagSeverity = 'info' | 'amber' | 'red';
 export type DividendVerdict = 'healthy' | 'caution' | 'stressed' | 'not_applicable';
@@ -286,6 +293,14 @@ export interface ThresholdSpec {
   high_alarm: string | null;
   model_variant: string | null;
   applies: boolean;
+  /**
+   * Por qué la vara no aplica a este (sector × norma), en español (motor ≥
+   * 1.6.0): «el EBITDA carece de sentido en banca», «sin inventario material en
+   * este sector». Sin ella, un número gris se lee como «no se ha podido
+   * calcular» y el diagnóstico se va a las cuentas de la empresa cuando lo que
+   * pasa es que la métrica no describe ese negocio.
+   */
+  not_applicable_reason?: string | null;
 }
 
 /**
@@ -355,6 +370,17 @@ export interface CanonicalItemCatalogResponse {
  * explica por qué. Si todas las señales de una pregunta llegan sin contar, el
  * verde es por ausencia de prueba y hay que pintarlo gris.
  */
+/**
+ * Qué le pasó a una señal candidata (motor ≥ 1.5.0).
+ *
+ * - `scored` — puntuó en el semáforo.
+ * - `clear` — se comprobó y no saltó. Es evidencia POSITIVA, no un hueco.
+ * - `unchecked` — no se pudo comprobar. Esto sí es ausencia de evidencia.
+ * - `informational` — no puntúa por diseño (banderas `info`, métricas sin banda
+ *   absoluta).
+ */
+export type SignalOutcome = 'scored' | 'clear' | 'unchecked' | 'informational';
+
 export interface QuestionSignal {
   key: string;
   label: string;
@@ -364,6 +390,12 @@ export interface QuestionSignal {
   status: MetricStatus | null;
   counted: boolean;
   reason: string | null;
+  /**
+   * AUSENTE en los runs anteriores al motor 1.5.0 — y ausente no es
+   * `'unchecked'`: en aquellos runs la distinción no se registraba, así que
+   * afirmar cualquiera de los cuatro sería inventarla.
+   */
+  outcome?: SignalOutcome;
 }
 
 export interface QuestionVerdict {
@@ -389,6 +421,41 @@ export interface QuestionVerdict {
   signals?: QuestionSignal[];
   evaluated_count?: number;
   unavailable_count?: number;
+  /**
+   * Los dos que PARTEN `unavailable_count` (motor ≥ 1.5.0), que metía en un
+   * solo cubo cuatro cosas: no se pudo calcular, la bandera no saltó —buena
+   * noticia—, es informativa por diseño, y no aplica. En McDonald's la pregunta
+   * sobre la contabilidad decía «7 no disponibles» sobre 2 huecos reales y 5
+   * banderas comprobadas y limpias: la pantalla subestimaba la evidencia
+   * mientras el veredicto verde la sobreestimaba.
+   *
+   * Opcionales por la misma razón que los de arriba: la tabla guarda runs de
+   * todas las versiones, y un `0` donde no hay dato es un dato inventado.
+   */
+  clear_count?: number;
+  unchecked_count?: number;
+  /**
+   * Los PORTANTES de la pregunta y si todos se pudieron evaluar (motor ≥ 1.6.0).
+   *
+   * No todas las señales pesan igual: «¿la contabilidad es de fiar?» se sostiene
+   * en el M-Score y en los accruals, no en el peso de los extraordinarios. Antes
+   * la guarda era todo-o-nada (`evaluated_count === 0`) y McDonald's salía verde
+   * confiado con 3 señales de 10, con las dos que responden la pregunta muertas.
+   *
+   * `audited === false` es el CUARTO estado de una pregunta: gris, con la lista
+   * de lo que falta. Ausente (`undefined`) en runs anteriores y eso NO es
+   * `false`: en aquellos runs la distinción no se registraba.
+   */
+  load_bearing?: string[];
+  audited?: boolean;
+  unaudited_reasons?: string[];
+  /**
+   * Avisos sobre el ALCANCE de un veredicto que sí se sostiene: en una
+   * financiera, un verde de contabilidad es verde con cobertura forense
+   * limitada. Decirlo es la diferencia entre un verde honesto y uno que promete
+   * de más.
+   */
+  notes?: string[];
 }
 
 export interface SafetyProfile {

@@ -5,6 +5,8 @@ import type { AnalysisRun } from '@crisol/types';
 
 import { Card, CardTitle } from '@/components/ui/card';
 
+import { CommonSizeDrift } from './common-size-drift';
+import { DeltaHeatmap } from './delta-heatmap';
 import { InlineNotice } from './degraded-panel';
 import { FlagList } from './flag-list';
 import { formatMetricValue, formatPercentDelta } from '@crisol/ui';
@@ -46,14 +48,6 @@ export function TabEvolution({ run, index, catalog }: TabEvolutionProps) {
     }),
   }));
 
-  const deltaRows: MatrixRow[] = series.map((serie) => ({
-    key: `${serie.key}-yoy`,
-    label: serie.label,
-    cells: years.map((year) => {
-      const point = serie.points.find((p) => p.fiscal_year === year);
-      return { text: formatPercentDelta(point?.yoy ?? null) };
-    }),
-  }));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg }}>
@@ -74,8 +68,22 @@ export function TabEvolution({ run, index, catalog }: TabEvolutionProps) {
 
       <Card>
         <CardTitle size="sm">Variación interanual</CardTitle>
+        <div style={{ marginTop: spacing.md, display: 'grid', gap: spacing.md }}>
+          <InlineNotice>
+            La misma tabla de antes, con el color como refuerzo: diez magnitudes por cinco
+            ejercicios son cincuenta números que hay que leer uno a uno para ver el patrón. El
+            número sigue impreso en cada celda a propósito —el verde y el rojo de la escala son
+            indistinguibles para una de cada doce personas—, así que el color añade velocidad sin
+            ser nunca la única fuente.
+          </InlineNotice>
+          <DeltaHeatmap series={series} years={years} />
+        </div>
+      </Card>
+
+      <Card>
+        <CardTitle size="sm">Deriva de la estructura de márgenes</CardTitle>
         <div style={{ marginTop: spacing.md }}>
-          <YearMatrix years={years} rows={deltaRows} firstColumnLabel="Magnitud" />
+          <CommonSizeDrift vertical={evolution.vertical ?? []} />
         </div>
       </Card>
 

@@ -33,6 +33,16 @@ async def get_one(
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
+async def list_all(db: AsyncSession) -> list[ScoringThresholds]:
+    """Toda la tabla en UNA consulta.
+
+    La sincronización (PHASE-44.21) compara ~1.500 filas contra lo que resuelve
+    el engine; pedirlas de una en una serían otras tantas consultas en cada
+    arranque.
+    """
+    return list((await db.execute(select(ScoringThresholds))).scalars().all())
+
+
 async def count(db: AsyncSession) -> int:
     return (await db.execute(select(func.count()).select_from(ScoringThresholds))).scalar_one()
 

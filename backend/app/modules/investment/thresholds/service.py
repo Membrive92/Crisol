@@ -10,12 +10,13 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
+from dataclasses import dataclass
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.database import SessionLocal
-from app.modules.investment.analysis.engine.catalog import ALL_DEFAULT_THRESHOLDS
+from app.modules.investment.analysis.engine.sector_profiles import resolve_thresholds
 from app.modules.investment.analysis.engine.types import ThresholdSpec
 from app.modules.investment.enums import AccountingStd, SectorInternal
 from app.modules.investment.thresholds import repository as repo
@@ -33,21 +34,42 @@ def _spec_from_row(row: ScoringThresholds) -> ThresholdSpec:
         high_alarm=row.high_alarm,
         model_variant=row.model_variant,
         applies=row.applies,
+        not_applicable_reason=row.not_applicable_reason,
     )
 
 
 async def load_thresholds(
-    db: AsyncSession, sector: SectorInternal, accounting_std: AccountingStd
+    db: AsyncSession,
+    sector: SectorInternal,
+    accounting_std: AccountingStd,
+    *,
+    is_financial: bool = False,
 ) -> dict[str, ThresholdSpec]:
-    """El juego de umbrales para (sector × norma), fusionado SOBRE los defaults
-    del engine.
+    """El juego de umbrales para un valor, fusionado SOBRE lo que resuelve el engine.
 
-    Si la tabla no está sembrada, se usan íntegramente los defaults del engine —
-    el análisis sigue funcionando (y en financieras el engine ya apaga los
-    forenses por `is_financial`, con independencia de `applies`)."""
-    resolved: dict[str, ThresholdSpec] = dict(ALL_DEFAULT_THRESHOLDS)
+    La base es `sector_profiles.resolve_thresholds`, no el catálogo genérico
+    (PHASE-44.21): así una base sin sembrar se comporta igual que una sembrada, y
+    un banco no se juzga con cortes industriales por el camino de que su fila no
+    existiera. La tabla se superpone encima, que es para lo que está — poder
+    recalibrar de forma auditable sin tocar el motor.
+
+    `is_financial` es del VALOR y no del sector, así que sólo puede aplicarlo el
+    engine: la tabla guarda (sector × norma).
+    """
+    resolved = resolve_thresholds(sector, accounting_std, is_financial=is_financial)
     for row in await repo.list_for(db, sector, accounting_std):
-        resolved[row.metric_key] = _spec_from_row(row)
+        current = resolved.get(row.metric_key)
+        if current is None:
+            # Una fila de una métrica que el catálogo ya no tiene. Se ignora en
+            # vez de reventar: la tabla sobrevive a las versiones del motor.
+            continue
+        spec = _spec_from_row(row)
+        # Una fila que dice «no aplica» manda; una que dice que sí NO puede
+        # reactivar lo que el perfil del VALOR apagó (un banco clasificado fuera
+        # del sector financiero, cuya fila de sector no sabe que es un banco).
+        if spec.applies and not current.applies:
+            continue
+        resolved[row.metric_key] = spec
     return resolved
 
 
@@ -78,92 +100,91 @@ def thresholds_hash(specs: Mapping[str, ThresholdSpec]) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-async def seed_scoring_thresholds(db: AsyncSession) -> int:
-    """Siembra/actualiza toda la tabla. Idempotente: devuelve cuántas filas
-    NUEVAS insertó (0 en re-ejecuciones sobre una tabla ya sembrada)."""
+_ROW_FIELDS = (
+    "direction",
+    "low_alarm",
+    "low_ok",
+    "high_ok",
+    "high_alarm",
+    "model_variant",
+    "applies",
+    "not_applicable_reason",
+)
+
+
+@dataclass(frozen=True)
+class SeedOutcome:
+    """Qué cambió al sincronizar la tabla con la calibración del engine."""
+
+    inserted: int
+    updated: int
+
+    @property
+    def changed(self) -> int:
+        return self.inserted + self.updated
+
+
+async def sync_thresholds(db: AsyncSession) -> SeedOutcome:
+    """Deja la tabla exactamente igual a lo que resuelve el engine.
+
+    Inserta lo que falta y **reescribe sólo lo que difiere** — si no difiere, no
+    escribe: en régimen estacionario esto es una consulta y cero UPDATEs.
+
+    **Por qué ahora sí actualiza** (PHASE-44.21). PHASE-44.18 hizo el arranque
+    sólo-inserción para no reescribir filas bajo los pies de un run ya guardado.
+    Esa preocupación está resuelta desde PHASE-44.9: cada `AnalysisRun` persiste
+    su `thresholds_used`, así que un run viejo se explica con SU vara aunque la
+    tabla cambie. Y sin actualizar aparece el defecto simétrico al de 44.18: una
+    calibración nueva llegaría a las bases recién creadas y **nunca** a la que
+    lleva meses funcionando, que es justo la que se usa.
+
+    Lo que no cambia: la calibración se escribe en el engine, no aquí. Esta
+    función no decide nada, sólo hace que la tabla lo refleje.
+    """
+    existing = {
+        (row.sector, row.accounting_std, row.metric_key): row for row in await repo.list_all(db)
+    }
     inserted = 0
+    updated = 0
     for row in build_threshold_rows():
-        existing = await repo.get_one(db, row.sector, row.accounting_std, row.metric_key)
-        if existing is None:
+        current = existing.get((row.sector, row.accounting_std, row.metric_key))
+        if current is None:
             db.add(
                 ScoringThresholds(
                     sector=row.sector,
                     accounting_std=row.accounting_std,
                     metric_key=row.metric_key,
-                    direction=row.direction,
-                    low_alarm=row.low_alarm,
-                    low_ok=row.low_ok,
-                    high_ok=row.high_ok,
-                    high_alarm=row.high_alarm,
-                    model_variant=row.model_variant,
-                    applies=row.applies,
+                    **{field: getattr(row, field) for field in _ROW_FIELDS},
                 )
             )
             inserted += 1
-        else:
-            existing.direction = row.direction
-            existing.low_alarm = row.low_alarm
-            existing.low_ok = row.low_ok
-            existing.high_ok = row.high_ok
-            existing.high_alarm = row.high_alarm
-            existing.model_variant = row.model_variant
-            existing.applies = row.applies
-    await db.flush()
-    return inserted
-
-
-async def seed_missing_thresholds(db: AsyncSession) -> int:
-    """Inserta las filas que faltan y **no toca ni una de las existentes**.
-
-    Es la hermana conservadora de `seed_scoring_thresholds`, que además actualiza
-    lo que ya está. Esa mutación in situ es correcta para resembrar a propósito,
-    pero inaceptable como paso de arranque: `AnalysisRun.thresholds_version` es un
-    hash irreversible de los cortes efectivos, y por eso PHASE-44.9 tuvo que
-    persistir `thresholds_used` en cada run. Si el arranque reescribiera filas,
-    los runs viejos dejarían de poder explicarse.
-
-    **Por qué existe** (PHASE-44.18): el arranque llamaba a `seed_if_empty`, que
-    salía por la puerta de atrás en cuanto la tabla tenía UNA fila. Efecto: toda
-    métrica añadida al catálogo después del primer seed quedaba fuera para
-    siempre. Medido en la BD real: 1440 filas, **40 métricas sembradas frente a
-    42 con banda** — S7 y S8, que llegaron en PHASE-44.10, nunca entraron.
-
-    Una sola consulta para saber qué hay; el resto es diferencia en memoria.
-    """
-    existing = await repo.existing_keys(db)
-    inserted = 0
-    for row in build_threshold_rows():
-        if (row.sector, row.accounting_std, row.metric_key) in existing:
             continue
-        db.add(
-            ScoringThresholds(
-                sector=row.sector,
-                accounting_std=row.accounting_std,
-                metric_key=row.metric_key,
-                direction=row.direction,
-                low_alarm=row.low_alarm,
-                low_ok=row.low_ok,
-                high_ok=row.high_ok,
-                high_alarm=row.high_alarm,
-                model_variant=row.model_variant,
-                applies=row.applies,
-            )
-        )
-        inserted += 1
+        differences = [
+            field for field in _ROW_FIELDS if getattr(current, field) != getattr(row, field)
+        ]
+        if not differences:
+            continue
+        for field in differences:
+            setattr(current, field, getattr(row, field))
+        updated += 1
     await db.flush()
-    return inserted
+    return SeedOutcome(inserted=inserted, updated=updated)
 
 
-async def seed_on_startup(session_factory: async_sessionmaker[AsyncSession] | None = None) -> int:
-    """Completa la tabla de umbrales al arrancar. Devuelve cuántas filas insertó.
+async def seed_on_startup(
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+) -> SeedOutcome:
+    """Sincroniza la tabla de umbrales al arrancar.
 
-    Sustituye a `seed_if_empty`: se ejecuta SIEMPRE, no sólo con la tabla vacía,
-    porque el caso que importa —una métrica nueva en el catálogo— sólo se da
-    cuando la tabla YA tiene filas.
+    Se ejecuta SIEMPRE, no sólo con la tabla vacía: el caso que importa —una
+    métrica nueva en el catálogo, o una calibración que cambia— sólo se da cuando
+    la tabla YA tiene filas. Ése fue el defecto de `seed_if_empty` (PHASE-44.18),
+    que salía por la puerta de atrás en cuanto había una fila y dejó S7 y S8 sin
+    sembrar para siempre.
     """
     factory = session_factory or SessionLocal
     async with factory() as db:
-        inserted = await seed_missing_thresholds(db)
-        if inserted:
+        outcome = await sync_thresholds(db)
+        if outcome.changed:
             await db.commit()
-        return inserted
+        return outcome

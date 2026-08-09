@@ -34,13 +34,16 @@ FLAG_LABELS: dict[str, str] = {
     "B1_debt_competes_with_dividend": "La deuda compite con el dividendo",
     "B2_interest_priority": "Los intereses tienen prioridad sobre el dividendo",
     "B4_dividend_funded_externally": "Dividendo financiado con deuda o emisión",
+    # ── Reglas cruzadas sectoriales (PHASE-44.21) ─────────────────
+    "RC1_negative_working_capital": "Modelo de circulante negativo (cobra antes de pagar)",
+    "RC2_utility_payout_needs_funding_check": "Payout alto en una regulada: mira quién lo financia",
     # ── Calidad del dato (capa 1 y forense) ───────────────────────
     "ebt_divergence": "El resultado antes de impuestos no cuadra con EBIT − intereses",
     "ebt_reconstruction_divergence": "Resultado antes de impuestos reconstruido con divergencia",
     "fcf_divergence": "Las dos formas de medir la caja libre no cuadran",
     "z_score_uncalibrated_for_reit": "Z''-Score sin calibrar para socimis",
 }
-"""Las 18 claves de bandera que el engine puede emitir, con su nombre legible.
+"""Las claves de bandera que el engine puede emitir, con su nombre legible.
 
 Un test comprueba que el conjunto coincide EXACTAMENTE con las claves que las
 seis capas emiten: si alguien añade una bandera sin nombrarla aquí, CI falla en

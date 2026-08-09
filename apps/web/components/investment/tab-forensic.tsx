@@ -7,7 +7,7 @@ import { Card, CardTitle } from '@/components/ui/card';
 
 import { DegradedPanel, InlineNotice } from './degraded-panel';
 import { FlagList } from './flag-list';
-import { metricRow, type MetricRowOptions } from '@crisol/ui';
+import { metricGapLegend, metricRow, type MetricRowOptions } from '@crisol/ui';
 import type { CatalogIndex, MetricIndex } from '@crisol/ui';
 import { ScoreBreakdownCard } from './score-breakdown-card';
 import { YearMatrix } from './year-matrix';
@@ -44,6 +44,13 @@ export function TabForensic({ run, index, catalog, security }: TabForensicProps)
     (forensic.breakdowns ?? []).find(
       (b) => b.key === key && b.fiscal_year === verdictYear,
     );
+
+  // Derivada del run, no escrita a mano. La leyenda anterior afirmaba que sólo
+  // el primer ejercicio se queda sin M-Score ni F-Score «porque comparan contra
+  // el año anterior»: cierto en la empresa que su autor tenía delante, falso en
+  // McDonald's, que se queda sin M-Score en los cinco ejercicios por una razón
+  // distinta (no publica coste de ventas anual).
+  const gaps = metricGapLegend(FORENSIC_KEYS, { index, catalog });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg }}>
@@ -86,10 +93,20 @@ export function TabForensic({ run, index, catalog, security }: TabForensicProps)
             verdictYear={verdictYear}
             firstColumnLabel="Score"
             legend={
-              <p style={{ margin: 0, color: colors.textSubtle, fontSize: fontSize.xs }}>
-                El primer ejercicio de la serie sale sin M-Score ni F-Score: ambos comparan
-                contra el año anterior, y no lo hay.
-              </p>
+              gaps.length === 0 ? undefined : (
+                <ul
+                  style={{
+                    margin: 0,
+                    paddingLeft: spacing.lg,
+                    color: colors.textSubtle,
+                    fontSize: fontSize.xs,
+                  }}
+                >
+                  {gaps.map((sentence) => (
+                    <li key={sentence}>{sentence}</li>
+                  ))}
+                </ul>
+              )
             }
           />
         </div>

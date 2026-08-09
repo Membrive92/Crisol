@@ -11,6 +11,7 @@ equivocada — es la lección de PHASE-41.
 from __future__ import annotations
 
 import ast
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -245,6 +246,96 @@ def test_l4_muro_de_vencimientos(result: BaseRatiosResult) -> None:
     metric = _metric(result, "L4")
     assert metric.value == dec(3)
     assert metric.band == "healthy"
+
+
+def _series_sin_vencimientos(*, imputado: bool) -> StatementSeries:
+    """La misma empresa, pero sin deuda venciendo en doce meses.
+
+    `imputado` distingue los dos ceros: el que la empresa PUBLICA y el que la
+    ingesta supone porque el filing no etiqueta el concepto (§4.5).
+    """
+    provenance = (
+        {"short_term_debt": Provenance.IMPUTED_ZERO, "ltd_current_portion": Provenance.IMPUTED_ZERO}
+        if imputado
+        else {}
+    )
+    statements = tuple(
+        replace(
+            statement,
+            short_term_debt=dec(0),
+            ltd_current_portion=dec(0),
+            item_provenance={**statement.item_provenance, **provenance},
+        )
+        for statement in (_statement_2023(), _statement_2024())
+    )
+    return StatementSeries(security=_security(), statements=statements, as_of=date(2025, 3, 31))
+
+
+def test_l4_sin_deuda_a_doce_meses_es_el_mejor_resultado_no_un_hueco() -> None:
+    """No tener muro que refinanciar es el mejor resultado posible de L4.
+
+    Salía `not_computable` con «denominador cero (deuda que vence en 12 meses)»,
+    que la pantalla presenta igual que un dato ausente: la empresa perdía una
+    señal de resiliencia justamente por tenerlo todo pagado.
+    """
+    metric = _metric(base_ratios.compute(_series_sin_vencimientos(imputado=False)), "L4")
+    assert metric.status == "not_applicable"
+    assert metric.value is None
+    assert metric.band == "healthy"
+    assert metric.reason is not None and "no hay muro" in metric.reason
+    assert "denominador cero" not in metric.reason
+
+
+def test_l4_con_el_cero_imputado_no_regala_el_verde() -> None:
+    """Si el filing no publica deuda a corto, el cero lo pone la ingesta.
+
+    Eso es una lectura del silencio, no una comprobación — así que la métrica
+    dice lo que pasa pero NO se pinta verde. El verde se gana.
+    """
+    metric = _metric(base_ratios.compute(_series_sin_vencimientos(imputado=True)), "L4")
+    assert metric.status == "not_applicable"
+    assert metric.band is None
+    assert metric.reason is not None and "supone cero" in metric.reason
+
+
+def test_l4_no_se_pinta_verde_donde_la_vara_no_aplica() -> None:
+    """`applies=False` manda: sin vara no hay semáforo, ni siquiera el trivial."""
+    specs = dict(DEFAULT_THRESHOLDS)
+    specs["L4"] = replace(
+        specs["L4"], applies=False, not_applicable_reason="la vara no aplica aquí"
+    )
+    metric = _metric(
+        base_ratios.compute(_series_sin_vencimientos(imputado=False), specs),
+        "L4",
+    )
+    assert metric.status == "not_applicable"
+    assert metric.band is None
+
+
+def test_una_metrica_no_computable_no_puede_llevar_semaforo() -> None:
+    """El invariante que separa los dos estados sin número: `not_computable` es
+    «no se ha comprobado nada», así que una banda ahí sería un color inventado."""
+    with pytest.raises(ValueError, match="no puede tener semáforo"):
+        MetricResult(
+            key="L4",
+            fiscal_year=2024,
+            value=None,
+            status="not_computable",
+            provenance=Provenance.SOURCED,
+            reason="falta la partida",
+            band="healthy",
+        )
+
+
+def test_un_not_applicable_exige_razon() -> None:
+    with pytest.raises(ValueError, match="exige una razón"):
+        MetricResult(
+            key="L4",
+            fiscal_year=2024,
+            value=None,
+            status="not_applicable",
+            provenance=Provenance.SOURCED,
+        )
 
 
 # ── Actividad ─────────────────────────────────────────────────────────
@@ -837,6 +928,7 @@ def test_un_umbral_que_no_aplica_no_pinta_banda() -> None:
         low_alarm=Decimal(1),
         low_ok=Decimal(2),
         applies=False,
+        not_applicable_reason="Beneish no está calibrado para financieras",
     )
     assert spec.band_for(Decimal(3)) is None
 

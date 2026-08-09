@@ -41,6 +41,7 @@ from app.modules.investment.analysis.engine.metrics import (
 )
 from app.modules.investment.analysis.engine.types import (
     Amount,
+    Band,
     Flag,
     MetricResult,
     StatementSeries,
@@ -408,7 +409,17 @@ _result = to_metric_result
 #: `True` por defecto. Una exención razonada, documentada y que nunca llegó a
 #: ejecutarse. Aquí no puede perderse: no depende de la BD, así que una base
 #: recién creada se comporta igual que una sembrada.
-NOT_CALIBRATED_FOR_FINANCIALS: frozenset[str] = frozenset({"S7"})
+FINANCIAL_LEVERAGE_REASON = (
+    "un pasivo del 90% del activo ES el negocio bancario, no un riesgo: la vara "
+    "industrial pintaría un rojo permanente que no informa de nada"
+)
+
+NOT_CALIBRATED_FOR_FINANCIALS: Mapping[str, str] = {"S7": FINANCIAL_LEVERAGE_REASON}
+"""Métricas de ESTA capa cuyos cortes no valen para una financiera, con su
+motivo. El perfil sectorial completo (PHASE-44.21) vive en `sector_profiles` y
+apaga muchas más; esto es el suelo que se aplica aunque nadie haya resuelto un
+perfil —el camino de `thresholds=None`—, para que la exención no dependa nunca de
+una fila de base de datos ni de quién llame al motor."""
 
 
 def _drop_bands_for_financials(
@@ -416,10 +427,10 @@ def _drop_bands_for_financials(
 ) -> Mapping[str, ThresholdSpec]:
     """Apaga el semáforo (no el cálculo) de las métricas sin calibrar para bancos."""
     adjusted = dict(specs)
-    for key in NOT_CALIBRATED_FOR_FINANCIALS:
+    for key, reason in NOT_CALIBRATED_FOR_FINANCIALS.items():
         spec = adjusted.get(key)
         if spec is not None and spec.applies:
-            adjusted[key] = replace(spec, applies=False)
+            adjusted[key] = replace(spec, applies=False, not_applicable_reason=reason)
     return adjusted
 
 
@@ -446,6 +457,9 @@ def compute(
     for statement in series.statements:
         year = statement.fiscal_year
         year_metrics = {metric.key: metric for metric in _compute_year(series, statement, specs)}
+        rc1 = _negative_working_capital_rule(year_metrics)
+        if rc1 is not None:
+            flags.append(rc1)
         metrics.extend(year_metrics.values())
 
         roe = year_metrics["R5"]
@@ -480,6 +494,55 @@ def compute(
     return BaseRatiosResult(metrics=tuple(metrics), flags=tuple(flags), dupont=tuple(dupont))
 
 
+RC1_LIQUIDITY_KEYS = ("L1", "L2")
+
+RC1_MESSAGE = (
+    "El ciclo de conversión de caja es NEGATIVO: la empresa cobra a sus clientes "
+    "antes de pagar a sus proveedores, así que financia su operación con el "
+    "circulante en vez de con caja parada. Es el modelo de la distribución y del "
+    "gran retail — una fortaleza estructural, no un riesgo de liquidez—, y por eso "
+    "un ratio corriente por debajo de 1 aquí no se pinta en rojo."
+)
+
+
+def _negative_working_capital_rule(year_metrics: dict[str, MetricResult]) -> Flag | None:
+    """RC-1 — con circulante negativo, un rojo de liquidez corriente NO informa.
+
+    Muta las métricas del año EN EL SITIO (el diccionario que se acaba de
+    construir, antes de publicarse) para quitarles la banda roja y dejar el
+    motivo en su lugar: el número sigue ahí, deja de estar en rojo, y dice por
+    qué. Devuelve la bandera informativa que lo explica en el informe, o `None`
+    si la regla no aplica.
+
+    El caso: Inditex, Mercadona, cualquier supermercado. Su ratio corriente
+    ronda 0,8 porque cobran al contado y pagan a 60 días — el rojo permanente
+    que salía ahí es el ejemplo de manual de una alarma que se aprende a
+    ignorar. Sólo degrada el ROJO: un ámbar sigue informando de la tendencia.
+    """
+    ccc = year_metrics.get("A5")
+    if ccc is None or ccc.value is None or ccc.value >= ZERO:
+        return None
+    degraded = [
+        key
+        for key in RC1_LIQUIDITY_KEYS
+        if (metric := year_metrics.get(key)) is not None and metric.band == "stressed"
+    ]
+    if not degraded:
+        return None
+    for key in degraded:
+        year_metrics[key] = replace(year_metrics[key], band=None, reason=RC1_MESSAGE)
+    return Flag(
+        key="RC1_negative_working_capital",
+        severity="info",
+        message=RC1_MESSAGE,
+        evidence={
+            "fiscal_year": ccc.fiscal_year,
+            "cash_conversion_cycle_days": str(ccc.value),
+            "degraded": degraded,
+        },
+    )
+
+
 def _identity_check(roe: MetricResult, *factors: MetricResult) -> Decimal | None:
     """`(producto de los factores) − ROE`. Cero si la identidad cierra.
 
@@ -496,6 +559,60 @@ def _identity_check(roe: MetricResult, *factors: MetricResult) -> Decimal | None
             return None
         product *= factor.value
     return product - roe.value
+
+
+def _maturity_wall(
+    statement: CanonicalStatement,
+    year: int,
+    liquidity: Amount,
+    specs: Mapping[str, ThresholdSpec],
+) -> MetricResult:
+    """L4 — el muro de vencimientos, con el caso «no hay muro» dicho como tal.
+
+    Sin deuda venciendo en doce meses no hay nada que refinanciar: es el MEJOR
+    resultado posible de esta métrica, no un hueco. Se publicaba como
+    «denominador cero (deuda que vence en 12 meses)», que la pantalla presenta
+    igual que un dato que falta — así que una empresa que lo tiene todo pagado
+    perdía una señal de resiliencia por tenerlo pagado.
+
+    Hay DOS ceros distintos, y de cuál sea depende que se pueda dar el verde:
+
+    - **Publicado** (`sourced`): la empresa declara que no debe nada a corto.
+      Comprobado → banda verde.
+    - **Imputado** (`imputed_zero`): el filing no publica el concepto y la
+      ingesta lo lee como cero (§4.5). Eso es una lectura del silencio, no una
+      comprobación, así que sale SIN banda diciendo exactamente eso. El verde se
+      gana; no se hereda de que el emisor no etiquete un concepto.
+
+    Si la vara no aplica a este (sector × norma), tampoco se pinta verde: el
+    `applies=False` manda por encima de todo lo demás.
+    """
+    maturities = add(
+        sourced(statement, "short_term_debt"),
+        sourced(statement, "ltd_current_portion"),
+    )
+    label = "deuda que vence en 12 meses"
+    if maturities.is_missing or maturities.value != ZERO:
+        return _result("L4", year, divide(liquidity, maturities, denominator_label=label), specs)
+
+    spec = specs.get("L4")
+    imputed = maturities.provenance is Provenance.IMPUTED_ZERO
+    band: Band | None = None if imputed or spec is None or not spec.applies else "healthy"
+    reason = (
+        "el filing no publica deuda a corto plazo y la ingesta la supone cero: "
+        "probablemente no haya muro que refinanciar, pero eso no se ha comprobado"
+        if imputed
+        else "no hay deuda venciendo en los próximos doce meses: no hay muro que refinanciar"
+    )
+    return MetricResult(
+        key="L4",
+        fiscal_year=year,
+        value=None,
+        status="not_applicable",
+        provenance=maturities.provenance,
+        reason=reason,
+        band=band,
+    )
 
 
 def _compute_year(
@@ -549,17 +666,7 @@ def _compute_year(
             "L3",
             divide(liquid_assets, current_liabilities, denominator_label="pasivo corriente"),
         ),
-        metric(
-            "L4",
-            divide(
-                add(liquid_assets, fcf),
-                add(
-                    sourced(statement, "short_term_debt"),
-                    sourced(statement, "ltd_current_portion"),
-                ),
-                denominator_label="deuda que vence en 12 meses",
-            ),
-        ),
+        _maturity_wall(statement, year, add(liquid_assets, fcf), specs),
         # ── Actividad ─────────────────────────────────────────────
         metric(
             "A1",

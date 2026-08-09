@@ -2,7 +2,16 @@
 
 import { useState } from 'react';
 
-import { colors, fontSize, fontWeight, questionEvidence, radius, spacing } from '@crisol/ui';
+import {
+  colors,
+  EVIDENCE_LABEL,
+  evidenceBreakdown,
+  fontSize,
+  fontWeight,
+  questionEvidence,
+  radius,
+  spacing,
+} from '@crisol/ui';
 import type {
   AnalysisRun,
   CanonicalItemDefinition,
@@ -18,6 +27,7 @@ import { BandChip, bandColors } from './band-chip';
 import { DegradedPanel, InlineNotice } from './degraded-panel';
 import { FlagList } from './flag-list';
 import { SignalTable } from './signal-table';
+import { StressDumbbell } from './stress-dumbbell';
 import type { CatalogIndex } from '@crisol/ui';
 
 const SAFETY: Record<SafetyLabel, { label: string; fg: string; bg: string }> = {
@@ -358,16 +368,7 @@ function QuestionBlock({
     </span>
   );
   const chip = (
-    <BandChip
-      band={muted ? null : question.verdict}
-      label={
-        evidence === 'no-evidence'
-          ? 'Sin evidencia'
-          : evidence === 'not-recorded'
-            ? 'No auditable'
-            : undefined
-      }
-    />
+    <BandChip band={muted ? null : question.verdict} label={EVIDENCE_LABEL[evidence] || undefined} />
   );
   const headerLayout = {
     display: 'flex',
@@ -417,13 +418,36 @@ function QuestionBlock({
         <LegacySignals question={question} catalog={catalog} />
       ) : (
         <span style={{ color: colors.textMuted, fontSize: fontSize.xs }}>
-          {question.evaluated_count} señales evaluadas · {question.unavailable_count} sin poder
-          evaluar
+          {evidenceBreakdown(question)}
           {evidence === 'no-evidence'
             ? ' — el verde de esta pregunta sería por ausencia de prueba, no por buena salud'
             : ''}
         </span>
       )}
+
+      {/* El cuarto estado (PHASE-44.21): falta un PORTANTE, así que el veredicto
+          no se sostiene aunque el resto de señales estén verdes. Se dice QUÉ
+          falta, porque «no auditada» a secas no es accionable. */}
+      {evidence === 'not-audited' && question.unaudited_reasons?.length ? (
+        <ul
+          style={{
+            margin: 0,
+            paddingLeft: spacing.lg,
+            color: colors.textMuted,
+            fontSize: fontSize.xs,
+          }}
+        >
+          {question.unaudited_reasons.map((reason) => (
+            <li key={reason}>{reason}</li>
+          ))}
+        </ul>
+      ) : null}
+
+      {question.notes?.map((note) => (
+        <span key={note} style={{ color: colors.textSubtle, fontSize: fontSize.xs }}>
+          {note}
+        </span>
+      ))}
 
       {open && signals ? (
         <SignalTable signals={signals} catalog={catalog} thresholdsUsed={thresholdsUsed} />
@@ -456,6 +480,11 @@ function StressCard({ run }: { run: AnalysisRun }) {
           No se ha podido calcular ningún escenario para este valor.
         </p>
       ) : (
+        <>
+        {/* El dibujo primero y las frases debajo: el dumbbell contesta «¿cuánto
+            se mueve y sigue cubriendo?» de un vistazo, y la frase del motor
+            explica el escenario. Ninguno sustituye al otro. */}
+        <StressDumbbell scenarios={scenarios} />
         <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: spacing.sm }}>
           {scenarios.map((scenario) => (
             <li
@@ -477,6 +506,7 @@ function StressCard({ run }: { run: AnalysisRun }) {
             </li>
           ))}
         </ul>
+        </>
       )}
 
       {stress?.breakeven_fcf_drop ? (

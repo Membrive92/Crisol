@@ -18,7 +18,10 @@ import {
   groupFlags,
   DUPONT_SECTIONS,
   dupontCheckRow,
+  EVIDENCE_LABEL,
   EVOLUTION_METRICS,
+  evidenceBreakdown,
+  metricGapLegend,
   metricRow,
   QUALITY_LABEL,
   questionEvidence,
@@ -71,6 +74,12 @@ export interface TabContext {
 
 function options(ctx: TabContext): MetricRowOptions {
   return { index: ctx.index, catalog: ctx.catalog, thresholdsUsed: ctx.run.thresholds_used };
+}
+
+/** Las frases de una leyenda derivada, en una sola cadena. Sin frases, nada:
+ *  una leyenda vacía ocupa sitio y no dice nada. */
+function legendOf(sentences: string[]): string | undefined {
+  return sentences.length === 0 ? undefined : sentences.join('\n');
 }
 
 function Block({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) {
@@ -355,6 +364,10 @@ export function TabForensic({ ctx }: { ctx: TabContext }) {
         rows={FORENSIC_KEYS.map((key) => metricRow(key, options(ctx)))}
         verdictYear={verdictYear}
         firstColumnLabel="Score"
+        // Derivada del run, igual que en web (PHASE-44.17): qué scores faltan y
+        // por qué. La leyenda que había en web estaba escrita a mano y era falsa
+        // en McDonald's; una copia a mano aquí lo habría sido en otro sitio.
+        legend={legendOf(metricGapLegend(FORENSIC_KEYS, options(ctx)))}
       />
     </Block>
   );
@@ -546,20 +559,36 @@ export function TabVerdict({ ctx }: { ctx: TabContext }) {
           <View key={question.key} style={[styles.card, { borderLeftWidth: 3, borderLeftColor: band.fg }]}>
             <Text style={styles.question}>{question.question}</Text>
             <Text style={[styles.bandText, { color: band.fg }]}>
-              {evidence === 'evaluated'
-                ? bandLabel(question.verdict)
-                : evidence === 'no-evidence'
-                  ? 'Sin evidencia'
-                  : 'No auditable'}
+              {evidence === 'evaluated' ? bandLabel(question.verdict) : EVIDENCE_LABEL[evidence]}
             </Text>
             {evidence === 'not-recorded' ? (
               <LegacySignals question={question} catalog={catalog} />
             ) : (
-              <SignalList
-                signals={question.signals ?? []}
-                catalog={catalog}
-                thresholdsUsed={run.thresholds_used}
-              />
+              <>
+                {/* Mismo desglose que en web: «comprobado y limpio» es evidencia
+                    positiva, y meterlo en el mismo cubo que un hueco hacía que
+                    la pantalla se contradijera con su propio veredicto. */}
+                <Text style={styles.evidence}>{evidenceBreakdown(question)}</Text>
+                {/* El cuarto estado (PHASE-44.21): sin un portante, el veredicto
+                    no se sostiene. Se dice qué falta, no sólo que falta. */}
+                {evidence === 'not-audited'
+                  ? (question.unaudited_reasons ?? []).map((reason) => (
+                      <Text key={reason} style={styles.evidence}>
+                        · {reason}
+                      </Text>
+                    ))
+                  : null}
+                {(question.notes ?? []).map((note) => (
+                  <Text key={note} style={styles.evidence}>
+                    {note}
+                  </Text>
+                ))}
+                <SignalList
+                  signals={question.signals ?? []}
+                  catalog={catalog}
+                  thresholdsUsed={run.thresholds_used}
+                />
+              </>
             )}
           </View>
         );
@@ -715,6 +744,7 @@ const styles = StyleSheet.create({
   note: { color: colors.textMuted, fontSize: fontSize.xs, lineHeight: 18 },
   question: { color: colors.text, fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
   bandText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
+  evidence: { color: colors.textMuted, fontSize: fontSize.xs },
   signalRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',

@@ -5,9 +5,11 @@ Todo inmutable (`frozen=True`): el engine no muta sus inputs ni sus salidas.
 El tipo central es `MetricResult`. Su contrato es el corazón del módulo: una
 métrica **nunca desaparece y nunca miente**. Si no se puede calcular, sale con
 `status="not_computable"` y una `reason` en español; si se calculó con un
-denominador aproximado, sale con `status="approximation"`. Jamás un 0 implícito,
-jamás una excepción, jamás una clave ausente (§4.5) — el frontend enseña el
-porqué, que es más informativo que un hueco.
+denominador aproximado, sale con `status="approximation"`; y si la pregunta que
+hace no se plantea en este caso, con `status="not_applicable"` y su motivo — que
+no es lo mismo y por eso son dos estados. Jamás un 0 implícito, jamás una
+excepción, jamás una clave ausente (§4.5) — el frontend enseña el porqué, que es
+más informativo que un hueco.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from app.modules.investment.enums import AccountingStd, SectorInternal, ThresholdDirection
 from app.modules.investment.fundamentals.canonical import (
@@ -24,9 +26,16 @@ from app.modules.investment.fundamentals.canonical import (
     combine_provenance,
 )
 
-MetricStatus = Literal["ok", "not_computable", "approximation"]
+MetricStatus = Literal["ok", "not_computable", "approximation", "not_applicable"]
 """`approximation` = calculada, pero con un input degradado (típicamente el
-primer año de la serie, sin t−1 para la media de balance) [Dec.3]."""
+primer año de la serie, sin t−1 para la media de balance) [Dec.3].
+
+`not_applicable` (PHASE-44.17) = **la pregunta que hace la métrica no se plantea
+en este caso**, que no es lo mismo que no haber podido responderla. El caso que
+lo trajo: el muro de vencimientos (L4) de una empresa sin deuda venciendo a doce
+meses salía «denominador cero», indistinguible de un dato que falta — cuando es
+el mejor resultado posible de esa métrica. Un `not_applicable` puede llevar
+banda; un `not_computable` nunca, porque no se ha comprobado nada."""
 
 Band = Literal["healthy", "caution", "stressed"]
 Severity = Literal["info", "amber", "red"]
@@ -181,6 +190,17 @@ class ThresholdSpec:
     high_alarm: Decimal | None = None
     model_variant: str | None = None
     applies: bool = True
+    not_applicable_reason: str | None = None
+    """Por qué la vara no aplica a este (sector × norma), en español
+    (PHASE-44.21). Viaja al run y de ahí a la pantalla: un número gris sin
+    explicación se lee como «no se ha podido calcular», que es otra cosa."""
+
+    def __post_init__(self) -> None:
+        if not self.applies and not self.not_applicable_reason:
+            raise ValueError(
+                f"{self.metric_key}: un umbral que no aplica DEBE decir por qué — "
+                "un «N/A» mudo es indistinguible de un fallo de cálculo"
+            )
 
     def band_for(self, value: Decimal | None) -> Band | None:
         """Banda de un valor. `None` cuando no hay banda que aplicar — que NO
@@ -217,8 +237,16 @@ class ThresholdSpec:
 class MetricResult:
     """El resultado de UNA métrica en UN año fiscal.
 
-    `value` es `None` si y solo si `status == "not_computable"`, y entonces
-    `reason` explica por qué en español (§4.5).
+    `value` es `None` si y solo si la métrica no trae número, y eso ocurre por
+    dos motivos que NO se pueden confundir (§4.5):
+
+    - `not_computable` — se intentó y no se pudo (falta una partida, denominador
+      cero…). Nunca lleva banda: no se ha comprobado nada.
+    - `not_applicable` — la métrica no tiene aplicación en este caso, y eso es
+      información. Puede llevar banda cuando la ausencia ES el resultado (L4 sin
+      deuda a doce meses).
+
+    En los dos, `reason` explica por qué en español.
     """
 
     key: str
@@ -229,14 +257,23 @@ class MetricResult:
     reason: str | None = None
     band: Band | None = None
 
+    #: Los dos estados sin número. Se enumeran una vez para que el invariante y
+    #: quien lea el contrato vean lo mismo.
+    VALUELESS: ClassVar[frozenset[str]] = frozenset({"not_computable", "not_applicable"})
+
     def __post_init__(self) -> None:
-        if (self.value is None) != (self.status == "not_computable"):
+        if (self.value is None) != (self.status in self.VALUELESS):
             raise ValueError(
                 f"{self.key}: value={self.value!r} incoherente con status={self.status!r} — "
-                "un valor ausente DEBE ser not_computable y viceversa"
+                "un valor ausente DEBE ser not_computable o not_applicable, y viceversa"
             )
-        if self.status == "not_computable" and not self.reason:
-            raise ValueError(f"{self.key}: not_computable exige una razón (§4.5)")
+        if self.status in self.VALUELESS and not self.reason:
+            raise ValueError(f"{self.key}: {self.status} exige una razón (§4.5)")
+        if self.status == "not_computable" and self.band is not None:
+            raise ValueError(
+                f"{self.key}: not_computable con banda {self.band!r} — una métrica que no se "
+                "ha podido calcular no puede tener semáforo"
+            )
 
 
 @dataclass(frozen=True)
@@ -247,6 +284,44 @@ class Flag:
     severity: Severity
     message: str
     evidence: dict[str, Any] = field(default_factory=dict)
+
+
+FlagOutcome = Literal["fired", "clear", "not_computable", "not_applicable"]
+"""Los cuatro desenlaces de una regla de bandera.
+
+`not_applicable` (PHASE-44.21) es «la regla no se plantea en este sector» —el
+inventario de una eléctrica— y no «no se pudo comprobar»: lo segundo invita a
+ingerir más datos, y aquí no hay nada que ingerir."""
+
+
+@dataclass(frozen=True)
+class FlagEvaluation:
+    """Qué le pasó a una REGLA de bandera, haya saltado o no (PHASE-44.17).
+
+    Una `Flag` sólo existe cuando salta. Eso deja sin representar los otros dos
+    desenlaces, que la síntesis colapsaba en uno: preguntaba «¿hay bandera con
+    esta clave?» y traducía el no a **«no se ha encendido»** — que se lee como
+    *comprobado y limpio*. Pero una regla que aborta porque le falta un dato
+    (sin coste de ventas, C3 no llega a ejecutarse nunca) también responde que
+    no, y ahí no se ha comprobado nada.
+
+    Una evaluación POR REGLA y por serie, no por año: las reglas exigen rachas
+    («dos años seguidos»), así que la unidad de decisión es la serie entera.
+
+    `years_evaluated` y `years_unevaluable` viajan para que la razón se pueda
+    auditar sin recomputar: son los ejercicios en los que la regla pudo mirar y
+    los que se saltó.
+    """
+
+    key: str
+    outcome: FlagOutcome
+    reason: str | None = None
+    years_evaluated: tuple[int, ...] = ()
+    years_unevaluable: tuple[int, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.outcome == "not_computable" and not self.reason:
+            raise ValueError(f"{self.key}: una regla que no se pudo evaluar DEBE decir por qué")
 
 
 @dataclass(frozen=True)

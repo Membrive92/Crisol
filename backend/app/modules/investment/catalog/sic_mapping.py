@@ -29,9 +29,12 @@ _SPECIFIC: dict[int, SectorInternal] = {
     3842: SectorInternal.HEALTHCARE,  # suministros ortopédicos
     3843: SectorInternal.HEALTHCARE,  # equipamiento dental
     3845: SectorInternal.HEALTHCARE,  # electromedicina
+    5122: SectorInternal.CONSUMER_STAPLES,  # distribución farmacéutica
+    5171: SectorInternal.ENERGY,  # mayoristas de productos petrolíferos
     5912: SectorInternal.CONSUMER_STAPLES,  # farmacias (droguerías)
     6798: SectorInternal.REAL_ESTATE,  # REIT (aunque 67xx sea holding financiero)
     7372: SectorInternal.TECHNOLOGY,  # software empaquetado
+    8711: SectorInternal.INDUSTRIALS,  # ingeniería (no es un servicio de consumo)
 }
 
 
@@ -70,19 +73,27 @@ def sic_to_sector(sic: str | None) -> SectorInternal:
         return SectorInternal.CONSUMER_DISCRETIONARY
     if 2600 <= code <= 2699:  # papel
         return SectorInternal.MATERIALS
-    if 2700 <= code <= 2799:  # imprenta y edición
-        return SectorInternal.COMMUNICATION
+    # Imprenta y edición van a consumo discrecional, NO a COMMUNICATION: desde
+    # PHASE-44.21 ese sector lleva las bandas de telecomunicaciones (deuda alta,
+    # liquidez baja, ingresos por suscripción), que a una editorial no le
+    # corresponden. El cubo se estrecha a lo que la calibración describe.
+    if 2700 <= code <= 2799:
+        return SectorInternal.CONSUMER_DISCRETIONARY
     if 2800 <= code <= 2899:  # químicas (las farma ya salieron por _SPECIFIC)
         return SectorInternal.MATERIALS
     if 2900 <= code <= 2999:  # refino de petróleo
         return SectorInternal.ENERGY
     if 3570 <= code <= 3579 or 3670 <= code <= 3699:  # ordenadores y electrónica
         return SectorInternal.TECHNOLOGY
+    if 3300 <= code <= 3399:  # metalurgia primaria: materia prima, no manufactura
+        return SectorInternal.MATERIALS
     if 3000 <= code <= 3999:  # resto de manufactura
         return SectorInternal.INDUSTRIALS
+    if 4610 <= code <= 4619:  # oleoductos y gasoductos
+        return SectorInternal.ENERGY
     if 4000 <= code <= 4799:  # transporte
         return SectorInternal.INDUSTRIALS
-    if 4800 <= code <= 4899:  # comunicaciones
+    if 4800 <= code <= 4899:  # telecomunicaciones (el contenido de COMMUNICATION)
         return SectorInternal.COMMUNICATION
     if 4900 <= code <= 4999:  # utilities
         return SectorInternal.UTILITIES
@@ -100,8 +111,8 @@ def sic_to_sector(sic: str | None) -> SectorInternal:
         return SectorInternal.FINANCIALS
     if 7370 <= code <= 7379:  # servicios informáticos y software
         return SectorInternal.TECHNOLOGY
-    if 7800 <= code <= 7999:  # ocio y entretenimiento
-        return SectorInternal.COMMUNICATION
+    if 7800 <= code <= 7999:  # ocio y entretenimiento: consumo, no telecomunicaciones
+        return SectorInternal.CONSUMER_DISCRETIONARY
     if 8000 <= code <= 8099:  # servicios sanitarios
         return SectorInternal.HEALTHCARE
     if 7000 <= code <= 8999:  # resto de servicios

@@ -441,6 +441,46 @@ async def test_la_norma_contable_viaja_con_la_evidencia(client: AsyncClient) -> 
     assert segundo.json()["accounting_std"] == "GAAP"
 
 
+async def test_la_clasificacion_se_refresca_al_volver_a_resolver(client: AsyncClient) -> None:
+    """El sector elige los UMBRALES desde PHASE-44.21, así que congelarlo el día
+    del alta significa que corregir el mapeo SIC no alcanza a lo que ya está en
+    el catálogo — la calibración nueva llegaría a las altas futuras y nunca a las
+    que se están analizando. Es el defecto del sembrado sólo-inserción de los
+    umbrales, en otra tabla.
+
+    `is_financial` viaja con el sector porque sale de la misma resolución:
+    separarlos dejaría a un banco reclasificado con los forenses encendidos.
+    """
+    token = await _register(client, "cat-reclass@example.com")
+
+    # Primero llega sin SIC (el emisor no lo publicaba, o el adapter no lo leyó).
+    _override_adapter(
+        SecurityIdentity(
+            ticker="SAN",
+            cik="0000891478",
+            name="Banco Santander, S.A.",
+            sic=None,
+            annual_report_count=0,
+            foreign_annual_report_count=25,
+        )
+    )
+    primero = await client.post(
+        "/investment/securities/resolve", json={"ticker": "SAN"}, headers=_auth(token)
+    )
+    assert primero.json()["sector"] == "unknown"
+    assert primero.json()["is_financial"] is False
+
+    # Y al volver a resolver ya trae el SIC de banca.
+    _override_adapter(_SAN)
+    segundo = await client.post(
+        "/investment/securities/resolve", json={"ticker": "SAN"}, headers=_auth(token)
+    )
+
+    assert segundo.json()["id"] == primero.json()["id"]  # sigue siendo la misma fila
+    assert segundo.json()["sector"] == "financials"
+    assert segundo.json()["is_financial"] is True
+
+
 async def test_un_recuento_fallido_no_pisa_el_veredicto_anterior(client: AsyncClient) -> None:
     """Si el adapter no pudo contar (`None`), no sabemos nada nuevo: dejar el
     valor como estaba es lo correcto. Sobrescribir con "desconocido" perdería

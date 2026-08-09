@@ -49,8 +49,87 @@ Historial:
   `conventions`: los usan la síntesis y la valoración, y `conventions` es hoja
   del grafo de imports — sin eso, registrar el catálogo de valoración creaba el
   ciclo `catalog → valuation → synthesis → catalog`.
+- 1.4.0 — PHASE-44.17: un `MetricResult` gana un cuarto estado,
+  **`not_applicable`** («la pregunta que hace la métrica no se plantea aquí»),
+  distinto de `not_computable` («se intentó y no se pudo»). Lo estrena **L4**: no
+  tener deuda venciendo a doce meses salía como «denominador cero», que la
+  pantalla presenta igual que un dato ausente — así que una empresa con todo
+  pagado perdía una señal de resiliencia por tenerlo pagado. Ahora sale verde si
+  el cero lo PUBLICA la empresa y sin banda si lo supone la ingesta (§4.5): el
+  verde se gana, no se hereda de que el emisor no etiquete un concepto.
+
+  Ningún otro valor cambia, pero el significado de la salida sí, y por eso se
+  mueve la versión: el gate de la huella no lo habría exigido —cambia un
+  `Literal`, no la lista de campos de una dataclass—, que es precisamente el
+  hueco que conviene conocer del gate.
+
+  Va con dos invariantes nuevos en `MetricResult`: un estado sin número exige
+  razón (ya valía para `not_computable`) y un `not_computable` **no puede llevar
+  banda**, porque un color sobre algo que no se ha comprobado es un color
+  inventado.
+- 1.5.0 — PHASE-44.17: las **reglas de bandera publican si se pudieron
+  evaluar** (`FlagEvaluation`, `flag_rules.py`). Una `Flag` sólo existe cuando
+  salta, así que la síntesis preguntaba «¿hay bandera?» y traducía el no a **«no
+  se ha encendido»** — la misma frase para una regla comprobada y limpia y para
+  una que no llegó a ejecutarse (sin coste de ventas, C3 no corre ni un año).
+
+  Tres piezas que sostienen el arreglo:
+
+  1. **Default pesimista** en `_flag_signal`: sin evaluación, «no se ha podido
+     comprobar». Con el optimista, olvidar publicar una evaluación pinta verde.
+  2. **Gate de cobertura** simétrico: toda clave de `QUESTION_FLAG_KEYS` tiene
+     evaluación publicada. Sin él, el default pesimista cambiaría un falso verde
+     por un falso gris universal.
+  3. El criterio de «suficientes ejercicios» es una **racha consecutiva**, no un
+     cardinal: con años evaluables {2016, 2018, 2020} y `sustained=2` la regla
+     no puede encenderse jamás.
+
+  Además: `QuestionSignal.outcome` y los contadores `clear_count` /
+  `unchecked_count` separan «comprobado y limpio» —que es evidencia positiva—
+  de «no se pudo». Y `_safety_profile` deja de leer una B4 no evaluable como «no
+  está en rojo»: es una de las cuatro condiciones de «Evitar», así que sin
+  comprobarla no se concede el sello de «Conservador».
+
+  El motivo de un hueco distingue por fin los TRES modos de ausencia
+  (`growth_of`): falta la partida, valía cero, o el filing no la publica y la
+  ingesta la supone cero — redactarlo sin mirar la procedencia produce una frase
+  falsa.
+- 1.6.0 — PHASE-44.21: **calibración sectorial**. Los umbrales dejan de ser una
+  vara única (`sector_profiles.py`): doce perfiles de deltas sobre el genérico,
+  con la aplicabilidad —qué métricas NO significan nada en ese negocio— en el
+  ENGINE y no sólo en la tabla, para que una base sin sembrar se comporte igual
+  que una sembrada.
+
+  Lo que cambia de verdad para quien lee un informe:
+
+  - Una eléctrica con deuda neta 4,8× EBITDA sale **ámbar**, no roja: la mediana
+    de grado de inversión del sector es 5,1×. Un rojo permanente se aprende a
+    ignorar, y entonces tampoco informa el que sí importa.
+  - Un banco ve apagadas las 33 métricas que no describen su negocio, **cada una
+    con su motivo** (`ThresholdSpec.not_applicable_reason`), y re-bandeadas las
+    tres que sí: ROA en banda bancaria (1% es un buen banco), ROE y patrimonio
+    sobre activo como proxy de capital — declarado como proxy, que no es CET1.
+  - Un retail que cobra antes de pagar deja de salir en rojo de liquidez (RC-1),
+    y una regulada con payout alto recibe la pregunta que decide: quién financia
+    el exceso (RC-2, que enlaza C7 y B4 — ésas no se relajan por sector).
+  - F7 deja de perderse entero por un check que no aplica: el de inventario sale
+    del cómputo donde no hay inventario, con un mínimo de 4 checks aplicables.
+
+  Y las **preguntas declaran sus portantes** (`load_bearing`, `audited`): el
+  veredicto de «¿la contabilidad es de fiar?» se sostiene en el M-Score y en los
+  accruals, no en el peso de los extraordinarios. Si falta un portante, la
+  pregunta sale **no auditada** —el cuarto estado, en gris— en vez de verde. No
+  es una proporción a propósito: un ratio trataría igual una señal cualquiera
+  que el M-Score. En una financiera, «¿aguanta un golpe?» es no auditable de
+  forma permanente: la resiliencia bancaria es capital regulatorio y no está en
+  un 10-K.
+
+  Sube la versión porque cambia la FORMA (tres campos nuevos en `QuestionVerdict`
+  y uno en `ThresholdSpec`) y porque el veredicto de la misma empresa puede
+  cambiar. Los `thresholds_version` de los runs futuros también cambian, que es
+  lo correcto: la calibración es otra.
 """
 
 from __future__ import annotations
 
-ENGINE_VERSION = "1.3.0"
+ENGINE_VERSION = "1.6.0"

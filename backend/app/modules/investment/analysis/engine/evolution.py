@@ -38,6 +38,13 @@ from app.modules.investment.analysis.engine.conventions import (
     sourced,
     subtract,
 )
+from app.modules.investment.analysis.engine.flag_rules import (
+    FlagRuleResult,
+    evaluate_windowed_rule,
+    flag_applicability,
+    not_applicable_rule,
+    runs,
+)
 from app.modules.investment.analysis.engine.metrics import (
     MetricDefinition,
     MetricUnit,
@@ -47,6 +54,7 @@ from app.modules.investment.analysis.engine.metrics import (
 from app.modules.investment.analysis.engine.types import (
     Amount,
     Flag,
+    FlagEvaluation,
     MetricResult,
     Severity,
     StatementSeries,
@@ -170,6 +178,49 @@ def _growth(current: Decimal | None, previous: Decimal | None) -> Decimal | None
     if current is None or previous is None or previous == ZERO:
         return None
     return (current - previous) / abs(previous)
+
+
+@dataclass(frozen=True)
+class _Growth:
+    """Una variación interanual con el porqué cuando no sale."""
+
+    value: Decimal | None
+    reason: str | None = None
+
+
+def growth_of(item: str, current: CanonicalStatement, previous: CanonicalStatement) -> _Growth:
+    """La variación de una partida entre dos ejercicios, DICIENDO por qué falta.
+
+    `_growth` devuelve `None` por dos motivos distintos —falta el dato, o el
+    ejercicio anterior valía cero— y confundirlos hace que la explicación mienta:
+    una regla que no se pudo evaluar diría «falta el coste de ventas» cuando lo
+    que pasó es que valía 0.
+
+    Y hay un TERCER modo de ausencia que sólo se ve mirando la procedencia: los
+    ceros IMPUTADOS. En XBRL las empresas no etiquetan lo que vale cero, así que
+    la ingesta imputa 0 a una lista blanca de partidas (§4.5, `inventory` entre
+    ellas). Para esas, «valía cero» es una lectura del silencio del filing, no un
+    dato — y la frase tiene que decirlo, porque manda el diagnóstico a un sitio
+    completamente distinto.
+    """
+    now = current.get(item)
+    before = previous.get(item)
+    if now is None or before is None:
+        year = previous.fiscal_year if before is None else current.fiscal_year
+        return _Growth(None, f"falta la partida '{item}' en {year}")
+    if before == ZERO:
+        if previous.provenance_of(item) is Provenance.IMPUTED_ZERO:
+            return _Growth(
+                None,
+                f"el filing de {previous.fiscal_year} no publica '{item}' y la ingesta lo "
+                "supone cero: no hay variación que medir sobre un dato que no existe",
+            )
+        return _Growth(
+            None,
+            f"'{item}' valía cero en {previous.fiscal_year}: no hay variación relativa "
+            "que medir sobre cero",
+        )
+    return _Growth((now - before) / abs(before))
 
 
 def compute_horizontal(series: StatementSeries) -> tuple[HorizontalSeries, ...]:
@@ -322,21 +373,6 @@ def compute_sustainable_growth(series: StatementSeries, statement: CanonicalStat
 # ── Reglas de coherencia C1-C8 ────────────────────────────────────────
 
 
-def _runs(years: Sequence[int], length: int) -> list[tuple[int, ...]]:
-    """Rachas de `length` años CONSECUTIVOS dentro de los años marcados.
-
-    "Sostenido 2 años" significa 2024 y 2025, no 2021 y 2024: dos años sueltos
-    son dos casualidades, dos seguidos son una tendencia.
-    """
-    ordered = sorted(years)
-    found: list[tuple[int, ...]] = []
-    for index in range(len(ordered) - length + 1):
-        window = ordered[index : index + length]
-        if window[-1] - window[0] == length - 1:
-            found.append(tuple(window))
-    return found
-
-
 @dataclass(frozen=True)
 class _YearPair:
     """Un año y su inmediato anterior, ya resueltos."""
@@ -371,39 +407,69 @@ def _gap_rule(
     sustained: int,
     severity: Severity,
     message: str,
-) -> tuple[Flag, ...]:
+) -> tuple[tuple[Flag, ...], FlagEvaluation]:
     """Cruce genérico "X crece más que Y en más de N pp".
 
     C1 (cobros vs ventas) y C3 (inventario vs coste de ventas) son la misma
     forma con distinto umbral, así que comparten implementación: si divergieran,
     divergirían por accidente.
+
+    Devuelve las banderas encendidas **y** la evaluación de la regla. Lo segundo
+    es lo que faltaba: sin coste de ventas, C3 no se ejecuta ni un año, no emite
+    bandera, y la síntesis leía esa ausencia como «no se ha encendido».
     """
     marked: list[int] = []
+    evaluable: list[int] = []
+    unevaluable: dict[int, str] = {}
     for pair in _pairs(series):
-        growth_numerator = _growth(
-            pair.current.get(numerator_item), pair.previous.get(numerator_item)
-        )
-        growth_reference = _growth(
-            pair.current.get(reference_item), pair.previous.get(reference_item)
-        )
-        if growth_numerator is None or growth_reference is None:
+        numerator = growth_of(numerator_item, pair.current, pair.previous)
+        reference = growth_of(reference_item, pair.current, pair.previous)
+        if numerator.value is None or reference.value is None:
+            reasons = [r for r in (numerator.reason, reference.reason) if r]
+            unevaluable[pair.year] = "; ".join(dict.fromkeys(reasons))
             continue
-        if growth_numerator - growth_reference > gap:
+        evaluable.append(pair.year)
+        if numerator.value - reference.value > gap:
             marked.append(pair.year)
-    return tuple(
+    flags = tuple(
         _flag(key, severity, message.format(years=f"{run[0]}-{run[-1]}"), years=list(run))
-        for run in _runs(marked, sustained)
+        for run in runs(marked, sustained)
+    )
+    evaluation = evaluate_windowed_rule(
+        key,
+        fired=bool(flags),
+        evaluable=evaluable,
+        unevaluable=unevaluable,
+        sustained=sustained,
+    )
+    return flags, evaluation
+
+
+def compute_coherence_flags(series: StatementSeries) -> FlagRuleResult:
+    """C1-C8 — los cruces que delatan divergencias (DESIGN §5, Capa 1.5).
+
+    Devuelve las banderas encendidas y, para las tres que la síntesis usa como
+    señal (C1, C2, C3), la evaluación de su regla.
+    """
+    flags: list[Flag] = []
+    evaluations: list[FlagEvaluation] = []
+    pairs = _pairs(series)
+    # Qué reglas no se plantean en este sector (PHASE-44.21). No es lo mismo que
+    # no poder comprobarlas: el inventario de una eléctrica no va a aparecer por
+    # ingerir más ejercicios, así que la frase tiene que ser otra.
+    inapplicable = flag_applicability(
+        series.security.sector, is_financial=series.security.is_financial
     )
 
-
-def compute_coherence_flags(series: StatementSeries) -> tuple[Flag, ...]:
-    """C1-C8 — los cruces que delatan divergencias (DESIGN §5, Capa 1.5)."""
-    flags: list[Flag] = []
-    pairs = _pairs(series)
-
     # C1 — cobros creciendo por encima de las ventas
-    flags.extend(
-        _gap_rule(
+    if "C1_receivables_vs_revenue" in inapplicable:
+        evaluations.append(
+            not_applicable_rule(
+                "C1_receivables_vs_revenue", inapplicable["C1_receivables_vs_revenue"]
+            )
+        )
+    else:
+        c1_flags, c1_evaluation = _gap_rule(
             series,
             key="C1_receivables_vs_revenue",
             numerator_item="receivables",
@@ -417,11 +483,16 @@ def compute_coherence_flags(series: StatementSeries) -> tuple[Flag, ...]:
                 "forzando el cobro a plazo o cargando producto al canal."
             ),
         )
-    )
+        flags.extend(c1_flags)
+        evaluations.append(c1_evaluation)
 
     # C3 — inventario creciendo por encima del coste de ventas
-    flags.extend(
-        _gap_rule(
+    if "C3_inventory_vs_cogs" in inapplicable:
+        evaluations.append(
+            not_applicable_rule("C3_inventory_vs_cogs", inapplicable["C3_inventory_vs_cogs"])
+        )
+    else:
+        c3_flags, c3_evaluation = _gap_rule(
             series,
             key="C3_inventory_vs_cogs",
             numerator_item="inventory",
@@ -434,18 +505,24 @@ def compute_coherence_flags(series: StatementSeries) -> tuple[Flag, ...]:
                 "({years}): producto que entra y no sale."
             ),
         )
-    )
+        flags.extend(c3_flags)
+        evaluations.append(c3_evaluation)
 
     # C2 — beneficio que sube sin que suba la caja
-    marked_c2 = [
-        pair.year
-        for pair in pairs
-        if (ni := _growth(pair.current.net_income, pair.previous.net_income)) is not None
-        and (cfo := _growth(pair.current.cfo, pair.previous.cfo)) is not None
-        and ni > ZERO
-        and cfo <= ZERO
-    ]
-    flags.extend(
+    marked_c2: list[int] = []
+    evaluable_c2: list[int] = []
+    unevaluable_c2: dict[int, str] = {}
+    for pair in pairs:
+        income = growth_of("net_income", pair.current, pair.previous)
+        cash = growth_of("cfo", pair.current, pair.previous)
+        if income.value is None or cash.value is None:
+            reasons = [r for r in (income.reason, cash.reason) if r]
+            unevaluable_c2[pair.year] = "; ".join(dict.fromkeys(reasons))
+            continue
+        evaluable_c2.append(pair.year)
+        if income.value > ZERO and cash.value <= ZERO:
+            marked_c2.append(pair.year)
+    c2_flags = tuple(
         _flag(
             "C2_income_without_cash",
             "amber",
@@ -453,7 +530,17 @@ def compute_coherence_flags(series: StatementSeries) -> tuple[Flag, ...]:
             f"({run[0]}-{run[-1]}): beneficio contable que todavía no es caja.",
             years=list(run),
         )
-        for run in _runs(marked_c2, 2)
+        for run in runs(marked_c2, 2)
+    )
+    flags.extend(c2_flags)
+    evaluations.append(
+        evaluate_windowed_rule(
+            "C2_income_without_cash",
+            fired=bool(c2_flags),
+            evaluable=evaluable_c2,
+            unevaluable=unevaluable_c2,
+            sustained=2,
+        )
     )
 
     # C4 — capex por debajo de la amortización (descapitalización).
@@ -477,7 +564,7 @@ def compute_coherence_flags(series: StatementSeries) -> tuple[Flag, ...]:
             "se repone.",
             years=list(run),
         )
-        for run in _runs(marked_c4, 3)
+        for run in runs(marked_c4, 3)
     )
 
     # C5 — fondo de comercio que aparece sin compras
@@ -508,7 +595,7 @@ def compute_coherence_flags(series: StatementSeries) -> tuple[Flag, ...]:
         and (pair.current.buybacks or ZERO) == ZERO
     ]
     severe = [year for year, growth in diluting if growth > Decimal("0.05")]
-    for run in _runs([year for year, _ in diluting], 2):
+    for run in runs([year for year, _ in diluting], 2):
         is_severe = any(year in severe for year in run)
         flags.append(
             _flag(
@@ -532,7 +619,7 @@ def compute_coherence_flags(series: StatementSeries) -> tuple[Flag, ...]:
         and dividends + (pair.current.buybacks or ZERO) > fcf
         and debt_change > ZERO
     ]
-    sustained_c7 = _runs(marked_c7, 2)
+    sustained_c7 = runs(marked_c7, 2)
     if sustained_c7:
         run = sustained_c7[0]
         flags.append(
@@ -581,7 +668,7 @@ def compute_coherence_flags(series: StatementSeries) -> tuple[Flag, ...]:
                         revenue_growth=str(revenue_last - revenue_first),
                     )
                 )
-    return tuple(flags)
+    return FlagRuleResult(flags=tuple(flags), evaluations=tuple(evaluations))
 
 
 # ── Orquestación de la capa ───────────────────────────────────────────
@@ -593,6 +680,9 @@ class EvolutionResult:
     horizontal: tuple[HorizontalSeries, ...]
     vertical: tuple[VerticalPoint, ...]
     flags: tuple[Flag, ...]
+    flag_evaluations: tuple[FlagEvaluation, ...] = ()
+    """Qué reglas se pudieron comprobar (C1, C2, C3). Las consume la síntesis
+    para no traducir «no hay bandera» a «no se ha encendido»."""
 
     def get(self, key: str, fiscal_year: int) -> MetricResult | None:
         for metric in self.metrics:
@@ -624,7 +714,8 @@ def compute(
     specs = DEFAULT_THRESHOLDS if thresholds is None else thresholds
     horizontal = compute_horizontal(series)
     vertical = compute_vertical(series)
-    flags = list(compute_coherence_flags(series))
+    coherence = compute_coherence_flags(series)
+    flags = list(coherence.flags)
 
     metrics: list[MetricResult] = []
     stability = compute_margin_stability(series)
@@ -646,6 +737,7 @@ def compute(
         horizontal=horizontal,
         vertical=vertical,
         flags=tuple(flags),
+        flag_evaluations=coherence.evaluations,
     )
 
 
@@ -673,5 +765,5 @@ def _external_funding_flags(
             years=list(run),
             revenue_cagr=str(revenue.cagr),
         )
-        for run in _runs(marked, 2)
+        for run in runs(marked, 2)
     )

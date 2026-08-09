@@ -110,9 +110,13 @@ def to_xbrl_fact(fact: Any) -> XbrlFact | None:
 def classify_sic(sic: str | None) -> tuple[bool, bool]:
     """SIC → (es REIT, es financiera). Sin SIC, ninguna de las dos.
 
-    Ante la duda NO se marca: marcar de más apaga los forenses en una empresa
-    normal (se pierde análisis), pero marcar de menos los corre en un banco y
-    devuelve un veredicto con números que no significan nada — que es peor.
+    Se marca sólo con EVIDENCIA explícita —el prefijo del SIC— y nunca por
+    parecido. Quien resuelve añade un segundo testigo independiente (el flag que
+    publica la librería), y basta con que uno de los dos lo afirme: los dos
+    errores no cuestan lo mismo. Marcar de más apaga los forenses en una empresa
+    normal y se pierde análisis; marcar de menos los CORRE en un banco y produce
+    un veredicto con números que no significan nada, que es peor porque se lee
+    como si valiera.
     """
     if not sic:
         return False, False

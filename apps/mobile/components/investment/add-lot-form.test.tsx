@@ -58,12 +58,16 @@ describe('AddLotForm (móvil)', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it('avisa de una fecha con formato incorrecto en vez de mandarla', () => {
-    const { getByPlaceholderText, getByText } = renderSeeded(<AddLotForm onDone={jest.fn()} />);
+  it('la fecha no se teclea: no hay forma de meter un formato inválido', () => {
+    // Antes se pedía `AAAA-MM-DD` a mano y el formulario avisaba del formato.
+    // Ahora usa el date-picker nativo que Finanzas Domésticas tiene desde
+    // PHASE-14.3, así que el aviso sobra porque el error no puede ocurrir — y
+    // eso importa más de lo que parece: la fecha de la operación es la que fija
+    // el tipo de cambio que el servidor deriva del BCE.
+    const { queryByPlaceholderText, getByText } = renderSeeded(<AddLotForm onDone={jest.fn()} />);
 
-    fireEvent.changeText(getByPlaceholderText('AAAA-MM-DD'), '07/08/2026');
-
-    expect(getByText(/AAAA-MM-DD \(p. ej./)).toBeTruthy();
+    expect(queryByPlaceholderText('AAAA-MM-DD')).toBeNull();
+    expect(getByText('Fecha de la compra')).toBeTruthy();
   });
 
   it('acepta la coma decimal y la manda con punto', async () => {

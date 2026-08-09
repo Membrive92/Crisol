@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import {
   SEARCH_MIN_LENGTH,
@@ -112,6 +112,23 @@ export function SecuritySearch({
   }
 
   const activeHit = results[activeIndex];
+
+  /**
+   * La opción activa se arrastra a la vista al navegar con el teclado.
+   *
+   * `aria-activedescendant` le dice al lector de pantalla cuál es la activa,
+   * pero al ojo no le dice nada: sin esto, bajar con ↓ por veinte resultados
+   * movía una selección invisible. `block: 'nearest'` desplaza lo mínimo, así
+   * que la lista no salta cuando la activa ya se ve.
+   *
+   * El `?.` de `scrollIntoView` no es defensa contra el DOM: jsdom no lo
+   * implementa, y sin él los tests del combobox revientan (misma familia que
+   * `Blob.text()`, lección PHASE-4.2).
+   */
+  const activeOptionRef = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    activeOptionRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [activeIndex]);
 
   /** La degradación del alta ext: (PHASE-44.14): el proveedor no reconoce el
    *  ISIN y el servidor pide el ticker con la identidad pre-rellenada. */
@@ -319,7 +336,11 @@ export function SecuritySearch({
             border: `1px solid ${colors.border}`,
             borderRadius: radius.md,
             backgroundColor: colors.surface,
-            overflow: 'hidden',
+            // Con `limit=20` la lista puede ocupar más que la ventana, y
+            // entonces bajar con ↓ mueve una selección que no se ve. Acotarla y
+            // arrastrar la activa a la vista son la misma corrección.
+            maxHeight: 320,
+            overflowY: 'auto',
           }}
         >
           {results.map((hit, index) => {
@@ -329,6 +350,7 @@ export function SecuritySearch({
             <li
               key={hit.listing_key}
               id={`${baseId}-opt-${index}`}
+              ref={active ? activeOptionRef : undefined}
               role="option"
               aria-selected={active}
               aria-disabled={blocked !== null}
