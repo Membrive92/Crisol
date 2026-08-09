@@ -941,6 +941,333 @@ librería de terceros, también el tuyo de hace tres fases. Y desconfía
 especialmente cuando el modo de fallo es «no encuentra nada»: eso se lee como
 «no hay datos», no como un bug.
 
+### [PHASE-44.13] Un job periódico cuya condición de «ya está hecho» es LAXA no es un job: es un no-op con log de éxito
+**Error:** El cron nocturno de tipos de cambio (PHASE-11.1) llevaba desde que se
+construyó **sin traer una sola tasa nueva**, loguendo «0 fechas refrescadas» como
+si fuera lo normal. Llamaba a `ensure_rates_for_dates([ayer, hoy])`, cuyo canario
+es `get_rate_with_fallback`: acepta cualquier tasa de los **14 días anteriores**
+y hace `continue`. O sea que el día que entraba una tasa, el job se callaba dos
+semanas. Efecto real: la compra de JNJ del viernes 24-jul se valoró con el tipo
+del **sábado 18**, y el backfill de `fx_rate_at_trade` habría escrito ese dato
+rancio como «el tipo de la operación».
+**Causa:** reutilizar para «refrescar a diario» una función escrita para
+«rellenar huecos históricos». Las dos parecen la misma pregunta —«¿tengo tasa
+para esta fecha?»— y no lo son: para convertir un movimiento pasado, el último
+día hábil publicado *es* el dato bueno; para refrescar hoy, conformarse con lo de
+hace 13 días es exactamente el fallo. La segunda parte, independiente: el timeout
+global de 10 s. Medido, una fecha histórica tarda 13-17 s y la del día 9,3 —así
+que la pata de «ayer» fallaba SIEMPRE y la de «hoy» aprobaba por tres décimas.
+Hacían falta los dos defectos para que el job no sirviera de nada, y ninguno de
+los dos levanta un error.
+**Solución:** una hermana ESTRICTA (`ensure_exact_rates_for_dates`) con
+`missing_exact_rates` como canario, sin tocar la política laxa —que sigue siendo
+la correcta para su caso—, y un timeout propio para el camino de fondo, donde no
+espera ningún usuario. El módulo de cartera ya había tenido que inventarse esa
+política para sí mismo en PHASE-44.11; ahora hay una sola.
+**Regla:** cuando compartas una función entre un camino de REQUEST y uno de
+FONDO, comprueba que su condición de salida temprana significa lo mismo en los
+dos. Y desconfía de un job cuyo modo de fallo sea «no hace nada»: un `0` en el
+log se lee como «no había trabajo». La señal que lo destapa no está en el código
+sino en los DATOS —aquí, una fecha cada ~15 días en `exchange_rates`, el ancho
+exacto de la ventana de fallback—, así que ante la sospecha de un cron muerto,
+mira la huella que deja en la tabla antes que su lógica. Hermana de
+[PHASE-44.11] «cero red en los tests no es cierto porque esté escrito».
+
+### [PHASE-44.13] Un script de data-fix con `--dry-run` está probado a la mitad: el camino que escribe es OTRO camino
+**Error:** `scripts/backfill_trade_fx.py` se había ejecutado en dry-run y dado
+por bueno. Al lanzarlo con `--apply` reventó dos veces seguidas: primero con
+`UnicodeEncodeError` al imprimir su propio informe (un `→` no existe en cp1252,
+la codificación por defecto de la consola de Windows), y después con
+`NoReferencedTableError` en el `commit`, porque `inv_lots` tiene FK a `accounts`
+y a `users` y esos modelos no estaban registrados en el metadata de SQLAlchemy.
+**Causa:** el dry-run hace un `SELECT` con los joins explícitos, que **no
+necesita resolver la FK**; el flush del `--apply` sí. Y el fallo de codificación
+sólo aparece en la línea que informa de un cambio, que en un dry-run con 0 filas
+no se imprime. Los dos son del camino que escribe, y ese camino no se había
+recorrido nunca.
+**Solución:** importar `app.main` por efecto lateral (registra todos los modelos;
+la lista explícita ya está duplicada en `alembic/env.py` y `tests/conftest.py`, y
+una tercera copia es una más que mantener) y pasar el informe a ASCII.
+**Regla:** un `--dry-run` prueba la consulta, no la escritura. Antes de confiar
+un script de data-fix, ejecútalo con `--apply` contra una copia o una fila de
+prueba: el camino de escritura tiene sus propias dependencias (metadata completo,
+transacción, `onupdate`, codificación de la salida) que el de lectura no ejerce.
+Es la misma familia que [PHASE-44.12] «un test con entrada sintética prueba tu
+lógica, no tu integración».
+
+### [PHASE-44.13] Compartir el CÁLCULO no basta si cada app se guarda su propia lista de qué mostrar
+**Error (evitado):** Al llevar el informe de análisis a móvil, la tentación era
+copiar las listas de métricas por bloque (`RATIO_FAMILIES`, `FORENSIC_KEYS`,
+`DIVIDEND_BLOCKS`) y traducir el renderizado. El cálculo se habría compartido y
+aun así las dos pantallas podrían acabar enseñando **ocho scores forenses una y
+seis la otra** sin que nada avise: añadir una métrica al motor exige tocar dos
+sitios, y sólo uno lo recuerda.
+**Causa:** confundir «capa pura» con «fórmulas». El view-model incluye QUÉ se
+muestra y en qué orden, y eso es tan compartible —y tan divergible— como el
+formato de un porcentaje.
+**Solución:** `packages/ui/src/investment-report-sections.ts` con las familias,
+sus notas y las claves de las seis pestañas; ambas apps las importan. Las claves
+son las que YA viajaban en la URL de la web (`?tab=veredicto`), no unas nuevas:
+inventar un segundo vocabulario para móvil habría sido el mismo error en pequeño
+(pasó, y lo destapó comparar con el fichero real antes de cablear).
+**Regla:** al partir una pantalla en «pura» y «renderizado», la línea va después
+del contenido, no antes: listas de campos, órdenes, etiquetas y textos
+explicativos son parte de lo compartido. Si un cambio en el motor obliga a editar
+dos ficheros para que las dos pantallas digan lo mismo, la partición está mal
+hecha. Corolario verificado aquí: `groupFlags` también, o el móvil pinta siete
+tarjetas idénticas cuando una empresa diluye siete años seguidos.
+
+### [PHASE-44.14] Un identificador oficial tiene NIVELES, y el que publica el regulador no es el que usa todo el mundo
+**Error (evitado por poco):** El plan decía filtrar los ficheros FIRDS por «los
+MICs del mapa de sufijos de pricing» — `XETR`, `XMAD`, `XPAR`…. Implementado
+literalmente, **Alemania entera habría quedado fuera**: Allianz no aparece en
+`XETR` en ningún registro de FIRDS, aparece en `XETA` (el segmento «Regulierter
+Markt» de Xetra), `XETU` (off-book) y `XEMA` (midpoint). El fallo habría sido
+silencioso y con forma de dato: «Alemania no cotiza acciones».
+**Causa:** ISO 10383 define MIC **operativos** (`XETR`) y MIC de **segmento**
+(`XETA`). Los reguladores reportan por segmento —es el nivel al que existe la
+admisión a negociación—, mientras que los proveedores de precios y la gente
+hablan en operativos. Los dos son «el MIC», y ninguno de los dos documentos lo
+aclara: hay que mirar el registro. Peor: `XMAD` **parece** operativo y también
+es un segmento (de `BMEX`), así que España habría funcionado por accidente y
+reforzado la creencia equivocada.
+**Solución:** un mapa curado segmento→operativo, construido contra el CSV
+oficial de ISO 10383 y contra la distribución REAL de los ficheros (contando
+filas por MIC), con colapso por prioridad cuando tres segmentos caen en el mismo
+par. Y un test que ata las dos tablas: **todo MIC que el seed pueda almacenar
+tiene sufijo en el proveedor de precios**, o CI para el commit.
+**Regla:** cuando cruces dos sistemas por un identificador «estándar»,
+comprueba que hablan del mismo NIVEL del estándar antes de escribir el mapeo —
+ejecutando una consulta que cuente qué valores aparecen de verdad en cada lado,
+no leyendo las dos especificaciones. Y cuando el mapeo una dos tablas que deben
+cubrirse (aquí: lo que se puede sembrar ↔ lo que se puede cotizar), el test que
+las ata vale más que las dos revisiones que no se harán.
+
+### [PHASE-44.14] Un fichero «de la jurisdicción X» contiene filas de la jurisdicción Y — y el dry-run lo cazó
+**Error:** El seed asumía que el FULINS de ESMA trae UE y el de la FCA trae UK,
+así que sincronizaba cada fuente contra su lote como particiones disjuntas. El
+fichero de la FCA trae también Commerzbank y Kontron en **XETR**, valores de
+Oslo y de Estocolmo: cada regulador publica lo admitido en **las plazas que
+supervisa más lo que sus entidades reportan**. El mismo `(isin, mic)` entraba
+por las dos fuentes y la PK reventaba.
+**Causa:** deducir el contenido de un fichero de su nombre y de su emisor. Es
+la lección [PHASE-44.6] («la forma de salida se prueba, no se deduce») aplicada
+al ALCANCE del dato, no a su forma: los campos eran exactamente los esperados;
+lo inesperado era qué filas venían dentro.
+**Solución:** partición **jurisdiccional explícita** (`UK_VENUES`): cada
+registro se queda con el regulador de su plaza, no con el fichero del que salió.
+**Lo destapó el `--dry-run` del seed** contra los ficheros reales, 24 horas
+después de escribir la lección de que un dry-run prueba la consulta y no la
+escritura — aquí sí la probó porque el choque de PK ocurre al construir el
+INSERT, y por eso se corrió antes de aplicar.
+**Regla:** antes de tratar dos fuentes como particiones disjuntas, **compruébalo
+con los datos**: una consulta que cuente el solape. Y ejecuta el dry-run de un
+seed contra los ficheros de verdad, no sólo contra el fixture — un fixture lo
+construyes tú con lo que ya sabes, y por eso no puede sorprenderte.
+
+### [PHASE-44.14] Un test que sólo verifica que el guardarraíl SALTA no prueba lo que el guardarraíl protege
+**Error:** El sync del directorio elimina las filas ausentes (un fichero *full*
+es el universo completo, así que lo que falta es un deslistado) con un suelo de
+seguridad: si el lote nuevo trae menos de 100 filas, no se borra nada — un
+fichero truncado parecería «todo deslistado». Escribí el test del suelo
+(`removed == 0` con un lote de 1) y lo di por cubierto. Pero **el fixture real
+tiene 5 filas**, así que TODOS los tests corrían por debajo del suelo: el camino
+de borrado no se ejecutaba en ninguno. Podría haber estado roto de cualquier
+forma —borrar de más, no borrar nunca, borrar la fuente equivocada— y la suite
+habría seguido verde.
+**Causa:** cubrir la rama defensiva y confundirla con cubrir la funcionalidad.
+El `assert removed == 0` se lee como «probado» y es cierto: lo que no está
+probado es el `removed > 0`.
+**Solución:** un lote sintético por encima del suelo que borra de verdad
+(asertando qué filas desaparecen), otro que comprueba que un cambio real SÍ se
+escribe y mueve `seeded_at` —si no, «0 cambios» podría significar «no detecta
+cambios» en vez de «no había»— y un tercero que verifica que sincronizar una
+fuente no toca las filas de la otra.
+**Regla:** cuando un umbral parta el comportamiento en dos, el test tiene que
+caer a **los dos lados**. Y si tus fixtures viven todos de un lado del umbral,
+el otro lado no está probado por mucho que exista un test que lo mencione —
+mira los datos del fixture contra la constante antes de dar la rama por cubierta.
+
+### [PHASE-44.14] Una revisión que NO se ejecuta devuelve exactamente la misma forma que una revisión limpia
+**Error (a punto de cometerse):** La revisión adversarial de la fase se lanzó
+como workflow de cinco agentes con verificación por hallazgo. Devolvió
+`{"confirmed": [], "totals": {"raw": 0, "confirmed": 0}}` — que es, carácter por
+carácter, lo que devuelve una revisión que ha leído todo el código y no ha
+encontrado nada. Estuve a un paso de reportar «revisión adversarial: sin
+hallazgos». Los cinco agentes habían muerto por límite de sesión sin leer una
+sola línea.
+**Causa:** el agregado (`filter(...).length`) no distingue «cero hallazgos» de
+«cero ejecuciones». Es la misma familia que el cron mudo de [PHASE-44.13] —un
+`0` en el log que se lee como «no había trabajo»— pero aplicada a la
+herramienta que debería CAZAR ese tipo de fallo. Lo delató un bloque
+`<failures>` aparte del resultado, no el resultado.
+**Solución:** leerlo, decirlo en el HANDOFF («la revisión no llegó a
+ejecutarse») y sustituirla por lectura crítica propia. Esa lectura encontró dos
+defectos reales: el borrado del sync que no se ejecutaba en ningún test, y un
+formulario que sobrevivía al cambio de consulta apuntando al listing anterior.
+**Regla:** cuando una herramienta de verificación devuelva «nada que reportar»,
+comprueba **cuántas comprobaciones se ejecutaron de verdad** antes de creerla:
+un agregado vacío es ambiguo por construcción. Y en un harness propio, haz que
+el resultado lleve el recuento de ejecuciones o falle ruidosamente cuando ningún
+verificador haya corrido — el silencio de un revisor muerto es indistinguible
+del de un revisor satisfecho.
+
+### [PHASE-44.15] Un «arréglalo el día que toques X» escrito en un comentario es deuda que se paga sola sólo si alguien recuerda leerlo
+**Error:** `resolve_security` escribía `accounting_std=GAAP` para todo, ADR
+europeos incluidos, con esta nota al lado y otra copia en el ADR-0008 y una
+tercera en el backlog: *«el día que alguien añada `20-F` a `ANNUAL_FORMS`, esta
+etiqueta pasa a ser load-bearing de golpe y esas cuentas se analizarían con
+cortes US-GAAP sin decirlo. Quien toque `ANNUAL_FORMS` lo arregla en el mismo
+commit.»* Tres avisos escritos, cero mecanismos: nada relaciona el fichero que
+hay que tocar con la línea que hay que cambiar, y el que abra `ANNUAL_FORMS`
+dentro de un año no va a grepear el backlog.
+**Causa:** aplazar con nota en vez de aplazar con fecha o con gate. La nota era
+correcta cuando se escribió —faltaban dos piezas para poder derivar la
+etiqueta— pero al llegar esas piezas nadie recalculó si el motivo seguía en pie.
+Es el mismo mecanismo de [PHASE-43] («una premisa escrita caduca en silencio»),
+en su variante activa: no es que la premisa deje de ser cierta, es que **deja de
+ser necesaria** y nadie lo nota.
+**Solución:** derivar el valor de la evidencia que ya existía
+(`analysis_status`, PHASE-44.8) en cuanto la segunda pieza (`thresholds_used`,
+PHASE-44.9) hizo seguro moverlo. Y comprobar que el arreglo NO es cosmético:
+`IFRS` hace que los umbrales se siembren `model_variant='uncalibrated'`, que es
+la declaración honesta que faltaba.
+**Regla:** cuando aplaces algo con un «arréglalo cuando pase X», anota **qué
+tiene que existir** para poder arreglarlo, no sólo qué lo hará urgente. Lo
+primero es comprobable en cada revisión de deuda («¿ya existe?»); lo segundo
+depende de que el futuro lector encuentre tu nota justo cuando toca. Y si el
+aplazamiento se justificaba en que el arreglo sería un no-op, revisa esa premisa
+al cerrar la deuda: aquí había dejado de serlo.
+
+### [PHASE-44.15] Un desempate alfabético es el desempate por defecto, no una decisión — y se nota justo en las consultas más obvias
+**Error:** El buscador devolvía `Banco Santander (Chile)` y `(Brasil)` **antes**
+que la matriz al teclear «santander». Los tres empatan a puntuación (token
+exacto, misma plaza) y el último criterio del orden era el ticker: `BSAC` <
+`BSBR` < `SAN`. Se documentó como limitación aceptable («cumple el criterio del
+plan, top 3») en vez de como lo que era: la consulta más previsible del buscador
+devolviendo lo que nadie busca.
+**Causa:** poner `item.ticker` como desempate final para que el orden fuera
+determinista —lo cual es correcto— y no volver a preguntarse si había un
+criterio MEJOR antes de ese. Un desempate estable no tiene por qué ser el
+primero que se te ocurre.
+**Solución:** el criterio estaba en el dato: la matriz es **sólo** lo buscado
+más su forma jurídica; las filiales añaden un calificativo. Contar tokens
+significativos —descartando `S.A.`, `plc`, `Inc`, `Corp`— y ordenar por el menor.
+Efecto no buscado que confirma la regla: `johnson` pasó a devolver JNJ primero,
+que salía detrás de Johnson Controls por exactamente el mismo motivo.
+**Regla:** si el criterio final de una ordenación es alfabético o por id, es que
+no hay criterio — y en cuanto haya empates reales, el resultado será arbitrario
+en el peor sitio. Antes de aceptar un empate como «aceptable», mira los datos
+que empatan y pregunta qué los distingue de verdad; y cuando encuentres el
+criterio, compruébalo en una consulta que NO estabas mirando (aquí, `johnson`),
+porque un desempate bueno arregla casos que no sabías que estaban rotos.
+
+### [PHASE-44.15] `cmd | tail` rompe el `&&`: la cadena sigue aunque el comando falle, y así se lanzan dos pytest a la vez
+**Error:** Lancé la verificación como una sola cadena:
+`ruff && black --check | tail -2 && mypy | tail -2 && pytest | tail -3`.
+`black --check` **falló** (un fichero sin formatear), lo vi en la salida, formateé
+y lancé la suite otra vez. Pero la primera cadena **no se había parado**: el
+código de salida de una tubería es el del ÚLTIMO comando, y `tail` siempre
+devuelve 0, así que el `&&` siguió y arrancó su propio `pytest`. Dos suites
+concurrentes sobre `crisol_test`, que es una sola base compartida — o sea que
+**ninguno de los dos resultados valía**, incluido el que iba a reportar como
+verde.
+**Causa:** dos cosas que ya estaban escritas, combinadas. La memoria del
+proyecto dice literalmente «`| tail` enmascara el código de salida», y
+`lessons.md` dice «nunca dos pytest a la vez»; lo que no estaba escrito es que
+**lo primero causa lo segundo**. Y el fallo es silencioso en la dirección
+peligrosa: la cadena parecía haberse detenido porque su última salida visible
+era el error de black.
+**Solución:** matar los dos, comprobar que no queda ningún proceso vivo
+(`Get-Process python`), y relanzar UNA suite redirigiendo a fichero
+(`pytest > log 2>&1; echo EXIT=$?`) en vez de a `tail`. El síntoma que lo
+destapó: dos procesos python con horas de arranque distintas.
+**Regla:** no encadenes con `&&` un comando cuyo resultado te importa si va a
+pasar por una tubería — el `&&` deja de proteger. Para ver sólo el final de una
+salida larga sin perder el código, redirige a fichero y consúltalo después, o
+usa `set -o pipefail`. Y antes de lanzar la suite, **comprueba que no hay otro
+pytest vivo** en vez de asumirlo por lo que crees que hizo tu comando anterior.
+
+### [PHASE-44.15] Un buscador por capas ordena por CAPA, y eso pisa la calidad de la coincidencia — sólo se ve con los datos reales delante
+**Error:** El buscador consulta tres capas (catálogo → índice SEC → directorio
+UE/UK) y concatena sus resultados en ese orden. Con los datos reales apareció lo
+que eso significa: **buscar «allianz» no devolvía Allianz**. La SEC no tiene
+ninguna coincidencia exacta, así que su *fuzzy* proponía `ALLIANT`, `RALLIANT` y
+`ALLIANCE` —otras empresas— y esas cuatro filas llenaban el cupo antes de que el
+directorio pudiera ofrecer `Allianz SE`, que casa exacto por nombre. Y un
+segundo caso de la misma familia, preexistente: con McDonald's en el catálogo,
+teclear `MC` devolvía `MCD` (prefijo, capa 1) en vez de Moelis, cuyo ticker
+**es** `MC`.
+**Causa:** el orden de las capas es una decisión de PRIORIDAD razonable («lo que
+ya tienes primero»), pero se aplicó como orden ABSOLUTO. Una capa preferente
+gasta el cupo con coincidencias débiles y las fuertes de las capas siguientes no
+llegan a existir. El fuzzy, además, estaba pensado como «último recurso» y lo era
+sólo dentro de su propia capa.
+**Por qué la suite no lo veía:** los tests inyectan un índice de dos o tres filas
+elegidas, y el defecto necesita el ruido de 10.365 emisores reales conviviendo
+con un directorio sembrado. Un doble de test tiene justo los datos que el autor
+imaginó, y por eso no puede sorprenderle.
+**Solución:** el fuzzy pasa a ser el último recurso GLOBAL (exacto de la SEC →
+directorio → fuzzy), y una coincidencia de ticker al 100 % se adelanta venga de
+la capa que venga. Ambos con test de regresión, validados reintroduciendo el bug.
+**Regla:** si compones resultados de varias fuentes, decide si el orden entre
+ellas es una **prioridad** (desempata) o una **jerarquía** (manda siempre) — casi
+nunca quieres lo segundo, porque una fuente preferente con una coincidencia mala
+tapa a otra con la buena. Y **levanta la app con los datos de verdad**: un
+buscador con tres filas de fixture no puede enseñarte lo que hace con diez mil.
+
+### [PHASE-44.16] Un registro JSONB persistido es la UNIÓN de todas las versiones que has escrito nunca; el tipo describe sólo la última, y por eso el compilador no te salva
+**Error:** Al abrir el informe de McDonald's y pulsar una de «Las cuatro
+preguntas», la pantalla se caía entera —el usuario lo describió como «me lleva a
+un 404»—. `SignalTable` hacía `signals.length` sobre `undefined`. Sólo pasaba con
+MCD: es el único valor analizado antes de PHASE-44.9, con el motor **1.0.0**.
+**Causa:** un `AnalysisRun` se guarda como JSONB y se lee tal cual meses después,
+así que la tabla contiene a la vez runs de **todas** las versiones del motor que
+han existido. Pero `packages/types` se escribió mirando lo que produce el motor de
+HOY, declarando obligatorios seis campos que los runs viejos no tienen. Con el
+tipo mintiendo, `tsc` no podía avisar de ni uno de los ocho accesos inseguros.
+Y la señal estaba escrita: dos líneas más arriba, un comentario decía *«Vacío en
+los runs anteriores a PHASE-44.9»*. Tres afirmaciones distintas en dos líneas —el
+comentario avisa, el tipo lo niega, la realidad dice que la clave **no existe**—
+y el compilador obedece a la del medio. «Vacío» y «ausente» no son lo mismo: el
+empty-state escrito EXPRESAMENTE para este caso era inalcanzable, porque la
+guarda que lo mostraba (`signals.length === 0`) reventaba antes de llegar a él.
+**Lo que casi no se ve, y era peor.** El crash se reporta; las mentiras
+silenciosas no. La misma ausencia hacía que (a) la fila de comprobación del
+DuPont pintara **«NaN» en rojo** con el título «la identidad NO cierra: hay un
+problema en los datos o en una fórmula» —la pantalla denunciando un descuadre
+contable inexistente en las cuentas de una empresa real, porque la guarda era
+`raw === null` y lo que llegaba era `undefined`—; (b) seis métricas que el motor
+1.0.0 no emitía (S7, S8 y las cuatro DUPONT_*) se anunciaran como «no calculable
+con los datos disponibles», culpando a los balances de MCD de un hueco del
+motor; y (c) `evaluated_count === 0 && signals.length > 0` fallara **en abierto**
+(`undefined === 0` es `false`), así que una pregunta verde por ausencia de prueba
+se presentaba como verde verificado — justo la regresión que PHASE-44.9 cerró.
+**Solución:** hacer honestos los tipos (`?` en los campos posteriores a 1.0.0) y
+dejar que `tsc` enumere él mismo los ocho sitios —lo hizo, exactamente los ocho—.
+Encima, tres piezas: un tri-estado compartido `questionEvidence`
+(`evaluated | no-evidence | not-recorded`) porque los dos primeros no se pueden
+colapsar con el tercero y la regla estaba **copiada en dos ficheros**; una regla
+7 de honestidad en `metricRow` que separa «el motor no la calculaba» de «no se
+pudo calcular»; y un aviso global `StaleRunNotice` que compara la versión del run
+con la del catálogo, porque tolerar los huecos evita el crash pero deja al
+usuario delante de un informe agujereado sin causa común a la vista.
+**Regla:** cuando persistas un documento (JSONB, un blob, un fichero de estado)
+y lo leas con código que evoluciona, el tipo tiene que describir la **unión de
+todas las versiones escritas**, no la que produce el emisor de hoy; los campos
+que llegaron después van opcionales, y entonces el compilador trabaja para ti.
+Distingue siempre **ausente** de **vacío/cero** —es la convención «hueco ≠ 0»
+que el propio engine aplica desde PHASE-44.2 §4.5, sin aplicarla a su propia
+salida—. Y cuando un dato pueda faltar, comprueba qué FRASE sale: un «NaN» rojo
+o un «no calculable» que acusa al usuario de un problema en sus datos es más
+caro que un crash, porque el crash se reporta y la frase se cree. Corolario de
+método: la fixture se extrae de la **BD real** (aquí, el run de MCD verbatim) —
+una escrita a mano hoy llevaría la forma de hoy y no probaría nada, que es
+exactamente por qué esto llegó a producción con la suite en verde. Y el fixture
+de móvil, casteado con `as unknown as AnalysisRun`, llevaba una forma
+**imposible** (señales presentes y contadores ausentes): un cast apaga la única
+comprobación que tenías.
+
 ---
 
 ## Ejemplos de referencia (no son lecciones reales)

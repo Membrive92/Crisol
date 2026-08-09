@@ -244,6 +244,15 @@ def check_volatile(files: list[Path]) -> list[Problem]:
 
 
 def main() -> int:
+    # La consola de Windows usa cp1252 por defecto, donde un emoji o un `·` no
+    # existen: sin esto, el script muere con `UnicodeEncodeError` al imprimir su
+    # PRIMERA línea — o sea que el verificador de podredumbre documental no se
+    # podía ejecutar en la máquina de desarrollo, sólo en el CI de Linux. Se
+    # reconfigura la salida en vez de quitar los símbolos porque el informe se
+    # lee mucho mejor con ellos y en CI se ven bien.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     files = doc_files()
     revisions, heads = migration_graph()
 

@@ -41,7 +41,33 @@ flujos de Finanzas Domésticas. Son cosas distintas.
 **Exclusiones**: no ejecuta órdenes; no valora precio (DCF/múltiplos =
 extensión futura); **sector financiero excluido del scoring forense**
 (Beneish/Altman no aplican a bancos/aseguradoras — la UI lo explica,
-no se calcula basura); no ingesta 10-Q en MVP (el modelo lo prevé).
+no se calcula basura); **ETFs y fondos** fuera del motor de acciones
+por `security_type` (se trazan desde el día uno; su análisis llegará
+como flujo propio — ver abajo); no ingesta 10-Q en MVP (el modelo lo
+prevé).
+
+**Familia de motores por tipo de activo (dirección futura, invariante
+fijado hoy)**: la Tab Análisis evolucionará a un **selector
+Acción / Fondo / ETF**, y cada tipo tendrá su motor, sus fuentes y su
+flujo. Lo implementado hoy es el motor de **Acciones** (empresa
+operativa: forense book-based + dividendo). Reglas que se fijan ahora
+para que esa evolución no genere deuda:
+
+1. **Ningún tipo entra en el motor de otro.** Un ETF jamás pasa por
+   Beneish; una acción jamás se evalúa como estructura de fondo.
+2. **Motores hermanos, tablas hermanas**: cada motor futuro tendrá su
+   propia tabla de runs con el mismo patrón (`engine_version` +
+   `thresholds_version` + inmutabilidad), NUNCA una tabla polimórfica
+   compartida con columnas nullables por tipo. `analysis_runs` actual
+   queda como la del motor de acciones.
+3. Fronteras ya identificadas para cuando lleguen: el análisis de
+   **ETF** es de estructura (TER, réplica, domicilio/retención,
+   tracking, liquidez, concentración) con fuentes KID/factsheet, no
+   10-K; el de **Fondo** añade además dos diferencias duras — precio
+   por **NAV** (no cotización de bolsa: fuente gestora/CNMV, fuera de
+   yfinance) y **fiscalidad propia** (régimen de traspasos con
+   diferimiento, distinto del FIFO de acciones/ETF, relevante para la
+   futura capa fiscal transversal).
 
 ---
 
@@ -273,7 +299,8 @@ mejora del negocio: es deuda.
 
 ### Capa 2 — Forense
 
-**No se calcula si `is_financial`** — `not_computable` con razón
+**No se calcula si `is_financial` ni si `security_type='ETF'`** (cuando
+existan) — `not_computable` con razón
 explícita en cada score, nunca omitido.
 
 **M-Score de Beneish (8 variables)** — probabilidad de manipulación

@@ -589,8 +589,9 @@ los precios son **globales** (ADR-0007 — un 10-K es el mismo para todos); los
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| GET | `/investment/securities/search` | Busca en el catálogo local por ticker o nombre. `q` mínimo 2 caracteres. |
-| POST | `/investment/securities/resolve` | Crea (o reutiliza) un `Security` desde su ticker. La plaza la decide el servidor, no el cliente (ADR-0008). 404 si EDGAR no lo reconoce. |
+| GET | `/investment/securities/search` | **(44.13, ampliado en 44.14)** Busca en TRES capas locales, sin red: el catálogo del usuario, el índice de los ~10.400 emisores de la SEC y el directorio FIRDS UE/UK. `q` mínimo 2 caracteres. Cada hit trae `listing_key`, `source` (`catalog`/`sec_index`/`eu_directory`), `cik`, `isin`, `currency`, `exchange_label` y `analysis_reason`; la respuesta, `index_ready`, `notice` y `directory_seeded_at`. |
+| POST | `/investment/securities/adopt` | **(44.13, ampliado en 44.14)** Materializa un resultado del buscador desde su `listing_key` opaca (`cat:`/`idx:`/`ext:`/`typed:`). El servidor la re-resuelve: el cliente no manda plaza ni CIK. Para `ext:` (directorio FIRDS) el alta es **validada**: resolución ISIN→símbolo, cross-check sufijo↔plaza y una cotización real antes de persistir. `422` con `detail.code='ticker_required'` y la identidad pre-rellenada cuando el proveedor no reconoce el ISIN — el cliente reintenta con `ticker`. `422` con motivo si la clave está mal formada o el ISIN no valida el checksum. |
+| POST | `/investment/securities/resolve` | Crea (o reutiliza) un `Security` desde su ticker. La plaza la decide el servidor, no el cliente (ADR-0008). 404 si EDGAR no lo reconoce. Se conserva como escotilla; el buscador usa `/adopt`, que además NO pierde la plaza. |
 | GET | `/investment/securities/{security_id}` | Un valor por id, con `analysis_available` y su motivo. |
 
 ### Fundamentales

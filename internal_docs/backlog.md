@@ -197,7 +197,7 @@ Si quieres atacar trabajo real, por orden de valor:
 ## Módulo Inversión — follow-ups (fase 44)
 
 Limitaciones conscientes del módulo. El engine (6 capas, 57 métricas), el adapter
-EDGAR, la persistencia, la API (28 endpoints) y el informe web con seis pestañas
+EDGAR, la persistencia, la API (28 endpoints) y el informe con siete pestañas
 están **construidos** (44.7, 44.8 E1 y 44.9); lo de aquí es lo que queda.
 
 > **Este fichero es el sitio DURABLE de la deuda del módulo.** `HANDOFF.md` la
@@ -209,15 +209,17 @@ están **construidos** (44.7, 44.8 E1 y 44.9); lo de aquí es lo que queda.
 El flujo Análisis con MCD se validó a mano el 2026-07-26 (y el smoke en vivo
 cazó el bug del `getattr` sobre un método). Lo que **sigue sin recorrerse**:
 
-- **[PHASE-44.9] El informe con seis pestañas, entero.** Es lo que bloquea el
-  commit de 44.9. Recorrido: MCD (le falta `cogs` → varias métricas no
-  calculables con motivo), Realty Income (socimi: balance no clasificado, la
-  liquidez casi entera cae) y JNJ. En cada uno, las seis pestañas y **recargar en
-  cada una**. Los análisis guardados antes de 44.9 hay que reejecutarlos.
+- **[PHASE-44.9] El informe con siete pestañas, entero.** Recorrido: MCD (le falta
+  `cogs` → varias métricas no calculables con motivo), Realty Income (socimi:
+  balance no clasificado, la liquidez casi entera cae) y JNJ. En cada uno, las
+  siete pestañas y **recargar en cada una**. Los análisis guardados antes de 44.9
+  hay que reejecutarlos.
+- **[PHASE-44.13] El buscador con índice y el informe en móvil.** Consultas de
+  prueba y qué debe pasar, en la phase doc.
+- **[PHASE-44.11] Los precios contra el bróker del usuario.** No delegable.
 - **[PHASE-44.7] Flujo Cartera completo**: alta de compra, posición con coste
-  base, badge «sin cotización» (sin Finnhub key), venta con FIFO (409 al vender
-  de más), split aplicado.
-- **[PHASE-44.7] Paridad móvil**: shell + tabs + veredicto.
+  base, badge «sin cotización», venta con FIFO (409 al vender de más), split
+  aplicado.
 
 Playbook paso a paso en
 [`investment-module-guide.md` §9](investment-module-guide.md).
@@ -234,16 +236,19 @@ Playbook paso a paso en
 - **[PHASE-44.7] `spinoff` y `return_of_capital`**: se registran pero aplicarlas
   devuelve 400. El modelo `CorporateAction` (un `ratio` escalar) no expresa el
   security destino ni la fracción de base; exige ampliar el modelo + migración.
-- **[PHASE-44.9] Informe sin charts**: el informe web ya tiene seis pestañas con
+- **[PHASE-44.9] Informe sin charts**: el informe ya tiene siete pestañas con
   los estados financieros, las matrices de métricas multi-año, los desgloses
   forenses y el dictamen auditable — pero **todo en tablas**. Siguen diferidos
   los gráficos: evolución common-size, escenarios de stress y heatmap de Δ%.
-- **[PHASE-44.9] Paridad móvil del informe**: el móvil se quedó en la vista
-  resumida (sólo veredicto) mientras la web pasaba a seis pestañas, así que la
-  brecha es ahora MUCHO mayor que cuando se anotó en 44.7. Los charts de móvil
-  (gifted-charts) son 0% reutilizables desde web.
+- **[PHASE-44.9] Sin charts en ninguna de las dos pantallas.** Es lo único
+  grande que sigue siendo «todo en tablas»: evolución common-size, escenarios de
+  stress y heatmap de Δ%.
+- **[PHASE-44.13] La pestaña del informe de móvil vive en estado local**, no en
+  la URL. Expo Router no tiene aquí el query param de la web y forzarlo obligaría
+  a una ruta por pestaña. Las CLAVES sí son las mismas (`veredicto`, `estados`…,
+  en `REPORT_TABS`), así que habilitar enlaces profundos no exige renombrar nada.
 - **[PHASE-44.9] La tabla de cartera sigue sin test de componente.** El informe
-  sí tiene: `tabs.test.tsx`, `metric-format.test.ts` y `tab-verdict.test.tsx`.
+  sí tiene, en web y en móvil.
 - **[PHASE-44.7] Reconciliación con el patrimonio (ARCH §9, fase 40.9)**: decidido
   dejar Inversión como espacio SEPARADO (no entra en el patrimonio neto del
   Dashboard) y eximir `/investments` del `AccountsGuard`. Integrarlo exige decidir
@@ -256,31 +261,30 @@ Playbook paso a paso en
   metadatos del módulo). El enrutado sí existe (`investment/router.py` agrega los
   5 sub-routers); falta sólo el fichero de metadatos, sin precedente en otros
   módulos.
-- **[PHASE-44.1] Las 13 tablas del módulo no están en
-  [`data-model/schema.md`](data-model/schema.md)**, ni las migraciones
-  intermedias entre `d7t03v5sq7u6t2` y `d4e15f9a3b7c62`. Su modelo vive en la
-  phase doc de 44.1 y en el ADR-0007. Anotado también en el propio `schema.md`.
 
 ### Deuda del buscador (fase 44.8)
 
-- **[PHASE-44.8] Sólo la Entrega 1 de 5.** Buscar por nombre no funciona como
-  escribe la gente: `Mac`, `Macdo`, `Macdonald` dan **cero**; sólo encuentra por
-  ticker exacto o por el nombre literal de la SEC. No es un bug, es un `ILIKE`
-  contra `MCDONALDS CORP`. Lo arregla la E2 (índice en memoria de los ~10.400
-  emisores). Plan en
-  [`improvements/phase-44.8-investment-search-hybrid.md`](improvements/phase-44.8-investment-search-hybrid.md).
-- **[PHASE-44.8] `resolve_security` escribe `currency='USD'` y
-  `accounting_std=GAAP` para todo**, ADR extranjeros incluidos. Hoy no mueve
-  ningún número **pero es un acoplamiento latente**: el 20-F de un ADR no entra
-  en el pipeline porque `annual.ANNUAL_FORMS` sólo admite `10-K`. El día que
-  alguien añada `20-F` para dar soporte a IFRS, esa etiqueta pasa a ser
-  load-bearing de golpe y esos estados se analizarían con cortes calibrados en
-  US-GAAP sin decirlo. **Quien toque `ANNUAL_FORMS` arregla `accounting_std` en
-  el mismo commit.** (También en el ADR-0008.)
-- **[PHASE-44.8] `pandas` no está declarada en `backend/pyproject.toml`**: entra
-  como transitiva de `edgartools`. La E2 la necesita para leer el parquet;
-  importarla **dentro** de la función, no a nivel de módulo (~1 s en cada
-  arranque).
+- **[PHASE-44.15] El combobox no hace auto-scroll de la opción activa.** Con el
+  `limit=20` del buscador la lista es corta y no se ha visto necesario; con
+  listas largas la opción activa podría quedar fuera de vista.
+- **[PHASE-44.15] El alta de compra en móvil pide la fecha como texto**
+  (`AAAA-MM-DD`, con validación) en vez del date-picker nativo que Finanzas
+  Domésticas ya usa desde PHASE-14.3. Reutilizarlo es barato.
+- **[PHASE-44.14] Suiza es frontera documentada**: SIX no reporta ni a ESMA ni
+  a la FCA, así que Nestlé, Roche y Novartis sólo entran por alta manual o por
+  su ADR estadounidense. Si algún día pesa, SIX publica listados propios y
+  sería un tercer seed sin tocar nada más.
+- **[PHASE-44.14] Los mercados SME/growth no se siembran** (AIM, Euronext
+  Growth, First North, Xetra Scale, BME Growth). Decisión de alcance, no
+  técnica: se amplía añadiendo filas a `SEED_SEGMENT_TO_OPERATING`.
+- **[PHASE-44.14] El alta `ext:` exige red** (resolución ISIN→símbolo +
+  validación por cotización). Deliberado —nada se persiste sin ver una
+  cotización— pero significa que sin conexión no hay alta europea, mientras que
+  la búsqueda sí funciona offline.
+- **[PHASE-44.14] `MIN_ROWS_TO_PRUNE = 100` es un número elegido, no medido.**
+  Protege de un fichero truncado; si algún día un registro real encogiera por
+  debajo de 100 filas legítimas, el borrado degradaría a upsert y las
+  deslistadas sobrevivirían (el script lo avisa por consola).
 
 ### Deuda del informe (fase 44.9)
 

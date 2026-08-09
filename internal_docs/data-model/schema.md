@@ -57,13 +57,17 @@
 | `c6s92u4rp6t5s1` | 37.3 | `transactions.is_exceptional` (BOOLEAN NULL) — override estructural/puntual. |
 | `d7t03v5sq7u6t2` | 39   | `transactions.statement_balance` (NUMERIC(14,2) NULL) + `accounts.anchored_statement_balance` (NUMERIC(14,2) NULL) — saldo del extracto por movimiento + ancla persistida del saldo real. |
 | `d4e15f9a3b7c62` | 44.9 | `analysis_runs.thresholds_used` (JSONB NOT NULL DEFAULT `'{}'`) — los cortes EFECTIVOS del run. Aditiva y reversible. |
+| `f2b84a6c1d9e73` | 44.14 | `listing_directory` (GLOBAL, PK `(isin, mic)`) + extensión `pg_trgm` + índice GIN sobre `name` — el directorio oficial UE/UK de FIRDS. Aditiva y reversible (el downgrade tira la tabla; la extensión se queda, porque desinstalarla en un downgrade parcial rompería a quien la use). |
 
-> **Deuda documental**: las 13 tablas del módulo Inversión (PHASE-44.1) y las
-> migraciones intermedias entre `d7t03v5sq7u6t2` y `cc3d69e1f4a8b2` no están
-> recogidas en esta tabla. Su modelo vive en
-> [`phases/phase-44.1-investment-foundations.md`](../phases/phase-44.1-investment-foundations.md)
-> y el ADR [`0007`](../decisions/0007-investment-global-tables.md). El head real
-> se consulta SIEMPRE con `alembic heads`, nunca por el nombre del fichero
+> **Deuda documental**: las 14 tablas del módulo Inversión (13 de PHASE-44.1 más
+> `listing_directory` de 44.14) y las migraciones intermedias entre
+> `d7t03v5sq7u6t2` y `cc3d69e1f4a8b2` no están recogidas en esta tabla. Su modelo
+> vive en las phase docs
+> ([44.1](../phases/phase-44.1-investment-foundations.md),
+> [44.14](../phases/phase-44.14-eu-uk-listing-directory.md)) y en los ADR
+> [`0007`](../decisions/0007-investment-global-tables.md) y
+> [`0010`](../decisions/0010-identity-official-registers.md). El head real se
+> consulta SIEMPRE con `alembic heads`, nunca por el nombre del fichero
 > (lección PHASE-44.1).
 
 ### `analysis_runs.thresholds_used` (PHASE-44.9)
@@ -450,3 +454,48 @@ transactions.transfer_pair_id  → FK auto-referente bidireccional;
 | `transactionflow` | `IN`, `OUT`, `TRANSFER_IN`, `TRANSFER_OUT` (PHASE-34.1, migración `z3p58r0on2q1p7`) |
 | `categoryrole` | `GENERIC`, `TRANSFER`, `DEBT_PAYMENT`, `DEBT_INTEREST` (PHASE-30.1, migración `s6i70k2gf5j3h9`) |
 | `fixedexpensestatus` | `PENDING`, `CONFIRMED`, `PAUSED`, `CANCELLED`, `DISMISSED` (rename desde `subscriptionstatus`, migración `d72f1a5e8b29`) |
+
+---
+
+## Módulo Inversión — las 14 tablas (PHASE-44.1 … 44.14)
+
+Llevaban desde 44.1 fuera de este documento. La partición GLOBAL / SCOPED es la
+decisión del [ADR-0007](../decisions/0007-investment-global-tables.md): la
+identidad de un valor de mercado y sus cuentas publicadas son **objetivas**, así
+que duplicarlas por usuario no tiene sentido; lo que es del usuario es su
+cartera y sus análisis.
+
+| Tabla | Ámbito | PK | FK | Qué guarda |
+|---|---|---|---|---|
+| `securities` | GLOBAL | `id` | — | Identidad del valor: ticker, plaza, CIK, ISIN, sector, norma contable, divisa, `is_financial`/`is_reit` y `analysis_status`. Unique `(ticker, exchange)`. |
+| `listing_directory` | GLOBAL | `(isin, mic)` | — | Directorio oficial UE/UK de FIRDS (ESMA + FCA). Índice GIN trigram sobre `name`. [ADR-0010](../decisions/0010-identity-official-registers.md). |
+| `financial_statements` | GLOBAL | `id` | `securities` | Las 49 partidas canónicas por ejercicio, más `raw_source_ref` (trazas de mapeo, procedencia y banderas de calidad). |
+| `restatement_flags` | GLOBAL | `id` | `securities` | Reexpresiones detectadas entre filings del mismo ejercicio. |
+| `scoring_thresholds` | GLOBAL | `id` | — | Cortes por `(sector, accounting_std, metric_key)`. `model_variant='uncalibrated'` para IFRS/PGC. |
+| `price_quotes` | GLOBAL | `id` | `securities` | Última cotización con su divisa **del proveedor** (no la del catálogo) y su `as_of`. |
+| `ingestion_jobs` | SCOPED | `id` | `securities`, `users` | Job de descarga EDGAR, con estado y error legible. |
+| `analysis_runs` | SCOPED | `id` | `securities`, `users` | Un run del motor: scores, veredicto, banderas, `engine_version`, `thresholds_version` y `thresholds_used`. Inmutable. |
+| `inv_lots` | SCOPED | `id` | `securities`, `accounts`, `users` | Compras: cantidad, precio, comisiones y `fx_rate_at_trade`. |
+| `inv_sales` | SCOPED | `id` | `securities`, `users` | Ventas, que consumen lotes por FIFO. |
+| `inv_sale_allocations` | GLOBAL* | `id` | `inv_lots`, `inv_sales` | Qué lote pagó qué venta. *Sin `user_id` propio: cuelga de filas que ya lo tienen. |
+| `inv_dividends_received` | SCOPED | `id` | `securities`, `users` | Dividendos cobrados, brutos y netos de retención. |
+| `inv_corporate_actions` | SCOPED | `id` | `securities`, `users` | Splits, stock dividends (y `spinoff`/`return_of_capital`, registrables pero aún no aplicables). |
+| `inv_lot_adjustments` | GLOBAL* | `id` | `inv_lots`, `inv_corporate_actions` | Rastro auditable y reversible de cómo una acción corporativa modificó un lote. |
+
+### Enums del módulo
+
+| Nombre | Valores |
+|--------|---------|
+| `accountingstd` | `GAAP`, `IFRS`, `PGC` |
+| `securitytype` | `STOCK`, `ADR`, `ETF` |
+| `sectorinternal` | `technology`, `healthcare`, `financials`, `consumer_staples`, `consumer_discretionary`, `industrials`, `energy`, `materials`, `utilities`, `real_estate`, `communication`, `unknown` |
+| `periodtype` | `ANNUAL`, `QUARTERLY` |
+| `statementsource` | `EDGAR_XBRL`, `MANUAL` |
+| `thresholddirection` | `lower_better`, `higher_better`, `band` |
+| `corpactiontype` | `split`, `spinoff`, `stock_dividend`, `return_of_capital` |
+| `jobstatus` | `pending`, `running`, `done`, `failed` |
+
+`securities.analysis_status` **no** es un enum nativo sino `String(16)`
+(`ok` · `no_annual` · `non_gaap` · `not_supported` · NULL): el conjunto va a
+crecer y un `ALTER TYPE ADD VALUE` no es reversible en un `downgrade` limpio.
+Su traducción vive en `catalog/capabilities.py`, fuente única de la regla.
