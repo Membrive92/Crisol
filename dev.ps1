@@ -25,9 +25,29 @@
        bindear, la ventana se cierra en un parpadeo, y la web sigue hablando
        con el proceso viejo —que sirve código antiguo—.
 
+    LIMPIEZA DE RESTOS
+
+    Antes de nada barre lo que quedara vivo de una sesión anterior, mire o no
+    a un puerto. Los dos no son lo mismo: matar al dueño del 3000 deja en pie
+    la VENTANA que lo lanzó —que sigue abierta a propósito, para que se pueda
+    leer el error—, así que sin este paso se acumula una ventana muerta por
+    arranque. Se cierran los servicios (uvicorn y sus workers, next, turbo,
+    pnpm, expo) y las ventanas que abrió este script.
+
+    Lo que NO cierra, aunque también sea "del proyecto": un `pytest`, un
+    `alembic` o un script de datos corriendo en el venv. Pertenecen al repo
+    pero no son restos del arranque, y tumbarlos a media escritura sería mucho
+    peor que dejarlos. Por eso el barrido busca los SERVICIOS por su línea de
+    comandos, no todo lo que toque la carpeta.
+
+    Y nunca se toca a sí mismo ni a quien lo lanzó: la ruta del repo aparece
+    también en la línea de comandos de tu terminal y en la de VS Code (que se
+    abre con la carpeta del workspace como argumento). Comprobado en esta
+    máquina: sin esa exclusión, "limpiar restos" cierra el editor.
+
     LIBERACIÓN AUTOMÁTICA DE PUERTOS
 
-    Antes de arrancar revisa los puertos que necesita y los libera. Pero no mata
+    Después revisa los puertos que necesita y los libera. Pero no mata
     a ciegas lo que haya escuchando: distingue si el proceso es DEL PROYECTO
     (por su línea de comandos o la de sus padres) o ajeno.
 
@@ -39,6 +59,14 @@
     Los puertos de los contenedores (5432, 9000, 9001, 11434) se revisan pero
     NUNCA se matan solos: si los ocupa algo que no es nuestro contenedor, lo más
     probable es que sea un servicio del sistema. Se avisa y se decide a mano.
+
+    DOCKER DESKTOP SE ARRANCA SOLO
+
+    Que `docker` esté en el PATH no significa que haya motor detrás: el CLI y el
+    demonio son cosas distintas, y en Windows el segundo se apaga al cerrar
+    sesión o al reiniciar. Antes, el script se limitaba a decir "Docker no
+    responde" y abortaba — o sea que el arranque más frecuente (el primero del
+    día) no arrancaba nada. Ahora lo abre él y espera al motor.
 
 .PARAMETER Mobile
     Arranca también Expo (móvil) en su propia ventana.
@@ -192,47 +220,160 @@ function Get-PortOwner {
     return [pscustomobject]@{ Pid = $conn.OwningProcess; Name = 'proceso ya terminado'; Alive = $false }
 }
 
-#: Marcadores que identifican un proceso como "de este proyecto" por su línea
-#: de comandos. La ruta del repo cubre casi todo; los demás están porque el
-#: gestor de paquetes y el bundler se lanzan desde la raíz y no siempre la
-#: repiten en los argumentos.
+#: Marcadores que identifican un proceso como "de ESTE proyecto". Sólo valen
+#: los que no puede llevar el proyecto de al lado.
+#:
+#: Aquí había también `next dev`, `turbo run dev`, `expo start` y
+#: `app.main:app`, que son genéricos: los lleva idéntico cualquier otro repo
+#: tuyo con Next o FastAPI. Mientras esto sólo decidía si PREGUNTAR antes de
+#: liberar un puerto, el precio de equivocarse era una pregunta de menos. Desde
+#: que gobierna el barrido, decide a quién se cierra sin avisar — y un `next
+#: dev` de otro proyecto, en otro puerto, cumplía el criterio.
+#:
+#: No se pierde nada al quitarlos: lo que de verdad ata un proceso a este repo
+#: es su ejecutable dentro de la carpeta (el `python.exe` del venv,
+#: `turbo.exe`) o la ruta del repo en la línea de comandos, y los eslabones que
+#: no tienen ninguna de las dos la heredan del padre. Verificado en la cadena
+#: real `powershell -> pnpm -> cmd -> turbo -> node -> next`, donde la prueba
+#: aparece a dos niveles del más pobre.
 $script:ProjectMarkers = @(
-    'app.main:app',
-    'crisol',
-    'turbo run dev',
-    'next dev',
-    'expo start'
+    'crisol'
 )
+
+#: Marca que llevan las ventanas que abre este script, para reconocerlas sin
+#: adivinar. El título ya era casi único, pero un título se cambia por estética
+#: y entonces el barrido dejaría de encontrarlas en silencio.
+$script:DevWindowMarker = 'CRISOL_DEV_WINDOW'
+
+#: Los argumentos EXACTOS con que se lanza una ventana de dev. La lista la usa
+#: `Start-DevWindow` para abrirla y `Test-DevWindow` para reconocerla, y por eso
+#: es una constante y no dos literales: si alguien añade un flag al lanzador y
+#: el detector se queda con la cadena vieja, el barrido deja de encontrar sus
+#: propias ventanas — y no falla, simplemente no limpia.
+#:
+#: Reconocer por la firma CONTIGUA y no sólo por el marcador tiene un motivo
+#: medido: cualquier consola que MENCIONE el marcador —la que usas para
+#: comprobar que la marca funciona— lo lleva también en su línea de comandos.
+#: `-NoExit -NoProfile -Command` seguidos sólo los produce `Start-Process` aquí;
+#: una consola de herramientas trae `-NoProfile -NonInteractive`, que no casa.
+$script:DevWindowArgs      = @('-NoExit', '-NoProfile', '-Command')
+$script:DevWindowSignature = $script:DevWindowArgs -join ' '
+
+#: Qué línea de comandos delata a un SERVICIO de la app —lo que este script
+#: arranca— frente al resto de cosas que uno ejecuta en el repo. Se comparan en
+#: minúsculas contra la línea entera, así que valen tanto el argumento
+#: (`run dev`) como el trozo de ruta del binario (`turbo`, `next`).
+#: Deliberadamente NO están aquí `pytest`, `alembic`, `mypy` ni los scripts de
+#: datos: corren con el mismo `python.exe` del venv y son igual de "del
+#: proyecto", pero matarlos no limpia nada — rompe lo que estuvieras haciendo.
+$script:AppProcessMarkers = @(
+    'app.main:app',
+    'uvicorn',
+    'run dev',
+    'dev:web',
+    'dev:mobile',
+    'next',
+    'turbo',
+    'expo'
+)
+
+#: Ejecutables que el barrido se permite tocar. Lista CERRADA: el criterio de
+#: pertenencia es la ruta del repo, y esa ruta también sale en la línea de
+#: comandos de VS Code y del terminal desde el que lanzas esto.
+$script:SweepableNames = @('python', 'pythonw', 'node', 'turbo', 'esbuild', 'uvicorn', 'pnpm')
+
+function Get-ProcessSnapshot {
+    <#
+    .SYNOPSIS
+        Una foto de todos los procesos, indexada por PID.
+    .DESCRIPTION
+        Una sola consulta a CIM en vez de una por proceso y nivel de ancestro.
+        Además de ser más rápida, es COHERENTE: recorrer el árbol con consultas
+        sueltas puede ver un padre que ya murió a medio recorrido y decidir con
+        media verdad.
+    #>
+    $map = @{}
+    foreach ($proc in Get-CimInstance Win32_Process -ErrorAction SilentlyContinue) {
+        $map[[int]$proc.ProcessId] = $proc
+    }
+    return $map
+}
+
+function Get-SelfAndAncestorIds {
+    <#
+    .SYNOPSIS
+        El PID de este script y toda su cadena de padres: intocables.
+    .DESCRIPTION
+        Sin esto, el barrido se suicida. Está verificado en esta máquina: el
+        proceso que ejecuta el script tiene la ruta del repo en su propia línea
+        de comandos —igual que el terminal que lo lanzó y que VS Code—, así que
+        cumple el criterio de "es del proyecto" tan bien como uvicorn.
+
+        El `HashSet` corta también los ciclos: Windows recicla PIDs, y un padre
+        reciclado puede apuntar de vuelta a un descendiente y hacer bucle.
+    #>
+    param([hashtable]$Snapshot, [int]$MaxDepth = 12)
+
+    $ids = New-Object 'System.Collections.Generic.HashSet[int]'
+    $null = $ids.Add($PID)
+    $current = $PID
+    for ($depth = 0; $depth -lt $MaxDepth; $depth++) {
+        $proc = $Snapshot[$current]
+        if ($null -eq $proc) { break }
+        $parent = [int]$proc.ParentProcessId
+        if ($parent -le 4) { break }          # 0/4 = kernel
+        if (-not $ids.Add($parent)) { break } # ya visto: ciclo por PID reciclado
+        $current = $parent
+    }
+    return $ids
+}
 
 function Test-ProjectProcess {
     <#
     .SYNOPSIS
-        ¿El proceso que ocupa el puerto pertenece a este proyecto?
+        ¿El proceso pertenece a este proyecto?
     .DESCRIPTION
-        Mira su línea de comandos y, si no concluye, SUBE POR SUS PADRES. Hace
-        falta: el worker de `uvicorn --reload` se lanza como
+        Mira su ejecutable y su línea de comandos y, si no concluye, SUBE POR
+        SUS PADRES. Hace falta: el worker de `uvicorn --reload` se lanza como
         `python.exe -c "from multiprocessing..."`, que no menciona ni el repo ni
         la app. Sin mirar al padre, el proceso más característico del proyecto
         parecería ajeno y el script pediría permiso para matar lo que él mismo
         había arrancado.
 
+        Las dos señales hacen falta, no una: `turbo.exe` vive DENTRO del repo
+        (`node_modules/.pnpm/...`) pero `node.exe` es el global de
+        `Program Files` y sólo la línea de comandos lo delata.
+
         Un socket cuyo dueño ya murió se considera del proyecto: es el zombi de
         uvicorn descrito en `Stop-PortHolder`.
-    #>
-    param([int]$ProcessId, [int]$MaxDepth = 4)
 
+        La profundidad es 6 y no 4 porque la cadena real de la web mide siete
+        eslabones (`powershell -> pnpm -> cmd -> turbo -> node -> cmd -> node`)
+        y algunos de ellos —`cmd.exe` lanzando `pnpm.cmd`— no dicen ni el repo
+        ni nada: sólo el abuelo los delata.
+    #>
+    param([int]$ProcessId, [int]$MaxDepth = 6, [hashtable]$Snapshot)
+
+    $root = $RepoRoot.ToLowerInvariant()
     $currentId = $ProcessId
     for ($depth = 0; $depth -lt $MaxDepth; $depth++) {
-        $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $currentId" -ErrorAction SilentlyContinue
+        if ($Snapshot) {
+            $proc = $Snapshot[$currentId]
+        } else {
+            $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $currentId" -ErrorAction SilentlyContinue
+        }
         if ($null -eq $proc) {
             # Sin proceso: o es el huérfano de uvicorn (nuestro), o el padre ya
             # no existe y no se puede seguir subiendo.
             return ($depth -eq 0)
         }
+        if ($proc.ExecutablePath -and $proc.ExecutablePath.ToLowerInvariant().StartsWith($root)) {
+            return $true
+        }
         $cmd = $proc.CommandLine
         if ($cmd) {
             $lower = $cmd.ToLowerInvariant()
-            if ($lower.Contains($RepoRoot.ToLowerInvariant())) { return $true }
+            if ($lower.Contains($root)) { return $true }
             foreach ($marker in $script:ProjectMarkers) {
                 if ($lower.Contains($marker.ToLowerInvariant())) { return $true }
             }
@@ -241,6 +382,151 @@ function Test-ProjectProcess {
         $currentId = [int]$proc.ParentProcessId
     }
     return $false
+}
+
+function Test-AppServiceProcess {
+    <#
+    .SYNOPSIS
+        ¿Es uno de los SERVICIOS que arranca este script (y no otra cosa del repo)?
+    .DESCRIPTION
+        Se pregunta después de `Test-ProjectProcess`, no en su lugar: aquélla
+        dice "es de este repo" y ésta "es del arranque". Separarlas es lo que
+        deja vivo un `pytest` del venv mientras se cierra un uvicorn huérfano.
+
+        Sube por los padres por el mismo motivo que la otra: el worker de
+        `--reload` no menciona uvicorn, pero su supervisor sí. Y cualquier
+        descendiente de una ventana de dev cuenta como servicio — es la cadena
+        `powershell -> pnpm -> node -> turbo -> next`, donde los eslabones de en
+        medio no dicen nada por sí mismos.
+    #>
+    param([int]$ProcessId, [hashtable]$Snapshot, [int]$MaxDepth = 6)
+
+    $marker = $script:DevWindowMarker.ToLowerInvariant()
+    $currentId = $ProcessId
+    for ($depth = 0; $depth -lt $MaxDepth; $depth++) {
+        $proc = $Snapshot[$currentId]
+        if ($null -eq $proc) { return $false }
+        $cmd = $proc.CommandLine
+        if ($cmd) {
+            $lower = $cmd.ToLowerInvariant()
+            if ($lower.Contains($marker)) { return $true }
+            foreach ($appMarker in $script:AppProcessMarkers) {
+                if ($lower.Contains($appMarker)) { return $true }
+            }
+        }
+        if ($proc.ParentProcessId -le 4) { return $false }
+        $currentId = [int]$proc.ParentProcessId
+    }
+    return $false
+}
+
+function Test-DevWindow {
+    <#
+    .SYNOPSIS
+        ¿Es una de las ventanas que abre este script?
+    .DESCRIPTION
+        Acepta también el título, y no sólo el marcador, porque las ventanas ya
+        abiertas cuando se añadió el marcador no lo llevan: sin esta segunda
+        vía, el primer arranque tras el cambio no limpiaría justo los restos que
+        motivaron el cambio. Se compara la parte del título SIN el separador
+        `·`, que viaja distinto según la codificación de la consola.
+
+        Se exige ADEMÁS la firma de lanzamiento (`$script:DevWindowSignature`),
+        que es lo que distingue una ventana ABIERTA por `Start-DevWindow` de
+        cualquier consola que simplemente MENCIONE el marcador. No es
+        hipotético y no basta con pedir `-NoExit` suelto: buscar
+        `CRISOL_DEV_WINDOW` para comprobar que la marca funciona mete el
+        literal —y el `-NoExit` de la propia consulta— en la línea de comandos
+        de la consola desde la que buscas. Las dos versiones de esta condición
+        se probaron contra procesos reales, y la primera se la tragaba.
+    #>
+    param($Proc)
+
+    $name = [System.IO.Path]::GetFileNameWithoutExtension($Proc.Name).ToLowerInvariant()
+    if ($name -ne 'powershell' -and $name -ne 'pwsh') { return $false }
+    $cmd = $Proc.CommandLine
+    if (-not $cmd) { return $false }
+    if (-not $cmd.Contains($script:DevWindowSignature)) { return $false }
+    return ($cmd.Contains($script:DevWindowMarker) -or $cmd.Contains("WindowTitle = 'Crisol"))
+}
+
+function Invoke-ProjectSweep {
+    <#
+    .SYNOPSIS
+        Cierra todo resto del proyecto que siga vivo, retenga un puerto o no.
+    .DESCRIPTION
+        Tres criterios, en este orden:
+
+          1. Nunca a sí mismo ni a sus ancestros (ver `Get-SelfAndAncestorIds`).
+          2. Ventanas de dev -> se cierran enteras, con su árbol. Van primero
+             porque `taskkill /T` sobre la ventana se lleva ya la cadena
+             `pnpm -> node -> turbo -> next` y evita rematar uno a uno.
+          3. Ejecutable de la lista + del repo + con pinta de servicio.
+
+        Lo que es del repo pero no es un servicio se REPORTA y se deja vivo: si
+        un resto sobrevive al barrido, mejor saber por qué que descubrirlo
+        cuando el puerto siga ocupado.
+    .OUTPUTS
+        [int] cuántos procesos se cerraron.
+    #>
+    $snapshot  = Get-ProcessSnapshot
+    $protected = Get-SelfAndAncestorIds -Snapshot $snapshot
+
+    $victims = @()
+    $spared  = @()
+
+    foreach ($proc in $snapshot.Values) {
+        $id = [int]$proc.ProcessId
+        if ($id -le 4 -or $protected.Contains($id)) { continue }
+
+        if (Test-DevWindow -Proc $proc) {
+            $victims += [pscustomobject]@{ Id = $id; Name = $proc.Name; Why = 'ventana de dev'; First = 0 }
+            continue
+        }
+
+        $name = ($proc.Name -replace '\.exe$', '').ToLowerInvariant()
+        if ($script:SweepableNames -notcontains $name) { continue }
+        if (-not (Test-ProjectProcess -ProcessId $id -Snapshot $snapshot)) { continue }
+
+        if (Test-AppServiceProcess -ProcessId $id -Snapshot $snapshot) {
+            $victims += [pscustomobject]@{ Id = $id; Name = $proc.Name; Why = 'servicio de la app'; First = 1 }
+        } else {
+            $spared += [pscustomobject]@{ Id = $id; Name = $proc.Name }
+        }
+    }
+
+    if ($spared.Count -gt 0) {
+        $list = ($spared | ForEach-Object { "$($_.Name) (PID $($_.Id))" }) -join ', '
+        Write-Warn2 "Del repo pero no del arranque, los dejo vivos: $list"
+    }
+
+    if ($victims.Count -eq 0) {
+        Write-Ok 'No quedaban restos de sesiones anteriores.'
+        return 0
+    }
+
+    foreach ($victim in ($victims | Sort-Object -Property First, Id)) {
+        Write-Warn2 "Cierro $($victim.Name) (PID $($victim.Id)) — $($victim.Why)."
+        # `/T` para el árbol; que un hijo ya no exista porque lo mató el padre
+        # es lo ESPERADO, y por eso va silenciado (ver `Invoke-Quiet`).
+        Invoke-Quiet { taskkill /PID $victim.Id /T /F } | Out-Null
+    }
+
+    $alive = @()
+    $deadline = (Get-Date).AddSeconds(15)
+    while ((Get-Date) -lt $deadline) {
+        $alive = @($victims | Where-Object { Get-Process -Id $_.Id -ErrorAction SilentlyContinue })
+        if ($alive.Count -eq 0) { break }
+        Start-Sleep -Milliseconds 400
+    }
+
+    if ($alive.Count -gt 0) {
+        $list = ($alive | ForEach-Object { "$($_.Name) (PID $($_.Id))" }) -join ', '
+        Write-Warn2 "Siguen vivos tras el cierre: $list"
+    } else {
+        Write-Ok "Restos cerrados: $($victims.Count)."
+    }
+    return ($victims.Count - $alive.Count)
 }
 
 function Resolve-PortConflict {
@@ -383,6 +669,13 @@ function Start-DevWindow {
     <#
     .SYNOPSIS
         Abre una ventana de PowerShell persistente ejecutando un comando.
+    .DESCRIPTION
+        El guion generado empieza por un comentario con `$script:DevWindowMarker`.
+        No es decorativo: ese comentario viaja en la LÍNEA DE COMANDOS de la
+        ventana, y es lo que permite al barrido reconocerla como suya sin
+        heurísticas. La ventana no se cierra al terminar el proceso (a
+        propósito, para poder leer el error), así que sin una marca fiable cada
+        arranque dejaría una ventana muerta más.
     #>
     param(
         [string]$Title,
@@ -390,6 +683,7 @@ function Start-DevWindow {
         [string]$Command
     )
     $script = @"
+# $script:DevWindowMarker
 `$host.UI.RawUI.WindowTitle = '$Title'
 Set-Location '$WorkingDirectory'
 Write-Host '--- $Title ---' -ForegroundColor Cyan
@@ -398,7 +692,7 @@ Write-Host ''
 Write-Host 'El proceso ha terminado. Esta ventana queda abierta para que leas el error.' -ForegroundColor Yellow
 "@
     Start-Process -FilePath 'powershell.exe' `
-                  -ArgumentList '-NoExit', '-NoProfile', '-Command', $script `
+                  -ArgumentList ($script:DevWindowArgs + $script) `
                   -WorkingDirectory $WorkingDirectory | Out-Null
 }
 
@@ -450,11 +744,100 @@ function Wait-ForContainerHealth {
     return $false
 }
 
+#: Dónde vive el ejecutable de Docker Desktop. Se busca a mano porque el
+#: instalador NO lo pone en el PATH: lo que sí está es `docker`, el CLI, que
+#: vive en otra carpeta y responde igual de bien con el motor apagado. Esa
+#: diferencia es justo la que hace falta salvar aquí.
+#: Se interpolan sin `Join-Path` a propósito: en una máquina de 32 bits
+#: `${env:ProgramFiles(x86)}` es $null y `Join-Path` con $null LANZA — con
+#: `$ErrorActionPreference = 'Stop'` eso mataría el script al cargarlo. Una
+#: cadena con el prefijo vacío sólo produce una ruta que `Test-Path` descarta.
+$script:DockerDesktopPaths = @(
+    "$env:ProgramFiles\Docker\Docker\Docker Desktop.exe",
+    "${env:ProgramFiles(x86)}\Docker\Docker\Docker Desktop.exe",
+    "$env:LOCALAPPDATA\Docker\Docker Desktop.exe"
+)
+
+function Test-DockerEngine {
+    <#
+    .SYNOPSIS
+        ¿Responde el motor de Docker? (no el CLI: el motor)
+    .DESCRIPTION
+        Va por `Invoke-Quiet` porque con el demonio apagado `docker info`
+        escribe en stderr, y redirigir la stderr de un nativo con
+        `$ErrorActionPreference = 'Stop'` aborta el script — que es la trampa
+        documentada arriba en `Invoke-Quiet`.
+    #>
+    Invoke-Quiet { docker info } | Out-Null
+    return ($script:QuietExit -eq 0)
+}
+
+function Start-DockerEngine {
+    <#
+    .SYNOPSIS
+        Deja el motor de Docker respondiendo: lo abre si hace falta y espera.
+    .DESCRIPTION
+        Tres situaciones distintas que se ven igual desde `docker info`:
+
+          - Motor vivo            -> no se toca nada.
+          - Docker Desktop ABIERTO pero todavía inicializando -> sólo esperar.
+            Lanzar una segunda instancia no acelera nada y en Windows saca un
+            diálogo de "ya se está ejecutando" que hay que cerrar a mano.
+          - Docker Desktop cerrado -> abrirlo y esperar.
+
+        El arranque en frío del backend WSL2 tarda de 30 s a más de un minuto,
+        así que el margen es generoso: agotarlo antes de tiempo devolvería un
+        "no responde" que sólo significa "aún no".
+    .OUTPUTS
+        [bool] $true si el motor acabó respondiendo.
+    #>
+    param([int]$TimeoutSeconds = 180)
+
+    if (Test-DockerEngine) { return $true }
+
+    $running = @(Get-Process -Name 'Docker Desktop' -ErrorAction SilentlyContinue)
+    if ($running.Count -gt 0) {
+        Write-Warn2 'Docker Desktop está abierto pero el motor aún no responde; espero…'
+    } else {
+        $exe = $script:DockerDesktopPaths |
+               Where-Object { $_ -and (Test-Path $_) } |
+               Select-Object -First 1
+        if (-not $exe) {
+            Write-Err 'Docker no responde y no encuentro Docker Desktop para arrancarlo.'
+            Write-Host '       Ábrelo a mano y repite. Lo he buscado en:' -ForegroundColor Yellow
+            foreach ($path in $script:DockerDesktopPaths) {
+                Write-Host "         $path" -ForegroundColor Yellow
+            }
+            return $false
+        }
+        Write-Warn2 'Docker no responde. Abro Docker Desktop (el arranque en frío tarda ~1 min)…'
+        Start-Process -FilePath $exe | Out-Null
+    }
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 3
+        if (Test-DockerEngine) { return $true }
+    }
+
+    Write-Err "El motor de Docker no respondió en $TimeoutSeconds s."
+    Write-Host '       Mira la ventana de Docker Desktop: suele estar pidiendo una actualización,' -ForegroundColor Yellow
+    Write-Host '       la contraseña de WSL o aceptar los términos, y se queda ahí esperando.' -ForegroundColor Yellow
+    return $false
+}
+
 # ─────────────────────────────────────────────────────────────────────────
 # Parada
 # ─────────────────────────────────────────────────────────────────────────
 
 function Invoke-StopAll {
+    Write-Step 'Cerrando restos del proyecto'
+    # Primero el barrido y después los puertos, no al revés: el barrido cierra
+    # las ventanas con su árbol, así que para cuando se revisan los puertos ya
+    # no suele quedar nadie escuchando. Al revés funcionaría igual, pero
+    # dejaría las ventanas abiertas — que es justo lo que se acumulaba.
+    Invoke-ProjectSweep | Out-Null
+
     Write-Step 'Parando procesos de desarrollo'
     $backend = Get-BackendPort
     $targets = @()
@@ -477,10 +860,18 @@ function Invoke-StopAll {
     }
 
     Write-Step 'Parando contenedores'
-    Set-Location $RepoRoot
-    docker compose down
-    if ($LASTEXITCODE -eq 0) { Write-Ok 'Contenedores parados.' }
-    else { Write-Warn2 'docker compose down devolvió error.' }
+    # Con el motor apagado no hay nada que parar, y `docker compose down`
+    # escupiría un error de conexión que se lee como si algo hubiera fallado.
+    # Aquí NO se arranca Docker: abrirlo para acto seguido bajar sus
+    # contenedores sería lo contrario de lo que pide `-Stop`.
+    if (-not (Test-DockerEngine)) {
+        Write-Ok 'Docker no está corriendo: los contenedores ya están parados.'
+    } else {
+        Set-Location $RepoRoot
+        docker compose down
+        if ($LASTEXITCODE -eq 0) { Write-Ok 'Contenedores parados.' }
+        else { Write-Warn2 'docker compose down devolvió error.' }
+    }
 
     Write-Host "`nEntorno parado.`n" -ForegroundColor Green
 }
@@ -489,9 +880,14 @@ function Invoke-StopAll {
 # Principal
 # ─────────────────────────────────────────────────────────────────────────
 
+# Los finales son `exit <código>` y no `return` a propósito. Sin un código
+# explícito, el script hereda el `$LASTEXITCODE` del último comando nativo que
+# se ejecutara — y varios de ellos son SONDEOS cuyo fallo es el resultado
+# esperado: `docker info` con el motor apagado devuelve 1, así que un `-Stop`
+# que había terminado perfectamente salía con código de error.
 if ($Stop) {
     Invoke-StopAll
-    return
+    exit 0
 }
 
 Write-Host ''
@@ -508,7 +904,7 @@ foreach ($tool in @('docker', 'pnpm')) {
 }
 if ($missing.Count -gt 0) {
     Write-Err "Falta en el PATH: $($missing -join ', ')"
-    return
+    exit 1
 }
 Write-Ok 'docker y pnpm disponibles.'
 
@@ -517,7 +913,7 @@ if (-not (Test-Path $VenvPython)) {
     Write-Host '       Créalo con:' -ForegroundColor Yellow
     Write-Host '         cd backend; python -m venv .venv' -ForegroundColor Yellow
     Write-Host '         .venv\Scripts\python.exe -m pip install -e ".[dev]" -c constraints.txt' -ForegroundColor Yellow
-    return
+    exit 1
 }
 $pyVersion = & $VenvPython -c "import sys; print('.'.join(map(str, sys.version_info[:3])))"
 Write-Ok "venv del backend: Python $pyVersion"
@@ -526,15 +922,11 @@ if (-not (Test-Path (Join-Path $RepoRoot 'node_modules'))) {
     Write-Warn2 'No hay node_modules. Ejecutando pnpm install…'
     Set-Location $RepoRoot
     pnpm install
-    if ($LASTEXITCODE -ne 0) { Write-Err 'pnpm install falló.'; return }
+    if ($LASTEXITCODE -ne 0) { Write-Err 'pnpm install falló.'; exit 1 }
 }
 Write-Ok 'Dependencias de Node instaladas.'
 
-Invoke-Quiet { docker info } | Out-Null
-if ($script:QuietExit -ne 0) {
-    Write-Err 'Docker no responde. ¿Está Docker Desktop arrancado?'
-    return
-}
+if (-not (Start-DockerEngine)) { exit 1 }
 Write-Ok 'Docker responde.'
 
 # --- 2. Puerto del backend ----------------------------------------------
@@ -546,6 +938,16 @@ Write-Ok "Puerto $BackendPort (según $($backendInfo.Source))."
 Write-Host '       La web proxea /api/* a ese puerto; uvicorn arrancará justo ahí.' -ForegroundColor DarkGray
 
 # --- 2b. Revisión y liberación de puertos --------------------------------
+
+Write-Step 'Limpiando restos de sesiones anteriores'
+
+if ($NoKill) {
+    Write-Warn2 '-NoKill activo: no cierro nada (si algo sigue vivo, el arranque abortará).'
+} else {
+    Invoke-ProjectSweep | Out-Null
+}
+
+# --- 2c. Revisión de puertos ---------------------------------------------
 
 Write-Step 'Revisando puertos'
 
@@ -563,7 +965,7 @@ if (-not $portsOk) {
     Write-Err 'Aborto: quedan puertos ocupados.'
     Write-Host '       Opciones:  .\dev.ps1 -Stop      (cierra lo del proyecto)' -ForegroundColor Yellow
     Write-Host '                  .\dev.ps1 -Force     (cierra también lo ajeno)' -ForegroundColor Yellow
-    return
+    exit 1
 }
 Write-Ok 'Puertos de la app libres.'
 Write-Host '       Los de infraestructura (5432, 9000/9001, 11434) los gestiona Docker;' -ForegroundColor DarkGray
@@ -577,14 +979,14 @@ docker compose up -d
 if ($LASTEXITCODE -ne 0) {
     Write-Err 'docker compose up falló.'
     Show-InfraPortDiagnosis
-    return
+    exit 1
 }
 
 if (Wait-ForContainerHealth -Container 'crisol-postgres') {
     Write-Ok 'Postgres listo (healthcheck en verde).'
 } else {
     Write-Err 'Postgres no llegó a healthy. Revisa: docker compose logs postgres'
-    return
+    exit 1
 }
 if (Wait-ForContainerHealth -Container 'crisol-minio' -TimeoutSeconds 45) {
     Write-Ok 'MinIO listo.'
@@ -604,7 +1006,7 @@ if ($SkipMigrations) {
     if ($LASTEXITCODE -ne 0) {
         Write-Err 'alembic upgrade head falló. El backend arrancaría contra un schema viejo.'
         Set-Location $RepoRoot
-        return
+        exit 1
     }
     Write-Ok 'Schema al día.'
     Set-Location $RepoRoot
@@ -669,3 +1071,8 @@ Write-Host ''
 if (-not $NoBrowser -and $webUp) {
     Start-Process "http://localhost:$WebPort"
 }
+
+# Si un servicio no llegó a responder, el arranque NO ha ido bien por mucho que
+# se haya impreso el resumen: las ventanas siguen abiertas con su error dentro.
+if ($backendUp -and $webUp) { exit 0 }
+exit 1
