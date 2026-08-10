@@ -147,6 +147,19 @@ class Transaction(Base):
     # `opening_balance` al confirmar un import y permitirá detectar huecos
     # (saltos en la cadena saldo±importe) en el futuro.
     statement_balance: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    # PHASE-45 — contrapartida de una amortización declarada por el usuario.
+    # Cuando marca un cargo de su banco como "amortización" de una deuda SIN
+    # cuadro, se crea el movimiento contrario en la cuenta de deuda (única
+    # forma de que su saldo baje) y ESE movimiento apunta aquí a la tx del
+    # banco. NULL = no es contrapartida de nadie (el caso de casi todas).
+    #
+    # No se usa `transfer_pair_id` a propósito: emparejar excluiría la pata del
+    # banco de presupuestos y de las queries de gasto de deuda (ambos filtran
+    # `transfer_pair_id IS NULL`), que es lo contrario de "cuenta como gasto".
+    amortization_source_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("transactions.id", ondelete="CASCADE"),
+        nullable=True,
+    )
 
     __table_args__ = (
         # Partial unique para dedup de imports — incluye `AND deleted_at
@@ -197,5 +210,13 @@ class Transaction(Base):
             "user_id",
             "flow",
             postgresql_where="deleted_at IS NULL",
+        ),
+        # PHASE-45 — buscar la contrapartida de una amortización por su origen
+        # (¿ya está registrada esta tx? ¿qué pata borro al deshacer?). Parcial:
+        # sólo unas pocas filas llevan valor.
+        Index(
+            "ix_transactions_amortization_source",
+            "amortization_source_id",
+            postgresql_where="amortization_source_id IS NOT NULL",
         ),
     )

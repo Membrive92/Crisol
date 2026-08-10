@@ -51,8 +51,113 @@ from app.modules.personal_finance.accounts.installments_repository import (
 from app.modules.personal_finance.accounts.models import Account, AccountNature, AccountType
 from app.modules.personal_finance.transactions.models import Transaction
 
-
 # ── Clasificación de la descripción del movimiento ──────────────────────
+#
+# Estos predicados son la ÚNICA definición de "qué concepto bancario es qué" en
+# el dominio de deuda. Los consumen el clasificador de `flow` del import
+# (`transfers.service.classify_import_flow`), el buscador del cargo espejo
+# (`transfers.repository.find_mirror_charge`) y la reconciliación de cuadros.
+#
+# Que vivan juntos no es orden estético: en PHASE-38 ya costó una lección que
+# el clasificador y el matcher tuvieran definiciones distintas de lo mismo. Aun
+# así quedaron DOS listas de "liquidación de tarjeta" —una en el servicio y
+# otra en el repositorio— y divergieron en cuanto BBVA escribió
+# `Recibo mes anterior` en vez de `Adeudo mensual de tarjeta`: el clasificador
+# la contó como gasto nuevo (doblando compras ya contadas) y el matcher no la
+# reconoció como espejo. Ahora la secuencia se declara una vez y cada consumidor
+# deriva su forma (subcadena en Python, `ILIKE` en SQL).
+
+
+def _matches_token_sequence(lowered: str, tokens: tuple[str, ...]) -> bool:
+    """¿Aparecen los tokens, en orden, dentro del texto?
+
+    Equivale EXACTAMENTE a `ILIKE '%tok1%tok2%'`, que es la forma que necesita
+    la query del espejo. Se implementa avanzando el cursor tras cada token para
+    que las dos caras (Python y SQL) no puedan dar respuestas distintas sobre
+    la misma descripción.
+    """
+    position = 0
+    for token in tokens:
+        found = lowered.find(token, position)
+        if found < 0:
+            return False
+        position = found + len(token)
+    return True
+
+
+def _matches_any_sequence(description: str | None, sequences: tuple[tuple[str, ...], ...]) -> bool:
+    if not description:
+        return False
+    lowered = description.lower()
+    return any(_matches_token_sequence(lowered, tokens) for tokens in sequences)
+
+
+def sql_like_patterns(sequences: tuple[tuple[str, ...], ...]) -> tuple[str, ...]:
+    """Las mismas secuencias, como patrones `ILIKE` para una query."""
+    return tuple("%" + "%".join(tokens) + "%" for tokens in sequences)
+
+
+#: LIQUIDACIÓN de tarjeta: el cargo del banco que salda lo gastado con la
+#: tarjeta el ciclo anterior. NO es gasto nuevo — las compras ya contaron una a
+#: una en su mes—, así que va fuera del cashflow, y es el "cargo espejo" que
+#: compensa el abono cuando el banco financia ese recibo.
+#:
+#: `recibo` + `mes anterior` es la redacción de BBVA cuando el recibo se
+#: financia; el resto de meses lo llama `Adeudo mensual de tarjeta`. Las dos
+#: cosas son el mismo hecho.
+#: OJO con `recibo`: `Recibo mes anterior` es el CARGO que salda la tarjeta,
+#: pero `Recibo anterior jun-26 Otras financiaciones` es el ABONO que lo
+#: financia. Se parecen y son opuestos, así que la secuencia exige `mes` en
+#: medio — que es lo único que los distingue por texto.
+CARD_SETTLEMENT_SEQUENCES: tuple[tuple[str, ...], ...] = (
+    ("adeudo", "tarjeta"),
+    ("liquidacion", "tarjeta"),
+    ("liquidación", "tarjeta"),
+    ("recibo", "mes anterior"),
+)
+
+#: FINANCIACIÓN ENTRANTE: el banco te abona un importe y nace una deuda. No es
+#: ingreso — es un aplazamiento—, así que nunca puede sumar en la gráfica de
+#: ingresos.
+#:
+#: `otras financiaciones` es la etiqueta de producto de BBVA y aparece en las
+#: dos redacciones observadas (`Operacion financiada Otras financiaciones` y
+#: `Recibo anterior jun-26 Otras financiaciones`), que son el mismo hecho
+#: contado distinto.
+#: `operacion financiada` a secas entra aquí además de en los movimientos
+#: internos del clasificador. Ser "neutro" y ser "el nacimiento de una deuda"
+#: no son lo mismo: lo primero basta para que no cuente como ingreso, pero sólo
+#: lo segundo hace que la pantalla ofrezca atarlo a su cuadro. El extracto de la
+#: cuenta escribe así el aplazamiento que el de la tarjeta llama
+#: `Otras financiaciones` — el mismo hecho visto desde los dos productos.
+#: La CUOTA (`operación financiada CON TARJETA`) no se cuela: es un cargo, y
+#: quien pregunta exige que sea un abono.
+FINANCING_INFLOW_SEQUENCES: tuple[tuple[str, ...], ...] = (
+    ("otras financiaciones",),
+    ("financiacion de recibo",),
+    ("financiación de recibo",),
+    ("operacion financiada",),
+    ("operación financiada",),
+)
+
+
+def is_card_settlement(description: str | None) -> bool:
+    """Cargo que salda el ciclo de una tarjeta (no es gasto nuevo)."""
+    return _matches_any_sequence(description, CARD_SETTLEMENT_SEQUENCES)
+
+
+def is_financing_inflow(description: str | None) -> bool:
+    """Abono con el que el banco financia algo: nace deuda, no ingreso.
+
+    Se comprueba SÓLO contra el texto. Quien clasifica exige además que el
+    movimiento sea un ABONO, porque el mismo producto aparece con el signo
+    contrario cuando llega la cuota — y esa sí es gasto real de caja
+    (PHASE-38). Sin esa condición, apagar el ingreso falso apagaría también el
+    gasto verdadero.
+    """
+    return _matches_any_sequence(description, FINANCING_INFLOW_SEQUENCES)
+
+
 def is_loan_amortization(description: str | None) -> bool:
     """Cargo de amortización de un préstamo/hipoteca."""
     return description is not None and "amortizac" in description.lower()

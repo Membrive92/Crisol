@@ -59,6 +59,7 @@
 | `d4e15f9a3b7c62` | 44.9 | `analysis_runs.thresholds_used` (JSONB NOT NULL DEFAULT `'{}'`) — los cortes EFECTIVOS del run. Aditiva y reversible. |
 | `f2b84a6c1d9e73` | 44.14 | `listing_directory` (GLOBAL, PK `(isin, mic)`) + extensión `pg_trgm` + índice GIN sobre `name` — el directorio oficial UE/UK de FIRDS. Aditiva y reversible (el downgrade tira la tabla; la extensión se queda, porque desinstalarla en un downgrade parcial rompería a quien la use). |
 | `g3c95b7d2e8f41` | 44.21 | `scoring_thresholds.not_applicable_reason` (`TEXT NULL`). Aditiva y reversible. **Sin backfill**: las filas existentes quedan en `NULL` hasta que la sincronización del arranque las reescriba desde la calibración del engine — inventar aquí una razón para ~1.500 filas sería escribir a mano lo que el motor deriva. |
+| `h4d17c9e2f0b63` | 45 | `transactions.amortization_source_id` (FK auto-ref `ON DELETE CASCADE`, NULL) + índice parcial `ix_transactions_amortization_source`. Aditiva y reversible. **Sin backfill**: la declaración del usuario no se puede reconstruir a posteriori, y adivinarla por importe+fecha inventaría un dato. |
 
 > **Deuda documental**: las 14 tablas del módulo Inversión (13 de PHASE-44.1 más
 > `listing_directory` de 44.14) y las migraciones intermedias entre
@@ -158,7 +159,7 @@ Challenge efímero de un flujo de registro/autenticación. Migraciones
 | `role` | `ENUM('GENERIC','TRANSFER','DEBT_PAYMENT','DEBT_INTEREST')` | tipo `categoryrole`, NOT NULL, default `GENERIC` (PHASE-30.1, migración `s6i70k2gf5j3h9`). Rol semántico; los callers de deuda filtran por `role IN (DEBT_PAYMENT, DEBT_INTEREST)`. Índice parcial `ix_categories_role_debt`. Backfill deriva de `is_transfer` + nombres del seed. |
 | `created_at` / `updated_at` | `TIMESTAMPTZ` | |
 
-### `transactions` (`PHASE-2.1` + `PHASE-4.1` + `PHASE-10.1` + `PHASE-21.3` + `PHASE-34` + `PHASE-37.3` + `PHASE-39`)
+### `transactions` (`PHASE-2.1` + `PHASE-4.1` + `PHASE-10.1` + `PHASE-21.3` + `PHASE-34` + `PHASE-37.3` + `PHASE-39` + `PHASE-45`)
 
 | Columna | Tipo | Notas |
 |---------|------|-------|
@@ -178,6 +179,7 @@ Challenge efímero de un flujo de registro/autenticación. Migraciones
 | `flow` | `ENUM('IN','OUT','TRANSFER_IN','TRANSFER_OUT')` NULLABLE | tipo `transactionflow` (PHASE-34.1, migración `z3p58r0on2q1p7`, ADR-0004). Fuente de verdad del dinero: saldo y cashflow derivan de `flow` + `account.nature`, no de la categoría. NULL = sin clasificar (contribuye 0). Índice parcial `ix_transactions_user_flow_active`. |
 | `absorbed_as_mirror` | `BOOLEAN` | NOT NULL, default `FALSE` (AUDIT-2026-07 H-04, migración `b5r81t3qo5s4r0`). TRUE = "cargo espejo" (ADEUDO/liquidación de tarjeta) que el sistema soft-borró al convertir una compra en deuda; el dedup de imports lo trata como existente para no resucitarlo. |
 | `is_exceptional` | `BOOLEAN` NULLABLE | PHASE-37.3, migración `c6s92u4rp6t5s1`. Override manual estructural/puntual del gasto: NULL = heurística, TRUE = puntual (one-off), FALSE = estructural. |
+| `amortization_source_id` | `UUID` FK → `transactions.id` `ON DELETE CASCADE` | NULLABLE (PHASE-45, migración `h4d17c9e2f0b63`). Marca la **contrapartida** que se crea en una cuenta de deuda SIN cuadro cuando el usuario declara que un cargo del banco la amortiza; apunta a ese cargo. NULL = el movimiento no es contrapartida de nadie. No se usa `transfer_pair_id` a propósito: emparejar excluiría la pata del banco de `budgets` y de las queries de gasto de deuda (ambas filtran `transfer_pair_id IS NULL`), justo lo contrario de «cuenta como gasto». Índice parcial `ix_transactions_amortization_source`. |
 | `statement_balance` | `NUMERIC(14,2)` NULLABLE | PHASE-39, migración `d7t03v5sq7u6t2`. Saldo de la cuenta según el EXTRACTO tras este movimiento (columna "Saldo" del fichero). Firmado (puede ser 0 o negativo). NULL para tx manuales o imports sin esa columna. Informativo/auditable: NO participa en el cálculo del saldo; alimenta el auto-anclaje del `opening_balance` y NO entra en el `import_hash` (re-imports idempotentes que backfillean el saldo en filas duplicadas). |
 
 **Índices**:

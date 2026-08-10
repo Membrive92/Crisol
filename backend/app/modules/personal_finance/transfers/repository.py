@@ -4,11 +4,19 @@ from __future__ import annotations
 
 import uuid
 from datetime import timedelta
+from decimal import Decimal
 
 import sqlalchemy as sa
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.personal_finance.accounts.debt_reconciliation import (
+    CARD_SETTLEMENT_SEQUENCES,
+    FINANCING_INFLOW_SEQUENCES,
+    sql_like_patterns,
+)
+from app.modules.personal_finance.accounts.installments_model import LiabilityInstallment
+from app.modules.personal_finance.accounts.models import Account, AccountNature
 from app.modules.personal_finance.categories.models import Category, CategoryKind
 from app.modules.personal_finance.transactions.models import Transaction, TransactionFlow
 
@@ -16,13 +24,88 @@ from app.modules.personal_finance.transactions.models import Transaction, Transa
 # (el "cargo espejo" que compensa el abono de una operación financiada). Se
 # exige ESTE patrón además de importe+cuenta exactos para no anular un gasto
 # cualquiera del mismo importe por accidente.
-_CARD_SETTLEMENT_LIKE = (
-    "%adeudo%tarjeta%",
-    "%liquidacion%tarjeta%",
-    "%liquidación%tarjeta%",
-)
+#
+# Los patrones se DERIVAN de `CARD_SETTLEMENT_SEQUENCES` en vez de escribirse
+# aquí. Estaban duplicados —tres literales aquí y otra lista en el servicio— y
+# divergieron: `Recibo mes anterior` (la redacción de BBVA cuando el recibo se
+# financia) no estaba en ninguna de las dos, así que el espejo no se encontraba
+# y el cargo quedaba suelto restando del saldo.
+_CARD_SETTLEMENT_LIKE = sql_like_patterns(CARD_SETTLEMENT_SEQUENCES)
 # Ventana de fechas alrededor del abono donde buscar el espejo (mismo ciclo).
 _MIRROR_WINDOW = timedelta(days=31)
+
+
+async def list_unlinked_financing_inflows(
+    db: AsyncSession, user_id: uuid.UUID
+) -> list[Transaction]:
+    """Abonos que parecen una financiación y todavía no cuelgan de ninguna deuda.
+
+    El filtro por texto se hace en SQL con las MISMAS secuencias que usa el
+    clasificador, para que lo que la pantalla ofrece enlazar y lo que el import
+    marca como neutro no puedan describir conjuntos distintos.
+
+    Se aceptan `IN` y `TRANSFER_IN` a propósito: `IN` es justo el estado roto
+    que hay que ofrecer arreglar (el abono que se coló como ingreso antes de
+    que el clasificador conociera la redacción), y `TRANSFER_IN` el ya neutro
+    pero aún sin deuda detrás.
+    """
+    desc_match = sa.or_(
+        *[
+            Transaction.description.ilike(pattern)
+            for pattern in sql_like_patterns(FINANCING_INFLOW_SEQUENCES)
+        ]
+    )
+    query = (
+        select(Transaction)
+        .join(Account, Account.id == Transaction.account_id)
+        .where(
+            Transaction.user_id == user_id,
+            Transaction.deleted_at.is_(None),
+            Transaction.transfer_pair_id.is_(None),
+            Transaction.flow.in_([TransactionFlow.IN, TransactionFlow.TRANSFER_IN]),
+            Account.nature == AccountNature.ASSET,
+            desc_match,
+        )
+        .order_by(Transaction.occurred_at.desc())
+    )
+    return list((await db.execute(query)).scalars().all())
+
+
+async def list_liabilities_awaiting_origination(
+    db: AsyncSession, user_id: uuid.UUID
+) -> list[tuple[Account, Decimal]]:
+    """Pasivos CON cuadro que aún no tienen el movimiento que los originó.
+
+    Devuelve `(cuenta, capital del cuadro)`. El capital es la suma del
+    principal de las cuotas — el importe que el banco financió—, que es lo que
+    permite reconocer a qué deuda pertenece un abono sin depender de cómo lo
+    haya escrito el banco.
+
+    "Aún no originado" = no hay ninguna transacción emparejada en la cuenta.
+    Cuando se registra la operación financiada se crea ahí la contrapartida
+    `TRANSFER_OUT` con su `transfer_pair_id`, así que su presencia es la señal
+    de que esa deuda ya tiene su origen contado y no debe volver a ofrecerse.
+    """
+    already_linked = (
+        select(Transaction.account_id)
+        .where(
+            Transaction.user_id == user_id,
+            Transaction.deleted_at.is_(None),
+            Transaction.transfer_pair_id.is_not(None),
+        )
+        .scalar_subquery()
+    )
+    query = (
+        select(Account, sa.func.sum(LiabilityInstallment.principal))
+        .join(LiabilityInstallment, LiabilityInstallment.account_id == Account.id)
+        .where(
+            Account.user_id == user_id,
+            Account.nature == AccountNature.LIABILITY,
+            Account.id.not_in(already_linked),
+        )
+        .group_by(Account.id)
+    )
+    return [(account, Decimal(total)) for account, total in (await db.execute(query)).all()]
 
 
 async def find_mirror_charge(
@@ -90,6 +173,45 @@ async def get_transaction(
         Transaction.deleted_at.is_(None),
     )
     return (await db.execute(query)).scalar_one_or_none()
+
+
+async def find_amortization_counterpart(
+    db: AsyncSession, user_id: uuid.UUID, source_transaction_id: uuid.UUID
+) -> Transaction | None:
+    """PHASE-45 — la pata que se creó en la cuenta de deuda para esta tx.
+
+    Sólo existe cuando el pasivo NO tiene cuadro (ahí la deuda baja por el
+    movimiento). Es lo que hace la operación detectable, idempotente y
+    reversible sin depender de `transfer_pair_id`, que no sirve: emparejar
+    excluye la pata del banco del gasto.
+    """
+    query = select(Transaction).where(
+        Transaction.user_id == user_id,
+        Transaction.amortization_source_id == source_transaction_id,
+        Transaction.deleted_at.is_(None),
+    )
+    return (await db.execute(query)).scalars().first()
+
+
+async def count_registered_outflows(
+    db: AsyncSession, user_id: uuid.UUID, account_id: uuid.UUID
+) -> int:
+    """PHASE-45 — cuántas compras REALES (flow=OUT) hay registradas en una
+    cuenta.
+
+    Decide la sugerencia del panel de amortización: si una tarjeta tiene sus
+    compras metidas en la app, ya cuentan como gasto y contar además su
+    liquidación cobraría lo mismo dos veces; si no tiene ninguna, ese cargo es
+    el único rastro del gasto y sí debe contar. `TRANSFER_*` no cuenta: son
+    movimientos internos, no compras.
+    """
+    query = select(sa.func.count()).where(
+        Transaction.user_id == user_id,
+        Transaction.account_id == account_id,
+        Transaction.deleted_at.is_(None),
+        Transaction.flow == TransactionFlow.OUT,
+    )
+    return int((await db.execute(query)).scalar_one())
 
 
 async def get_pair(

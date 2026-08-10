@@ -16,12 +16,15 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
 from app.modules.personal_finance.transfers.schemas import (
+    AmortizationEffect,
+    AmortizationRequest,
+    FinancingMatchResponse,
     MisclassifiedTransfer,
     ReclassifyBulkRequest,
     ReclassifyBulkResponse,
@@ -31,11 +34,15 @@ from app.modules.personal_finance.transfers.schemas import (
     TransferPairResponse,
 )
 from app.modules.personal_finance.transfers.service import (
+    convert_to_amortization,
     convert_to_debt_operation,
     convert_to_internal_transfer,
+    describe_amortization,
+    find_financing_matches,
     link_manually,
     list_misclassified,
     reclassify_bulk,
+    undo_amortization,
     unlink,
 )
 
@@ -57,6 +64,59 @@ async def link_endpoint(
     )
     await db.commit()
     return pair
+
+
+@router.post("/amortization", response_model=AmortizationEffect)
+async def amortization_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    body: AmortizationRequest,
+) -> AmortizationEffect:
+    """PHASE-45: declara que un cargo del banco amortiza una deuda.
+
+    Con `dry_run=true` devuelve el efecto exacto sin escribir nada — es lo que
+    el panel usa para enseñar cuántas cuotas cubre, cuánto capital amortiza de
+    verdad y a cuánto se queda la deuda antes de que el usuario confirme.
+    """
+    effect = await convert_to_amortization(
+        db,
+        user.id,
+        source_transaction_id=body.source_transaction_id,
+        liability_account_id=body.liability_account_id,
+        counts_as_expense=body.counts_as_expense,
+        dry_run=body.dry_run,
+    )
+    if not body.dry_run:
+        await db.commit()
+    return effect
+
+
+@router.get("/amortization/{transaction_id}", response_model=AmortizationEffect)
+async def amortization_state_endpoint(
+    transaction_id: uuid.UUID,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AmortizationEffect:
+    """PHASE-45: el registro de amortización de una tx. 404 si no lo tiene."""
+    effect = await describe_amortization(db, user.id, transaction_id)
+    if effect is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Esta transacción no está registrada como amortización.",
+        )
+    return effect
+
+
+@router.delete("/amortization/{transaction_id}", status_code=204, response_class=Response)
+async def undo_amortization_endpoint(
+    transaction_id: uuid.UUID,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    """PHASE-45: deshace el registro — la deuda vuelve a subir."""
+    await undo_amortization(db, user.id, transaction_id)
+    await db.commit()
+    return Response(status_code=204)
 
 
 @router.delete("/{transaction_id}", status_code=204, response_class=Response)
@@ -81,6 +141,22 @@ async def misclassified_endpoint(
     con la dirección de la descripción (ej. RECIBIDA en categoría
     EXPENSE). Candidatas a recategorización en bloque desde la UI."""
     return await list_misclassified(db, user.id)
+
+
+@router.get("/financing-matches", response_model=list[FinancingMatchResponse])
+async def financing_matches_endpoint(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[FinancingMatchResponse]:
+    """PHASE-46: abonos de financiación que encajan con el cuadro de una deuda
+    ya creada y todavía no cuelgan de ella.
+
+    Sólo PROPONE. El enlace lo confirma el usuario con `from-source-debt`,
+    porque atarlo cambia dónde vive ese dinero (sale del ingreso del mes y pasa
+    a ser deuda) y esa es una afirmación sobre su vida, no sobre sus datos.
+    """
+    matches = await find_financing_matches(db, user.id)
+    return [FinancingMatchResponse(**vars(m)) for m in matches]
 
 
 @router.post("/reclassify-bulk", response_model=ReclassifyBulkResponse)

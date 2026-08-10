@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -91,6 +92,70 @@ def schedule_outstanding(installments: list[LiabilityInstallment]) -> Decimal | 
     )
 
 
+@dataclass(frozen=True)
+class LiabilityOutstanding:
+    """Deuda viva de un pasivo + de dónde ha salido el número."""
+
+    value: Decimal
+    from_schedule: bool
+    """True si la manda el cuadro (Σ principal no pagado); False si sale de
+    `opening_balance + Σ movimientos`."""
+
+
+def resolve_liability_outstanding(
+    *,
+    opening_balance: Decimal,
+    movements_balance: Decimal,
+    installments: list[LiabilityInstallment],
+) -> LiabilityOutstanding:
+    """PHASE-36 — el MUX «el cuadro manda», en un solo sitio.
+
+    Un pasivo CON cuadro deriva su deuda viva de las cuotas no pagadas y sus
+    movimientos se ignoran; uno SIN cuadro la deriva de `opening_balance + Σ
+    movimientos`. Nunca la suma de ambos: eso reintroduciría el doble conteo de
+    [PHASE-34] «dos fuentes de verdad».
+    """
+    sched = schedule_outstanding(installments)
+    if sched is not None:
+        return LiabilityOutstanding(value=sched, from_schedule=True)
+    return LiabilityOutstanding(value=opening_balance + movements_balance, from_schedule=False)
+
+
+# Holgura de un céntimo al comparar un pago contra el principal de una cuota:
+# el banco redondea distinto que el cuadro francés ideal.
+PRINCIPAL_MATCH_TOLERANCE = Decimal("0.01")
+
+
+def plan_installments_covering_principal(
+    installments: list[LiabilityInstallment], principal_amount: Decimal
+) -> list[LiabilityInstallment]:
+    """Qué cuotas cubriría un pago de `principal_amount`, sin tocar nada.
+
+    Greedy desde la cuota pendiente MÁS ANTIGUA hacia adelante: se cubre la
+    cuota k mientras su `principal` quepa en lo que resta (con un céntimo de
+    holgura). Devuelve la lista en orden; vacía si el pago no llega ni a la
+    primera pendiente — el caller lo usa para avisar de que el saldo no bajará.
+
+    Es PURA a propósito: así el "previsualiza el efecto" (`dry_run`) y el
+    "aplícalo" usan LA MISMA definición y no pueden divergir. Asume el cuadro
+    anclado (las cuotas ya pagadas están marcadas), así que la más antigua
+    pendiente es la del pago en curso.
+
+    `installments` debe venir ordenada por `installment_index` ascendente —
+    es lo que devuelve `list_installments`.
+    """
+    remaining = principal_amount
+    covered: list[LiabilityInstallment] = []
+    for inst in installments:
+        if inst.paid_at is not None:
+            continue
+        if inst.principal > remaining + PRINCIPAL_MATCH_TOLERANCE:
+            break
+        remaining -= inst.principal
+        covered.append(inst)
+    return covered
+
+
 # ─────────────────────────────────────────────────────────────────────
 # PHASE-37 — Agregación de interés/capital DIRIGIDA POR EL CUADRO.
 # El interés no se registra como movimiento aparte (va dentro de la cuota),
@@ -145,6 +210,27 @@ async def list_installments(
         .where(
             LiabilityInstallment.account_id == account_id,
             LiabilityInstallment.user_id == user_id,
+        )
+        .order_by(LiabilityInstallment.installment_index.asc())
+    )
+    result = await db.execute(query)
+    return list(result.scalars().all())
+
+
+async def list_installments_paid_by_transaction(
+    db: AsyncSession, user_id: uuid.UUID, transaction_id: uuid.UUID
+) -> list[LiabilityInstallment]:
+    """PHASE-45 — cuotas que una transacción concreta marcó como pagadas.
+
+    Es la huella que deja una amortización sobre un pasivo CON cuadro (ahí no
+    se crea ningún movimiento: manda el cuadro), así que es también la forma de
+    saber si esa transacción ya está registrada y qué deshacer.
+    """
+    query = (
+        select(LiabilityInstallment)
+        .where(
+            LiabilityInstallment.user_id == user_id,
+            LiabilityInstallment.paid_transaction_id == transaction_id,
         )
         .order_by(LiabilityInstallment.installment_index.asc())
     )

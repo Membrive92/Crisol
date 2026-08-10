@@ -1,6 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type {
+  AmortizationEffect,
+  AmortizationRequest,
+  FinancingMatch,
   MisclassifiedTransfer,
   ReclassifyBulkResponse,
   TransferFromSourceDebtRequest,
@@ -82,6 +85,22 @@ export function useMisclassifiedTransfers() {
 }
 
 /**
+ * PHASE-46 — abonos de financiación que encajan con el cuadro de una deuda ya
+ * creada y todavía no cuelgan de ella.
+ *
+ * No hace falta una mutación propia: el enlace lo aplica `useTransferFromDebt`,
+ * que es el mismo gesto que ya existía en el detalle de transacción. Aquí sólo
+ * se propone.
+ */
+export function useFinancingMatches() {
+  return useQuery<FinancingMatch[], Error>({
+    queryKey: queryKeys.transfers.financingMatches(),
+    queryFn: () => transfersApi.financingMatches(),
+    staleTime: 1000 * 30,
+  });
+}
+
+/**
  * PHASE-31.2 — recategorización en bloque de transferencias mal
  * direccionadas. Tras el éxito invalida todo el grupo de transfers
  * + transactions + balances + dashboard (los saldos cambian).
@@ -94,6 +113,62 @@ export function useReclassifyBulk() {
     { transaction_ids: string[]; target_category_id?: string }
   >({
     mutationFn: (payload) => transfersApi.reclassifyBulk(payload),
+    onSuccess: () => invalidateAll(queryClient),
+  });
+}
+
+/**
+ * PHASE-45 — el registro de amortización de una tx, o `null` si no lo tiene.
+ *
+ * Lo consulta el panel del detalle para saber si ya está registrada (y poder
+ * ofrecer deshacerlo) en vez de dejar que el usuario la registre dos veces.
+ */
+export function useAmortization(transactionId: string) {
+  return useQuery<AmortizationEffect | null, Error>({
+    queryKey: queryKeys.transfers.amortization(transactionId),
+    queryFn: () => transfersApi.amortization(transactionId),
+    enabled: Boolean(transactionId),
+  });
+}
+
+/**
+ * PHASE-45 — previsualiza el efecto de una amortización SIN escribir nada.
+ *
+ * Es el mismo endpoint que la aplica, con `dry_run: true`, para que lo que se
+ * enseña y lo que ocurre salgan de la misma cuenta. No invalida nada: no ha
+ * cambiado nada.
+ */
+export function usePreviewAmortization() {
+  return useMutation<
+    AmortizationEffect,
+    Error,
+    Omit<AmortizationRequest, 'dry_run'>
+  >({
+    mutationFn: (payload) => transfersApi.amortize({ ...payload, dry_run: true }),
+  });
+}
+
+/**
+ * PHASE-45 — registra la amortización. Mueve la deuda y (si cuenta como
+ * gasto) el cashflow, así que invalida el grupo entero.
+ */
+export function useAmortize() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    AmortizationEffect,
+    Error,
+    Omit<AmortizationRequest, 'dry_run'>
+  >({
+    mutationFn: (payload) => transfersApi.amortize({ ...payload, dry_run: false }),
+    onSuccess: () => invalidateAll(queryClient),
+  });
+}
+
+/** PHASE-45 — deshace el registro: la deuda vuelve a subir. */
+export function useUndoAmortization() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: (transactionId) => transfersApi.undoAmortization(transactionId),
     onSuccess: () => invalidateAll(queryClient),
   });
 }

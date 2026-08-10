@@ -8,6 +8,7 @@ import { toast } from '@crisol/store';
 import type { TransactionUpdateRequest } from '@crisol/types';
 import { colors, fontSize, fontWeight, layout, spacing } from '@crisol/ui';
 
+import { AmortizationPanel } from '@/components/transfers/amortization-panel';
 import {
   ConvertToDebtDialog,
   looksLikeFinancedOperation,
@@ -159,6 +160,15 @@ export default function EditTransactionPage({ params }: { params: Promise<{ id: 
                   }
                 />
               </Card>
+            ) : null}
+
+            {/* PHASE-45 — sólo para salidas de dinero sin emparejar: una tx ya
+                emparejada tiene su contrapartida moviendo el dinero, y añadir
+                una amortización bajaría la deuda dos veces (el backend lo
+                rechaza con 409). */}
+            {data.transfer_pair_id === null &&
+            (data.flow === 'OUT' || data.flow === 'TRANSFER_OUT') ? (
+              <AmortizationPanel transaction={data} />
             ) : null}
 
             {data.transfer_pair_id === null ? (

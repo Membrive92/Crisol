@@ -57,3 +57,19 @@ export interface TransferFromSourceDebtRequest {
   destination_account_id?: string;
   new_liability?: NewLiabilityForDebt;
 }
+
+/**
+ * PHASE-45: declarar que un cargo del banco amortiza una deuda.
+ *
+ * `counts_as_expense` es una DECLARACIÓN del usuario, no una inferencia: el
+ * mismo gesto es gasto (pagar un préstamo, cuyo capital nunca se contó) o
+ * neutro (liquidar una tarjeta cuyas compras ya se contaron). En `dry_run`
+ * puede omitirse y el servidor devuelve su sugerencia con el motivo; al
+ * aplicar es obligatorio.
+ */
+export interface AmortizationRequest {
+  source_transaction_id: string;
+  liability_account_id: string;
+  counts_as_expense?: boolean;
+  dry_run?: boolean;
+}

@@ -317,6 +317,66 @@ async def test_convert_to_debt_absorbs_mirror_charge(session_factory) -> None:  
     assert o is not None and o.deleted_at is None  # otro importe intacto
 
 
+async def test_convert_to_debt_absorbs_mirror_with_the_financed_receipt_wording(  # type: ignore[no-untyped-def]
+    session_factory,
+) -> None:
+    """PHASE-46 — La forma REAL de julio de 2026, extraída de la BD.
+
+    El banco financia el recibo de la tarjeta: abona `Recibo anterior jun-26
+    Otras financiaciones` (+700,26) y al día siguiente cobra `Recibo mes
+    anterior` (−700,26). Neto de caja cero, y queda la deuda.
+
+    Antes de unificar las listas, `find_mirror_charge` sólo conocía
+    `%adeudo%tarjeta%` y `%liquidacion%tarjeta%`, así que el espejo NO se
+    encontraba: al registrar la operación como deuda, el cargo quedaba suelto
+    restando 700,26 € del saldo de BBVA sin contraparte.
+    """
+    from app.modules.personal_finance.transfers.service import convert_to_debt_operation
+
+    uid = await _seed_user(session_factory)
+    bbva = await _seed_account(
+        session_factory, uid, nature=AccountNature.ASSET, type_=AccountType.BANK
+    )
+    prestamo = await _seed_account(
+        session_factory, uid, nature=AccountNature.LIABILITY, type_=AccountType.LOAN
+    )
+    abono = await _seed_tx(
+        session_factory,
+        uid,
+        bbva,
+        amount=Decimal("700.26"),
+        flow=TransactionFlow.IN,
+        description="Recibo anterior jun-26 Otras financiaciones",
+    )
+    espejo = await _seed_tx(
+        session_factory,
+        uid,
+        bbva,
+        amount=Decimal("700.26"),
+        flow=TransactionFlow.OUT,
+        description="Recibo mes anterior No categorizable",
+    )
+
+    async with session_factory() as db:
+        resp = await convert_to_debt_operation(
+            db,
+            uid,
+            source_transaction_id=abono,
+            destination_account_id=prestamo,
+            new_liability=None,
+        )
+        await db.commit()
+
+    assert resp.absorbed_mirror_amount == Decimal("700.26")
+    async with session_factory() as db:
+        origen = await db.get(Transaction, abono)
+        cargo = await db.get(Transaction, espejo)
+    assert cargo is not None and cargo.deleted_at is not None
+    # La pata origen deja de ser un ingreso y pasa a ser dinero prestado.
+    assert origen is not None and origen.flow == TransactionFlow.TRANSFER_IN
+    assert origen.transfer_pair_id is not None
+
+
 # ─────────────────────────────────────────────────────────────────────
 # classify_import_flow — modelo de dinero + tarjeta en el import (PHASE-34.3).
 # El signo del extracto manda; la transfer-ness sale de categoría o texto.
@@ -388,6 +448,217 @@ def test_classify_financiada_con_tarjeta_overrides_category_transfer() -> None:
         )
         == TransactionFlow.OUT
     )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# PHASE-46 — La deuda que nace no es un ingreso.
+#
+# Medido en datos reales: BBVA financió el recibo de tarjeta de junio de 2026 y
+# lo presentó con DOS redacciones que ninguna lista conocía, así que julio salió
+# con 700,26 € de ingreso que nadie cobró y 700,26 € de gasto ya contado compra
+# a compra. El mismo hecho, escrito "OPERACION FINANCIADA" en marzo, se había
+# clasificado bien — la diferencia era la redacción, no el hecho.
+# ─────────────────────────────────────────────────────────────────────
+
+
+def test_classify_financing_inflow_is_never_income() -> None:
+    """Un abono de financiación NO es ingreso: es un aplazamiento.
+
+    El banco te adelanta un dinero y nace una deuda; contarlo como ingreso
+    infla el mes, la tasa de ahorro y el ratio de endeudamiento a la vez.
+    """
+    for text in (
+        "Recibo anterior jun-26 Otras financiaciones",
+        "Operacion financiada Otras financiaciones",
+        "FINANCIACION DE RECIBO",
+    ):
+        assert (
+            classify_import_flow(bank_sign=1, text=text, category_is_transfer=False)
+            == TransactionFlow.TRANSFER_IN
+        ), text
+
+
+def test_classify_financing_wording_as_charge_is_still_a_real_expense() -> None:
+    """El MISMO producto con el signo contrario sí es gasto — y por eso la regla
+    de arriba mira el signo.
+
+    Cuando llega la cuota de lo financiado, el extracto vuelve a decir "otras
+    financiaciones" pero es un cargo. Ese gasto no está contado en ningún otro
+    sitio (su compra se modeló como creación de deuda, neutra), así que
+    apagarlo por compartir la redacción escondería gasto real — que es
+    exactamente el carve-out que costó PHASE-38.
+    """
+    assert (
+        classify_import_flow(
+            bank_sign=-1, text="Otras financiaciones cuota 3/36", category_is_transfer=False
+        )
+        == TransactionFlow.OUT
+    )
+
+
+def test_classify_card_settlement_new_wording_is_transfer() -> None:
+    """ "Recibo mes anterior" es la liquidación de la tarjeta, igual que
+    "Adeudo mensual de tarjeta": las compras ya contaron una a una en su mes,
+    así que cobrarla otra vez al liquidarlas dobla el gasto."""
+    assert (
+        classify_import_flow(
+            bank_sign=-1, text="Recibo mes anterior No categorizable", category_is_transfer=False
+        )
+        == TransactionFlow.TRANSFER_OUT
+    )
+
+
+def test_financing_inflow_and_card_settlement_are_not_confused() -> None:
+    """Las dos redacciones se parecen y significan lo CONTRARIO.
+
+    "Recibo anterior … Otras financiaciones" es el abono que crea la deuda;
+    "Recibo mes anterior" es el cargo que salda la tarjeta. Si la segunda
+    secuencia no exigiera "mes" en medio, el abono se clasificaría como
+    liquidación y el buscador del cargo espejo podría absorber la pata
+    equivocada.
+    """
+    from app.modules.personal_finance.accounts.debt_reconciliation import (
+        is_card_settlement,
+        is_financing_inflow,
+    )
+
+    abono = "Recibo anterior jun-26 Otras financiaciones"
+    cargo = "Recibo mes anterior No categorizable"
+
+    assert is_financing_inflow(abono) and not is_card_settlement(abono)
+    assert is_card_settlement(cargo) and not is_financing_inflow(cargo)
+
+
+def test_card_settlement_definition_is_shared_with_the_mirror_finder() -> None:
+    """Gate: el clasificador y el buscador del espejo hablan de LA MISMA lista.
+
+    Eran dos listas —una en el servicio, otra en el repositorio— y divergieron
+    en silencio: "Recibo mes anterior" no estaba en ninguna, así que el cargo
+    se contó como gasto Y quedó sin absorber. Este test falla si alguien vuelve
+    a enumerar liquidaciones en un solo lado.
+    """
+    from app.modules.personal_finance.accounts.debt_reconciliation import (
+        CARD_SETTLEMENT_SEQUENCES,
+        sql_like_patterns,
+    )
+    from app.modules.personal_finance.transfers.repository import _CARD_SETTLEMENT_LIKE
+    from app.modules.personal_finance.transfers.service import is_internal_movement_text
+
+    assert sql_like_patterns(CARD_SETTLEMENT_SEQUENCES) == _CARD_SETTLEMENT_LIKE
+    for tokens in CARD_SETTLEMENT_SEQUENCES:
+        ejemplo = " ".join(tokens)
+        assert is_internal_movement_text(ejemplo), ejemplo
+
+
+# ─────────────────────────────────────────────────────────────────────
+# PHASE-46 — La columna Saldo decide la dirección cuando el importe no la trae.
+# ─────────────────────────────────────────────────────────────────────
+
+
+def _fila(  # type: ignore[no-untyped-def]
+    *, importe: str, saldo: str | None, texto: str, flow=None, fecha_dia: int = 6
+):
+
+    from app.modules.personal_finance.imports.service import ParsedRow
+
+    return ParsedRow(
+        amount=Decimal(importe),
+        occurred_at=datetime(2026, 7, fecha_dia, 12, 0, tzinfo=UTC),
+        description=texto,
+        category_id=None,
+        import_hash=f"h{texto}{importe}{fecha_dia}",
+        flow=flow,
+        statement_balance=Decimal(saldo) if saldo is not None else None,
+        classify_text=texto,
+        category_is_transfer=False,
+    )
+
+
+def test_balance_chain_resolves_an_unsigned_inflow() -> None:
+    """El caso REAL: `Operación financiada` por 700,26 € entró sin clasificar
+    porque el extracto no trae signos y el texto no dice ni abono ni recibido.
+
+    El salto del saldo (717,10 → 1.417,36) prueba que es una entrada, y la
+    prueba estaba dentro de la propia fila: PHASE-39 ya guardaba esa columna.
+    Como el concepto es una financiación, el flow correcto es `TRANSFER_IN`
+    (nace deuda), no `IN`.
+    """
+    from app.modules.personal_finance.imports.service import resolve_flows_from_balance_chain
+
+    filas = [
+        _fila(
+            importe="21.97",
+            saldo="717.10",
+            texto="Www.amazon Pago con tarjeta",
+            fecha_dia=5,
+            flow=TransactionFlow.OUT,
+        ),
+        _fila(importe="700.26", saldo="1417.36", texto="Operación financiada 4940121100185049"),
+    ]
+    assert resolve_flows_from_balance_chain(filas) == 1
+    assert filas[1].flow == TransactionFlow.TRANSFER_IN
+
+
+def test_balance_chain_resolves_an_unsigned_outflow() -> None:
+    from app.modules.personal_finance.imports.service import resolve_flows_from_balance_chain
+
+    filas = [
+        _fila(
+            importe="10.00", saldo="1000.00", texto="Algo", fecha_dia=5, flow=TransactionFlow.OUT
+        ),
+        _fila(importe="40.00", saldo="960.00", texto="Concepto mudo"),
+    ]
+    assert resolve_flows_from_balance_chain(filas) == 1
+    assert filas[1].flow == TransactionFlow.OUT
+
+
+def test_balance_chain_stays_quiet_when_the_jump_does_not_match() -> None:
+    """Si entre dos saldos hay un movimiento que no vemos, el salto no cuadra
+    con el importe de la fila — y entonces NO se toca.
+
+    Es la condición que hace segura la regla: una fila neutra es honesta; una
+    dirección inventada a partir de un salto que no cuadra, no.
+    """
+    from app.modules.personal_finance.imports.service import resolve_flows_from_balance_chain
+
+    filas = [
+        _fila(
+            importe="10.00", saldo="1000.00", texto="Algo", fecha_dia=5, flow=TransactionFlow.OUT
+        ),
+        _fila(importe="40.00", saldo="925.00", texto="Concepto mudo"),  # salto de 75, no de 40
+    ]
+    assert resolve_flows_from_balance_chain(filas) == 0
+    assert filas[1].flow is None
+
+
+def test_balance_chain_does_not_touch_rows_already_classified() -> None:
+    """El signo del extracto sigue mandando: esto sólo rellena huecos."""
+    from app.modules.personal_finance.imports.service import resolve_flows_from_balance_chain
+
+    filas = [
+        _fila(
+            importe="10.00", saldo="1000.00", texto="Algo", fecha_dia=5, flow=TransactionFlow.OUT
+        ),
+        _fila(importe="40.00", saldo="1040.00", texto="Otro", flow=TransactionFlow.OUT),
+    ]
+    assert resolve_flows_from_balance_chain(filas) == 0
+    assert filas[1].flow == TransactionFlow.OUT
+
+
+def test_balance_chain_reads_a_newest_first_statement() -> None:
+    """BBVA imprime el más reciente arriba. Si se leyera en el orden del
+    fichero, el salto saldría con el signo cambiado y la fila entraría al
+    revés — peor que dejarla neutra."""
+    from app.modules.personal_finance.imports.service import resolve_flows_from_balance_chain
+
+    filas = [
+        _fila(importe="700.26", saldo="1417.36", texto="Operación financiada 4940", fecha_dia=6),
+        _fila(
+            importe="21.97", saldo="717.10", texto="Amazon", fecha_dia=5, flow=TransactionFlow.OUT
+        ),
+    ]
+    assert resolve_flows_from_balance_chain(filas) == 1
+    assert filas[0].flow == TransactionFlow.TRANSFER_IN
 
 
 def test_classify_bizum_is_expense_not_transfer() -> None:

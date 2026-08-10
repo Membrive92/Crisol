@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
@@ -11,9 +12,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.personal_finance.accounts.debt_reconciliation import (
     is_card_financed_op,
+    is_card_settlement,
+    is_financing_inflow,
 )
+from app.modules.personal_finance.accounts.installments_model import LiabilityInstallment
 from app.modules.personal_finance.accounts.installments_repository import (
     generate_installments_for_account,
+    list_installments,
+    list_installments_paid_by_transaction,
+    mark_installment_paid,
+    plan_installments_covering_principal,
+    resolve_liability_outstanding,
+    unmark_installment_paid,
 )
 from app.modules.personal_finance.accounts.models import (
     Account,
@@ -26,6 +36,7 @@ from app.modules.personal_finance.accounts.repository import (
 from app.modules.personal_finance.accounts.repository import (
     get_account_by_id,
     get_account_by_name,
+    get_balances_for_user,
 )
 from app.modules.personal_finance.categories.models import CategoryKind
 from app.modules.personal_finance.categories.repository import (
@@ -40,9 +51,13 @@ from app.modules.personal_finance.transfers.repository import (
     assign_category as repo_assign_category,
 )
 from app.modules.personal_finance.transfers.repository import (
+    count_registered_outflows,
+    find_amortization_counterpart,
     find_mirror_charge,
     get_or_create_default_transfer_category,
+    list_liabilities_awaiting_origination,
     list_misclassified_transfers,
+    list_unlinked_financing_inflows,
 )
 from app.modules.personal_finance.transfers.repository import (
     get_pair as repo_get_pair,
@@ -57,6 +72,7 @@ from app.modules.personal_finance.transfers.repository import (
     unlink_pair as repo_unlink_pair,
 )
 from app.modules.personal_finance.transfers.schemas import (
+    AmortizationEffect,
     MisclassifiedTransfer,
     NewLiabilityForDebt,
     ReclassifyBulkResponse,
@@ -359,6 +375,11 @@ _infer_transfer_kind = infer_transfer_kind
 # no duplicar. BIZUM se EXCLUYE a propósito (suele ser pago a comercio →
 # gasto real). OJO: estos patrones NO matchean "pago con tarjeta" (la
 # compra de débito), que sí es gasto.
+#
+# Las liquidaciones de tarjeta YA NO se enumeran aquí: viven en
+# `CARD_SETTLEMENT_SEQUENCES` (debt_reconciliation) porque el buscador del
+# cargo espejo necesita esa misma definición. Tenerla duplicada es lo que dejó
+# `Recibo mes anterior` fuera de las dos.
 _INTERNAL_MOVEMENT_PATTERNS = (
     "transferencia",
     "transf.",
@@ -367,9 +388,6 @@ _INTERNAL_MOVEMENT_PATTERNS = (
     "envío de dinero",
     "envio inmediato",
     "envío inmediato",
-    "adeudo mensual de tarjeta",
-    "liquidacion de tarjeta",
-    "liquidación de tarjeta",
     "operacion financiada",
     "operación financiada",
     "cuota de tarjeta",
@@ -381,6 +399,8 @@ def is_internal_movement_text(text: str | None) -> bool:
     pago/liquidación de tarjeta) que NO debe contar como gasto/ingreso."""
     if not text:
         return False
+    if is_card_settlement(text):
+        return True
     lowered = text.lower()
     return any(pattern in lowered for pattern in _INTERNAL_MOVEMENT_PATTERNS)
 
@@ -426,6 +446,39 @@ def classify_import_flow(
     tarjeta). Nunca se infiere la dirección de `category.kind` cuando hay
     signo de extracto.
     """
+    internal = is_internal_movement_row(
+        bank_sign=bank_sign, text=text, category_is_transfer=category_is_transfer
+    )
+    if bank_sign > 0:
+        income = True
+    elif bank_sign < 0:
+        income = False
+    else:
+        kind = infer_transfer_kind(text) or category_kind
+        if kind is None:
+            return None
+        income = kind == CategoryKind.INCOME
+    return flow_for_direction(income=income, internal=internal)
+
+
+def flow_for_direction(*, income: bool, internal: bool) -> TransactionFlow:
+    """Dirección + transfer-ness → el `flow` concreto."""
+    if internal:
+        return TransactionFlow.TRANSFER_IN if income else TransactionFlow.TRANSFER_OUT
+    return TransactionFlow.IN if income else TransactionFlow.OUT
+
+
+def is_internal_movement_row(
+    *, bank_sign: int, text: str | None, category_is_transfer: bool
+) -> bool:
+    """La "transfer-ness" de una fila importada, en UN solo sitio.
+
+    Se separa de `classify_import_flow` porque hay dos momentos que necesitan
+    la misma respuesta: la clasificación inicial y la segunda pasada que deduce
+    la dirección del salto del saldo del extracto. Si cada una lo decidiera por
+    su cuenta, una fila podría entrar como `TRANSFER_IN` por un camino y como
+    `IN` por el otro.
+    """
     # La "transfer-ness" por TEXTO se tempera con el override de ingreso
     # externo (W-01): una nómina/pensión por transferencia es ingreso real. El
     # override NO pisa un `category_is_transfer` explícito (señal más fuerte que
@@ -445,19 +498,21 @@ def classify_import_flow(
     # y la "OPERACIÓN FINANCIADA" a secas). Gana sobre `text_says_internal`
     # (que también matchea por "operación financiada") y sobre un
     # `category_is_transfer` mal puesto: el concepto es inequívocamente cuota.
-    is_transfer = (category_is_transfer or text_says_internal) and not is_card_financed_op(text)
-    if bank_sign > 0:
-        income = True
-    elif bank_sign < 0:
-        income = False
-    else:
-        kind = infer_transfer_kind(text) or category_kind
-        if kind is None:
-            return None
-        income = kind == CategoryKind.INCOME
-    if is_transfer:
-        return TransactionFlow.TRANSFER_IN if income else TransactionFlow.TRANSFER_OUT
-    return TransactionFlow.IN if income else TransactionFlow.OUT
+    # Una FINANCIACIÓN ENTRANTE (el banco te abona un importe y nace deuda) no
+    # es ingreso: es un aplazamiento. Iba por `_INTERNAL_MOVEMENT_PATTERNS`
+    # mientras el banco la escribiera "operación financiada", pero con
+    # "Recibo anterior jun-26 Otras financiaciones" se coló como ingreso del
+    # mes —700,26 € que nadie cobró—.
+    #
+    # La condición del signo NO es defensiva, es lo que hace correcta la regla:
+    # el mismo producto ("Otras financiaciones") vuelve a aparecer con signo
+    # contrario cuando se cobra la cuota, y ésa SÍ es gasto real de caja
+    # (PHASE-38, porque su compra no cuenta como gasto en ningún otro sitio).
+    # Sin el signo, apagar el ingreso falso apagaría el gasto verdadero.
+    text_says_financing_inflow = bank_sign > 0 and is_financing_inflow(text)
+    return (
+        category_is_transfer or text_says_internal or text_says_financing_inflow
+    ) and not is_card_financed_op(text)
 
 
 async def convert_to_internal_transfer(
@@ -617,6 +672,82 @@ _LIABILITY_TYPES_AMORT = {
 }
 
 
+#: Holgura al comparar un abono contra el capital de un cuadro. Un céntimo, la
+#: misma que usa la reconciliación: el banco redondea distinto que el cuadro
+#: francés ideal, pero un aplazamiento y su cuadro nacen del MISMO importe, así
+#: que la coincidencia es exacta salvo redondeo. Más holgura convertiría la
+#: propuesta en una adivinanza.
+FINANCING_MATCH_TOLERANCE = Decimal("0.01")
+
+
+@dataclass(frozen=True)
+class FinancingMatch:
+    """Un abono de financiación y la deuda a la que parece pertenecer."""
+
+    transaction_id: uuid.UUID
+    description: str | None
+    amount: Decimal
+    currency: str
+    occurred_at: datetime
+    counted_as_income: bool
+    liability_id: uuid.UUID
+    liability_name: str
+    schedule_principal: Decimal
+    reason: str
+
+
+async def find_financing_matches(db: AsyncSession, user_id: uuid.UUID) -> list[FinancingMatch]:
+    """Abonos de financiación que encajan con el cuadro de una deuda ya creada.
+
+    **Por qué por el CUADRO y no por el texto.** El texto decide si un abono es
+    una financiación (y por tanto que no es un ingreso), pero no puede decir a
+    QUÉ deuda pertenece: el extracto no trae ninguna referencia común con la
+    cuenta que el usuario dio de alta. El capital del cuadro sí — un
+    aplazamiento y su cuadro de amortización nacen del mismo importe—, y además
+    no caduca cuando el banco cambia la redacción, que es lo que ha pasado ya
+    dos veces.
+
+    Sólo se propone cuando la coincidencia es ÚNICA. Con dos deudas del mismo
+    capital exacto sin originar, elegir una sería inventarse cuál; se calla y el
+    usuario lo enlaza a mano, que es lo que ya hacía.
+    """
+    inflows = await list_unlinked_financing_inflows(db, user_id)
+    if not inflows:
+        return []
+    candidates = await list_liabilities_awaiting_origination(db, user_id)
+
+    matches: list[FinancingMatch] = []
+    for tx in inflows:
+        fitting = [
+            (account, principal)
+            for account, principal in candidates
+            if account.currency == tx.currency
+            and abs(principal - tx.amount) <= FINANCING_MATCH_TOLERANCE
+        ]
+        if len(fitting) != 1:
+            continue
+        account, principal = fitting[0]
+        matches.append(
+            FinancingMatch(
+                transaction_id=tx.id,
+                description=tx.description,
+                amount=tx.amount,
+                currency=tx.currency,
+                occurred_at=tx.occurred_at,
+                counted_as_income=tx.flow == TransactionFlow.IN,
+                liability_id=account.id,
+                liability_name=account.name,
+                schedule_principal=principal,
+                reason=(
+                    f"El cuadro de «{account.name}» tiene un capital de {principal} "
+                    f"{account.currency}, el mismo importe que este abono, y todavía no "
+                    "tiene registrado el movimiento que lo originó."
+                ),
+            )
+        )
+    return matches
+
+
 async def convert_to_debt_operation(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -757,6 +888,366 @@ async def convert_to_debt_operation(
     # (entró dinero en BBVA) y la contraparte como "out" (deuda creada
     # en la liability).
     return _pair_to_schema(counterpart, source, absorbed_mirror_amount=absorbed_mirror_amount)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# PHASE-45 — "Es una amortización": enlazar un cargo del banco con la deuda
+# que amortiza, para que la deuda baje.
+#
+# Dos mecanismos, y los decide el pasivo, no el usuario:
+#   - CON cuadro (préstamo, compra a plazos): la deuda viva la manda el cuadro
+#     (PHASE-36), así que se marcan cuotas pagadas y NO se crea ningún
+#     movimiento — sería invisible para el saldo y ruido en la lista.
+#   - SIN cuadro (tarjeta con saldo arrastrado): la deuda es
+#     `opening + Σ movimientos`, así que la única forma de bajarla es crear el
+#     movimiento contrario en la cuenta de deuda.
+#
+# Lo que sí decide el usuario es si el pago CUENTA COMO GASTO, porque eso
+# depende de algo que sólo él sabe: si ese dinero ya se contó al comprar. El
+# servidor sugiere con su motivo y obedece la declaración (PHASE-28: la
+# dirección se declara, no se adivina).
+# ─────────────────────────────────────────────────────────────────────
+
+_OUTFLOW_FLOWS = (TransactionFlow.OUT, TransactionFlow.TRANSFER_OUT)
+
+MODE_SCHEDULE = "schedule"
+MODE_MOVEMENT = "movement"
+
+
+def _suggest_counts_as_expense(
+    *, has_schedule: bool, registered_outflows: int, liability_name: str
+) -> tuple[bool, str]:
+    """Sugerencia + motivo, para que la pantalla explique en vez de imponer."""
+    if has_schedule:
+        return True, (
+            "Esta deuda tiene cuadro de cuotas: su capital entró como préstamo o compra "
+            "financiada y no se contó como gasto en ningún sitio, así que pagarlo sí lo es."
+        )
+    if registered_outflows > 0:
+        compras = "compra registrada" if registered_outflows == 1 else "compras registradas"
+        return False, (
+            f"«{liability_name}» tiene {registered_outflows} {compras} en la app, y ésas ya "
+            "cuentan como gasto en su mes. Contar también lo que las liquida cobraría el "
+            "mismo dinero dos veces."
+        )
+    return True, (
+        f"«{liability_name}» no tiene ninguna compra registrada en la app, así que este cargo "
+        "es el único rastro de ese gasto."
+    )
+
+
+async def _liability_outstanding_now(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    liability: Account,
+    installments: list[LiabilityInstallment],
+) -> tuple[Decimal, bool]:
+    """Deuda viva de un pasivo AHORA + si la manda el cuadro. Usa el mismo MUX
+    que `accounts.service.get_balances` (`resolve_liability_outstanding`), no
+    una copia — si divergieran, la pantalla prometería un saldo y el módulo de
+    deuda enseñaría otro."""
+    movements = await get_balances_for_user(db, user_id)
+    resolved = resolve_liability_outstanding(
+        opening_balance=liability.opening_balance,
+        movements_balance=movements.get(liability.id, Decimal("0")),
+        installments=installments,
+    )
+    return resolved.value, resolved.from_schedule
+
+
+def _effect(
+    *,
+    source: Transaction,
+    liability: Account,
+    counts_as_expense: bool,
+    suggested: bool,
+    reason: str,
+    mode: str,
+    installments_marked: int,
+    principal_covered: Decimal,
+    outstanding_before: Decimal,
+    counterpart_transaction_id: uuid.UUID | None,
+    paired: bool,
+    dry_run: bool,
+) -> AmortizationEffect:
+    uncovered = source.amount - principal_covered
+    return AmortizationEffect(
+        source_transaction_id=source.id,
+        liability_account_id=liability.id,
+        liability_account_name=liability.name,
+        amount=source.amount,
+        currency=source.currency,
+        counts_as_expense=counts_as_expense,
+        suggested_counts_as_expense=suggested,
+        suggestion_reason=reason,
+        mode=mode,
+        installments_marked=installments_marked,
+        principal_covered=principal_covered,
+        principal_uncovered=uncovered if uncovered > 0 else Decimal("0"),
+        outstanding_before=outstanding_before,
+        outstanding_after=outstanding_before - principal_covered,
+        counterpart_transaction_id=counterpart_transaction_id,
+        paired=paired,
+        dry_run=dry_run,
+    )
+
+
+async def convert_to_amortization(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    source_transaction_id: uuid.UUID,
+    liability_account_id: uuid.UUID,
+    counts_as_expense: bool | None,
+    dry_run: bool,
+) -> AmortizationEffect:
+    """PHASE-45 — declara que un cargo del banco amortiza una deuda.
+
+    Con `dry_run=True` no escribe nada y devuelve el efecto EXACTO que tendría
+    (incluida la sugerencia de si cuenta como gasto y su motivo). El plan de
+    cuotas sale de la misma función pura que lo aplica, así que la previsión y
+    el resultado no pueden discrepar.
+    """
+    source = await repo_get_tx(db, source_transaction_id, user_id)
+    if source is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="La transacción no existe o no es tuya.",
+        )
+    if source.flow not in _OUTFLOW_FLOWS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Una amortización es dinero que SALE de una cuenta. Marca antes este "
+                "movimiento como gasto o transferencia de salida."
+            ),
+        )
+    already = await find_amortization_counterpart(db, user_id, source.id)
+    already_paid = await list_installments_paid_by_transaction(db, user_id, source.id)
+    if already is not None or already_paid:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Esta transacción ya está registrada como amortización. Deshaz el registro "
+                "antes de volver a hacerlo."
+            ),
+        )
+    # Una tx emparejada YA tiene su contrapartida moviendo el dinero a la otra
+    # cuenta. Registrarla además como amortización crearía una segunda pata y
+    # la deuda bajaría dos veces por el mismo pago.
+    if source.transfer_pair_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Esta transacción ya forma parte de una transferencia, que es la que mueve "
+                "el dinero a la otra cuenta. Deshaz el enlace antes de registrarla como "
+                "amortización."
+            ),
+        )
+
+    liability = await get_account_by_id(db, liability_account_id, user_id)
+    if liability is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="La cuenta de deuda no existe o no es tuya.",
+        )
+    if liability.nature != AccountNature.LIABILITY:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La cuenta destino debe ser de deuda (tarjeta, préstamo o hipoteca).",
+        )
+    if liability.id == source.account_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La deuda que amortizas no puede ser la propia cuenta del movimiento.",
+        )
+    if liability.currency != source.currency:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Amortizaciones cross-currency no soportadas todavía — la cuenta de deuda "
+                "debe tener la misma moneda que el movimiento."
+            ),
+        )
+
+    installments = await list_installments(db, liability.id, user_id)
+    outstanding_before, from_schedule = await _liability_outstanding_now(
+        db, user_id, liability, installments
+    )
+    registered_outflows = await count_registered_outflows(db, user_id, liability.id)
+    suggested, reason = _suggest_counts_as_expense(
+        has_schedule=from_schedule,
+        registered_outflows=registered_outflows,
+        liability_name=liability.name,
+    )
+    if counts_as_expense is None and not dry_run:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Declara si esta amortización cuenta como gasto (`counts_as_expense`).",
+        )
+    effective = suggested if counts_as_expense is None else counts_as_expense
+
+    plan = (
+        plan_installments_covering_principal(installments, source.amount) if from_schedule else []
+    )
+    # El capital que amortiza NO es el importe pagado: en un cuadro, los
+    # intereses de la cuota no reducen la deuda. Sin cuadro sí coinciden.
+    covered = sum((i.principal for i in plan), Decimal("0")) if from_schedule else source.amount
+    mode = MODE_SCHEDULE if from_schedule else MODE_MOVEMENT
+
+    if dry_run:
+        return _effect(
+            source=source,
+            liability=liability,
+            counts_as_expense=effective,
+            suggested=suggested,
+            reason=reason,
+            mode=mode,
+            installments_marked=len(plan),
+            principal_covered=covered,
+            outstanding_before=outstanding_before,
+            counterpart_transaction_id=None,
+            paired=False,
+            dry_run=True,
+        )
+
+    source.flow = TransactionFlow.OUT if effective else TransactionFlow.TRANSFER_OUT
+    counterpart_id: uuid.UUID | None = None
+    paired = False
+    if from_schedule:
+        for inst in plan:
+            await mark_installment_paid(
+                db, inst, paid_at=source.occurred_at, paid_transaction_id=source.id
+            )
+    else:
+        src_account = await get_account_by_id(db, source.account_id, user_id)
+        src_name = src_account.name if src_account is not None else "otra cuenta"
+        counterpart_category = await get_or_create_default_transfer_category(
+            db, user_id, kind=CategoryKind.INCOME
+        )
+        counterpart = Transaction(
+            user_id=user_id,
+            account_id=liability.id,
+            category_id=counterpart_category.id,
+            amount=source.amount,
+            currency=source.currency,
+            occurred_at=source.occurred_at,
+            description=f"Amortización desde {src_name}",
+            source=TransactionSource.MANUAL,
+            # Entra valor en el pasivo → la deuda baja. Fuera del cashflow
+            # siempre: el gasto (si lo es) lo cuenta la pata del banco, no ésta.
+            flow=TransactionFlow.TRANSFER_IN,
+            amortization_source_id=source.id,
+        )
+        db.add(counterpart)
+        await db.flush()
+        counterpart_id = counterpart.id
+        # Emparejar SÓLO cuando el movimiento es neutro: un par significa "el
+        # mismo dinero visto por los dos lados, fuera del cashflow", y budgets
+        # y las queries de gasto de deuda filtran `transfer_pair_id IS NULL`.
+        # Emparejar una pata declarada como gasto la borraría de ambos.
+        if not effective:
+            await repo_link_pair(db, source, counterpart)
+            paired = True
+
+    return _effect(
+        source=source,
+        liability=liability,
+        counts_as_expense=effective,
+        suggested=suggested,
+        reason=reason,
+        mode=mode,
+        installments_marked=len(plan),
+        principal_covered=covered,
+        outstanding_before=outstanding_before,
+        counterpart_transaction_id=counterpart_id,
+        paired=paired,
+        dry_run=False,
+    )
+
+
+async def describe_amortization(
+    db: AsyncSession, user_id: uuid.UUID, transaction_id: uuid.UUID
+) -> AmortizationEffect | None:
+    """PHASE-45 — el registro de amortización de una tx, si lo tiene.
+
+    Reconstruye el efecto YA aplicado a partir de su huella (la pata creada o
+    las cuotas marcadas), así que `outstanding_before` es el saldo que había
+    antes y `outstanding_after` el de ahora. `None` si la tx no está registrada.
+    """
+    source = await repo_get_tx(db, transaction_id, user_id)
+    if source is None:
+        return None
+    counterpart = await find_amortization_counterpart(db, user_id, source.id)
+    paid = await list_installments_paid_by_transaction(db, user_id, source.id)
+    if counterpart is None and not paid:
+        return None
+
+    liability_id = counterpart.account_id if counterpart is not None else paid[0].account_id
+    liability = await get_account_by_id(db, liability_id, user_id)
+    if liability is None:
+        return None
+    installments = await list_installments(db, liability.id, user_id)
+    outstanding_now, _ = await _liability_outstanding_now(db, user_id, liability, installments)
+    registered_outflows = await count_registered_outflows(db, user_id, liability.id)
+    suggested, reason = _suggest_counts_as_expense(
+        has_schedule=bool(installments),
+        registered_outflows=registered_outflows,
+        liability_name=liability.name,
+    )
+    covered = (
+        sum((i.principal for i in paid), Decimal("0")) if counterpart is None else source.amount
+    )
+    return _effect(
+        source=source,
+        liability=liability,
+        counts_as_expense=source.flow == TransactionFlow.OUT,
+        suggested=suggested,
+        reason=reason,
+        mode=MODE_MOVEMENT if counterpart is not None else MODE_SCHEDULE,
+        installments_marked=len(paid),
+        principal_covered=covered,
+        # El saldo de AHORA ya tiene la amortización aplicada, así que el de
+        # antes se reconstruye sumándola.
+        outstanding_before=outstanding_now + covered,
+        counterpart_transaction_id=counterpart.id if counterpart is not None else None,
+        paired=counterpart is not None and counterpart.transfer_pair_id is not None,
+        dry_run=False,
+    )
+
+
+async def undo_amortization(
+    db: AsyncSession, user_id: uuid.UUID, transaction_id: uuid.UUID
+) -> None:
+    """PHASE-45 — deshace el registro: la deuda vuelve a subir.
+
+    Desmarca las cuotas que pagó y manda a la papelera la pata que creó
+    (desemparejándola antes, para que la papelera atómica del par no se lleve
+    también el movimiento del banco). NO toca el `flow` del movimiento
+    original: era el que tenía antes de registrarlo y el usuario puede
+    cambiarlo desde el formulario si quiere.
+    """
+    source = await repo_get_tx(db, transaction_id, user_id)
+    if source is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="La transacción no existe o no es tuya.",
+        )
+    counterpart = await find_amortization_counterpart(db, user_id, source.id)
+    paid = await list_installments_paid_by_transaction(db, user_id, source.id)
+    if counterpart is None and not paid:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Esta transacción no está registrada como amortización.",
+        )
+    for inst in paid:
+        await unmark_installment_paid(db, inst)
+    if counterpart is not None:
+        if counterpart.transfer_pair_id is not None:
+            await repo_unlink_pair(db, source, counterpart)
+        counterpart.deleted_at = datetime.now(UTC)
+        counterpart.amortization_source_id = None
+        await db.flush()
 
 
 async def _create_liability_for_debt(

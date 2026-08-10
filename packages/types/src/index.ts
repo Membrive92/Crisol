@@ -58,6 +58,9 @@ export type {
   RecurringQuotaRef,
 } from './models/debt';
 export type {
+  AmortizationEffect,
+  AmortizationMode,
+  FinancingMatch,
   MisclassifiedTransfer,
   ReclassifyBulkResponse,
   TransferPair,
@@ -137,6 +140,7 @@ export type {
 } from './dto/account.dto';
 
 export type {
+  AmortizationRequest,
   NewLiabilityForDebt,
   TransferFromSourceDebtRequest,
   TransferFromSourceRequest,

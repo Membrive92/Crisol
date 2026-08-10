@@ -552,6 +552,31 @@ y [`improvements/ARCHITECTURE-investment-module.md`](improvements/ARCHITECTURE-i
 > B1/B2). Lo siguiente sale del engine: el adapter EDGAR (44.6), con parada para
 > el cruzado con empresas reales.
 
+### Fase 45 — «Es una amortización»: el cargo del banco que baja la deuda
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 45   | Un `ADEUDO MENSUAL DE TARJETA` sacaba el dinero de la cuenta y **no tocaba el módulo de deuda**: no había gesto para decir «esto paga esta deuda». Panel nuevo (web + móvil) con previsualizador contra el servidor. Cómo baja la deuda lo decide el pasivo —con cuadro se marcan cuotas y baja por el **capital**, no por lo pagado; sin cuadro se crea la contrapartida y baja entera—; si cuenta como **gasto** lo declara el usuario, con la sugerencia razonada al lado (una tarjeta cuyas compras ya están en la app no puede cobrarlas dos veces). Columna `transactions.amortization_source_id` en vez de reutilizar `transfer_pair_id`: emparejar una pata declarada como gasto la borraría de presupuestos y del gasto de deuda, que filtran `transfer_pair_id IS NULL` | 🚧 pendiente prueba manual | — |
+
+### Fase 46 — La deuda que nace no es un ingreso
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 46   | Julio de 2026 tenía **700,26 € de ingreso que nadie cobró** — el 100 % del ingreso del mes— y 700,26 € de gasto que doblaba compras ya contadas. BBVA financió el recibo de la tarjeta con dos redacciones que ninguna lista conocía (`Recibo anterior … Otras financiaciones` / `Recibo mes anterior`); el **mismo hecho en marzo**, escrito `Operacion financiada`, se había clasificado bien. Las liquidaciones de tarjeta se declaraban por duplicado —servicio y repositorio— y divergieron: el clasificador la contó como gasto **y** el buscador del cargo espejo no la reconoció. Ahora la secuencia se declara una vez y cada consumidor deriva su forma (subcadena / `ILIKE`), con un gate que falla si vuelven a separarse. La financiación entrante nunca es ingreso, **condicionada al signo** — el mismo producto es gasto real cuando llega la cuota—, y a qué deuda pertenece lo decide el **capital del cuadro**, no el texto: el usuario ya había creado el pasivo con los 700,26 € exactos y sólo faltaba el enlace. La prueba manual añadió lo que faltaba: ese extracto viene **sin signos**, así que una fila que no diga «abono» ni resuelva categoría entra sin dirección — pero PHASE-39 ya guardaba el **saldo del extracto** en esa misma fila, y el salto (717,10 → 1.417,36) la prueba. Segunda pasada que rellena la dirección con el salto, exigiendo coincidencia exacta y respetando el orden del extracto. Y destapó que el problema era mayor: el extracto de la **tarjeta** se había importado a la cuenta del **banco** (julio: 0 compras en la tarjeta frente a 7 en mayo y 7 en junio) | 🚧 pendiente reimportación | — |
+
+> Detalle en [`phases/phase-46-financing-is-not-income.md`](phases/phase-46-financing-is-not-income.md).
+> Sin migraciones. Verde: BE 1353 tests · ruff · black · mypy · FE typecheck ·
+> lint · knip · 307 tests. Los tests nuevos verificados **rompiendo el código**.
+
+> Detalle en [`phases/phase-45-amortization-link.md`](phases/phase-45-amortization-link.md).
+> El MUX de PHASE-36 («el cuadro manda») se extrae a `resolve_liability_outstanding`
+> para que el saldo que promete el panel y el que enseña el módulo de deuda no
+> puedan divergir, y el greedy de cuotas pasa a ser una función PURA compartida
+> por el previsualizador y el aplicador. Verde: 19 tests nuevos de backend
+> **verificados rompiendo el código** (bajar por lo pagado en vez de por el
+> capital, y emparejar siempre, tumban tres), 9 de la capa compartida y 7 del
+> panel web (también verificado rompiéndolo).
+
 ---
 
 ## Estructura de este directorio

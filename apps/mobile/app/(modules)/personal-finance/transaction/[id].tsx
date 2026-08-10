@@ -8,9 +8,10 @@ import {
 } from '@crisol/services';
 import { toast } from '@crisol/store';
 import type { TransactionUpdateRequest } from '@crisol/types';
-import { colors, fontSize, spacing } from '@crisol/ui';
+import { colors, fontSize, formatAmount, spacing } from '@crisol/ui';
 
 import { TransactionForm } from '../../../../components/transaction-form';
+import { AmortizationBlock } from '../../../../components/transfers/amortization-block';
 import {
   ConvertToDebtBlock,
   looksLikeFinancedOperation,
@@ -56,6 +57,24 @@ export default function EditTransactionScreen() {
         onSubmit={(payload) => handleSubmit(payload as TransactionUpdateRequest)}
         onCancel={() => router.back()}
       />
+      {/* PHASE-45 — sólo salidas sin emparejar: una tx emparejada ya tiene su
+          contrapartida moviendo el dinero (el backend lo rechaza con 409). */}
+      {data.transfer_pair_id === null &&
+      (data.flow === 'OUT' || data.flow === 'TRANSFER_OUT') ? (
+        <AmortizationBlock
+          transaction={data}
+          onRegistered={(effect) =>
+            toast.success(
+              `Amortización registrada: ${effect.liability_account_name} baja a ` +
+                `${formatAmount(effect.outstanding_after, effect.currency)}.`,
+            )
+          }
+          onUndone={() => toast.success('Registro deshecho: la deuda vuelve a subir.')}
+          onError={(err) =>
+            toast.error(formatApiError(err, 'No se pudo registrar la amortización.'))
+          }
+        />
+      ) : null}
       {data.transfer_pair_id === null ? (
         <>
           <ConvertToTransferBlock

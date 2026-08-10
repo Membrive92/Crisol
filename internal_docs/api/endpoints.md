@@ -528,26 +528,40 @@ Reglas:
 
 | Método | Ruta | Auth | Body / Query | Response |
 |--------|------|------|--------------|----------|
-| GET    | `/transfers` | sí | — | `200 list[TransferPair]` |
-| GET    | `/transfers/candidates` | sí | `?window_days=N` (def 3, max 14) | `200 list[TransferCandidate]` (sin escribir nada en BD) |
-| POST   | `/transfers/match` | sí | `{ window_days?: N }` | `200 TransferMatchResponse { linked_count, pending_candidates }` |
 | POST   | `/transfers/link` | sí | `{ out_transaction_id, in_transaction_id }` | `201 TransferPair` (`400` si misma cuenta o importe distinto, `409` si ya hay par, `404` si tx ajena) |
-| DELETE | `/transfers/{transaction_id}` | sí | — | `204` |
-| GET    | `/transfers/suspects` | sí | — | `200 list[TransferSuspect]` — tx candidatas a transferencia sin pareja (descripción con transfer/BIZUM/TRASPASO, aún no marcadas) (PHASE-23/33) |
+| DELETE | `/transfers/{transaction_id}` | sí | — | `204` — deshace el par |
 | GET    | `/transfers/misclassified` | sí | — | `200 list[MisclassifiedTransfer]` — tx `is_transfer` cuyo `kind` no encaja con la dirección del texto (RECIBIDA en categoría EXPENSE). Candidatas a recategorización en bloque (PHASE-31.2) |
+| GET    | `/transfers/financing-matches` | sí | — | `200 list[FinancingMatchResponse]` — abonos que parecen una financiación (el banco aplaza un recibo y nace deuda) y encajan con el CAPITAL del cuadro de un pasivo que aún no tiene registrado su origen. Sólo propone: el enlace lo confirma el usuario con `from-source-debt`. `counted_as_income` dice si hoy está sumando en la gráfica de ingresos (PHASE-46) |
 | POST   | `/transfers/reclassify-bulk` | sí | `{ transaction_ids[], target_category_id? }` | `200 ReclassifyBulkResponse` — recategoriza en bloque; sin `target_category_id`, cada tx va a la categoría `is_transfer` del kind opuesto (PHASE-31.2) |
-| POST   | `/transfers/mark` | sí | `{ transaction_id }` | `201 TransferMarkResponse` — marca una tx como transferencia interna (categoría `is_transfer`, creándola si falta). Sale del cashflow, sigue impactando el saldo (PHASE-23.1) |
 | POST   | `/transfers/from-source` | sí | `{ source_transaction_id, originating_account_id, beneficiary_account_id }` | `201 TransferPairResponse` — convierte una tx en transferencia interna creando la contraparte y emparejando ambas; dirección EXPLÍCITA (PHASE-23.1/28) |
 | POST   | `/transfers/from-source-debt` | sí | `{ source_transaction_id, destination_account_id?, new_liability? }` | `201 TransferPairResponse` — convierte una tx en operación financiada: crea la contraparte en una liability (existente o nueva al vuelo) y empareja; la deuda sube por el importe (PHASE-24) |
+| POST   | `/transfers/amortization` | sí | `{ source_transaction_id, liability_account_id, counts_as_expense?, dry_run? }` | `200 AmortizationEffect` — declara que un cargo del banco amortiza una deuda (PHASE-45). Con `dry_run:true` no escribe nada y devuelve el efecto exacto + la sugerencia de si cuenta como gasto **con su motivo**; al aplicar, `counts_as_expense` es obligatorio (`400` si falta). `400` si la tx no es una salida, si la cuenta no es de deuda, si es la propia cuenta del movimiento o si es de otra divisa; `409` si ya está registrada o si la tx está emparejada; `404` si la tx o la cuenta son ajenas |
+| GET    | `/transfers/amortization/{transaction_id}` | sí | — | `200 AmortizationEffect` con el registro ya aplicado; `404` si la tx no está registrada (estado normal de la pantalla, no error) |
+| DELETE | `/transfers/amortization/{transaction_id}` | sí | — | `204` — deshace el registro: desmarca las cuotas y manda la contrapartida a la papelera. La deuda vuelve a subir. `404` si no estaba registrada |
+
+> PHASE-41 (ADR-0005) retiró el emparejado heurístico: `GET /transfers`,
+> `/candidates`, `POST /match`, `GET /suspects` y `POST /mark` **ya no
+> existen**. La verdad del dinero vive en `transactions.flow` (ADR-0004).
+
+**`AmortizationEffect`** (PHASE-45) — el previsto y el ya aplicado comparten
+forma. `mode` dice CÓMO baja la deuda y lo decide el pasivo, no el usuario:
+
+- `schedule` — el pasivo tiene cuadro, así que se marcan cuotas pagadas y **no
+  se crea ningún movimiento** (uno sería invisible para el saldo, que manda el
+  cuadro desde PHASE-36). `principal_covered` es Σ del capital de las cuotas
+  cubiertas: **no** el importe pagado, porque los intereses no amortizan.
+  `installments_marked: 0` significa que el pago no llega a completar la cuota
+  pendiente más antigua y la deuda NO baja — se declara, no se esconde.
+- `movement` — sin cuadro (tarjeta con saldo arrastrado): se crea la
+  contrapartida en la cuenta de deuda (`counterpart_transaction_id`) y baja por
+  el importe entero.
+
+`counts_as_expense` lo declara el usuario y sólo cambia el `flow` de la pata del
+banco (`OUT` vs `TRANSFER_OUT`). Emparejar (`paired`) ocurre **sólo** cuando es
+neutro: `budgets` y las queries de gasto de deuda filtran `transfer_pair_id IS
+NULL`, así que emparejar una pata declarada como gasto la borraría de las dos.
 
 Reglas:
-- El matcher empareja por `amount` + `currency` + cuentas distintas
-  + `occurred_at` dentro de `±window_days` + `kind` opuesto cuando
-  hay categoría (txs sin categoría participan en ambos lados).
-- Política conservadora: si dos pares comparten huella
-  (`amount + currency + frozenset({acc_a, acc_b})`), NINGUNO se
-  enlaza automáticamente — los devuelve como `pending_candidates`
-  para que el usuario decida.
 - Bidireccional: al enlazar A↔B, ambas filas apuntan mutuamente.
 - Las txs con `transfer_pair_id IS NOT NULL` se EXCLUYEN de los
   agregados (cashflow, donut, top-expenses, budgets) pero SÍ

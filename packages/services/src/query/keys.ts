@@ -83,6 +83,12 @@ export const queryKeys = {
     // emparejado heurístico. `all` sigue usándose para invalidar tras
     // link/unlink/convert; `misclassified` alimenta la data-hygiene.
     misclassified: () => [...queryKeys.transfers.all, 'misclassified'] as const,
+    // PHASE-46 — abonos de financiación que encajan con el cuadro de una deuda.
+    financingMatches: () =>
+      [...queryKeys.transfers.all, 'financing-matches'] as const,
+    // PHASE-45 — registro de amortización de una tx concreta (o su ausencia).
+    amortization: (transactionId: string) =>
+      [...queryKeys.transfers.all, 'amortization', transactionId] as const,
   },
   categories: {
     all: ['categories'] as const,

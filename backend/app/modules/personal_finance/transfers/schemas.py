@@ -59,6 +59,29 @@ class MisclassifiedTransfer(BaseModel):
     """`income` si la descripción es entrante, `expense` si es saliente."""
 
 
+class FinancingMatchResponse(BaseModel):
+    """PHASE-46 — un abono de financiación y la deuda a la que parece pertenecer.
+
+    Lo que el banco te abona cuando aplaza algo NO es un ingreso, y además tiene
+    una deuda detrás. Esta propuesta une las dos mitades: la transacción que
+    entró en la cuenta y el cuadro de amortización que el usuario ya dio de
+    alta, reconocidos por el capital y no por la redacción del extracto.
+    """
+
+    transaction_id: uuid.UUID
+    description: str | None
+    amount: Decimal
+    currency: str
+    occurred_at: datetime
+    counted_as_income: bool
+    """`True` si HOY está sumando en la gráfica de ingresos — el estado a corregir."""
+    liability_id: uuid.UUID
+    liability_name: str
+    schedule_principal: Decimal
+    reason: str
+    """Por qué se propone, en lenguaje llano, para que la pantalla explique."""
+
+
 class ReclassifyBulkRequest(BaseModel):
     """PHASE-31.2 — recategorizar en bloque tx detectadas como
     mal direccionadas. Si no se pasa `target_category_id`, el service
@@ -130,6 +153,56 @@ class NewLiabilityForDebt(BaseModel):
         default=None, ge=Decimal("0"), decimal_places=2
     )
     """PHASE-24.3 — Primera cuota especial sólo de intereses."""
+
+
+class AmortizationRequest(BaseModel):
+    """PHASE-45: declarar que un movimiento del banco amortiza una deuda.
+
+    `counts_as_expense` es EXPLÍCITO y no se infiere del tipo de cuenta: la
+    misma operación es gasto o no según si ese dinero YA se contó al comprar
+    (generaliza la lección de PHASE-28, "la dirección se declara, no se
+    adivina"). En `dry_run` puede omitirse y el servidor devuelve su sugerencia
+    con el motivo; al aplicar es obligatorio.
+    """
+
+    source_transaction_id: uuid.UUID
+    liability_account_id: uuid.UUID
+    counts_as_expense: bool | None = None
+    dry_run: bool = False
+
+
+class AmortizationEffect(BaseModel):
+    """Qué le pasa (o le pasaría) a la deuda con esta amortización."""
+
+    source_transaction_id: uuid.UUID
+    liability_account_id: uuid.UUID
+    liability_account_name: str
+    amount: Decimal
+    currency: str
+    counts_as_expense: bool
+    """El valor EFECTIVO: lo que declaró el usuario, o la sugerencia en dry-run."""
+    suggested_counts_as_expense: bool
+    suggestion_reason: str
+    """Por qué el servidor sugiere eso — se pinta al lado de la elección."""
+    mode: str
+    """`schedule` (la deuda baja marcando cuotas) | `movement` (baja por el
+    movimiento contrario en la cuenta de deuda)."""
+    installments_marked: int
+    """0 en modo `movement`. En modo `schedule`, cuántas cuotas cubre el pago."""
+    principal_covered: Decimal
+    """Capital que amortiza de verdad. En modo `schedule` es Σ del principal de
+    las cuotas cubiertas (NO el importe pagado: los intereses no amortizan)."""
+    principal_uncovered: Decimal
+    """Lo que sobra sin llegar a completar la siguiente cuota (modo `schedule`).
+    Igual al importe entero cuando el pago no cubre ni una: ahí el saldo NO baja."""
+    outstanding_before: Decimal
+    outstanding_after: Decimal
+    counterpart_transaction_id: uuid.UUID | None = None
+    """La pata creada en la cuenta de deuda (modo `movement`). `None` en modo
+    `schedule` — ahí manda el cuadro y un movimiento sería invisible."""
+    paired: bool = False
+    """True si las dos patas quedaron emparejadas (sólo cuando NO es gasto)."""
+    dry_run: bool = False
 
 
 class TransferFromSourceDebtRequest(BaseModel):

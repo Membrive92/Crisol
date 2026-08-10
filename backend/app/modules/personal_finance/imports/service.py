@@ -132,6 +132,12 @@ class ParsedRow:
     # (columna Saldo). Informativo — `None` si el fichero no la trae o el
     # valor no parsea; NUNCA participa en el `import_hash` (idempotencia).
     statement_balance: Decimal | None = None
+    # PHASE-46: las entradas con que se clasificó la fila, para que la segunda
+    # pasada (`resolve_flows_from_balance_chain`) pueda volver a llamar al
+    # MISMO clasificador con la dirección ya deducida, en vez de decidir por su
+    # cuenta qué es una transferencia y arriesgarse a discrepar.
+    classify_text: str | None = None
+    category_is_transfer: bool = False
 
 
 async def run_import(
@@ -505,6 +511,71 @@ def _chain_matches(rows: list[ParsedRow], *, newest_first: bool) -> int:
     return matches
 
 
+def _rows_oldest_first(rows: list[ParsedRow]) -> list[ParsedRow]:
+    """Las filas CON saldo, ordenadas de la más antigua a la más reciente.
+
+    El orden se deduce igual que en `_pick_balance_anchor` —por las fechas de
+    la primera y la última, y con la aritmética de la cadena como desempate
+    cuando el extracto es de un solo día—. No se ordena por fecha: dentro de un
+    mismo día el extracto imprime en un orden que las fechas no capturan, y es
+    ESE orden el que hace que la cadena de saldos cuadre.
+    """
+    with_balance = [p for p in rows if p.statement_balance is not None]
+    if len(with_balance) < 2:
+        return with_balance
+    first, last = with_balance[0], with_balance[-1]
+    if first.occurred_at > last.occurred_at:
+        newest_first = True
+    elif first.occurred_at < last.occurred_at:
+        newest_first = False
+    else:
+        newest_first = _chain_matches(with_balance, newest_first=True) >= _chain_matches(
+            with_balance, newest_first=False
+        )
+    return list(reversed(with_balance)) if newest_first else with_balance
+
+
+def resolve_flows_from_balance_chain(rows: list[ParsedRow]) -> int:
+    """PHASE-46 — deduce la dirección de las filas SIN clasificar a partir del
+    salto del saldo del extracto. Devuelve cuántas se resolvieron.
+
+    **Por qué existe.** Muchos extractos traen el importe sin signo, así que la
+    dirección se deduce del texto y, si falla, del kind de la categoría. Una
+    fila que no dice ni "abono" ni "recibido" y que no resuelve categoría se
+    queda sin clasificar — neutra, que es lo honesto pero no lo cierto. Medido
+    en un extracto real: `Operación financiada 4940…` por 700,26 € entró así,
+    y era un ABONO; la prueba estaba en la propia fila, en la columna Saldo que
+    PHASE-39 ya captura y que nadie consultaba.
+
+    **Por qué es seguro.** Se exige que el salto entre dos saldos consecutivos
+    sea EXACTAMENTE el importe de la fila. Si entre ambas hubiera otro
+    movimiento sin saldo, el salto no cuadraría y no se toca nada: mejor una
+    fila neutra que una dirección inventada. Y la fila resuelta vuelve a pasar
+    por `classify_import_flow` con el signo deducido, así que su transfer-ness
+    se decide con la misma regla que el resto — no con una copia.
+    """
+    ordered = _rows_oldest_first(rows)
+    resolved = 0
+    for previous, current in itertools.pairwise(ordered):
+        if current.flow is not None:
+            continue
+        assert previous.statement_balance is not None  # `_rows_oldest_first` filtra
+        assert current.statement_balance is not None
+        delta = current.statement_balance - previous.statement_balance
+        if abs(delta) != current.amount or delta == 0:
+            continue
+        flow = classify_import_flow(
+            bank_sign=1 if delta > 0 else -1,
+            text=current.classify_text,
+            category_is_transfer=current.category_is_transfer,
+        )
+        if flow is None:
+            continue
+        current.flow = flow
+        resolved += 1
+    return resolved
+
+
 def _pick_balance_anchor(rows: list[ParsedRow]) -> tuple[datetime, Decimal] | None:
     """PHASE-39 — elige el ancla de saldo del lote: `(fecha, saldo)` del
     movimiento CRONOLÓGICAMENTE más reciente que trae saldo de extracto.
@@ -630,6 +701,26 @@ async def _process_and_persist(
         if review_note is not None and len(review) < MAX_ERROR_LOG:
             review.append({"row": idx, "error": review_note, "review": True})
         parsed.append(parsed_row)
+
+    # PHASE-46: segunda pasada sobre las filas que quedaron sin dirección. Va
+    # aquí y no dentro del bucle porque el salto de saldo es una relación ENTRE
+    # filas consecutivas: mirando una sola no se puede saber. Sólo actúa cuando
+    # el extracto trae la columna Saldo y el salto cuadra exactamente con el
+    # importe de la fila.
+    resolved_by_balance = resolve_flows_from_balance_chain(parsed)
+    if resolved_by_balance and len(review) < MAX_ERROR_LOG:
+        plural = "movimiento" if resolved_by_balance == 1 else "movimientos"
+        review.append(
+            {
+                "row": 0,
+                "error": (
+                    f"{resolved_by_balance} {plural} sin signo en el extracto: la "
+                    "dirección se ha deducido del salto de la columna Saldo. "
+                    "Compruébalos antes de confirmar."
+                ),
+                "review": True,
+            }
+        )
 
     # AUDIT finding #2: asigna un ordinal de ocurrencia DENTRO del lote a
     # cada grupo de filas con el mismo hash base (user+amount+currency+
@@ -1285,10 +1376,12 @@ def _parse_row(
     # extracto, la dirección cae al texto y luego al kind de la categoría
     # resuelta (extractos sólo-magnitud); sin ninguna señal queda sin
     # clasificar (None) — neutro, como una tx sin categoría.
+    classify_text = f"{category_name_raw} {description or ''}".strip()
+    category_is_transfer = bool(transfer_cat_ids and category_id in transfer_cat_ids)
     flow = classify_import_flow(
         bank_sign=bank_sign,
-        text=f"{category_name_raw} {description or ''}".strip(),
-        category_is_transfer=bool(transfer_cat_ids and category_id in transfer_cat_ids),
+        text=classify_text,
+        category_is_transfer=category_is_transfer,
         category_kind=(category_kinds or {}).get(category_id) if category_id else None,
     )
 
@@ -1309,6 +1402,8 @@ def _parse_row(
             import_hash=import_hash,
             flow=flow,
             statement_balance=_parse_balance(balance_raw),
+            classify_text=classify_text,
+            category_is_transfer=category_is_transfer,
         ),
         review_note,
     )

@@ -1,37 +1,118 @@
-# Dónde estamos — 2026-08-09
+# Dónde estamos — 2026-08-10
 
-Punto de continuación tras las sesiones del 7, el 8 y el 9 de agosto. Se lee de
+Punto de continuación tras las sesiones del 7 al 10 de agosto. Se lee de
 arriba abajo; lo que hay que decidir está al final.
 
 ---
 
 ## Lo primero al retomar
 
-**Hay trabajo terminado y SIN COMMITEAR: tres fases más.** Está verde en todas
-las verificaciones automáticas, pero **falta tu prueba manual** — y la convención
-del proyecto es no commitear hasta que la des por buena.
+**La decisión abierta, y es de diseño, no de código.** Al cerrar la sesión del 10
+dijiste: *«seguimos teniendo el mismo problema de fondo, el manejo del módulo es
+demasiado complicado»*, y vas a estudiar una solución por tu cuenta. Lo que se
+midió ese día, para que la conversación arranque con datos:
 
-- **PHASE-44.17** — «lo que no se pudo medir, se dice». Las tres piezas
-  contrastadas del plan (el motivo del ejercicio equivocado, la leyenda falsa del
-  forense, el «denominador cero» de L4) **y** lo que estaba bloqueado: las reglas
-  de bandera publican si se pudieron evaluar. Motor **1.4.0** y **1.5.0**.
-- **PHASE-44.21** — calibración sectorial. Doce perfiles, la whitelist financiera
-  con motivo por métrica, dos reglas cruzadas y las cuatro preguntas declarando
-  sus portantes. Motor **1.6.0**. **Hay migración**: `alembic upgrade head`.
-- **PHASE-44.22** — los tres charts del informe (web): heatmap de variaciones,
-  deriva de la estructura de márgenes y dumbbell de stress. Sin backend.
-- **Deuda mecánica saldada**: knip entra en CI (y `scripts/` en ruff/black/mypy),
-  el sector se refresca al re-resolver, la tabla de cartera gana test, el alta
-  móvil usa el date-picker nativo, el combobox arrastra la opción activa a la
-  vista y en móvil el motivo por celda por fin se lee.
+- **6 cuentas de pasivo y 5 cuadros de amortización (177 cuotas)** para lo que en
+  la vida real son un préstamo, una tarjeta y tres compras a plazos.
+- **45 de 479 movimientos** (uno de cada diez) no son ni gasto ni ingreso: para
+  leer un mes hay que saber por qué está cada uno.
+- **Diez operaciones distintas** para gestos que en la cabeza del usuario son
+  uno: enlazar, deshacer, convertir en transferencia, convertir en operación
+  financiada, es una amortización, deshacerla, recategorizar en bloque,
+  reconciliar deuda, reasignar cuenta y cuadrar saldo.
+- Las **seis correcciones** que hicieron falta ese día para dejar julio bien
+  **no se podían hacer desde la interfaz**.
 
-**Y sigue pendiente todo lo anterior de subir**: `origin/main` está en `d98c96f`
-y el `main` local va muy por delante (PHASE-44.9 a 44.20 commiteadas y nunca
-empujadas).
+Las tres direcciones que quedaron sobre la mesa (sin decidir): el **cuadre del
+extracto como portero del import**, que la **deuda nazca del extracto** en vez
+del formulario, y **un solo gesto** «¿qué es este movimiento?» en la transacción.
+Pregunta de fondo anterior a todas: si el saldo de la deuda necesita las **dos
+verdades** (cuadro vs. movimientos) del MUX de PHASE-36.
+
+**Todo lo anterior está commiteado y en `origin/main`**, incluidas PHASE-45 y
+PHASE-46, a petición tuya y **sin prueba manual completa**.
+
+- **PHASE-46 — la deuda que nace no es un ingreso.** Julio tenía 700,26 € de
+  ingreso que nadie cobró (el 100 % del ingreso del mes) y otros 700,26 € de
+  gasto que doblaba compras ya contadas. Ver
+  [`phases/phase-46-financing-is-not-income.md`](phases/phase-46-financing-is-not-income.md).
+- **PHASE-45 — «Es una amortización».** Un `ADEUDO MENSUAL DE TARJETA` sacaba el
+  dinero de BBVA y **no tocaba el módulo de deuda**: no existía ningún gesto para
+  decir «esto paga esta deuda». Panel nuevo en el detalle de transacción (web y
+  móvil) que lo enlaza. **Hay migración**: `alembic upgrade head`.
+- **PHASE-44.17** — «lo que no se pudo medir, se dice». Motor **1.4.0** y **1.5.0**.
+- **PHASE-44.21** — calibración sectorial. Motor **1.6.0**.
+- **PHASE-44.22** — los tres charts del informe (web).
 
 ---
 
-## Qué cambia de verdad en pantalla
+## Estado de los datos tras la sesión del 10 (finanzas domésticas)
+
+Julio quedó cuadrado, pero hizo falta cirugía. Lo que hay que saber:
+
+| | |
+|---|---|
+| Ingresos julio 2026 | 2.529,68 € |
+| Gastos julio 2026 | 1.952,31 € (BBVA 1.343,17 + tarjeta 609,14) |
+| Saldo BBVA | 1.778,19 € — idéntico al extracto del 30-07 |
+| Saldo Tarjeta BBVA credito | 926,48 € |
+| Transacciones sin clasificar | 0 en toda la app |
+
+**Origen del lío:** `julio criedito.pdf` (extracto de la TARJETA) se importó
+eligiendo la cuenta **BBVA**. Sin un solo error: 19 filas OK. La señal que lo
+delató fue comparar meses — mayo 7 compras en la tarjeta, junio 7, **julio 0**.
+
+**Queda un clic pendiente**: en Transacciones hay una propuesta para atar
+`06/07 · Operación financiada · 700,26 €` con la deuda
+`Compra finaciada recibo junio`. Ya no cuenta como ingreso; lo que falta es que
+la deuda tenga registrado el movimiento que la originó.
+
+**Y un descuadre de 1,50 €**: `Reembolso maxima netflix` lleva seis meses
+entrando como ingreso en `Bonus tarjeta de credito` y el de julio entró como
+gasto en `Suscripciones`.
+
+Los tres scripts de `backend/scripts/` que se usaron llevan `--dry-run`:
+`undo_card_statement_into_bank.py`, `move_import_to_account.py` y
+`classify_from_statement_balance.py`. El segundo sirve para cualquier futuro
+fichero que se cuele en la cuenta equivocada.
+
+---
+
+## PHASE-45 — qué probar (finanzas domésticas)
+
+En **Transacciones → una salida de dinero sin emparejar** aparece un bloque nuevo
+**«¿Es una amortización?»**. Los cuatro cargos de julio son el caso real:
+
+| Fecha | Importe | Concepto |
+|---|---|---|
+| 08-jul | 406,33 € | Adeudo mensual de tarjeta |
+| 08-jul | 384,38 € | Adeudo mensual de tarjeta |
+| 15-jul | 164,94 € | Adeudo mensual de tarjeta |
+| 15-jul | 143,99 € | Adeudo mensual de tarjeta |
+
+Abre uno, elige la deuda y **antes de confirmar** el panel te dice qué va a
+pasar: cuántas cuotas marca (o que crea la contrapartida), cuánto capital
+amortiza de verdad y a cuánto se queda la deuda. Después eliges si cuenta como
+gasto, con la sugerencia razonada al lado.
+
+Lo que conviene comprobar con los ojos:
+
+1. **Con la tarjeta** (sin cuadro): sugiere **«No, es neutro»** porque tiene
+   compras registradas — y lo dice contando cuántas. La deuda baja por el importe
+   entero.
+2. **Con el préstamo** (con cuadro): sugiere **«Sí, es gasto»**, marca cuota(s) y
+   la deuda baja por el **capital**, no por lo pagado. Si el número que ves es el
+   del pago, hay un bug.
+3. **Un pago pequeño contra el préstamo** sale con aviso: «no llega a completar
+   la cuota más antigua, la deuda no bajará». Es correcto, no un fallo.
+4. **Deshacer** devuelve la deuda a su valor anterior. La contrapartida creada
+   aparece en la papelera.
+5. Cruza el resultado con **/debt** y con el saldo de la cuenta: tienen que
+   coincidir (salen del mismo cálculo, pero es lo que ningún test puede mirar).
+
+---
+
+## Qué cambia de verdad en pantalla (inversión)
 
 Lo que sigue se ve **reejecutando un análisis**; los runs guardados son de
 motores anteriores y saldrán con el aviso de run caducado (que es correcto).

@@ -22,6 +22,7 @@ import { toast, useCurrencyStore } from '@crisol/store';
 import type { TransactionListQuery } from '@crisol/types';
 import { colors, fontSize, fontWeight, layout, pluralize, radius, spacing } from '@crisol/ui';
 
+import { FinancingMatchesSection } from '@/components/transactions/financing-matches-section';
 import { MisclassifiedSection } from '@/components/transactions/misclassified-section';
 import { StitchSearchToolbar } from '@/components/transactions/stitch-search-toolbar';
 import { StitchTransactionsKpiRow } from '@/components/transactions/stitch-transactions-kpi-row';
@@ -413,6 +414,11 @@ export default function TransactionsPage() {
             aquí desde la retirada pestaña /transfers. Sólo se pinta si hay
             tx mal direccionadas. */}
         <MisclassifiedSection />
+
+        {/* PHASE-46 — abonos que el banco te hace al aplazar un recibo: entran
+            como ingreso y no lo son. Se propone atarlos a la deuda cuyo cuadro
+            tiene ese mismo capital. Sólo se pinta si hay alguno. */}
+        <FinancingMatchesSection />
 
         <StitchSearchToolbar
           value={filters}

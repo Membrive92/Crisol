@@ -58,11 +58,16 @@ export {
   useUpdateInstallment,
 } from './query/hooks/useAccounts';
 export {
+  useAmortization,
+  useAmortize,
   useConvertToDebt,
   useConvertToTransfer,
+  useFinancingMatches,
   useLinkTransfer,
   useMisclassifiedTransfers,
+  usePreviewAmortization,
   useReclassifyBulk,
+  useUndoAmortization,
   useUnlinkTransfer,
 } from './query/hooks/useTransfers';
 export {

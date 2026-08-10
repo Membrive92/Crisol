@@ -16,6 +16,8 @@ from app.modules.personal_finance.accounts.installments_model import (
 from app.modules.personal_finance.accounts.installments_repository import (
     generate_installments_for_account,
     installments_by_account,
+    plan_installments_covering_principal,
+    resolve_liability_outstanding,
     schedule_outstanding,
 )
 from app.modules.personal_finance.accounts.installments_repository import (
@@ -636,15 +638,19 @@ async def get_balances(
         # (Σ principal de cuotas no pagadas), no los movimientos. El
         # `movements_balance` se reexpresa para conservar la invariante
         # `opening + movements == current`.
-        sched_outstanding = (
-            schedule_outstanding(insts_by_account.get(account.id, []))
+        resolved = (
+            resolve_liability_outstanding(
+                opening_balance=account.opening_balance,
+                movements_balance=cash_movement,
+                installments=insts_by_account.get(account.id, []),
+            )
             if account.nature == AccountNature.LIABILITY
             else None
         )
-        if sched_outstanding is not None:
-            display_balance = sched_outstanding
-            cash_balance = sched_outstanding
-            display_movement = sched_outstanding - account.opening_balance
+        if resolved is not None and resolved.from_schedule:
+            display_balance = resolved.value
+            cash_balance = resolved.value
+            display_movement = resolved.value - account.opening_balance
         is_unvalued = account.type in UNVALUED_ACCOUNT_TYPES
 
         # AUDIT-2026-06 — Modo convertido: además del agregado, cada item
@@ -1155,20 +1161,14 @@ async def pay_installments_by_principal(
 
     installments = await repo_list_installments(db, account_id, user_id)
     when = paid_at if paid_at is not None else datetime.now(UTC)
-    tolerance = Decimal("0.01")
-    remaining = principal_amount
-    covered = Decimal("0")
-    marked = 0
-    for inst in installments:  # repo_list_installments ordena por índice asc
-        if inst.paid_at is not None:
-            continue
-        if inst.principal <= remaining + tolerance:
-            await repo_mark_paid(db, inst, paid_at=when, paid_transaction_id=paid_transaction_id)
-            remaining -= inst.principal
-            covered += inst.principal
-            marked += 1
-        else:
-            break
+    # PHASE-45: el greedy vive en `plan_installments_covering_principal` (puro)
+    # para que el previsualizador del panel de amortización y este aplicador
+    # compartan UNA definición y no puedan divergir.
+    plan = plan_installments_covering_principal(installments, principal_amount)
+    for inst in plan:
+        await repo_mark_paid(db, inst, paid_at=when, paid_transaction_id=paid_transaction_id)
+    marked = len(plan)
+    covered = sum((i.principal for i in plan), Decimal("0"))
 
     outstanding = schedule_outstanding(await repo_list_installments(db, account_id, user_id))
     uncovered = principal_amount - covered

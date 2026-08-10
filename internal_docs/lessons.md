@@ -1388,6 +1388,119 @@ donde este fallo se esconde hasta el día que hace falta. Hermana de [PHASE-44.1
 «`cmd | tail` rompe el `&&`»: en las dos, la fontanería que rodea al comando
 cambia el resultado de una forma que el comando no puede ver.
 
+### [PHASE-45] Una columna sobre la que alguien FILTRA no es un puntero: es una afirmación, y reutilizarla propaga esa afirmación a donde no toca
+**Error (evitado):** Para enlazar el cargo del banco con la contrapartida que lo
+amortiza en la cuenta de deuda, lo barato era reutilizar `transfer_pair_id` —
+existe, es una self-FK, tiene índice y ya empareja las dos patas de un
+movimiento—. Habría hecho desaparecer ese gasto del presupuesto del mes y del
+gasto de deuda, en silencio, justo cuando el usuario acababa de declarar que
+**sí** es gasto.
+**Causa:** `transfer_pair_id` no significa «apunta a». Significa «esto es la
+misma plata vista por los dos lados, fuera del cashflow», y ocho consultas de
+`budgets/repository.py` y `debt/repository.py` lo aplican como
+`WHERE transfer_pair_id IS NULL`. La semántica no está en el nombre ni en el
+tipo: está repartida por los `WHERE` de otros módulos, que es donde nadie mira
+al elegir dónde guardar un enlace nuevo.
+**Solución:** una columna propia (`transactions.amortization_source_id`) con su
+propio significado. Lo decidió un `grep transfer_pair_id backend/app`, no una
+corazonada: leer las 20 líneas que lo usan tardó menos que discutirlo conmigo
+mismo, y una de ellas resolvió el diseño.
+**Regla:** antes de reutilizar una columna existente para una relación nueva,
+**grepea quién FILTRA por ella**, no quién la lee. Una columna que aparece en un
+`WHERE` de otro módulo lleva una afirmación pegada, y tu fila nueva la heredará
+entera. Si tu caso no quiere esa afirmación —aquí: «esto no cuenta como
+gasto»—, no es la columna, por mucho que la forma encaje. Corolario del mismo
+arreglo: cuando dos ramas de una operación necesiten semánticas opuestas
+(emparejar cuando es neutro, no emparejar cuando es gasto), esa asimetría es
+información, no una inconsistencia que haya que limar — escríbela y ponle test.
+
+### [PHASE-46] Un catálogo de redacciones ajenas no es una regla: es una lista de las veces que has mirado — y el hecho vuelve con otro nombre
+**Error:** Julio de 2026 mostraba **700,26 € de ingreso que nadie cobró** (el
+100 % del ingreso que la app atribuía al mes) y 700,26 € de gasto que doblaba
+compras ya contadas una a una. BBVA había financiado el recibo de la tarjeta:
+abona el importe y al día siguiente lo cobra —neto cero, y queda una deuda a 36
+meses—, pero lo escribió `Recibo anterior jun-26 Otras financiaciones` y `Recibo
+mes anterior`, dos redacciones que no estaban en ninguna lista. El **mismo hecho
+en marzo**, escrito `Operacion financiada`, se había clasificado bien.
+**Causa:** tres listas de conceptos bancarios escritas a mano gobernaban la
+decisión, y dos de ellas —`_INTERNAL_MOVEMENT_PATTERNS` en el servicio y
+`_CARD_SETTLEMENT_LIKE` en el repositorio— describían **lo mismo** en sitios
+distintos, que es exactamente lo que PHASE-38 dejó dicho que no se hiciera. Al
+divergir, el fallo fue doble y en direcciones opuestas: el clasificador contó la
+liquidación como gasto nuevo **y** el buscador del cargo espejo no la reconoció
+como espejo. Nadie escribió nada falso; el banco cambió de vocabulario.
+**Solución:** la secuencia de tokens se declara UNA vez y cada consumidor deriva
+su forma (subcadena ordenada en Python, `ILIKE '%a%b%'` en SQL, con la misma
+semántica por construcción), más un gate que falla si alguien vuelve a enumerar
+liquidaciones en un solo lado. Y la pregunta «¿a qué deuda pertenece este
+abono?» se saca del texto y se lleva al **capital del cuadro de amortización**:
+un aplazamiento y su cuadro nacen del mismo importe, así que coinciden al
+céntimo — el usuario ya había creado el pasivo con los 700,26 € exactos y sólo
+faltaba el enlace.
+**Regla:** cuando clasifiques por el texto que escribe un tercero, asume que el
+texto cambiará y que el fallo será **silencioso y con forma de dato** (un ingreso
+de más, no un error). Pregúntate qué señal ESTRUCTURAL describe el mismo hecho
+—un importe que tiene que coincidir, una fecha, una relación ya modelada— y
+apoya en ella lo que puedas; deja el texto sólo para lo que ninguna otra señal
+puede decidir. Y si dos módulos tienen que coincidir en «qué es X», que no haya
+dos listas: una sola declaración y un test que ate a los consumidores, porque
+duplicar la definición no falla el día que la escribes sino el día que sólo
+actualizas una. Corolario medido aquí: al apagar un falso positivo, comprueba el
+caso con el signo contrario — la MISMA redacción («otras financiaciones») es
+ingreso falso como abono y gasto verdadero como cargo, así que la regla sin la
+condición del signo habría escondido gasto real mientras arreglaba el ingreso.
+
+### [PHASE-46] Antes de inventar una heurística, mira si la prueba ya estaba en la fila
+**Error:** Un extracto sin signos dejó `Operación financiada 4940…` (700,26 €)
+**sin clasificar** — la única de 40 filas. El clasificador deduce la dirección
+del texto y, si falla, del kind de la categoría; esa línea no decía ni «abono»
+ni «recibido» y no resolvió categoría, así que devolvió `None`. Honesto, pero
+la app se quedó sin saber algo que sí sabía.
+**Causa:** PHASE-39 llevaba desde su fase guardando `statement_balance` en cada
+fila **por otro motivo** (anclar el saldo), y nadie volvió a preguntarse qué más
+prueba ese dato. El saldo anterior era 717,10 y el de la fila 1.417,36: el salto
+es exactamente el importe, y su signo ES la dirección. La tentación era la de
+siempre —añadir «operación financiada» a otra lista de redacciones— y habría
+arreglado esta fila sin arreglar la siguiente.
+**Solución:** una segunda pasada sobre el lote que rellena las direcciones que
+falten con el salto del saldo, exigiendo coincidencia EXACTA con el importe: si
+entre dos saldos hay un movimiento sin saldo, el salto no cuadra y no se toca
+nada. La fila resuelta vuelve a pasar por el clasificador con el signo deducido,
+así que su transfer-ness sale de la misma regla que el resto.
+**Regla:** cuando una clasificación se quede sin señal, inventaria primero qué
+datos tienes YA en la misma fila y qué implican, antes de ampliar el catálogo de
+textos. Un dato capturado para un fin suele probar más cosas de las que se
+pensaron al capturarlo, y una prueba aritmética no caduca cuando el banco cambia
+de vocabulario — que es exactamente lo que le pasa a las listas de redacciones.
+Corolario verificado con un test: la deducción depende del ORDEN del extracto
+(BBVA imprime el más reciente arriba); leyéndolo al revés el salto sale con el
+signo cambiado y la fila entra **invertida**, que es peor que dejarla neutra.
+Reutiliza la detección de orden que ya exista en vez de asumir uno.
+
+### [PHASE-46] Un fichero importado en la cuenta equivocada no da error: da números que casi cuadran
+**Error:** El extracto de la TARJETA se importó eligiendo la cuenta del BANCO.
+No falló nada: 19 filas OK, cero errores. Pero 17 compras de tarjeta (609,14 €)
+quedaron colgando del banco, y el aplazamiento del recibo entró **por partida
+doble** —una vez desde el extracto de la tarjeta y otra desde el de la cuenta—,
+con la propuesta de deuda enganchada a la copia equivocada.
+**Causa:** la cuenta destino la elige el usuario en el asistente y nada la
+contrasta con el contenido del fichero. Y el gasto TOTAL del mes seguía siendo
+casi correcto —las compras se cuentan una vez, estén donde estén, porque la
+liquidación de la tarjeta es neutra—, así que el error no asoma por donde uno
+mira. Lo que sí asoma es una comparación entre meses: mayo 7 compras en la
+tarjeta, junio 7, **julio 0**.
+**Solución:** un script que deshace el import (papelera + desenlace + limpiar la
+marca de espejo) para reimportar a la cuenta correcta. Y el diagnóstico salió de
+mirar `import_jobs.filename`, no las transacciones: los nombres eran
+`julio criedito.pdf` y `julio debito.pdf`, ambos a BBVA.
+**Regla:** cuando los números de un mes no cuadren, comprueba **de qué fichero y
+a qué cuenta** entró cada lote antes de auditar transacción a transacción; el
+job guarda el nombre y la cuenta, y un fichero en la cuenta equivocada produce
+datos plausibles en vez de un error. Señal barata y fiable: comparar el
+RECUENTO de movimientos por cuenta entre meses consecutivos — un cero donde
+antes había siete no se explica por casualidad. (Pendiente: que el import avise
+cuando el contenido no encaje con la cuenta elegida.)
+
 ---
 
 ## Ejemplos de referencia (no son lecciones reales)
