@@ -14,7 +14,7 @@ from app.modules.personal_finance.debt.reconciliation import (
     sql_like_patterns,
 )
 from app.modules.personal_finance.imports.models import ImportJob, ImportJobStatus
-from app.modules.personal_finance.transactions.models import Transaction
+from app.modules.personal_finance.transactions.models import Transaction, TransactionFlow
 
 # Derivados de la ÚNICA declaración de qué es una liquidación (PHASE-46). Un
 # gate falla si alguien vuelve a enumerarlas por separado.
@@ -144,12 +144,17 @@ async def find_live_card_settlements(
     *,
     since: datetime,
     until: datetime,
-) -> list[tuple[datetime, Decimal]]:
+) -> list[tuple[datetime, Decimal, TransactionFlow | None]]:
     """Liquidaciones de tarjeta VIVAS de una cuenta dentro de un rango.
 
     Sirve para no volver a insertar un recibo que ya está registrado con otra
-    redacción (PHASE-47.E1). Devuelve sólo fecha e importe porque es lo único
-    que compara la regla de duplicado; el texto ya lo filtra la query.
+    redacción (PHASE-47.E1). Devuelve fecha, importe y DIRECCIÓN, que es lo que
+    compara la regla de duplicado; el texto ya lo filtra la query.
+
+    La dirección es imprescindible: `amount` guarda la magnitud sin signo y el
+    signo vive en `flow` (ADR-0004), así que un cargo y su DEVOLUCIÓN son
+    indistinguibles por importe. Sin comparar dirección, la devolución de un
+    recibo se tomaría por una copia del recibo y se perdería.
 
     Se excluye lo soft-deleted A PROPÓSITO, y en las dos direcciones: si el
     usuario mandó una copia a la papelera, la que quede viva sigue tapando a la
@@ -158,7 +163,7 @@ async def find_live_card_settlements(
     """
     patterns = [Transaction.description.ilike(p) for p in _CARD_SETTLEMENT_LIKE]
     result = await db.execute(
-        select(Transaction.occurred_at, Transaction.amount).where(
+        select(Transaction.occurred_at, Transaction.amount, Transaction.flow).where(
             Transaction.user_id == user_id,
             Transaction.account_id == account_id,
             Transaction.deleted_at.is_(None),
@@ -167,7 +172,7 @@ async def find_live_card_settlements(
             or_(*patterns),
         )
     )
-    return [(row[0], row[1]) for row in result.all()]
+    return [(row[0], row[1], row[2]) for row in result.all()]
 
 
 async def find_existing_hashes(db: AsyncSession, user_id: uuid.UUID, hashes: list[str]) -> set[str]:

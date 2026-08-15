@@ -70,12 +70,19 @@ async def _account(client: AsyncClient, token: str, name: str = "BBVA") -> str:
     return str(r.json()["id"])
 
 
-async def _import(client: AsyncClient, token: str, account_id: str, rows: list[list[str]]) -> dict:
+async def _import(
+    client: AsyncClient,
+    token: str,
+    account_id: str,
+    rows: list[list[str]],
+    *,
+    mappings: dict[str, str] | None = None,
+) -> dict:
     """Importa un lote y devuelve el resumen del job confirmado."""
     r = await client.post(
         "/imports/preview",
         files={"file": ("extracto.xlsx", _xlsx(rows), XLSX_MIME)},
-        data={"account_id": account_id, "column_mappings": json.dumps(MAPPING)},
+        data={"account_id": account_id, "column_mappings": json.dumps(mappings or MAPPING)},
         headers=_auth(token),
     )
     assert r.status_code == 200, r.text
@@ -266,3 +273,29 @@ async def test_the_surviving_copy_does_not_depend_on_file_order(
 
     assert result["rows_ok"] == 1
     assert await _descriptions(client, token, account) == [ADEUDO]
+
+
+async def test_a_refund_of_the_receipt_is_not_a_duplicate_of_it(client: AsyncClient) -> None:
+    """La DEVOLUCIÓN de un recibo tiene su forma exacta y es lo contrario.
+
+    `amount` guarda la magnitud sin signo y el signo vive en `flow`
+    (ADR-0004), así que el cargo y su devolución son idénticos para una regla
+    que sólo mire importe y fecha: mismo importe, dos días, y las dos
+    redacciones casan con la secuencia de liquidación. Sin comparar dirección,
+    el banco te devuelve 264,84 € y la app se los come.
+    """
+    token = await _register(client, "dedup_devolucion@example.com")
+    account = await _account(client, token)
+
+    result = await _import(
+        client,
+        token,
+        account,
+        [
+            ["2026-02-04", ADEUDO, "-264,84", "735,16"],
+            ["2026-02-06", f"DEVOLUCION {ADEUDO}", "+264,84", "1000,00"],
+        ],
+    )
+
+    assert result["rows_ok"] == 2
+    assert len(await _descriptions(client, token, account)) == 2

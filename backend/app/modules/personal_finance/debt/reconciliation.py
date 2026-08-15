@@ -152,9 +152,16 @@ FINANCING_INFLOW_SEQUENCES: tuple[tuple[str, ...], ...] = (
 #: alcance al ciclo siguiente — dos meses seguidos con el mismo importe han
 #: ocurrido de verdad (577,16 € en marzo y abril de 2026).
 #:
-#: El importe tiene que coincidir EXACTO: es lo que hace específica la regla.
-#: Dos liquidaciones distintas del mismo céntimo en la misma semana serían una
-#: casualidad, y el usuario puede recuperarla desde la papelera.
+#: El importe tiene que coincidir EXACTO —y la DIRECCIÓN también, porque
+#: `amount` guarda la magnitud sin signo: sin comparar dirección, la devolución
+#: de un recibo se tomaría por una copia del recibo—. Dos liquidaciones
+#: distintas del mismo céntimo, el mismo sentido y la misma semana serían una
+#: casualidad.
+#:
+#: OJO con el coste de equivocarse: la copia descartada NO llega a existir, así
+#: que **no está en la papelera** y el usuario no puede recuperarla — tendría
+#: que reimportar. Es lo que obliga a que la regla sea estrecha en vez de
+#: generosa.
 SETTLEMENT_DUPLICATE_WINDOW_DAYS = 7
 
 

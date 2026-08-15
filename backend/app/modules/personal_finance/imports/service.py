@@ -1101,6 +1101,23 @@ def _settlement_preference(p: ParsedRow) -> tuple[int, int, int, str, str]:
     )
 
 
+def _same_direction(left: TransactionFlow | None, right: TransactionFlow | None) -> bool:
+    """¿Los dos movimientos van en el mismo sentido?
+
+    `amount` guarda la MAGNITUD sin signo y el signo vive en `flow` (ADR-0004),
+    así que sin esta comprobación un cargo y su devolución —mismo importe,
+    mismos días, y las dos redacciones casan con la secuencia de liquidación—
+    serían indistinguibles, y la devolución se perdería tomada por una copia.
+
+    Una dirección desconocida (`None`) sólo casa con otra desconocida: es lo
+    que hace el extracto sin signos, y ahí preferimos insertar de más —el
+    usuario ve la fila y decide— antes que borrar un movimiento real.
+    """
+    if left is None or right is None:
+        return left is None and right is None
+    return left == right
+
+
 async def _drop_duplicate_settlements(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -1139,15 +1156,18 @@ async def _drop_duplicate_settlements(
     # Lo que llega del parser es naive y lo que devuelve la BD es aware
     # (`TIMESTAMPTZ`); restarlos directamente revienta, y forzar una zona sería
     # inventar una precisión que la regla no usa.
-    claimed = [(d.date(), a) for d, a in persisted]
+    claimed = [(d.date(), a, f) for d, a, f in persisted]
 
     dropped: set[str] = set()
     for p in sorted(settlements, key=_settlement_preference):
         day = p.occurred_at.date()
-        if any(a == p.amount and abs(d - day) <= window for d, a in claimed):
+        if any(
+            a == p.amount and _same_direction(f, p.flow) and abs(d - day) <= window
+            for d, a, f in claimed
+        ):
             dropped.add(p.import_hash)
             continue
-        claimed.append((day, p.amount))
+        claimed.append((day, p.amount, p.flow))
 
     if not dropped:
         return pending, 0

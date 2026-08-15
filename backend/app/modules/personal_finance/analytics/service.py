@@ -191,7 +191,9 @@ async def get_expense_structure(
     )
     income_total = totals[CategoryKind.INCOME]
     # Gasto bruto = estructural + puntual (mismos filtros que el split);
-    # equivale al gasto de `get_totals_by_kind`.
+    # equivale al gasto de `get_totals_by_kind` — incluida la exclusión de lo
+    # aplazado (PHASE-47.E), sin la cual las dos mitades de la tasa de ahorro
+    # se calcularían sobre universos distintos.
     gross_expense = structural_total + exceptional_total
 
     top_rows = await repo.top_exceptional_transactions(

@@ -28,6 +28,7 @@ from app.modules.personal_finance.categories.models import (
 from app.modules.personal_finance.dashboard.repository import (
     _amount_expr,
     _apply_scope,
+    _exclude_deferred,
     _is_expense,
     _is_internal_transfer,
 )
@@ -113,6 +114,11 @@ async def monthly_expense_by_category(
         date_to=window_end,
     )
     query = query.where(_is_internal_transfer().is_(False))
+    # PHASE-47.E — el runway es líquido ÷ gasto mensual, o sea CAJA pura. Un
+    # ciclo aplazado no salió de la cuenta ese mes, así que meterlo aquí sube
+    # el consumo mensual y acorta el colchón; y cuando empiecen a llegar las
+    # cuotas, los mismos euros contarían dos veces.
+    query = _exclude_deferred(query)
     rows = (await db.execute(query)).all()
     by_category: dict[uuid.UUID, list[Decimal]] = defaultdict(list)
     for cat_id, _month, total in rows:
@@ -262,8 +268,19 @@ async def expense_split_totals(
     """(gasto_estructural, gasto_puntual) en el rango pedido.
 
     Sobre el mismo conjunto de GASTO (flow=OUT, transferencias excluidas)
-    que el dashboard, partido por `is_structural_expr`. Su suma == gasto
-    total del rango (invariante que los tests verifican).
+    que el dashboard, partido por `is_structural_expr`. Su suma == el gasto
+    de `get_totals_by_kind` (invariante que los tests verifican).
+
+    PHASE-47.E — y por eso excluye lo APLAZADO, igual que el dashboard: de
+    aquí salen `savings_rate_gross` y `savings_rate_structural`, que son
+    lecturas de CAJA («¿he ahorrado?») y cuyo ingreso viene precisamente de
+    `get_totals_by_kind`. Sin la exclusión, las dos mitades del mismo cociente
+    se calculan sobre universos distintos y la tasa estructural puede salir
+    POR DEBAJO de la bruta, que es aritméticamente imposible.
+
+    Ojo: `exceptional_by_category` NO excluye, y es correcto — alimenta el
+    filtro Fijo/Variable del desglose, que es la lectura de GASTO y sí las
+    mantiene. Que estas dos difieran es la fase, no un descuido.
     """
     amount = _amount_expr(target_currency)
     is_struct = is_structural_expr(structural_category_ids)
@@ -282,6 +299,7 @@ async def expense_split_totals(
         query, user_id=user_id, currency=currency, date_from=date_from, date_to=date_to
     )
     query = query.where(_is_internal_transfer().is_(False))
+    query = _exclude_deferred(query)
     row = (await db.execute(query)).one()
     return Decimal(row[0]), Decimal(row[1])
 

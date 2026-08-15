@@ -20,7 +20,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.personal_finance.accounts.models import Account, AccountType
+from app.modules.personal_finance.accounts.models import Account, AccountNature, AccountType
 from app.modules.personal_finance.debt.deferral import (
     CyclePurchase,
     CycleSelection,
@@ -39,6 +39,13 @@ async def _load_liability(db: AsyncSession, user_id: uuid.UUID, liability_id: uu
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Esa deuda no existe o no es tuya.",
+        )
+    # Sin esta comprobación, pasar el id de una cuenta corriente devolvía 200 y
+    # le pedía al usuario que declarase con qué tarjeta financió su nómina.
+    if account.nature is not AccountNature.LIABILITY:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"«{account.name}» no es una cuenta de deuda.",
         )
     return account
 
@@ -88,6 +95,37 @@ async def _card_purchases(
     ]
 
 
+async def _declared_cycle(
+    db: AsyncSession, user_id: uuid.UUID, liability_id: uuid.UUID
+) -> list[CyclePurchase]:
+    """Las compras que YA están marcadas como aplazadas por este pasivo."""
+    rows = await db.execute(
+        select(
+            Transaction.id,
+            Transaction.occurred_at,
+            Transaction.amount,
+            Transaction.description,
+        ).where(
+            Transaction.user_id == user_id,
+            Transaction.deferred_by_account_id == liability_id,
+            Transaction.deleted_at.is_(None),
+        )
+    )
+    return [
+        CyclePurchase(id=r[0], occurred_at=r[1], amount=r[2], description=r[3]) for r in rows.all()
+    ]
+
+
+async def _parent_card(db: AsyncSession, user_id: uuid.UUID, liability: Account) -> Account | None:
+    """La tarjeta con la que se financió este pasivo, si está declarada."""
+    if liability.parent_account_id is None:
+        return None
+    card: Account | None = await db.scalar(
+        select(Account).where(Account.id == liability.parent_account_id, Account.user_id == user_id)
+    )
+    return card
+
+
 async def preview_deferred_cycle(
     db: AsyncSession, user_id: uuid.UUID, liability_id: uuid.UUID
 ) -> tuple[Account, Account | None, Decimal, CycleSelection]:
@@ -98,6 +136,27 @@ async def preview_deferred_cycle(
     tarjeta declarada, que es el más frecuente al empezar.
     """
     liability = await _load_liability(db, user_id, liability_id)
+
+    # Idempotencia. `_card_purchases` excluye lo YA marcado, así que una segunda
+    # llamada buscaría en un pool FRESCO y podría cerrar sobre un conjunto
+    # completamente distinto —las compras del ciclo anterior, si dan la misma
+    # suma— y estamparle el mismo pasivo. Un doble clic bastaba. Si ya hay
+    # ciclo declarado, se devuelve ESE y no se busca nada.
+    declared = await _declared_cycle(db, user_id, liability_id)
+    if declared:
+        total = sum((p.amount for p in declared), Decimal(0))
+        return (
+            liability,
+            await _parent_card(db, user_id, liability),
+            total,
+            CycleSelection(
+                tuple(declared),
+                total,
+                True,
+                f"Ya declarado: {len(declared)} compras marcadas como aplazadas por esta deuda.",
+            ),
+        )
+
     if liability.parent_account_id is None:
         return (
             liability,
@@ -148,14 +207,49 @@ async def preview_deferred_cycle(
         )
 
     purchases = await _card_purchases(db, user_id, card.id)
-    # El cierre del ciclo acota por arriba: una compra POSTERIOR pertenece al
-    # recibo siguiente, que todavía no se ha facturado. Se toma el día entero
-    # porque `start_date` es una fecha y las compras llevan hora.
-    until = None
-    if liability.start_date is not None:
-        until = datetime.combine(liability.start_date, time.max, tzinfo=UTC)
+    until = await _cycle_close(db, user_id, card.id, target, liability)
     selection = select_deferred_cycle(purchases, target, until=until)
     return liability, card, target, selection
+
+
+async def _cycle_close(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    card_id: uuid.UUID,
+    target: Decimal,
+    liability: Account,
+) -> datetime | None:
+    """Cuándo cerró el ciclo que este recibo salda. Acota el ciclo por arriba.
+
+    `start_date` es cuando se CONTRATÓ la financiación, no cuando el banco
+    cortó la facturación, y entre las dos fechas caben compras del ciclo
+    SIGUIENTE. Como el recorrido va de más reciente a más antigua, esas
+    entrarían las primeras — y si los importes se alinean, el ciclo cerraría
+    sobre compras que no son.
+
+    La señal buena ya está en los datos: el extracto de la tarjeta trae la
+    propia liquidación (`Recibo mes anterior` / `Adeudo mensual`) por el importe
+    exacto del recibo. Esa fila ES el corte. Se busca en la tarjeta y, sólo si
+    no aparece, se cae a `start_date` — que sigue siendo mejor que nada, pero
+    es una aproximación y por eso se prefiere la otra.
+    """
+    rows = await db.execute(
+        select(Transaction.occurred_at, Transaction.amount, Transaction.description).where(
+            Transaction.user_id == user_id,
+            Transaction.account_id == card_id,
+            Transaction.deleted_at.is_(None),
+            Transaction.amount == target,
+        )
+    )
+    settlements = [r[0] for r in rows.all() if is_card_settlement(r[2])]
+    if settlements:
+        # La más reciente: si el mismo importe se liquidó dos veces, el ciclo
+        # que este pasivo salda es el último.
+        latest: datetime = max(settlements)
+        return latest
+    if liability.start_date is not None:
+        return datetime.combine(liability.start_date, time.max, tzinfo=UTC)
+    return None
 
 
 async def apply_deferred_cycle(

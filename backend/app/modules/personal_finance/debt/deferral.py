@@ -85,7 +85,12 @@ def select_deferred_cycle(
             (), Decimal(0), False, "No hay compras registradas en la tarjeta antes de ese cierre."
         )
 
-    eligible.sort(key=lambda p: (p.occurred_at, str(p.id)))
+    # Desempate determinista. Las filas de un extracto caen todas a medianoche
+    # de su día, así que un día entero es UN grupo empatado: sin un criterio
+    # fijo, qué compras entran dependería del orden en que la BD las devuelva.
+    # Por importe primero (estable y visible) y por id después, que sólo decide
+    # entre filas indistinguibles.
+    eligible.sort(key=lambda p: (p.occurred_at, p.amount, str(p.id)))
 
     accumulated = Decimal(0)
     picked: list[CyclePurchase] = []

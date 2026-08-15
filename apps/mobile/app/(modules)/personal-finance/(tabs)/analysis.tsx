@@ -14,7 +14,13 @@ import {
   useUserCurrencies,
 } from '@crisol/services';
 import { useAuthStore, useCurrencyStore } from '@crisol/store';
-import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
+import {
+  colors,
+  deferredBreakdownNotice,
+  fontSize,
+  fontWeight,
+  spacing,
+} from '@crisol/ui';
 
 import { BalancesCard } from '../../../../components/accounts/balances-card';
 import {
@@ -176,6 +182,14 @@ export default function AnalysisScreen() {
   const outlookParams = convertAll ? { target_currency: currency } : { currency };
 
   const summaryQuery = useDashboardSummary(summaryParams);
+
+  // PHASE-47.E — la diferencia entre el donut (que mantiene lo aplazado) y los
+  // KPI (que lo excluyen), dicha en voz alta. La redacción vive en
+  // `@crisol/ui` para que las dos pantallas no la cuenten distinto.
+  const deferredNotice = deferredBreakdownNotice(
+    summaryQuery.data?.deferred_expenses,
+    currency,
+  );
   const monthlyQuery = useDashboardByMonth(monthlyParams);
   const byCategoryQuery = useDashboardByCategory(byCategoryParams);
   const topExpensesQuery = useDashboardTopExpenses(topExpensesParams);
@@ -326,6 +340,24 @@ export default function AnalysisScreen() {
           onKindChange={setDonutKind}
           exceptionalByCategory={structureQuery.data?.exceptional_by_category}
         />
+        {/* PHASE-47.E — el donut MANTIENE las compras aplazadas (el gasto se
+            hizo) y los KPI de arriba las excluyen (el dinero no salió). Sin
+            este aviso, quien sume el donut se encuentra cientos de euros de
+            más que el KPI y no tiene forma de saber por qué. */}
+        {deferredNotice ? (
+          <Text
+            testID="deferred-notice"
+            style={{
+              fontSize: fontSize.xs,
+              color: colors.textMuted,
+              lineHeight: 18,
+              paddingHorizontal: spacing.md,
+              marginBottom: spacing.md,
+            }}
+          >
+            {deferredNotice}
+          </Text>
+        ) : null}
         <TopExpensesList
           data={topExpensesQuery.data}
           currency={currency}

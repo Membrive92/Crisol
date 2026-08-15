@@ -126,11 +126,60 @@ ese número, quien lo intente concluirá que la app está mal.
       capa de texto compartida y 2 de componente.
 - [ ] Prueba manual del usuario.
 
+## Lo que la revisión adversarial cambió (2026-08-15)
+
+Cinco frentes en paralelo con verificación por hallazgo. **La revisión se
+ejecutó a medias** —66 de 111 agentes murieron por límite de sesión, incluido
+el crítico de completitud— así que su silencio no prueba nada sobre lo que no
+llegó a mirar. Aun así destapó seis defectos reales, todos corregidos y con su
+regresión verificada rompiendo el código:
+
+1. **[bloqueador] Las tasas de ahorro mezclaban dos universos.**
+   `expense_split_totals` no excluía lo aplazado mientras su ingreso venía de
+   `get_totals_by_kind`, que sí. Efecto: la tasa estructural podía salir POR
+   DEBAJO de la bruta —aritméticamente imposible, porque el gasto estructural
+   es un subconjunto— y la pantalla pintaba un badge contradiciendo su propio
+   titular. Su docstring afirmaba «su suma == gasto total del rango
+   (invariante que los tests verifican)», un invariante que este mismo trabajo
+   había roto: otra premisa escrita a mano caducando en silencio, esta vez
+   creada por mí el día anterior.
+2. **[alto] El runway contaba lo aplazado.** `structural_monthly_avg` es el
+   denominador de líquido ÷ consumo mensual, o sea caja pura: metía el ciclo
+   aplazado en la media y acortaba el colchón, para volver a contarlo cuando
+   llegaran las cuotas.
+3. **[alto] El dedup ignoraba la DIRECCIÓN.** `amount` guarda la magnitud sin
+   signo (ADR-0004), así que un recibo y su DEVOLUCIÓN son idénticos para una
+   regla que sólo mire importe y fecha: el banco te devuelve 264,84 € y la app
+   se los come.
+4. **[alto] Declarar el ciclo dos veces marcaba conjuntos distintos.** Como
+   `_card_purchases` excluye lo ya marcado, la segunda llamada buscaba en un
+   pool fresco y podía cerrar sobre las compras del ciclo ANTERIOR. Un doble
+   clic bastaba.
+5. **[alto] El corte del ciclo era la fecha de contrato**, no el cierre de
+   facturación, y entre las dos caben compras del ciclo siguiente — que el
+   recorrido, al ir hacia atrás, cogía las primeras. Ahora el corte lo marca
+   la propia liquidación del extracto de la tarjeta, que es la señal
+   estructural que ya estaba en los datos.
+6. **[bajo] Una cuenta corriente pasaba por deuda** y la respuesta le pedía al
+   usuario que declarase con qué tarjeta financió su nómina.
+
+Y un comentario que mentía: justificaba el riesgo de falso positivo del dedup
+diciendo que el usuario puede recuperar la copia «desde la papelera», cuando la
+fila descartada nunca llega a existir.
+
 ## Limitaciones conocidas
 
-- **Sin paridad móvil todavía.** La redacción ya vive en `@crisol/ui`
-  (`deferred-copy.ts`), así que móvil la hereda en cuanto se cablee: lo que
-  falta es el renderizado, no el texto ni la lógica.
+- **Un extracto SIN signos no distingue un recibo de su devolución.** El
+  clasificador deduce la dirección del texto y, para una liquidación, elige
+  salida; la segunda pasada del saldo (PHASE-46) sólo rellena direcciones
+  AUSENTES, no corrige las adivinadas. En ese escenario el dedup descartaría
+  la devolución. La guarda de dirección protege el caso con signos, que es el
+  común; cerrar el otro exige que la cadena de saldos pueda CORREGIR una
+  dirección deducida del texto, un cambio de radio mucho mayor que merece su
+  propia fase. Anotado en el backlog.
+- La marca por compra se pinta en la lista de transacciones y el aviso en el
+  desglose, en web **y** móvil. Lo que no muestra la marca todavía es la
+  pantalla de DETALLE de una transacción.
 - El aplazamiento se declara por API. **No hay todavía un panel en la web** que
   lo ofrezca: el usuario tiene que llegar por el endpoint. La propuesta
   automática (ofrecerlo al enlazar la financiación con su cuadro, que es cuando

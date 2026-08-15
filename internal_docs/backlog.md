@@ -532,3 +532,25 @@ al tocar zonas afines (la fuente canónica es `lessons.md`):
   `await db.refresh(obj)` antes de serializar.
 - jsdom no implementa `Blob.text()` — usar `FileReader` para tests de
   parsers de ficheros.
+
+## Extracto sin signos: una devolución de recibo se lee como el recibo (PHASE-47.E)
+
+`classify_import_flow` deduce la dirección del TEXTO cuando el fichero no trae
+signo, y para una liquidación de tarjeta elige salida. La segunda pasada de
+PHASE-46 (`resolve_flows_from_balance_chain`) sólo rellena las direcciones
+AUSENTES, así que no corrige esa deducción: un `DEVOLUCION ADEUDO MENSUAL DE
+TARJETA` entra como `TRANSFER_OUT`.
+
+Consecuencias, de menor a mayor: el signo de esa fila es falso; y el dedup de
+liquidaciones (PHASE-47.E1), que compara dirección precisamente para no
+confundirlas, no puede distinguirlas y descartaría la devolución.
+
+**Por qué no se arregló aquí**: el arreglo es permitir que el salto del saldo
+CORRIJA una dirección deducida del texto, no sólo que la rellene. Eso toca el
+invariante duro de PHASE-34 («el signo del extracto manda») desde el otro
+extremo y afecta a todo lo importado, no sólo a las liquidaciones. Merece su
+fase, con su golden de equivalencia.
+
+**Mitigación vigente**: con un extracto que sí trae signos —el caso común— la
+guarda de dirección funciona y hay test de regresión
+(`test_a_refund_of_the_receipt_is_not_a_duplicate_of_it`).

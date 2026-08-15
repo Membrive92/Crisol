@@ -141,6 +141,7 @@ async def _tx(
     amount: str,
     day: int,
     flow: str = "OUT",
+    description: str | None = None,
 ) -> str:
     r = await client.post(
         "/transactions",
@@ -150,7 +151,7 @@ async def _tx(
             "amount": amount,
             "currency": "EUR",
             "occurred_at": f"2026-06-{day:02d}T12:00:00Z",
-            "description": f"COMPRA {day}",
+            "description": description or f"COMPRA {day}",
             "flow": flow,
         },
         headers=_auth(token),
@@ -192,6 +193,26 @@ async def deferred_scenario(client: AsyncClient):  # type: ignore[no-untyped-def
     await _tx(client, token, account_id=card, category_id=groceries, amount="300.26", day=10)
     await _tx(client, token, account_id=card, category_id=groceries, amount="400.00", day=20)
     return token, card
+
+
+async def _financed_receipt(client: AsyncClient, token: str, card: str, principal: str) -> str:
+    """Un recibo aplazado dado de alta bajo su tarjeta, con cuadro."""
+    r = await client.post(
+        "/accounts",
+        json={
+            "name": f"Recibo aplazado {principal}",
+            "type": "loan",
+            "currency": "EUR",
+            "opening_balance": principal,
+            "apr": "0.10",
+            "term_months": 36,
+            "start_date": "2026-06-25",
+            "parent_account_id": card,
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 201, r.text
+    return str(r.json()["id"])
 
 
 async def test_before_declaring_it_both_readings_agree(
@@ -329,3 +350,130 @@ async def test_applying_a_cycle_that_does_not_close_is_refused(
 
     assert applied.status_code == 409, applied.text
     assert Decimal(str((await _summary(client, token))["expenses"])) == Decimal("700.26")
+
+
+# ── Regresiones de la revisión adversarial (2026-08-15) ──────────────
+#
+# Cinco defectos reales que la suite en verde no veía. Cada uno con su test,
+# y todos verificados rompiendo la línea concreta que dicen proteger.
+
+
+async def test_declaring_the_cycle_twice_does_not_mark_a_second_set(
+    client: AsyncClient, deferred_scenario  # type: ignore[no-untyped-def]
+) -> None:
+    """Un doble clic no puede marcar compras DISTINTAS con el mismo pasivo.
+
+    `_card_purchases` excluye lo ya marcado, así que la segunda llamada buscaba
+    en un pool fresco — y si las compras del ciclo anterior sumaban lo mismo,
+    cerraba otra vez y les estampaba el mismo aplazamiento. Dos ciclos marcados
+    por un recibo que sólo pagó uno.
+    """
+    token, card = deferred_scenario
+    groceries = await _category(client, token, "Ocio", "expense")
+    # Ciclo ANTERIOR, aún sin marcar, que suma exactamente lo mismo.
+    await _tx(client, token, account_id=card, category_id=groceries, amount="700.26", day=2)
+
+    liability = await _financed_receipt(client, token, card, "700.26")
+    first = await client.post(f"/debt/liabilities/{liability}/deferred-cycle", headers=_auth(token))
+    assert first.status_code == 200, first.text
+    assert len(first.json()["purchases"]) == 2
+
+    second = await client.post(
+        f"/debt/liabilities/{liability}/deferred-cycle", headers=_auth(token)
+    )
+
+    assert second.status_code == 200, second.text
+    # Las MISMAS dos compras, no cuatro.
+    assert len(second.json()["purchases"]) == 2
+    assert {p["id"] for p in second.json()["purchases"]} == {
+        p["id"] for p in first.json()["purchases"]
+    }
+
+
+async def test_the_cycle_closes_at_the_card_settlement_not_the_contract_date(
+    client: AsyncClient, deferred_scenario  # type: ignore[no-untyped-def]
+) -> None:
+    """El corte lo marca la liquidación de la tarjeta, no cuándo se firmó.
+
+    `start_date` es la fecha en que el banco contrató la financiación, y entre
+    el cierre de facturación y esa fecha caben compras del ciclo SIGUIENTE.
+    Como el recorrido va de la más reciente hacia atrás, esas entrarían las
+    primeras. La liquidación del extracto de la tarjeta ES el corte.
+    """
+    token, card = deferred_scenario
+    other = await _category(client, token, "Ocio", "expense")
+    # El recibo aparece en el extracto de la TARJETA el día 20: ahí cierra.
+    await _tx(
+        client,
+        token,
+        account_id=card,
+        category_id=other,
+        amount="700.26",
+        day=20,
+        flow="TRANSFER_OUT",
+        description="Recibo mes anterior",
+    )
+    # Compra del ciclo SIGUIENTE, anterior a la fecha de contrato (día 25).
+    await _tx(client, token, account_id=card, category_id=other, amount="55.00", day=22)
+
+    liability = await _financed_receipt(client, token, card, "700.26")
+    preview = await client.get(
+        f"/debt/liabilities/{liability}/deferred-cycle", headers=_auth(token)
+    )
+
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["closes_exactly"] is True
+    marked = {p["amount"] for p in preview.json()["purchases"]}
+    assert "55.00" not in marked
+
+
+async def test_an_asset_account_is_not_a_debt(
+    client: AsyncClient, deferred_scenario  # type: ignore[no-untyped-def]
+) -> None:
+    """Pasar una cuenta corriente devolvía 200 y pedía declarar una tarjeta."""
+    token, _ = deferred_scenario
+    checking = await _account(client, token, "Cuenta corriente", "bank")
+
+    r = await client.get(f"/debt/liabilities/{checking}/deferred-cycle", headers=_auth(token))
+
+    assert r.status_code == 400, r.text
+    assert "no es una cuenta de deuda" in r.json()["detail"]
+
+
+async def test_the_savings_rate_is_computed_over_a_single_universe(
+    client: AsyncClient, deferred_scenario  # type: ignore[no-untyped-def]
+) -> None:
+    """Las dos mitades del cociente tienen que mirar los mismos movimientos.
+
+    El ingreso sale de `get_totals_by_kind` (que excluye lo aplazado) y el
+    gasto de `expense_split_totals`. Si el segundo NO excluye, la tasa
+    estructural puede salir POR DEBAJO de la bruta — aritméticamente
+    imposible, porque el gasto estructural es un subconjunto del bruto — y la
+    pantalla enseña un badge que contradice a su propio titular.
+
+    Es el mismo defecto que la fase arregla, vivo en el módulo de al lado.
+    """
+    token, card = deferred_scenario
+    salary = await _category(client, token, "Nómina", "income")
+    bank = await _account(client, token, "BBVA", "bank")
+    await _tx(
+        client, token, account_id=bank, category_id=salary, amount="2000.00", day=1, flow="IN"
+    )
+
+    liability = await _financed_receipt(client, token, card, "700.26")
+    assert (
+        await client.post(f"/debt/liabilities/{liability}/deferred-cycle", headers=_auth(token))
+    ).status_code == 200
+
+    summary = await _summary(client, token)
+    r = await client.get("/analytics/expense-structure", params=JUNE, headers=_auth(token))
+    assert r.status_code == 200, r.text
+    structure = r.json()
+
+    # El gasto que ve Análisis es el mismo que el del resultado del mes.
+    gross = Decimal(str(structure["structural_total"])) + Decimal(
+        str(structure["exceptional_total"])
+    )
+    assert gross == Decimal(str(summary["expenses"]))
+    # Y la estructural no puede quedar por debajo de la bruta.
+    assert structure["savings_rate_structural"] >= structure["savings_rate_gross"]

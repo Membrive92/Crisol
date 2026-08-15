@@ -1616,6 +1616,53 @@ aparecer precisamente cuando el usuario adopta el modelo que le propones.
 Hermana de [PHASE-44.21] «una decisión razonada sin test se revierte sola»: aquí
 lo que faltaba no era la razón, era el caso con dos.
 
+### [PHASE-47.E] Un cambio de regla que sólo aplicas en UN módulo deja el mismo bug vivo en el de al lado — y lo destapa el cociente cuyas mitades ya no se miran
+**Error:** la fase declaró que el resultado del mes EXCLUYE las compras
+aplazadas, y lo cableó en `dashboard/repository.py`. Pero `analytics` calcula la
+tasa de ahorro y el runway con sus PROPIAS consultas, que no lo excluían — y su
+ingreso lo toma de `get_totals_by_kind`, que sí. O sea que las dos mitades del
+mismo cociente pasaron a mirar universos distintos: la tasa estructural podía
+salir POR DEBAJO de la bruta, que es imposible (el gasto estructural es un
+subconjunto del bruto), y la pantalla pintaba un badge contradiciendo su titular.
+**Causa:** al mover una regla de negocio, se cablea donde uno la estaba pensando
+—la pantalla que motivó el cambio— y no donde vive el CONCEPTO. «Cuánto he
+gastado» se calcula en cuatro sitios, y sólo uno estaba delante.
+**Solución:** inventariar TODA agregación de dinero y clasificarla explícitamente
+en caja / gasto / saldo antes de tocar nada; luego aplicar la exclusión sólo a
+las de caja. El resultado no es uniforme a propósito: `exceptional_by_category`
+NO excluye, porque alimenta el desglose. Y un test que ata las dos mitades
+(gasto de Análisis == gasto del resumen, y estructural ≥ bruta), que es lo que
+faltaba.
+**Regla:** cuando cambies qué entra en un cálculo, la unidad de trabajo no es la
+consulta que tienes abierta: es el CONCEPTO. Haz el inventario —`grep` de las
+funciones de agregación del dominio— y decide una por una, incluidas las que vas
+a dejar como están, porque esas también son una decisión. Y busca un invariante
+que ate las piezas que deben moverse juntas: aquí, que un cociente cuyas dos
+mitades salen de módulos distintos no puede violar una desigualdad aritmética.
+Señal de diagnóstico gratis: si dos números que deberían compararse viven en
+funciones distintas, escribe el test que los compara — es más barato que la
+revisión que no vas a hacer.
+
+### [PHASE-47.E] Una revisión que muere a medias devuelve un agregado que se lee como una revisión limpia — mira el recuento de ejecuciones, no el resultado
+**Error:** la revisión adversarial de la fase reportó `confirmed: 11` de `raw:
+35` y un veredicto por hallazgo. Parecía completa. En realidad **66 de sus 111
+agentes murieron por límite de sesión**: el crítico de completitud no llegó a
+correr y tres de los cinco frentes se quedaron sin la mayor parte de su
+verificación. Los `0` de esos frentes no significaban «no hay nada», significaban
+«no se miró».
+**Causa:** el agregado (`filter(...).length`) no distingue «cero hallazgos» de
+«cero ejecuciones». Ya está escrito en [PHASE-44.14], y aun así la forma en que
+llega —un JSON con totales y una lista de veredictos— invita a leerlo como
+resultado y no como muestra.
+**Solución:** leer el bloque de fallos ANTES que el resultado, y reportar la
+cobertura real al usuario en la misma frase que los hallazgos. Los seis defectos
+confirmados se arreglaron; lo que no se revisó quedó dicho como no revisado.
+**Regla:** de una herramienta de verificación, mira primero cuántas
+comprobaciones se ejecutaron y cuántas murieron; sólo después el veredicto. Y
+cuando reportes, di la cobertura junto al hallazgo — «seis defectos, con tres
+frentes sin verificar del todo» es información; «seis defectos» a secas es una
+falsa sensación de fondo tocado.
+
 ---
 
 ## Ejemplos de referencia (no son lecciones reales)
