@@ -114,6 +114,16 @@ class Settings(BaseSettings):
     fixed_expenses_cron_hour: int = 4
     fixed_expenses_cron_minute: int = 0
 
+    # ---------- Guardarraíl del import (PHASE-47.A) ----------
+    # Porcentaje de filas del fichero que, ya presentes en transacciones de OTRA
+    # cuenta, hacen sospechar que se ha elegido la cuenta equivocada. En julio
+    # de 2026 el extracto de la tarjeta se importó a la cuenta del banco: 19
+    # filas OK, cero errores, y el error sólo asomó comparando el recuento de
+    # compras entre meses. No es una prohibición: el usuario puede tener razón
+    # (un traspaso que aparece en los dos extractos), así que avisa y deja
+    # confirmar con un tick explícito.
+    import_cross_overlap_pct: int = 20
+
     # ---------- MinIO (blob storage) ----------
     minio_endpoint: str = "localhost:9000"
     minio_access_key: str = "minioadmin"

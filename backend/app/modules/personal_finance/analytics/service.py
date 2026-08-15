@@ -15,7 +15,6 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.currency.service import convert
-from app.modules.personal_finance.accounts.installments_repository import installments_by_account
 from app.modules.personal_finance.accounts.models import AccountNature, AccountType
 from app.modules.personal_finance.accounts.repository import (
     get_balances_for_user,
@@ -40,6 +39,7 @@ from app.modules.personal_finance.analytics.schemas import (
 from app.modules.personal_finance.categories.models import CategoryKind, ExpenseNature
 from app.modules.personal_finance.dashboard.repository import get_totals_by_kind
 from app.modules.personal_finance.dashboard.service import ensure_rates_for_user_scope
+from app.modules.personal_finance.debt.installments_repository import installments_by_account
 from app.modules.personal_finance.fixed_expenses.models import FixedExpenseStatus
 from app.modules.personal_finance.fixed_expenses.repository import list_fixed_expenses
 

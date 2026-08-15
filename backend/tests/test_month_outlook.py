@@ -16,10 +16,10 @@ from decimal import Decimal
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.modules.personal_finance.accounts.installments_model import LiabilityInstallment
 from app.modules.personal_finance.accounts.models import Account, AccountNature, AccountType
 from app.modules.personal_finance.analytics.service import get_month_outlook
 from app.modules.personal_finance.categories.models import Category, CategoryKind
+from app.modules.personal_finance.debt.installments_model import LiabilityInstallment
 from app.modules.personal_finance.fixed_expenses.models import FixedExpense, FixedExpenseStatus
 from app.modules.personal_finance.transactions.models import Transaction, TransactionFlow
 from app.modules.users.models import User

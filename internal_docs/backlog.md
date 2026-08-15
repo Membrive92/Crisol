@@ -128,22 +128,17 @@ Items de la auditoría conscientemente diferidos durante la remediación
 - **Cola/worker real para imports/receipts largos**. La Ola 3 los
   saca del event loop vía threadpool; una cola de jobs persistente es
   cambio de infra mayor sin beneficio claro en un único host de dev.
-- **[Ola 6] Reorg físico backend del módulo deuda (sin cambio de
-  comportamiento)**. Quedan los items puramente cosméticos del epic de
-  consolidación: mover `accounts/debt_health.py`→`debt/health.py` y
-  `accounts/debt_history.py`→`debt/history.py` (reubicación + arreglar
-  imports en `accounts/router.py` y `debt/service.py`), extraer los
-  helpers de fecha duplicados a `core/dates.py` (`_today_utc`,
+- **[Ola 6] Reorg físico backend del módulo deuda — HECHO en PHASE-47.A**
+  salvo dos residuos. Los seis módulos ya viven en `debt/` (`health`,
+  `history`, `reconciliation`, `amortization`, `installments_model`,
+  `installments_repository`) con sus 13 schemas, y un test de capas por AST
+  impide que el ciclo vuelva. Las URLs `/accounts/debt-*` se mantienen tal
+  como decidía esta entrada (cambiarlas rompe contrato). **Queda**: extraer
+  los helpers de fecha duplicados a `core/dates.py` (`_today_utc`,
   `_start_of_month`, `_end_of_month`, `_add_month`, `_format_month`,
-  `_month_start_utc`/`_end_utc`), y re-exportar `converted_amount_expr`
-  desde `personal_finance/_shared/money.py`. Las **correcciones reales**
-  del epic (orphan-unlink, invalidación `debt.all`, inversión de
-  dependencias, lógica fuera de routers) ya están hechas (Ola 6a/6b); la
-  consolidación de API/hooks/keys del **frontend** también (Ola 6b). Esto
-  es relocalización mecánica sin beneficio de comportamiento — recipe
-  exacto en el mapeo `ola6-mapping` del workflow. URL `/accounts/debt-*`
-  se mantiene (cambiarla a `/debt/*` rompe contrato; migración versionada
-  futura).
+  `_month_start_utc`/`_end_utc`) y re-exportar `converted_amount_expr` desde
+  `personal_finance/_shared/money.py`. Los dos son deduplicación pura, sin
+  beneficio de comportamiento.
 - **[Ola 6b] Dedup cosmético del navegador de período + filtro de
   liabilities (web/mobile)**. Diferido: `DEBT_PERIOD_OPTIONS` compartido
   (web usa 'Trimestre', mobile 'Trim.') y un `useDebtLiabilities`

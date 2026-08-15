@@ -11,6 +11,7 @@ import type {
   InstallmentUpdateRequest,
   PositionAsOf,
   PositionHistoryResponse,
+  SettlementCandidate,
 } from '@crisol/types';
 
 import { apiClient } from '../client';
@@ -145,6 +146,18 @@ export const accountsApi = {
 
   async get(id: string): Promise<Account> {
     const response = await apiClient.get<Account>(`/accounts/${id}`);
+    return response.data;
+  },
+
+  /**
+   * PHASE-47.A — Desde qué cuenta de activo parece cobrarse este pasivo, según
+   * los cargos que el usuario ya enlazó (PHASE-45). Propuesta, no verdad: el
+   * formulario la precarga con su motivo y el usuario adjudica (ADR-0011).
+   */
+  async settlementCandidate(id: string): Promise<SettlementCandidate> {
+    const response = await apiClient.get<SettlementCandidate>(
+      `/accounts/${id}/settlement-candidate`,
+    );
     return response.data;
   },
 

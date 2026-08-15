@@ -13,6 +13,7 @@ import type {
   ImportColumnMappings,
   ImportJob,
   ImportPreviewResponse,
+  ImportWarningKey,
 } from '@crisol/types';
 import {
   colors,
@@ -159,6 +160,7 @@ export default function NewImportPage() {
 
   function handlePreviewConfirm(
     categoryOverrides: Record<string, string>,
+    acknowledgedWarnings: ImportWarningKey[],
   ) {
     if (!preview) return;
     commitMutation.mutate(
@@ -167,6 +169,8 @@ export default function NewImportPage() {
         ...(Object.keys(categoryOverrides).length > 0
           ? { categoryOverrides }
           : {}),
+        // PHASE-47.A — sin los avisos reconocidos el backend responde 409.
+        ...(acknowledgedWarnings.length > 0 ? { acknowledgedWarnings } : {}),
       },
       {
         onSuccess: (job) => {

@@ -1,0 +1,222 @@
+{
+  "balances": {
+    "items": [
+      {
+        "account_id": "<uuid:0>",
+        "color": null,
+        "currency": "EUR",
+        "current_balance": "8950.00",
+        "icon": null,
+        "is_unvalued": false,
+        "monthly_payment": null,
+        "movements_balance": "4950.00",
+        "name": "Cuenta corriente",
+        "nature": "asset",
+        "opening_balance": "4000.00",
+        "parent_account_id": null,
+        "type": "bank"
+      },
+      {
+        "account_id": "<uuid:1>",
+        "color": null,
+        "currency": "EUR",
+        "current_balance": "150.00",
+        "icon": null,
+        "is_unvalued": false,
+        "monthly_payment": null,
+        "movements_balance": "150.00",
+        "name": "Tarjeta",
+        "nature": "liability",
+        "opening_balance": "0.00",
+        "parent_account_id": null,
+        "type": "credit_card"
+      },
+      {
+        "account_id": "<uuid:2>",
+        "color": null,
+        "currency": "EUR",
+        "current_balance": "9055.90",
+        "icon": null,
+        "is_unvalued": false,
+        "monthly_payment": "1027.29",
+        "movements_balance": "-2944.10",
+        "name": "Préstamo coche",
+        "nature": "liability",
+        "opening_balance": "12000.00",
+        "parent_account_id": null,
+        "type": "loan"
+      },
+      {
+        "account_id": "<uuid:3>",
+        "color": null,
+        "currency": "EUR",
+        "current_balance": "1200.00",
+        "icon": null,
+        "is_unvalued": false,
+        "monthly_payment": "205.87",
+        "movements_balance": "0.00",
+        "name": "Compra a plazos sofá",
+        "nature": "liability",
+        "opening_balance": "1200.00",
+        "parent_account_id": "<uuid:1>",
+        "type": "credit_card"
+      }
+    ],
+    "mixed_currencies": false,
+    "net_worth": "-1455.90",
+    "reference_currency": "EUR",
+    "total_assets": "8950.00",
+    "total_liabilities": "10405.90"
+  },
+  "category_summary": {
+    "available_from": "2023-02",
+    "available_to": "2023-04",
+    "by_type": [
+      {
+        "amount": "1050.00",
+        "percent": 0.2541222255298448,
+        "type": "loan"
+      }
+    ],
+    "capital_amortized": "3944.10",
+    "daily_series": null,
+    "effort_ratio_extended": 0.68864,
+    "effort_ratio_extended_status": "stressed",
+    "effort_ratio_strict": 0.68864,
+    "effort_ratio_strict_status": "stressed",
+    "interests_and_fees": "187.77",
+    "monthly_debt_payment_avg": "344.32",
+    "monthly_income_avg": "500.00",
+    "monthly_series": [
+      {
+        "balance": "13200.00",
+        "capital": "0.00",
+        "interests": "0.00",
+        "month": "2023-01",
+        "payments": "0.00"
+      },
+      {
+        "balance": "12222.71",
+        "capital": "977.29",
+        "interests": "50.00",
+        "month": "2023-02",
+        "payments": "1027.29"
+      },
+      {
+        "balance": "11241.35",
+        "capital": "1981.36",
+        "interests": "95.93",
+        "month": "2023-03",
+        "payments": "2077.29"
+      },
+      {
+        "balance": "10255.90",
+        "capital": "985.45",
+        "interests": "41.84",
+        "month": "2023-04",
+        "payments": "1027.29"
+      },
+      {
+        "balance": "10255.90",
+        "capital": "0.00",
+        "interests": "0.00",
+        "month": "2023-05",
+        "payments": "0.00"
+      },
+      {
+        "balance": "10255.90",
+        "capital": "0.00",
+        "interests": "0.00",
+        "month": "2023-06",
+        "payments": "0.00"
+      },
+      {
+        "balance": "10255.90",
+        "capital": "0.00",
+        "interests": "0.00",
+        "month": "2023-07",
+        "payments": "0.00"
+      },
+      {
+        "balance": "10255.90",
+        "capital": "0.00",
+        "interests": "0.00",
+        "month": "2023-08",
+        "payments": "0.00"
+      },
+      {
+        "balance": "10255.90",
+        "capital": "0.00",
+        "interests": "0.00",
+        "month": "2023-09",
+        "payments": "0.00"
+      },
+      {
+        "balance": "10255.90",
+        "capital": "0.00",
+        "interests": "0.00",
+        "month": "2023-10",
+        "payments": "0.00"
+      },
+      {
+        "balance": "10255.90",
+        "capital": "0.00",
+        "interests": "0.00",
+        "month": "2023-11",
+        "payments": "0.00"
+      },
+      {
+        "balance": "10255.90",
+        "capital": "0.00",
+        "interests": "0.00",
+        "month": "2023-12",
+        "payments": "0.00"
+      }
+    ],
+    "outstanding_at_end": "10255.90",
+    "outstanding_by_type": [
+      {
+        "amount": "9055.90",
+        "percent": 0.8829941789604033,
+        "type": "loan"
+      },
+      {
+        "amount": "1200.00",
+        "percent": 0.11700582103959672,
+        "type": "credit_card"
+      }
+    ],
+    "range": "custom",
+    "range_end": "2023-12-31",
+    "range_start": "2023-01-01",
+    "recurring_quotas": [],
+    "reference_currency": "EUR",
+    "total_payments": "4131.87"
+  },
+  "debt_health": {
+    "debt_by_type": [
+      {
+        "amount": "9055.90",
+        "type": "loan"
+      },
+      {
+        "amount": "1350.00",
+        "type": "credit_card"
+      }
+    ],
+    "debt_to_assets_ratio": 1.1626703910614524,
+    "dti_ratio": null,
+    "dti_status": "unknown",
+    "interest_paid_ytd": "0.00",
+    "interest_remaining": "224.94",
+    "interest_scheduled_total": "362.71",
+    "monthly_debt_payment": "1237.66",
+    "monthly_income_avg": "0",
+    "net_worth": "-1455.90",
+    "reference_currency": "EUR",
+    "time_to_payoff_months": 0,
+    "total_assets": "8950.00",
+    "total_liabilities": "10405.90",
+    "weighted_apr": 0.05585029105197983
+  }
+}

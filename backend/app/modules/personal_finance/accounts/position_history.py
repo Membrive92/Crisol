@@ -31,20 +31,6 @@ from sqlalchemy import Row, Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from app.modules.personal_finance.accounts.debt_health import DEFAULT_REFERENCE_CURRENCY
-from app.modules.personal_finance.accounts.debt_history import (
-    _add_month,
-    _end_of_month,
-    _format_month,
-    _scheduled_remaining_at,
-    _start_of_month,
-    _today_utc,
-    compute_debt_history,
-)
-from app.modules.personal_finance.accounts.installments_model import LiabilityInstallment
-from app.modules.personal_finance.accounts.installments_repository import (
-    installments_by_account,
-)
 from app.modules.personal_finance.accounts.models import (
     UNVALUED_ACCOUNT_TYPES,
     Account,
@@ -57,6 +43,20 @@ from app.modules.personal_finance.accounts.schemas import (
     PositionPoint,
 )
 from app.modules.personal_finance.categories.models import Category
+from app.modules.personal_finance.debt.health import DEFAULT_REFERENCE_CURRENCY
+from app.modules.personal_finance.debt.history import (
+    _add_month,
+    _end_of_month,
+    _format_month,
+    _scheduled_remaining_at,
+    _start_of_month,
+    _today_utc,
+    compute_debt_history,
+)
+from app.modules.personal_finance.debt.installments_model import LiabilityInstallment
+from app.modules.personal_finance.debt.installments_repository import (
+    installments_by_account,
+)
 from app.modules.personal_finance.transactions.models import Transaction
 
 

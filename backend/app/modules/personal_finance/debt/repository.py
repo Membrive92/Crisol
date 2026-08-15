@@ -26,13 +26,13 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.modules.personal_finance.accounts.installments_model import LiabilityInstallment
 from app.modules.personal_finance.accounts.models import Account, AccountNature
 from app.modules.personal_finance.accounts.repository import is_inflow, is_outflow
 from app.modules.personal_finance.categories.models import Category, CategoryRole
 from app.modules.personal_finance.dashboard.conversion import (
     converted_amount_expr,
 )
+from app.modules.personal_finance.debt.installments_model import LiabilityInstallment
 from app.modules.personal_finance.transactions.models import Transaction
 
 DEBT_ROLES: frozenset[CategoryRole] = frozenset(

@@ -41,14 +41,14 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.personal_finance.accounts.amortization import build_schedule
-from app.modules.personal_finance.accounts.installments_model import LiabilityInstallment
-from app.modules.personal_finance.accounts.installments_repository import (
+from app.modules.personal_finance.accounts.models import Account, AccountNature, AccountType
+from app.modules.personal_finance.debt.amortization import build_schedule
+from app.modules.personal_finance.debt.installments_model import LiabilityInstallment
+from app.modules.personal_finance.debt.installments_repository import (
     generate_installments_for_account,
     list_installments,
     mark_installment_paid,
 )
-from app.modules.personal_finance.accounts.models import Account, AccountNature, AccountType
 from app.modules.personal_finance.transactions.models import Transaction
 
 # ── Clasificación de la descripción del movimiento ──────────────────────

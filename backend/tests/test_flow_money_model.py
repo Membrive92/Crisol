@@ -517,7 +517,7 @@ def test_financing_inflow_and_card_settlement_are_not_confused() -> None:
     liquidación y el buscador del cargo espejo podría absorber la pata
     equivocada.
     """
-    from app.modules.personal_finance.accounts.debt_reconciliation import (
+    from app.modules.personal_finance.debt.reconciliation import (
         is_card_settlement,
         is_financing_inflow,
     )
@@ -537,7 +537,7 @@ def test_card_settlement_definition_is_shared_with_the_mirror_finder() -> None:
     se contó como gasto Y quedó sin absorber. Este test falla si alguien vuelve
     a enumerar liquidaciones en un solo lado.
     """
-    from app.modules.personal_finance.accounts.debt_reconciliation import (
+    from app.modules.personal_finance.debt.reconciliation import (
         CARD_SETTLEMENT_SEQUENCES,
         sql_like_patterns,
     )

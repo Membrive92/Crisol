@@ -15,8 +15,8 @@ from decimal import Decimal
 
 from httpx import AsyncClient
 
-from app.modules.personal_finance.accounts.installments_model import LiabilityInstallment
-from app.modules.personal_finance.accounts.installments_repository import (
+from app.modules.personal_finance.debt.installments_model import LiabilityInstallment
+from app.modules.personal_finance.debt.installments_repository import (
     plan_installments_covering_principal,
 )
 

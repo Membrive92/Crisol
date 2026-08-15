@@ -25,7 +25,7 @@ from uuid import uuid4
 import sqlalchemy as sa
 from alembic import op
 
-from app.modules.personal_finance.accounts.amortization import build_schedule
+from app.modules.personal_finance.debt.amortization import build_schedule
 
 
 revision: str = "o2e36g8cb1f9d5"

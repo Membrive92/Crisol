@@ -33,6 +33,7 @@ from app.modules.personal_finance.imports.schemas import (
     ImportPreviewResponse,
     ImportPreviewRow,
     ImportSource,
+    ImportWarning,
 )
 from app.modules.personal_finance.imports.service import (
     get_ai_suggestions,
@@ -376,6 +377,12 @@ async def preview_import_endpoint(
         total_rows=len(raw_rows),
         rows=preview_rows,
         bank_concept_groups=groups,
+        # PHASE-47.A — sospechas de que el fichero no es de la cuenta elegida.
+        # Se calculan en el preview y viven en su payload; el commit las exige
+        # reconocidas.
+        warnings=[
+            ImportWarning.model_validate(w) for w in (job.preview_payload or {}).get("warnings", [])
+        ],
     )
 
 
@@ -392,9 +399,20 @@ async def commit_import_endpoint(
     `body.category_overrides` mapea concepto del banco → category_id
     para asignar categorías a las filas y guardar la equivalencia para
     futuras importaciones. Si `body` es `None` no se aplican overrides.
+
+    PHASE-47.A — si el preview emitió avisos de "esto parece de otra cuenta",
+    `body.acknowledged_warnings` debe traerlos todos o la respuesta es 409 con
+    los que falten.
     """
     overrides = body.category_overrides if body is not None else {}
-    job = await run_commit(db, user.id, job_id=job_id, category_overrides=overrides)
+    acknowledged = body.acknowledged_warnings if body is not None else []
+    job = await run_commit(
+        db,
+        user.id,
+        job_id=job_id,
+        category_overrides=overrides,
+        acknowledged_warnings=acknowledged,
+    )
     await db.commit()
     return _job_response(job)
 

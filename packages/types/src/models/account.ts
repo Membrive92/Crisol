@@ -89,6 +89,35 @@ export interface Account {
    * deuda agrupa las hijas bajo el padre; los selectores de transacción
    * las ocultan. */
   parent_account_id?: string | null;
+  /** PHASE-47.A — Cuenta de ACTIVO desde la que se cobra este pasivo (el
+   * cargo del banco). Sólo significativo en liabilities; NULL = sin declarar.
+   *
+   * Existe porque el cargo de cierre de una tarjeta vive en la cuenta del
+   * banco, no en la tarjeta, así que sin este dato no se puede saber qué
+   * cargo cierra qué ciclo: no hay invariante de conservación ni detección
+   * automática. La app propone un candidato a partir de los enlaces que ya
+   * hiciste (PHASE-45), pero lo adjudicas tú (ADR-0011). */
+  settlement_account_id?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * PHASE-47.A — Propuesta del servidor sobre desde qué cuenta de activo se cobra
+ * un pasivo, derivada de los enlaces que el usuario YA hizo (PHASE-45).
+ *
+ * No se persiste ni se aplica sola: se ofrece precargada en el formulario con
+ * su motivo escrito y el usuario adjudica (ADR-0011). Sin evidencia,
+ * `account_id` es `null` y no se propone nada — decir «probablemente BBVA»
+ * sin haber contado nada sería adivinar.
+ */
+export interface SettlementCandidate {
+  account_id: string | null;
+  account_name: string | null;
+  /** Frase en español con la evidencia contada, o `null` si no la hay. */
+  reason: string | null;
+  /** Cargos que apuntan a la cuenta propuesta. */
+  matches: number;
+  /** Cargos con origen identificable examinados en total. */
+  total: number;
 }

@@ -4,6 +4,7 @@ import type {
   ImportListQuery,
   ImportListResponse,
   ImportPreviewResponse,
+  ImportWarningKey,
 } from '@crisol/types';
 
 import { apiClient } from '../client';
@@ -100,11 +101,23 @@ export const importsApi = {
    */
   async commit(
     jobId: string,
-    options: { categoryOverrides?: Record<string, string> } = {},
+    options: {
+      categoryOverrides?: Record<string, string>;
+      /**
+       * PHASE-47.A — avisos de "esto parece de otra cuenta" que el usuario ha
+       * reconocido. Si falta alguno de los emitidos en el preview, el backend
+       * responde 409 con los que quedan.
+       */
+      acknowledgedWarnings?: ImportWarningKey[];
+    } = {},
   ): Promise<ImportJob> {
-    const body = options.categoryOverrides
-      ? { category_overrides: options.categoryOverrides }
-      : undefined;
+    const body =
+      options.categoryOverrides || options.acknowledgedWarnings
+        ? {
+            category_overrides: options.categoryOverrides ?? {},
+            acknowledged_warnings: options.acknowledgedWarnings ?? [],
+          }
+        : undefined;
     // El commit no llama a IA, solo persiste filas ya parseadas. Pero con
     // 90+ filas + reconcile_with_expected por cada una en serie puede
     // pasar de los 15s default. Subimos a 2 min para tener margen.

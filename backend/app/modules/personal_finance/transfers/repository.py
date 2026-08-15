@@ -10,14 +10,14 @@ import sqlalchemy as sa
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.personal_finance.accounts.debt_reconciliation import (
+from app.modules.personal_finance.accounts.models import Account, AccountNature
+from app.modules.personal_finance.categories.models import Category, CategoryKind
+from app.modules.personal_finance.debt.installments_model import LiabilityInstallment
+from app.modules.personal_finance.debt.reconciliation import (
     CARD_SETTLEMENT_SEQUENCES,
     FINANCING_INFLOW_SEQUENCES,
     sql_like_patterns,
 )
-from app.modules.personal_finance.accounts.installments_model import LiabilityInstallment
-from app.modules.personal_finance.accounts.models import Account, AccountNature
-from app.modules.personal_finance.categories.models import Category, CategoryKind
 from app.modules.personal_finance.transactions.models import Transaction, TransactionFlow
 
 # PHASE-34 — Patrones de descripción de una LIQUIDACIÓN / cargo de tarjeta

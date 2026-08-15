@@ -44,18 +44,6 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.personal_finance.accounts.amortization import (
-    build_schedule,
-    compute_monthly_payment,
-)
-from app.modules.personal_finance.accounts.installments_model import (
-    LiabilityInstallment,
-)
-from app.modules.personal_finance.accounts.installments_repository import (
-    interest_paid_in_window,
-    interest_total,
-    schedule_outstanding,
-)
 from app.modules.personal_finance.accounts.models import (
     UNVALUED_ACCOUNT_TYPES,
     Account,
@@ -63,7 +51,6 @@ from app.modules.personal_finance.accounts.models import (
     AccountType,
 )
 from app.modules.personal_finance.accounts.repository import is_inflow
-from app.modules.personal_finance.accounts.schemas import DebtHealthKpis, DebtTypeSlice
 from app.modules.personal_finance.categories.models import Category, CategoryKind, CategoryRole
 from app.modules.personal_finance.dashboard.conversion import (
     converted_amount_expr,
@@ -72,6 +59,19 @@ from app.modules.personal_finance.dashboard.repository import (
     _is_income,
     _is_internal_transfer,
 )
+from app.modules.personal_finance.debt.amortization import (
+    build_schedule,
+    compute_monthly_payment,
+)
+from app.modules.personal_finance.debt.installments_model import (
+    LiabilityInstallment,
+)
+from app.modules.personal_finance.debt.installments_repository import (
+    interest_paid_in_window,
+    interest_total,
+    schedule_outstanding,
+)
+from app.modules.personal_finance.debt.schemas import DebtHealthKpis, DebtTypeSlice
 from app.modules.personal_finance.transactions.models import Transaction
 
 DEFAULT_REFERENCE_CURRENCY = "EUR"

@@ -35,30 +35,12 @@ from decimal import Decimal
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.personal_finance.accounts.amortization import (
-    AmortizationRow,
-    build_schedule,
-    compute_monthly_payment,
-)
-from app.modules.personal_finance.accounts.debt_health import (
-    DEFAULT_REFERENCE_CURRENCY,
-)
-from app.modules.personal_finance.accounts.installments_model import (
-    LiabilityInstallment,
-)
-from app.modules.personal_finance.accounts.installments_repository import (
-    installments_by_account,
-)
 from app.modules.personal_finance.accounts.models import (
     Account,
     AccountNature,
     AccountType,
 )
 from app.modules.personal_finance.accounts.repository import is_inflow, is_outflow
-from app.modules.personal_finance.accounts.schemas import (
-    DebtHistoryPoint,
-    DebtHistoryResponse,
-)
 from app.modules.personal_finance.categories.models import (
     Category,
     CategoryKind,
@@ -66,6 +48,24 @@ from app.modules.personal_finance.categories.models import (
 )
 from app.modules.personal_finance.dashboard.conversion import (
     converted_amount_expr,
+)
+from app.modules.personal_finance.debt.amortization import (
+    AmortizationRow,
+    build_schedule,
+    compute_monthly_payment,
+)
+from app.modules.personal_finance.debt.health import (
+    DEFAULT_REFERENCE_CURRENCY,
+)
+from app.modules.personal_finance.debt.installments_model import (
+    LiabilityInstallment,
+)
+from app.modules.personal_finance.debt.installments_repository import (
+    installments_by_account,
+)
+from app.modules.personal_finance.debt.schemas import (
+    DebtHistoryPoint,
+    DebtHistoryResponse,
 )
 from app.modules.personal_finance.transactions.models import Transaction
 

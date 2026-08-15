@@ -9,32 +9,6 @@ from decimal import Decimal
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.personal_finance.accounts.amortization import build_schedule
-from app.modules.personal_finance.accounts.installments_model import (
-    LiabilityInstallment,
-)
-from app.modules.personal_finance.accounts.installments_repository import (
-    generate_installments_for_account,
-    installments_by_account,
-    plan_installments_covering_principal,
-    resolve_liability_outstanding,
-    schedule_outstanding,
-)
-from app.modules.personal_finance.accounts.installments_repository import (
-    get_installment as repo_get_installment,
-)
-from app.modules.personal_finance.accounts.installments_repository import (
-    list_installments as repo_list_installments,
-)
-from app.modules.personal_finance.accounts.installments_repository import (
-    mark_installment_paid as repo_mark_paid,
-)
-from app.modules.personal_finance.accounts.installments_repository import (
-    unmark_installment_paid as repo_unmark_paid,
-)
-from app.modules.personal_finance.accounts.installments_repository import (
-    update_installment_amount_and_date as repo_update_installment,
-)
 from app.modules.personal_finance.accounts.models import (
     UNVALUED_ACCOUNT_TYPES,
     Account,
@@ -43,6 +17,7 @@ from app.modules.personal_finance.accounts.models import (
 )
 from app.modules.personal_finance.accounts.repository import (
     clear_default_accounts,
+    clear_settlement_references_to,
     count_child_accounts,
     count_transactions_for_account,
     get_account_by_id,
@@ -66,6 +41,34 @@ from app.modules.personal_finance.accounts.schemas import (
     AccountBalancesResponse,
     AccountCreate,
     AccountUpdate,
+)
+from app.modules.personal_finance.debt.amortization import build_schedule
+from app.modules.personal_finance.debt.installments_model import (
+    LiabilityInstallment,
+)
+from app.modules.personal_finance.debt.installments_repository import (
+    generate_installments_for_account,
+    installments_by_account,
+    plan_installments_covering_principal,
+    resolve_liability_outstanding,
+    schedule_outstanding,
+)
+from app.modules.personal_finance.debt.installments_repository import (
+    get_installment as repo_get_installment,
+)
+from app.modules.personal_finance.debt.installments_repository import (
+    list_installments as repo_list_installments,
+)
+from app.modules.personal_finance.debt.installments_repository import (
+    mark_installment_paid as repo_mark_paid,
+)
+from app.modules.personal_finance.debt.installments_repository import (
+    unmark_installment_paid as repo_unmark_paid,
+)
+from app.modules.personal_finance.debt.installments_repository import (
+    update_installment_amount_and_date as repo_update_installment,
+)
+from app.modules.personal_finance.debt.schemas import (
     AmortizationRowResponse,
     AmortizationScheduleResponse,
 )
@@ -125,6 +128,54 @@ async def _validate_debt_category_link(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
                 "La categoría vinculada debe tener rol de deuda " "(DEBT_PAYMENT o DEBT_INTEREST)."
+            ),
+        )
+
+
+async def _validate_settlement_account(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    account_id: uuid.UUID | None,
+    account_type: AccountType,
+    settlement_account_id: uuid.UUID | None,
+) -> None:
+    """PHASE-47.A — Verifica que la cuenta de cargo declarada tiene sentido.
+
+    Reglas:
+    - `None` se acepta siempre (no declarado / desvincular).
+    - Sólo un pasivo se cobra desde otra cuenta.
+    - La cuenta apuntada existe, es del usuario y es de ACTIVO — apuntar a otra
+      deuda no describe de dónde sale el dinero, sólo mueve la pregunta.
+    - No puede apuntarse a sí misma.
+
+    Lanza 400 con mensaje claro; nunca 404, para no filtrar la existencia de
+    cuentas ajenas (mismo criterio que `_validate_debt_category_link`).
+    """
+    if settlement_account_id is None:
+        return
+    if account_type not in LIABILITY_ACCOUNT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sólo una cuenta de deuda declara desde qué cuenta se cobra.",
+        )
+    if account_id is not None and settlement_account_id == account_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Una cuenta no puede cobrarse a sí misma.",
+        )
+    target = await get_account_by_id(db, settlement_account_id, user_id)
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La cuenta de cargo seleccionada no existe.",
+        )
+    if target.nature != AccountNature.ASSET:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "La cuenta de cargo debe ser una cuenta de activo "
+                "(banco, ahorro, efectivo): es de donde sale el dinero."
             ),
         )
 
@@ -203,6 +254,13 @@ async def create_account(db: AsyncSession, user_id: uuid.UUID, data: AccountCrea
     await _validate_debt_category_link(
         db, user_id, account_type=data.type, category_id=data.category_id
     )
+    await _validate_settlement_account(
+        db,
+        user_id,
+        account_id=None,
+        account_type=data.type,
+        settlement_account_id=data.settlement_account_id,
+    )
     # PHASE-32 (HIGH#2) — la cuenta principal refleja ahorro neto y SÓLO
     # tiene sentido sobre un activo. Una cuenta de pasivo no puede ser
     # principal: su carve-out de transferencias no aplica y su saldo es
@@ -279,6 +337,7 @@ async def create_account(db: AsyncSession, user_id: uuid.UUID, data: AccountCrea
         counts_as_debt=data.counts_as_debt,
         category_id=data.category_id,
         parent_account_id=data.parent_account_id,
+        settlement_account_id=data.settlement_account_id,
     )
     persisted = await persist_account(db, account)
     # PHASE-32: si se crea como principal, desmarcar cualquier otra.
@@ -302,6 +361,8 @@ async def update_account(
     cambia el `type`.
     """
     account = await get_account(db, account_id, user_id)
+    # Se captura ANTES de re-sincronizar `nature` con el nuevo `type`.
+    was_asset = account.nature == AccountNature.ASSET
     payload = data.model_dump(exclude_unset=True)
     valid_types = ASSET_ACCOUNT_TYPES | LIABILITY_ACCOUNT_TYPES
     if "type" in payload and payload["type"] is not None:
@@ -330,6 +391,15 @@ async def update_account(
             account_type=effective_type,
             category_id=payload["category_id"],
         )
+    if "settlement_account_id" in payload:
+        effective_type = payload.get("type") or account.type
+        await _validate_settlement_account(
+            db,
+            user_id,
+            account_id=account.id,
+            account_type=effective_type,
+            settlement_account_id=payload["settlement_account_id"],
+        )
     # AUDIT MEDIUM#6 — archivar una cuenta la saca de la pre-selección (los
     # formularios sólo cargan cuentas activas). Si era la principal, limpiamos
     # is_default para no dejar un puntero colgante a una cuenta invisible. El
@@ -354,8 +424,22 @@ async def update_account(
     # Marcar como principal desmarca el resto (única por usuario).
     if payload.get("is_default") is True:
         await clear_default_accounts(db, user_id, except_id=account.id)
+    # PHASE-47.A — si esta cuenta deja de ser un ACTIVO, los pasivos que
+    # declaraban cobrarse desde ella se quedan apuntando a algo que el propio
+    # validador rechaza. Nadie revalida las referencias ENTRANTES, así que se
+    # limpian aquí: es la única forma de que no quede un estado inalcanzable
+    # desde la interfaz (la siguiente edición de esos pasivos daría 400 sobre
+    # un campo que el formulario pinta como válido).
+    if was_asset and account.nature != AccountNature.ASSET:
+        await clear_settlement_references_to(db, user_id, account.id)
     for field, value in payload.items():
         setattr(account, field, value)
+    # PHASE-47.A — y el reverso, después del setattr para que gane sobre el
+    # payload: una cuenta que deja de ser pasivo no se cobra desde ningún sitio.
+    # Sin esto, convertir una tarjeta en cuenta de ahorro dejaba el vínculo
+    # persistido e invisible, y volver a convertirla en pasivo lo resucitaba.
+    if account.nature != AccountNature.LIABILITY:
+        account.settlement_account_id = None
     await db.flush()
     await db.refresh(account)
     return account
@@ -550,7 +634,7 @@ async def _convert_at_today(
     tasa.
 
     AUDIT-FIX (finding 5): se replica aquí el mismo helper que ya existe
-    en `accounts/debt_health.py` y `debt/service.py` (cada uno con su
+    en `debt/health.py` y `debt/service.py` (cada uno con su
     copia para evitar dependencias circulares con `currency.service`).
     La lógica real vive en `currency.service.convert`; aquí sólo
     decidimos "snapshot a hoy" + señalización de tasa ausente.
@@ -985,7 +1069,7 @@ async def regenerate_amortization_schedule(
 
     from sqlalchemy import select
 
-    from app.modules.personal_finance.accounts.installments_repository import (
+    from app.modules.personal_finance.debt.installments_repository import (
         delete_installments_for_account,
     )
     from app.modules.personal_finance.transactions.models import (

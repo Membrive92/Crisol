@@ -46,9 +46,6 @@ from app.modules.investment.portfolio.models import (  # noqa: F401
 )
 from app.modules.investment.pricing.models import PriceQuote  # noqa: F401
 from app.modules.investment.thresholds.models import ScoringThresholds  # noqa: F401
-from app.modules.personal_finance.accounts.installments_model import (  # noqa: F401
-    LiabilityInstallment,
-)
 from app.modules.personal_finance.accounts.models import Account  # noqa: F401
 from app.modules.personal_finance.bank_mappings.models import (  # noqa: F401
     BankCategoryMapping,
@@ -57,6 +54,9 @@ from app.modules.personal_finance.budgets.models import Budget  # noqa: F401
 from app.modules.personal_finance.categories.models import Category  # noqa: F401
 from app.modules.personal_finance.category_rules.models import (  # noqa: F401
     CategoryRule,
+)
+from app.modules.personal_finance.debt.installments_model import (  # noqa: F401
+    LiabilityInstallment,
 )
 from app.modules.personal_finance.fixed_expenses.models import (  # noqa: F401
     FixedExpense,

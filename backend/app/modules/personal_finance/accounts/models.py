@@ -156,6 +156,24 @@ class Account(Base):
     propio TIN/TAE/plazo/cuadro de amortización (el modelo previo sólo
     admitía UN plan por cuenta). La vista de deuda agrupa las hijas bajo el
     padre y muestra el total; los selectores de transacciones las ocultan."""
+    settlement_account_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("accounts.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    """PHASE-47.A — Cuenta de ACTIVO desde la que se cobra este pasivo (el
+    cargo del banco). Sólo significativa en `nature='liability'`; NULL = sin
+    declarar.
+
+    Existe porque el cargo que cierra el ciclo de una tarjeta vive en la cuenta
+    corriente, NO en la tarjeta (`find_mirror_charge` exige
+    `account_id == source.account_id` justamente por eso). Sin este vínculo no
+    hay forma de saber qué cargo cierra qué ciclo —en julio de 2026 había 4
+    cargos y 6 pasivos: la atribución era ambigua—, y sin eso no hay invariante
+    de conservación ni traducción automática (ADR-0011).
+
+    `ON DELETE SET NULL` y no CASCADE: borrar la cuenta del banco no puede
+    llevarse por delante la deuda; sólo deja de saberse desde dónde se cobraba.
+    """
     display_order: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )

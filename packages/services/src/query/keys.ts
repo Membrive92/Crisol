@@ -31,6 +31,11 @@ export const queryKeys = {
       [...queryKeys.accounts.all, 'position-as-of', dateFrom, dateTo] as const,
     amortization: (id: string) =>
       [...queryKeys.accounts.all, 'amortization', id] as const,
+    // PHASE-47.A — propuesta de "desde qué cuenta se cobra este pasivo".
+    // Cuelga de `accounts.all` porque la evidencia son enlaces de cargos:
+    // cualquier mutación de cuentas o de vínculos la puede mover.
+    settlementCandidate: (id: string) =>
+      [...queryKeys.accounts.all, 'settlement-candidate', id] as const,
   },
   // AUDIT-2026-05: debt-health/debt-history viven bajo `debt.*` (antes
   // bajo `accounts.*`). Así `debt.all` es el único objetivo de

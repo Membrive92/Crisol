@@ -66,6 +66,9 @@ export interface AccountFormValue {
    * `true` por defecto (la tarjeta arrastra saldo = deuda). Sólo relevante en
    * `credit_card`. */
   counts_as_debt: boolean;
+  /** PHASE-47.A — Cuenta de ACTIVO desde la que se cobra este pasivo. Cadena
+   * vacía = sin declarar. Sólo se pide en liabilities. */
+  settlement_account_id: string;
 }
 
 export interface AccountFormErrors {
@@ -91,6 +94,19 @@ export interface AccountFormFieldsProps {
    * permite re-parentar). Si está y type=credit_card, se muestra el
    * selector "compra a plazos dentro de…". */
   parentCardOptions?: Account[] | undefined;
+  /** PHASE-47.A — Cuentas de ACTIVO del usuario, candidatas a "desde dónde se
+   * cobra este pasivo". Si no se pasa, el selector no se muestra. */
+  settlementAccountOptions?: Account[] | undefined;
+  /** PHASE-47.A — Propuesta del servidor, si la hay. Se pinta bajo el selector
+   * con su motivo y un botón que la aplica: el sistema propone con su porqué,
+   * el usuario adjudica (ADR-0011). NO se preselecciona sola — un valor escrito
+   * sin que nadie lo pulse deja de distinguirse de uno declarado, y al reabrir
+   * la edición se volvería a colar aunque lo hubieras borrado a propósito.
+   * `null`/ausente cuando no hay evidencia todavía. */
+  settlementSuggestion?:
+    | { accountId: string; accountName: string | null; reason: string | null }
+    | null
+    | undefined;
 }
 
 const TYPE_LABEL: Record<AccountType, string> = {
@@ -120,6 +136,7 @@ export const DEFAULT_ACCOUNT_FORM: AccountFormValue = {
   category_id: '',
   parent_account_id: '',
   counts_as_debt: true,
+  settlement_account_id: '',
 };
 
 function isLiabilityType(type: AccountType): boolean {
@@ -146,6 +163,8 @@ export function AccountFormFields({
   variant = 'full',
   errors,
   parentCardOptions,
+  settlementAccountOptions,
+  settlementSuggestion,
 }: AccountFormFieldsProps) {
   const categoriesQuery = useCategories();
   const debtCategories = (categoriesQuery.data ?? []).filter(
@@ -176,6 +195,11 @@ export function AccountFormFields({
         // category_id sólo aplica a liabilities. Al cambiar a asset
         // limpiamos para no enviar un vínculo inválido al backend.
         category_id: isLiabilityType(nextType) ? value.category_id : '',
+        // PHASE-47.A: ídem con la cuenta de cargo — un activo no se cobra
+        // desde otra cuenta.
+        settlement_account_id: isLiabilityType(nextType)
+          ? value.settlement_account_id
+          : '',
         parent_account_id: nextParent,
       });
       return;
@@ -184,6 +208,9 @@ export function AccountFormFields({
       ...value,
       type: nextType,
       category_id: isLiabilityType(nextType) ? value.category_id : '',
+      settlement_account_id: isLiabilityType(nextType)
+        ? value.settlement_account_id
+        : '',
       parent_account_id: nextParent,
     });
   }
@@ -437,6 +464,69 @@ export function AccountFormFields({
               ? 'Aún no tienes categorías marcadas como deuda. Crea una en Ajustes › Categorías y marca el tipo "Pago de deuda" o "Intereses de deuda" para que aparezca aquí.'
               : 'Si las cuotas de este contrato aparecen en tus transacciones bajo una categoría, vincúlala aquí para cruzar el flujo (pagos categorizados) con el saldo (contrato) en el módulo de deuda.'}
           </p>
+        </div>
+      ) : null}
+
+      {isLiability && variant === 'full' && settlementAccountOptions ? (
+        <div>
+          <Select
+            label="¿Desde qué cuenta se cobra?"
+            value={value.settlement_account_id}
+            onChange={(e) => patch('settlement_account_id', e.target.value)}
+            disabled={settlementAccountOptions.length === 0}
+          >
+            <option value="">— Sin declarar —</option>
+            {settlementAccountOptions.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.icon ? `${a.icon} ` : ''}
+                {a.name}
+              </option>
+            ))}
+          </Select>
+          <p
+            style={{
+              margin: `${spacing.xs}px 0 0 0`,
+              fontSize: fontSize.xs,
+              color: colors.textMuted,
+              lineHeight: 1.4,
+            }}
+          >
+            {settlementAccountOptions.length === 0
+              ? 'Necesitas al menos una cuenta de activo (banco, ahorro, efectivo) para declarar de dónde sale el dinero.'
+              : 'El cargo que paga esta deuda aparece en la cuenta desde la que te lo cobran, no aquí. Declararlo permite cruzar cada cargo con su ciclo y avisarte cuando las cuentas no cuadren.'}
+          </p>
+          {settlementSuggestion &&
+          settlementSuggestion.accountId !== value.settlement_account_id ? (
+            <p
+              style={{
+                margin: `${spacing.xs}px 0 0 0`,
+                fontSize: fontSize.xs,
+                color: colors.text,
+                lineHeight: 1.4,
+              }}
+            >
+              <strong>Propuesto por tus movimientos:</strong>{' '}
+              {settlementSuggestion.reason ?? settlementSuggestion.accountName}.{' '}
+              <button
+                type="button"
+                onClick={() =>
+                  patch('settlement_account_id', settlementSuggestion.accountId)
+                }
+                style={{
+                  padding: 0,
+                  border: 'none',
+                  background: 'none',
+                  color: colors.primary,
+                  fontSize: fontSize.xs,
+                  fontWeight: fontWeight.semibold,
+                  textDecoration: 'underline',
+                  cursor: 'pointer',
+                }}
+              >
+                Usar «{settlementSuggestion.accountName}»
+              </button>
+            </p>
+          ) : null}
         </div>
       ) : null}
 

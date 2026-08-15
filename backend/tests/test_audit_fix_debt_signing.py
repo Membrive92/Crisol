@@ -34,9 +34,6 @@ from decimal import Decimal
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.modules.personal_finance.accounts.installments_model import (
-    LiabilityInstallment,
-)
 from app.modules.personal_finance.accounts.models import (
     Account,
     AccountNature,
@@ -46,6 +43,9 @@ from app.modules.personal_finance.categories.models import (
     Category,
     CategoryKind,
     CategoryRole,
+)
+from app.modules.personal_finance.debt.installments_model import (
+    LiabilityInstallment,
 )
 from app.modules.personal_finance.transactions.models import Transaction, TransactionFlow
 from app.modules.users.models import User
@@ -196,7 +196,7 @@ async def test_principal_paid_counts_only_income_leg(session_factory) -> None:  
     """Una cuenta-pasivo con transfer-pair entrante (income, amortiza) y
     saliente (expense, SUBE la deuda) en un mes cerrado: el principal
     amortizado cuenta SÓLO la pata income."""
-    from app.modules.personal_finance.accounts.debt_health import (
+    from app.modules.personal_finance.debt.health import (
         _principal_paid_last_n_months,
     )
 
@@ -252,7 +252,7 @@ async def test_principal_paid_counts_only_income_leg(session_factory) -> None:  
 async def test_history_principal_paid_counts_only_income_leg(session_factory) -> None:  # type: ignore[no-untyped-def]
     """`compute_debt_history` reporta como `principal_paid` del mes sólo
     la pata income del transfer-pair, no la de gasto que sube la deuda."""
-    from app.modules.personal_finance.accounts.debt_history import (
+    from app.modules.personal_finance.debt.history import (
         compute_debt_history,
     )
 
@@ -390,7 +390,7 @@ async def test_history_signed_else_zero_for_uncategorized(
 ) -> None:
     """`_compute_historical_points`: tx sin categoría no afecta al saldo
     histórico de deuda (else_=0)."""
-    from app.modules.personal_finance.accounts.debt_history import (
+    from app.modules.personal_finance.debt.history import (
         compute_debt_history,
     )
 
@@ -432,7 +432,7 @@ async def test_history_signed_follows_flow_not_category(
     el saldo histórico la cuenta como cargo que SUBE la deuda (gana flow),
     igual que get_balances_for_user. Antes (por `Category.kind`) la habría
     restado, desplazando la línea respecto al saldo real."""
-    from app.modules.personal_finance.accounts.debt_history import (
+    from app.modules.personal_finance.debt.history import (
         compute_debt_history,
     )
 
@@ -523,7 +523,7 @@ async def test_income_avg_divides_by_months_with_income(
     session_factory,  # type: ignore[no-untyped-def]
 ) -> None:
     """Ingreso en sólo 2 de los últimos 6 meses → media = total/2, no /6."""
-    from app.modules.personal_finance.accounts.debt_health import (
+    from app.modules.personal_finance.debt.health import (
         monthly_income_avg,
     )
 
@@ -565,7 +565,7 @@ async def test_income_avg_full_window_unchanged(
 ) -> None:
     """Regresión: con ingreso en los 6 meses, la media sigue siendo
     total/6 (comportamiento previo intacto)."""
-    from app.modules.personal_finance.accounts.debt_health import (
+    from app.modules.personal_finance.debt.health import (
         monthly_income_avg,
     )
 
@@ -602,7 +602,7 @@ async def test_interest_ytd_excludes_future(
     session_factory,  # type: ignore[no-untyped-def]
 ) -> None:
     """Interés autopostado a fecha futura NO entra en el YTD."""
-    from app.modules.personal_finance.accounts.debt_health import (
+    from app.modules.personal_finance.debt.health import (
         _interest_paid_ytd,
     )
 
@@ -649,7 +649,7 @@ async def test_linear_payoff_capped_returns_none(
 ) -> None:
     """Tarjeta revolving con amortización ínfima → el estimado lineal
     supera el cap y se descarta (None), en vez de devolver siglos."""
-    from app.modules.personal_finance.accounts.debt_health import (
+    from app.modules.personal_finance.debt.health import (
         _time_to_payoff_months,
     )
 
@@ -707,7 +707,7 @@ async def test_debt_health_uses_persisted_installments_for_payment(
     PERSISTIDAS reporta `monthly_debt_payment` y `time_to_payoff_months`
     no-cero — antes salía a 0 porque la cuota se calculaba sobre
     opening_balance."""
-    from app.modules.personal_finance.accounts.debt_health import (
+    from app.modules.personal_finance.debt.health import (
         compute_debt_health,
     )
 
@@ -780,7 +780,7 @@ async def test_debt_health_uses_counterpart_when_no_installments(
     """Loan convert-to-debt con `opening_balance=0` y SIN cuotas
     persistidas: la cuota francesa se deriva del principal de la tx
     contraparte pareada (no de opening_balance=0 → no-cero)."""
-    from app.modules.personal_finance.accounts.debt_health import (
+    from app.modules.personal_finance.debt.health import (
         compute_debt_health,
     )
 

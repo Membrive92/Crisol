@@ -1501,6 +1501,77 @@ RECUENTO de movimientos por cuenta entre meses consecutivos — un cero donde
 antes había siete no se explica por casualidad. (Pendiente: que el import avise
 cuando el contenido no encaje con la cuenta elegida.)
 
+### [PHASE-47.A] Un test que comprueba que el guardarraíl NO salta puede no estar tocándolo — sólo romper el código lo distingue
+**Error (cazado por el método):** el guardarraíl del import avisa cuando un
+fichero tiene el formato de OTRA cuenta, con una guarda para no molestar cuando
+ese formato ya ha entrado antes en la cuenta elegida. Escribí el test obvio —una
+cuenta importa su extracto dos veces, la segunda no avisa— y lo di por cubierto.
+Al romper la guarda a propósito, **el test siguió pasando**: con una sola cuenta
+la lista de «otras cuentas con este formato» sale vacía, así que el aviso no
+podía saltar por ningún camino. La guarda estaba sin probar y el nombre del test
+decía lo contrario.
+**Causa:** el test recorría el camino feliz por una razón DISTINTA de la que
+creía. Para llegar a la guarda hacen falta dos cuentas con la misma huella; con
+una, la comprobación anterior corta antes y el resultado es el mismo verde.
+**Solución:** un test con dos cuentas del mismo banco. Y de paso obligó a
+escribir el comportamiento real, que yo había supuesto mal: estrenar un formato
+conocido en una cuenta NUEVA **sí** avisa una vez, porque desde la cabecera es
+indistinguible del error que la fase existe para cazar. La premisa equivocada
+era la mía, no el código.
+**Regla:** cuando un test afirme que algo NO ocurre, rompe la línea que lo
+impide y comprueba que el test se cae. Si sigue verde, tu escenario no llega
+hasta ahí: hay una comprobación anterior que corta y estás midiendo otra cosa.
+Es el reverso de [PHASE-44.14] («un test que sólo verifica que el guardarraíl
+salta no prueba lo que protege») y sólo se ve rompiendo el código — leer el test
+no basta, porque se lee exactamente igual esté ciego o no.
+**Corolario, aprendido caro el mismo día:** esto pasó **tres veces** en una
+sesión y las tres con la misma forma —el escenario del test llegaba al verde por
+un camino distinto del que decía medir—, así que la práctica no es «romper el
+código cuando dudes», es **romperlo siempre, y romper LA LÍNEA CONCRETA que el
+test dice proteger**. El tercer caso fue un test *del propio detector*: el probe
+traía el símbolo por las dos formas de import a la vez, así que cegar una no
+cambiaba el resultado. Cuando un test enumera casos, cada caso tiene que ser
+alcanzable por UNA sola vía; si dos vías producen el mismo verde, el test no
+distingue nada.
+
+### [PHASE-47.A] La huella de un fichero no puede salir de lo que tu parser decide emitir: el parser normaliza, y normalizar es justo borrar lo que querías comparar
+**Error:** el guardarraíl «este fichero parece de otra cuenta» calculaba la
+huella del FORMATO con `header_fingerprint(rows[0].keys())`, y lo documentaba
+como «la cabecera real del fichero son las claves de las filas parseadas». Falso:
+`parse_pdf_smart` y `parse_xlsx_smart` construyen cada fila como un literal de
+**cinco claves fijas** (`amount`, `occurred_at`, `description`, `category_name`,
+`statement_balance`) sea cual sea la cabecera de entrada — es su contrato, y por
+eso existe `SMART_FORCED_MAPPING`. Como los dos son el camino PRIMARIO de su
+formato, la huella era **una constante** para todo PDF y todo XLSX de cualquier
+banco. Con las dos cuentas del usuario importando en PDF, la guarda «este formato
+ya entró aquí» se activaba siempre y el aviso **no salía nunca**: el guardarraíl
+era ciego exactamente en el caso que existía para cazar.
+**Causa:** confundir la salida del pipeline con la entrada. El dato que se quería
+comparar (¿qué columnas traía el fichero?) es justo el que el parser existe para
+hacer desaparecer. Y el modo de fallo es el peor: no lanza, no avisa, se lee como
+«no hay nada sospechoso».
+**Por qué la suite no lo veía:** ningún test comparaba dos cabeceras distintas, y
+el que sí avisaba lo hacía por otra razón —la cuenta destino no tenía imports
+previos, así que la guarda `own` estaba apagada y el aviso saltaba aunque las dos
+cabeceras fueran idénticas—. Cuatro tests en verde sobre una señal que no
+discriminaba nada. Lo destapó una revisión adversarial, no la suite.
+**Agravante que casi se cuela:** el script de backfill derivaba la huella de
+`preview_payload.rows[0].keys()` con la misma premisa, y su docstring la llamaba
+«la fuente buena». Ejecutarlo habría estampado la constante en el histórico de
+TODAS las cuentas — o sea, el script escrito para que la señal funcionara desde
+el primer día es lo que habría garantizado que no funcionara nunca.
+**Solución:** los smart-parsers devuelven `(filas, cabecera_detectada)`; la
+cabecera viaja por un canal aparte porque las claves son un contrato. El camino
+de visión declara `None` (no hay columnas), y el backfill sólo deriva de los jobs
+cuyo parseo indexa por la cabecera real, dejando NULL —«no se sabe»— en el resto.
+**Regla:** cuando compares la FORMA de un fichero de terceros, toma el dato antes
+de normalizar, y compruébalo con dos ficheros de forma distinta: un test que
+afirme «huella(A) ≠ huella(B)» es de una línea y es el único que distingue una
+señal viva de una constante. Corolario de documentación: la frase «X real son
+las claves de Y» es una afirmación sobre el contrato de Y — si Y es un parser con
+salida normalizada, es falsa por construcción, y escribirla en el comentario que
+justifica el código convierte el bug en doctrina.
+
 ---
 
 ## Ejemplos de referencia (no son lecciones reales)

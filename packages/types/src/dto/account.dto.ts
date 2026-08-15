@@ -32,6 +32,9 @@ export interface AccountCreateRequest {
    * PLAZOS dentro de esa tarjeta: el backend exige tipo `credit_card` y
    * plan completo (capital + TIN + plazo + fecha) para su cuadro propio. */
   parent_account_id?: string | null;
+  /** PHASE-47.A — Cuenta de activo desde la que se cobra este pasivo. Sólo
+   * válida en liabilities y apuntando a una cuenta de activo propia. */
+  settlement_account_id?: string | null;
 }
 
 export interface AccountUpdateRequest {
@@ -57,4 +60,7 @@ export interface AccountUpdateRequest {
   counts_as_debt?: boolean;
   /** PHASE-30.4 — Vincular o desvincular categoría (null para desvincular). */
   category_id?: string | null;
+  /** PHASE-47.A — Cuenta de activo desde la que se cobra este pasivo
+   * (null para desvincular). */
+  settlement_account_id?: string | null;
 }

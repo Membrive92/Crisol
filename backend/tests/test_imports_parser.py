@@ -235,7 +235,7 @@ def _bank_statement_pdf() -> bytes:
 
 
 def test_parse_pdf_smart_detects_transactions_table() -> None:
-    rows = parse_pdf_smart(_bank_statement_pdf())
+    rows, _header = parse_pdf_smart(_bank_statement_pdf())
     # 5 transacciones reales; los totales del resumen y el desglose se ignoran.
     assert len(rows) == 5
     # Todas las filas usan keys fijas (PHASE-39 añade `statement_balance`).
@@ -254,7 +254,7 @@ def test_parse_pdf_smart_detects_transactions_table() -> None:
 
 
 def test_parse_pdf_smart_uses_detalle_as_description_and_concepto_as_category() -> None:
-    rows = parse_pdf_smart(_bank_statement_pdf())
+    rows, _header = parse_pdf_smart(_bank_statement_pdf())
     first = rows[0]
     assert first["description"] == "PAYPAL *PAGO 3 PLAZOS"
     assert first["category_name"] == "PAGO TARJETA - RESTAURANTES"
@@ -264,7 +264,7 @@ def test_parse_pdf_smart_uses_detalle_as_description_and_concepto_as_category() 
 def test_parse_pdf_smart_infers_year_for_ddmm_dates() -> None:
     """Fechas DD/MM se rellenan con el año actual cuando no hay periodo
     explícito en el PDF (cubierto por el fixture)."""
-    rows = parse_pdf_smart(_bank_statement_pdf())
+    rows, _header = parse_pdf_smart(_bank_statement_pdf())
     from datetime import date
 
     expected_year = str(date.today().year)
@@ -274,7 +274,7 @@ def test_parse_pdf_smart_infers_year_for_ddmm_dates() -> None:
 
 def test_parse_pdf_smart_picks_f_operac_over_f_contab() -> None:
     """Si hay dos columnas de fecha, la primera (F. Operac.) gana."""
-    rows = parse_pdf_smart(_bank_statement_pdf())
+    rows, _header = parse_pdf_smart(_bank_statement_pdf())
     # 25/02 (operac) vs 02/03 (contab): debe ganar la primera.
     assert rows[0]["occurred_at"].startswith("25/02/")
 
@@ -294,7 +294,7 @@ def test_parse_pdf_smart_picks_importe_over_saldo() -> None:
             ]
         ]
     )
-    rows = parse_pdf_smart(payload)
+    rows, _header = parse_pdf_smart(payload)
     assert len(rows) == 3
     # Los importes deben ser los reales (con signo) — no los saldos.
     amounts = [r["amount"] for r in rows]
@@ -423,7 +423,7 @@ def test_parse_pdf_smart_emits_statement_balance() -> None:
             ]
         ]
     )
-    rows = parse_pdf_smart(payload)
+    rows, _header = parse_pdf_smart(payload)
     assert len(rows) == 2
     assert "3.317,98" in rows[0]["statement_balance"]
     assert "3.312,81" in rows[1]["statement_balance"]

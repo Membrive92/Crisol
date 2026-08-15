@@ -164,9 +164,15 @@ _XLSX_HEADER_SCAN_LIMIT = 30
 _MAX_PDF_PAGES = 50
 
 
-def parse_xlsx_smart(payload: bytes) -> list[dict[str, str]]:
+def parse_xlsx_smart(payload: bytes) -> tuple[list[dict[str, str]], list[str]]:
     """Espejo de `parse_pdf_smart` para XLSX: detecta los roles de las
     columnas en lugar de pedir al usuario que las mapee.
+
+    Devuelve `(filas, cabecera_detectada)`. La cabecera viaja aparte porque
+    las CLAVES de las filas son fijas por contrato (`SMART_FORCED_MAPPING`) y
+    por tanto no dicen nada del fichero: quien necesite saber qué columnas
+    traía de verdad —el guardarraíl de cuenta equivocada de PHASE-47.A— no
+    puede deducirlo de la salida (PHASE-47.A, corrección).
 
     Justificación: los XLSX de bancos españoles (BBVA, Santander, ING,
     CaixaBank…) traen una sola columna "Concepto" con la descripción
@@ -252,7 +258,7 @@ def parse_xlsx_smart(payload: bytes) -> list[dict[str, str]]:
     if not rows:
         raise SmartParseAmbiguousError("Cabecera detectada pero sin filas de datos")
 
-    return rows
+    return rows, headers
 
 
 def parse_pdf(payload: bytes) -> list[dict[str, str]]:
@@ -638,10 +644,14 @@ def _normalize_date(value: str, default_year: int) -> str:
     return cleaned  # devolvemos como vino; el service decidirá si la rechaza
 
 
-def parse_pdf_smart(payload: bytes) -> list[dict[str, str]]:
+def parse_pdf_smart(payload: bytes) -> tuple[list[dict[str, str]], list[str]]:
     """Heurística sobre `extract_tables`: detecta la tabla de
     transacciones entre todas las del PDF y devuelve filas con keys
     fijas (`amount`, `occurred_at`, `description`, `category_name`).
+
+    Devuelve `(filas, cabecera_de_la_tabla_elegida)`. La cabecera viaja aparte
+    por el mismo motivo que en `parse_xlsx_smart`: las claves de las filas son
+    un contrato fijo y no describen el fichero (PHASE-47.A, corrección).
 
     El caller debe usar `VISION_FORCED_MAPPING` o equivalente cuando
     use el resultado de esta función — el mapping del usuario se
@@ -755,4 +765,4 @@ def parse_pdf_smart(payload: bytes) -> list[dict[str, str]]:
     if not rows:
         raise SmartParseAmbiguousError("Tabla de transacciones detectada pero sin filas de datos")
 
-    return rows
+    return rows, [_pdf_clean(c) for c in best_table[0]]

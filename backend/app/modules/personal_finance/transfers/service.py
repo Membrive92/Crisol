@@ -10,21 +10,6 @@ from decimal import Decimal
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.personal_finance.accounts.debt_reconciliation import (
-    is_card_financed_op,
-    is_card_settlement,
-    is_financing_inflow,
-)
-from app.modules.personal_finance.accounts.installments_model import LiabilityInstallment
-from app.modules.personal_finance.accounts.installments_repository import (
-    generate_installments_for_account,
-    list_installments,
-    list_installments_paid_by_transaction,
-    mark_installment_paid,
-    plan_installments_covering_principal,
-    resolve_liability_outstanding,
-    unmark_installment_paid,
-)
 from app.modules.personal_finance.accounts.models import (
     Account,
     AccountNature,
@@ -41,6 +26,21 @@ from app.modules.personal_finance.accounts.repository import (
 from app.modules.personal_finance.categories.models import CategoryKind
 from app.modules.personal_finance.categories.repository import (
     get_category_by_id,
+)
+from app.modules.personal_finance.debt.installments_model import LiabilityInstallment
+from app.modules.personal_finance.debt.installments_repository import (
+    generate_installments_for_account,
+    list_installments,
+    list_installments_paid_by_transaction,
+    mark_installment_paid,
+    plan_installments_covering_principal,
+    resolve_liability_outstanding,
+    unmark_installment_paid,
+)
+from app.modules.personal_finance.debt.reconciliation import (
+    is_card_financed_op,
+    is_card_settlement,
+    is_financing_inflow,
 )
 from app.modules.personal_finance.transactions.models import (
     Transaction,

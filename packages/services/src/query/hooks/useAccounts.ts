@@ -13,6 +13,7 @@ import type {
   InstallmentUpdateRequest,
   PositionAsOf,
   PositionHistoryResponse,
+  SettlementCandidate,
 } from '@crisol/types';
 
 import { accountsApi } from '../../api/endpoints/accounts';
@@ -32,6 +33,29 @@ export function useAccount(id: string | undefined) {
     queryKey: id ? queryKeys.accounts.detail(id) : queryKeys.accounts.all,
     queryFn: () => accountsApi.get(id as string),
     enabled: !!id,
+  });
+}
+
+/**
+ * PHASE-47.A — Propuesta de "desde qué cuenta de activo se cobra este pasivo",
+ * contada sobre los cargos que el usuario ya enlazó (PHASE-45).
+ *
+ * Sólo se pide cuando hace falta: `enabled` lo decide el caller (el formulario
+ * de una liability que todavía no lo tiene declarado). No se cachea largo — la
+ * evidencia crece cada vez que se enlaza un cargo.
+ */
+export function useSettlementCandidate(
+  id: string | undefined,
+  options: { enabled?: boolean } = {},
+) {
+  const enabled = (options.enabled ?? true) && !!id;
+  return useQuery<SettlementCandidate, Error>({
+    queryKey: id
+      ? queryKeys.accounts.settlementCandidate(id)
+      : queryKeys.accounts.all,
+    queryFn: () => accountsApi.settlementCandidate(id as string),
+    enabled,
+    staleTime: 1000 * 30,
   });
 }
 

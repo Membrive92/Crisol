@@ -4,6 +4,7 @@ import type {
   ImportJob,
   ImportListQuery,
   ImportPreviewResponse,
+  ImportWarningKey,
 } from '@crisol/types';
 
 import {
@@ -72,16 +73,21 @@ export interface CommitImportPayload {
    * importaciones (PHASE-19).
    */
   categoryOverrides?: Record<string, string>;
+  /**
+   * PHASE-47.A — avisos de "este fichero puede no ser de esta cuenta" que el
+   * usuario ha reconocido. Sin ellos el backend responde 409.
+   */
+  acknowledgedWarnings?: ImportWarningKey[];
 }
 
 export function useCommitImport() {
   const queryClient = useQueryClient();
   return useMutation<ImportJob, Error, CommitImportPayload>({
-    mutationFn: ({ jobId, categoryOverrides }) =>
-      importsApi.commit(
-        jobId,
-        categoryOverrides ? { categoryOverrides } : {},
-      ),
+    mutationFn: ({ jobId, categoryOverrides, acknowledgedWarnings }) =>
+      importsApi.commit(jobId, {
+        ...(categoryOverrides ? { categoryOverrides } : {}),
+        ...(acknowledgedWarnings ? { acknowledgedWarnings } : {}),
+      }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.imports.all });
       // AUDIT-2026-06: commit persiste las tx del job → mismo blast

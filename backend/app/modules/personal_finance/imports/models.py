@@ -74,6 +74,12 @@ class ImportJob(Base):
     preview_payload: Mapped[dict[str, Any] | None] = mapped_column(
         JSON, nullable=True, default=None
     )
+    header_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    """PHASE-47.A — SHA-256 de la cabecera normalizada del fichero. Identifica
+    el FORMATO (qué producto del banco lo exportó), no el contenido, para poder
+    avisar cuando un fichero con el formato de otra cuenta se está importando
+    a ésta. NULL en jobs anteriores a 47.A que el backfill no pudo derivar y en
+    los que fallaron antes de parsear."""
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

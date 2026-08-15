@@ -7,7 +7,7 @@ import uuid
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.personal_finance.imports.models import ImportJob
+from app.modules.personal_finance.imports.models import ImportJob, ImportJobStatus
 from app.modules.personal_finance.transactions.models import Transaction
 
 
@@ -45,6 +45,86 @@ async def list_jobs(
         base.order_by(ImportJob.created_at.desc()).limit(limit).offset(offset)
     )
     return list(result.scalars().all()), total
+
+
+async def fingerprint_accounts(
+    db: AsyncSession, user_id: uuid.UUID, fingerprint: str
+) -> list[uuid.UUID]:
+    """PHASE-47.A — Cuentas donde ya se importó un fichero con esta cabecera.
+
+    Sólo jobs COMPLETADOS: un preview abandonado no prueba nada sobre a qué
+    cuenta pertenece un formato, y contarlo haría saltar el aviso por el
+    intento fallido del propio usuario dos minutos antes.
+    """
+    result = await db.execute(
+        select(ImportJob.account_id)
+        .where(
+            ImportJob.user_id == user_id,
+            ImportJob.header_fingerprint == fingerprint,
+            ImportJob.status == ImportJobStatus.COMPLETED,
+            ImportJob.account_id.is_not(None),
+        )
+        .distinct()
+    )
+    return [a for a in result.scalars().all() if a is not None]
+
+
+async def account_fingerprints(
+    db: AsyncSession, user_id: uuid.UUID, account_id: uuid.UUID
+) -> list[str]:
+    """PHASE-47.A — Formatos ya importados con éxito EN esta cuenta.
+
+    Si el formato del fichero ya entró aquí antes, no hay nada que avisar: es
+    el extracto mensual de siempre. Sin esta comprobación el guardarraíl
+    saltaría cada mes en cuanto dos cuentas compartieran formato, y un aviso
+    que salta siempre se aprende a ignorar — con él, el que sí importa.
+    """
+    result = await db.execute(
+        select(ImportJob.header_fingerprint)
+        .where(
+            ImportJob.user_id == user_id,
+            ImportJob.account_id == account_id,
+            ImportJob.status == ImportJobStatus.COMPLETED,
+            ImportJob.header_fingerprint.is_not(None),
+        )
+        .distinct()
+    )
+    return [f for f in result.scalars().all() if f is not None]
+
+
+async def accounts_holding_hashes(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    hashes: list[str],
+    *,
+    exclude_account_id: uuid.UUID,
+) -> list[tuple[uuid.UUID, int]]:
+    """PHASE-47.A — Cuántas de estas filas ya existen en OTRAS cuentas.
+
+    `_compute_hash` **no incluye `account_id`** (el índice único es
+    `(user_id, import_hash)`), así que el mismo fichero produce los mismos
+    hashes lo importes donde lo importes. Eso, que como dedup es un problema
+    conocido —un fichero metido en la cuenta equivocada bloquea su
+    reimportación en la correcta—, aquí es justo la señal que hace falta.
+
+    Devuelve `(account_id, filas)` ordenado de más a menos, excluyendo la
+    cuenta elegida (donde el solape significa «ya lo importaste», que es el
+    dedup normal y no un error de cuenta).
+    """
+    if not hashes:
+        return []
+    result = await db.execute(
+        select(Transaction.account_id, func.count())
+        .where(
+            Transaction.user_id == user_id,
+            Transaction.import_hash.in_(hashes),
+            Transaction.account_id != exclude_account_id,
+            Transaction.deleted_at.is_(None),
+        )
+        .group_by(Transaction.account_id)
+        .order_by(func.count().desc())
+    )
+    return [(row[0], row[1]) for row in result.all() if row[0] is not None]
 
 
 async def find_existing_hashes(db: AsyncSession, user_id: uuid.UUID, hashes: list[str]) -> set[str]:

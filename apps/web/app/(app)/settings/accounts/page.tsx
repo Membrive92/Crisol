@@ -10,6 +10,7 @@ import {
   useCreateAccount,
   useDeleteAccount,
   useReconcileAccount,
+  useSettlementCandidate,
   useUpdateAccount,
 } from '@crisol/services';
 import { toast } from '@crisol/store';
@@ -111,6 +112,11 @@ function toCreatePayload(form: AccountFormValue): AccountCreateRequest {
   if (form.type === 'credit_card' && !form.parent_account_id) {
     payload.counts_as_debt = form.counts_as_debt;
   }
+  // PHASE-47.A: desde qué cuenta de activo se cobra este pasivo. Sólo en
+  // liabilities (el backend rechaza declararlo en una cuenta de activo).
+  if (isLiability && form.settlement_account_id) {
+    payload.settlement_account_id = form.settlement_account_id;
+  }
   return payload;
 }
 
@@ -186,6 +192,13 @@ function toUpdatePayload(
   ].includes(form.type);
   payload.category_id =
     isLiabilityForCategory && form.category_id ? form.category_id : null;
+  // PHASE-47.A: misma regla que category_id — id o `null` (desvincular) en
+  // liabilities; `null` forzado en assets para no dejar residuos al cambiar
+  // de tipo.
+  payload.settlement_account_id =
+    isLiabilityForCategory && form.settlement_account_id
+      ? form.settlement_account_id
+      : null;
   // PHASE-40: el flag "pagada íntegra" sólo aplica a tarjetas normales.
   if (form.type === 'credit_card' && !form.parent_account_id) {
     payload.counts_as_debt = form.counts_as_debt;
@@ -300,6 +313,11 @@ export default function AccountsSettingsPage() {
   const parentCardOptions = active.filter(
     (a) => a.type === 'credit_card' && !a.parent_account_id,
   );
+  // PHASE-47.A — cuentas de activo activas: candidatas a "desde dónde se cobra
+  // este pasivo". El cargo que paga una deuda vive en la cuenta del banco, no
+  // en la deuda, así que sin este vínculo no se puede saber qué cargo cierra
+  // qué ciclo (ADR-0011).
+  const settlementAccountOptions = active.filter((a) => a.nature === 'asset');
 
   return (
     <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
@@ -391,6 +409,7 @@ export default function AccountsSettingsPage() {
             onChange={setForm}
             errors={createErrors ?? undefined}
             parentCardOptions={parentCardOptions}
+            settlementAccountOptions={settlementAccountOptions}
           />
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <Button type="submit" disabled={create.isPending}>
@@ -429,12 +448,14 @@ export default function AccountsSettingsPage() {
             title="Activas"
             items={active}
             balanceById={balanceById}
+            settlementAccountOptions={settlementAccountOptions}
           />
           {includeArchived && archived.length > 0 ? (
             <AccountGroup
               title="Archivadas"
               items={archived}
               balanceById={balanceById}
+              settlementAccountOptions={settlementAccountOptions}
             />
           ) : null}
         </div>
@@ -447,10 +468,12 @@ function AccountGroup({
   title,
   items,
   balanceById,
+  settlementAccountOptions,
 }: {
   title: string;
   items: Account[];
   balanceById: Map<string, AccountBalance>;
+  settlementAccountOptions: Account[];
 }) {
   if (items.length === 0) {
     return (
@@ -476,7 +499,11 @@ function AccountGroup({
                 borderTop: idx === 0 ? 'none' : `1px solid ${colors.border}`,
               }}
             >
-              <AccountRow account={account} balance={balanceById.get(account.id)} />
+              <AccountRow
+                account={account}
+                balance={balanceById.get(account.id)}
+                settlementAccountOptions={settlementAccountOptions}
+              />
             </li>
           ))}
         </ul>
@@ -518,9 +545,11 @@ const TYPE_LABEL: Record<string, string> = {
 function AccountRow({
   account,
   balance,
+  settlementAccountOptions,
 }: {
   account: Account;
   balance: AccountBalance | undefined;
+  settlementAccountOptions: Account[];
 }) {
   const update = useUpdateAccount(account.id);
   const remove = useDeleteAccount();
@@ -539,6 +568,26 @@ function AccountRow({
 
   const isLiability = LIABILITY_ACCOUNT_TYPES.includes(account.type);
   const isAmortizable = AMORTIZABLE_ACCOUNT_TYPES.includes(account.type);
+  // PHASE-47.A — sólo se pregunta al servidor cuando la respuesta puede
+  // cambiar algo: un pasivo, en modo edición, que todavía no lo tiene
+  // declarado. Si ya está declarado, la propuesta no aporta nada.
+  const settlementCandidate = useSettlementCandidate(account.id, {
+    enabled: editing && isLiability && !account.settlement_account_id,
+  });
+  // PHASE-47.A — la propuesta se OFRECE, no se escribe sola. Una preselección
+  // automática se persiste en el siguiente guardado, así que al reabrir la
+  // edición volvía a colarse aunque el usuario la hubiera borrado a propósito:
+  // el sistema propone, el usuario adjudica (ADR-0011), y una propuesta que se
+  // reimpone es una imposición con otro nombre.
+  const candidate = settlementCandidate.data;
+  const settlementSuggestion =
+    candidate && candidate.account_id
+      ? {
+          accountId: candidate.account_id,
+          accountName: candidate.account_name,
+          reason: candidate.reason,
+        }
+      : null;
   const hasFullAmortization =
     isAmortizable && !!account.apr && !!account.term_months && !!account.start_date;
 
@@ -648,6 +697,10 @@ function AccountRow({
           value={draft}
           onChange={setDraft}
           errors={errors ?? undefined}
+          settlementAccountOptions={settlementAccountOptions.filter(
+            (a) => a.id !== account.id,
+          )}
+          settlementSuggestion={settlementSuggestion}
         />
         <div
           style={{
@@ -927,5 +980,6 @@ function fromAccount(
     // el backend no permite re-parentar (toUpdatePayload no lo envía).
     parent_account_id: account.parent_account_id ?? '',
     counts_as_debt: account.counts_as_debt,
+    settlement_account_id: account.settlement_account_id ?? '',
   };
 }

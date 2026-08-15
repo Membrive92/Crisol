@@ -53,6 +53,7 @@ export {
   usePositionHistory,
   useReconcileAccount,
   useRegenerateAmortization,
+  useSettlementCandidate,
   useUnpayInstallment,
   useUpdateAccount,
   useUpdateInstallment,

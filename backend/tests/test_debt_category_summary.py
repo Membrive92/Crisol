@@ -450,7 +450,7 @@ async def test_recurring_quotas_lists_only_debt_categories(
 
 async def test_classify_effort_bands(client: AsyncClient) -> None:
     """Bandas BdE 30/35% (sin red): 0.28 healthy, 0.32 caution, 0.40 stressed."""
-    from app.modules.personal_finance.accounts.debt_health import classify_effort
+    from app.modules.personal_finance.debt.health import classify_effort
 
     assert classify_effort(None) == "unknown"
     assert classify_effort(0.0) == "healthy"

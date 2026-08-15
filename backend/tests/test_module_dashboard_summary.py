@@ -18,13 +18,13 @@ import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.modules.personal_finance.accounts.installments_repository import (
-    generate_installments_for_account,
-)
 from app.modules.personal_finance.accounts.models import (
     Account,
     AccountNature,
     AccountType,
+)
+from app.modules.personal_finance.debt.installments_repository import (
+    generate_installments_for_account,
 )
 from app.modules.personal_finance.debt.service import compute_dashboard_summary
 from app.modules.users.models import User

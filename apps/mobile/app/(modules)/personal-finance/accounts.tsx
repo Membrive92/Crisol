@@ -78,6 +78,10 @@ function toCreatePayload(values: AccountFormValues): AccountCreateRequest {
   if (isLiability && values.category_id) {
     payload.category_id = values.category_id;
   }
+  // PHASE-47.A: desde qué cuenta de activo se cobra este pasivo.
+  if (isLiability && values.settlement_account_id) {
+    payload.settlement_account_id = values.settlement_account_id;
+  }
   return payload;
 }
 
@@ -139,6 +143,12 @@ function toUpdatePayload(
   // evitar valores residuales tras un cambio de tipo.
   const isLiabilityForCategory = ['credit_card', 'loan', 'mortgage'].includes(values.type);
   payload.category_id = isLiabilityForCategory && values.category_id ? values.category_id : null;
+  // PHASE-47.A: id o `null` (desvincular) en liabilities; `null` forzado en
+  // assets para no dejar residuos tras un cambio de tipo.
+  payload.settlement_account_id =
+    isLiabilityForCategory && values.settlement_account_id
+      ? values.settlement_account_id
+      : null;
   return payload;
 }
 

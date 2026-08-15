@@ -71,6 +71,29 @@ def signed_amount_expr(account: Any, paired_account: Any) -> ColumnElement[Decim
     )
 
 
+async def clear_settlement_references_to(
+    db: AsyncSession, user_id: uuid.UUID, account_id: uuid.UUID
+) -> int:
+    """PHASE-47.A — Desvincula los pasivos que declaraban cobrarse desde
+    `account_id`. Devuelve cuántos se han desvinculado.
+
+    Se llama cuando esa cuenta deja de ser un activo (cambio de tipo). El
+    validador de `settlement_account_id` sólo mira la cuenta que se está
+    editando, así que sin esto la conversión dejaría referencias que el propio
+    validador rechaza: la siguiente edición de cada pasivo afectado devolvería
+    un 400 sobre un campo que el formulario ya pinta como válido, y no habría
+    forma de arreglarlo desde la interfaz.
+    """
+    stmt = (
+        update(Account)
+        .where(Account.user_id == user_id)
+        .where(Account.settlement_account_id == account_id)
+        .values(settlement_account_id=None)
+    )
+    result = await db.execute(stmt)
+    return int(result.rowcount or 0)  # type: ignore[attr-defined]
+
+
 async def clear_default_accounts(
     db: AsyncSession, user_id: uuid.UUID, *, except_id: uuid.UUID | None = None
 ) -> None:

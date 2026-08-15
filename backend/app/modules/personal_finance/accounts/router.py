@@ -11,9 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
-from app.modules.personal_finance.accounts.debt_health import compute_debt_health
-from app.modules.personal_finance.accounts.debt_history import compute_debt_history
-from app.modules.personal_finance.accounts.debt_reconciliation import reconcile_debt_payments
 from app.modules.personal_finance.accounts.position_history import (
     compute_position_as_of,
     compute_position_history,
@@ -23,18 +20,10 @@ from app.modules.personal_finance.accounts.schemas import (
     AccountCreate,
     AccountResponse,
     AccountUpdate,
-    AmortizationRowResponse,
-    AmortizationScheduleResponse,
-    DebtHealthKpis,
-    DebtHistoryResponse,
-    InstallmentBulkPayRequest,
-    InstallmentBulkPayResponse,
-    InstallmentPayRequest,
-    InstallmentUpdateRequest,
     PositionAsOfResponse,
     PositionHistoryResponse,
     ReconcileBalanceRequest,
-    ReconcilePlanResponse,
+    SettlementCandidateResponse,
 )
 from app.modules.personal_finance.accounts.service import (
     create_account,
@@ -50,6 +39,21 @@ from app.modules.personal_finance.accounts.service import (
     unmark_installment_paid,
     update_account,
     update_installment,
+)
+from app.modules.personal_finance.debt.attribution import suggest_settlement_account
+from app.modules.personal_finance.debt.health import compute_debt_health
+from app.modules.personal_finance.debt.history import compute_debt_history
+from app.modules.personal_finance.debt.reconciliation import reconcile_debt_payments
+from app.modules.personal_finance.debt.schemas import (
+    AmortizationRowResponse,
+    AmortizationScheduleResponse,
+    DebtHealthKpis,
+    DebtHistoryResponse,
+    InstallmentBulkPayRequest,
+    InstallmentBulkPayResponse,
+    InstallmentPayRequest,
+    InstallmentUpdateRequest,
+    ReconcilePlanResponse,
 )
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
@@ -346,6 +350,39 @@ async def pay_installments_endpoint(
     )
 
 
+@router.get(
+    "/{account_id}/settlement-candidate",
+    response_model=SettlementCandidateResponse,
+)
+async def settlement_candidate_endpoint(
+    account_id: uuid.UUID,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SettlementCandidateResponse:
+    """PHASE-47.A — Desde qué cuenta de activo parece cobrarse este pasivo.
+
+    Cuenta los cargos que el usuario ya enlazó a mano (PHASE-45) y devuelve la
+    cuenta mayoritaria con su recuento. Sin evidencia —o con empate— devuelve
+    una propuesta vacía: el sistema propone, no adivina (ADR-0011). No escribe
+    nada; declararlo sigue siendo un `PUT` del usuario.
+    """
+    await get_account(db, account_id, user.id)  # 404 y pertenencia
+    suggestion = await suggest_settlement_account(db, user.id, account_id)
+    return SettlementCandidateResponse(
+        account_id=suggestion.account_id,
+        account_name=suggestion.account_name,
+        reason=suggestion.reason,
+        matches=suggestion.matches,
+        total=suggestion.total,
+    )
+
+
+# ── Rutas paramétricas de un solo segmento, AL FINAL ────────────────────────
+# PHASE-47.A (D13) — FastAPI resuelve por orden de declaración, así que
+# `/{account_id}` a secas tiene que ir DESPUÉS de todas las rutas nombradas
+# (`/balances`, `/debt-health`, `/position-as-of`…): declarada antes, se
+# tragaría cada una de ellas intentando parsear su nombre como UUID. Cualquier
+# ruta nombrada nueva va ARRIBA de esta línea.
 @router.get("/{account_id}", response_model=AccountResponse)
 async def get_endpoint(
     account_id: uuid.UUID,

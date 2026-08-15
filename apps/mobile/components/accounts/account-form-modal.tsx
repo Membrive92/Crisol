@@ -9,7 +9,11 @@ import {
   View,
 } from 'react-native';
 
-import { useCategories } from '@crisol/services';
+import {
+  useAccounts,
+  useCategories,
+  useSettlementCandidate,
+} from '@crisol/services';
 import type { Account, AccountType } from '@crisol/types';
 import {
   AMORTIZABLE_ACCOUNT_TYPES,
@@ -55,6 +59,9 @@ export interface AccountFormValues {
   /** PHASE-30.5 — Categoría de pagos vinculada (sólo liabilities).
    * Vacío = sin vincular. */
   category_id: string;
+  /** PHASE-47.A — Cuenta de ACTIVO desde la que se cobra este pasivo. Vacío =
+   * sin declarar. Sólo se pide en liabilities. */
+  settlement_account_id: string;
 }
 
 export interface AccountFormModalProps {
@@ -93,6 +100,7 @@ const DEFAULT_ACCOUNT_FORM: AccountFormValues = {
   total_to_pay: '',
   interest_only_first_payment: '',
   category_id: '',
+  settlement_account_id: '',
 };
 
 /**
@@ -129,6 +137,7 @@ function fromAccount(account: Account): AccountFormValues {
     total_to_pay: account.total_to_pay ?? '',
     interest_only_first_payment: account.interest_only_first_payment ?? '',
     category_id: account.category_id ?? '',
+    settlement_account_id: account.settlement_account_id ?? '',
   };
 }
 
@@ -155,6 +164,25 @@ export function AccountFormModal({
   const debtCategories = (categoriesQuery.data ?? []).filter(
     (c) => c.role === 'DEBT_PAYMENT' || c.role === 'DEBT_INTEREST',
   );
+  // PHASE-47.A — cuentas de activo activas: candidatas a "desde dónde se cobra
+  // este pasivo". El cargo que lo paga vive en la cuenta del banco, no aquí.
+  const accountsQuery = useAccounts();
+  const settlementOptions = (accountsQuery.data ?? []).filter(
+    (a) => a.nature === 'asset' && !a.is_archived && a.id !== initial?.id,
+  );
+  const settlementCandidate = useSettlementCandidate(initial?.id, {
+    enabled:
+      visible &&
+      !!initial &&
+      LIABILITY_ACCOUNT_TYPES.includes(initial.type) &&
+      !initial.settlement_account_id,
+  });
+  // PHASE-47.A — la propuesta se OFRECE, no se escribe sola: una preselección
+  // automática se persiste en el siguiente guardado y volvería a colarse al
+  // reabrir aunque el usuario la hubiera borrado a propósito (ADR-0011).
+  const candidate = settlementCandidate.data;
+  const suggestedSettlement = candidate?.account_id ?? null;
+  const suggestedName = candidate?.account_name ?? null;
 
   useEffect(() => {
     if (!visible) return;
@@ -186,6 +214,8 @@ export function AccountFormModal({
         // PHASE-30.5: category_id sólo aplica a liabilities. Al
         // cambiar a asset, limpiar para no enviar un vínculo inválido.
         category_id: nextIsLiability ? prev.category_id : '',
+        // PHASE-47.A: ídem con la cuenta de cargo.
+        settlement_account_id: nextIsLiability ? prev.settlement_account_id : '',
       }));
       return;
     }
@@ -193,6 +223,7 @@ export function AccountFormModal({
       ...prev,
       type: nextType,
       category_id: nextIsLiability ? prev.category_id : '',
+      settlement_account_id: nextIsLiability ? prev.settlement_account_id : '',
     }));
   }
 
@@ -429,6 +460,91 @@ export function AccountFormModal({
                           categoría en tus transacciones, vincúlala para
                           cruzar Capa 1 (flujo) con Capa 2 (saldo).
                         </Text>
+                      </>
+                    )}
+                  </View>
+                ) : null}
+
+                {isLiability ? (
+                  <View>
+                    <Text style={styles.label}>¿Desde qué cuenta se cobra?</Text>
+                    {settlementOptions.length === 0 ? (
+                      <Text style={styles.helper}>
+                        Necesitas al menos una cuenta de activo (banco,
+                        ahorro, efectivo) para declarar de dónde sale el
+                        dinero.
+                      </Text>
+                    ) : (
+                      <>
+                        <View style={styles.categoryChipRow}>
+                          <Pressable
+                            onPress={() => patch('settlement_account_id', '')}
+                            style={[
+                              styles.categoryChip,
+                              !values.settlement_account_id &&
+                                styles.categoryChipActive,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.categoryChipText,
+                                !values.settlement_account_id &&
+                                  styles.categoryChipTextActive,
+                              ]}
+                            >
+                              Sin declarar
+                            </Text>
+                          </Pressable>
+                          {settlementOptions.map((a) => {
+                            const active = values.settlement_account_id === a.id;
+                            return (
+                              <Pressable
+                                key={a.id}
+                                onPress={() =>
+                                  patch('settlement_account_id', a.id)
+                                }
+                                style={[
+                                  styles.categoryChip,
+                                  active && styles.categoryChipActive,
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.categoryChipText,
+                                    active && styles.categoryChipTextActive,
+                                  ]}
+                                  numberOfLines={1}
+                                >
+                                  {a.icon ? `${a.icon} ` : ''}
+                                  {a.name}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                        <Text style={styles.helper}>
+                          El cargo que paga esta deuda aparece en la cuenta
+                          desde la que te lo cobran, no aquí. Declararlo
+                          permite cruzar cada cargo con su ciclo.
+                        </Text>
+                        {suggestedSettlement &&
+                        suggestedSettlement !== values.settlement_account_id ? (
+                          <>
+                            <Text style={styles.helper}>
+                              Propuesto por tus movimientos:{' '}
+                              {candidate?.reason ?? suggestedName}
+                            </Text>
+                            <Pressable
+                              onPress={() =>
+                                patch('settlement_account_id', suggestedSettlement)
+                              }
+                            >
+                              <Text style={styles.suggestionAction}>
+                                Usar «{suggestedName}»
+                              </Text>
+                            </Pressable>
+                          </>
+                        ) : null}
                       </>
                     )}
                   </View>
@@ -691,6 +807,14 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xs,
     color: colors.textMuted,
     lineHeight: 18,
+  },
+  // PHASE-47.A — aplicar la propuesta es un gesto explícito del usuario.
+  suggestionAction: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.semibold,
+    color: colors.primary,
+    lineHeight: 18,
+    paddingVertical: spacing.xs,
   },
   error: { color: colors.danger, fontSize: fontSize.sm },
   actions: {

@@ -11,6 +11,7 @@ export type {
   Account,
   AccountNature,
   AccountType,
+  SettlementCandidate,
 } from './models/account';
 export {
   AMORTIZABLE_ACCOUNT_TYPES,
@@ -107,6 +108,8 @@ export type {
   ImportPreviewRow,
   ImportSource,
   ImportSuggestionSource,
+  ImportWarning,
+  ImportWarningKey,
 } from './models/import';
 export type {
   Receipt,

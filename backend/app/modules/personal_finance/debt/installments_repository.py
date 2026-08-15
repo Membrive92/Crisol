@@ -10,11 +10,11 @@ from decimal import Decimal
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.personal_finance.accounts.amortization import build_schedule
-from app.modules.personal_finance.accounts.installments_model import (
+from app.modules.personal_finance.accounts.models import Account
+from app.modules.personal_finance.debt.amortization import build_schedule
+from app.modules.personal_finance.debt.installments_model import (
     LiabilityInstallment,
 )
-from app.modules.personal_finance.accounts.models import Account
 
 
 async def generate_installments_for_account(

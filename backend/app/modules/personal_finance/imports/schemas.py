@@ -96,6 +96,32 @@ class ImportPreviewBankConceptGroup(BaseModel):
     has_mixed_rule_matches: bool = False
 
 
+class ImportWarningKey(enum.StrEnum):
+    """PHASE-47.A — Avisos del guardarraíl de cuenta equivocada."""
+
+    HEADER_MATCHES_OTHER_ACCOUNT = "header_matches_other_account"
+    """El formato del fichero coincide con el de imports de otra cuenta."""
+    ROWS_EXIST_IN_OTHER_ACCOUNT = "rows_exist_in_other_account"
+    """Una parte de las filas ya existe en transacciones de otra cuenta."""
+
+
+class ImportWarning(BaseModel):
+    """Aviso BLOQUEABLE, no prohibición: el usuario puede tener razón.
+
+    Confirmar exige devolver su `key` en `acknowledged_warnings` — un tick
+    explícito, no un banner que se lee de reojo. `message` va en español y con
+    los números dentro para que la decisión sea informada.
+    """
+
+    key: ImportWarningKey
+    message: str
+    account_id: uuid.UUID | None = None
+    """Cuenta con la que se ha detectado el parecido, si la hay."""
+    account_name: str | None = None
+    matched_rows: int = 0
+    total_rows: int = 0
+
+
 class ImportPreviewResponse(BaseModel):
     """Respuesta del endpoint POST /imports/preview.
 
@@ -113,6 +139,9 @@ class ImportPreviewResponse(BaseModel):
     rows: list[ImportPreviewRow]
     bank_concept_groups: list[ImportPreviewBankConceptGroup] = Field(default_factory=list)
     error_sample: list[str] = Field(default_factory=list)
+    warnings: list[ImportWarning] = Field(default_factory=list)
+    """PHASE-47.A — Sospechas de que el fichero no es de la cuenta elegida.
+    Confirmar exige reconocerlas una a una (`acknowledged_warnings`)."""
 
 
 class ImportCommitRequest(BaseModel):
@@ -124,6 +153,9 @@ class ImportCommitRequest(BaseModel):
     """
 
     category_overrides: dict[str, uuid.UUID] = Field(default_factory=dict)
+    acknowledged_warnings: list[ImportWarningKey] = Field(default_factory=list)
+    """PHASE-47.A — Avisos que el usuario declara haber leído. Si falta alguno
+    de los emitidos en el preview, el commit devuelve 409 con la lista."""
 
 
 class ImportErrorEntry(BaseModel):

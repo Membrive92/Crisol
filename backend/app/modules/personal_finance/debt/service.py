@@ -11,25 +11,25 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.personal_finance.accounts.debt_health import (
-    DEFAULT_REFERENCE_CURRENCY,
-    classify_effort,
-    compute_debt_health,
-    first_income_month,
-    windowed_income_total,
-)
-from app.modules.personal_finance.accounts.debt_history import _scheduled_remaining_at
-from app.modules.personal_finance.accounts.installments_repository import (
-    installments_by_account,
-    interest_paid_in_window,
-    principal_paid_in_window,
-)
 from app.modules.personal_finance.accounts.models import Account, AccountNature
 from app.modules.personal_finance.categories.models import Category, CategoryRole
 from app.modules.personal_finance.dashboard.schemas import (
     ModuleDashboardSummary,
     ModuleSummaryItem,
     ModuleVerdict,
+)
+from app.modules.personal_finance.debt.health import (
+    DEFAULT_REFERENCE_CURRENCY,
+    classify_effort,
+    compute_debt_health,
+    first_income_month,
+    windowed_income_total,
+)
+from app.modules.personal_finance.debt.history import _scheduled_remaining_at
+from app.modules.personal_finance.debt.installments_repository import (
+    installments_by_account,
+    interest_paid_in_window,
+    principal_paid_in_window,
 )
 from app.modules.personal_finance.debt.repository import (
     aggregate_debt_payments_by_category,
@@ -233,7 +233,7 @@ def _format_month(d: date) -> str:
 
 
 async def _resolve_reference_currency(db: AsyncSession, user_id: uuid.UUID) -> str:
-    """Misma estrategia que `accounts.debt_health` — primera cuenta
+    """Misma estrategia que `debt.health` — primera cuenta
     activa por display_order. Si no hay cuentas, EUR (default global)."""
     query = select(Account).where(Account.user_id == user_id).where(Account.is_archived.is_(False))
     accounts = list((await db.execute(query)).scalars().all())

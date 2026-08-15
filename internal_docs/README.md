@@ -577,6 +577,28 @@ y [`improvements/ARCHITECTURE-investment-module.md`](improvements/ARCHITECTURE-i
 > capital, y emparejar siempre, tumban tres), 9 de la capa compartida y 7 del
 > panel web (también verificado rompiéndolo).
 
+### Fase 47 — Recomposición de deuda: bandeja, detalle por deuda y costura
+
+Plan en [`improvements/phase-47-implementation-plan.md`](improvements/phase-47-implementation-plan.md)
+(que manda sobre el [anexo](improvements/phase-47-anexo-implementacion.md) y el
+[plan original](improvements/phase-47-debt-recomposition-inbox.md)) ·
+[ADR-0011](decisions/0011-system-initiated-debt-event-translation.md).
+
+| Fase | Nombre                                                       | Estado | PR |
+|------|--------------------------------------------------------------|--------|----|
+| 47.A | **Cimientos, sin comportamiento nuevo salvo un portero.** Los seis módulos de deuda se mudan de `accounts/` a `debt/` con sus 13 schemas y cero migraciones, con un golden byte a byte de `debt-health`/`balances`/`category-summary` tomado ANTES del movimiento y un test de capas por AST que impide que el ciclo vuelva (las URLs `/accounts/debt-*` no se tocan: cambiarlas rompe contrato). `accounts.settlement_account_id` crea el dato que no existía —qué cuenta de activo cobra cada pasivo—, sin el cual no se puede saber qué cargo cierra el ciclo de qué tarjeta: en julio había **4 cargos y 6 pasivos**. No se adivina, se **propone** contando los cargos que el usuario ya enlazó en PHASE-45, en sus dos formas, callando ante un empate y sin escribirse sola. Y el guardarraíl del import, que es el agujero por el que entró el lío: la huella de la cabecera caza un fichero con el formato de otra cuenta —la única señal que habría cazado julio— y el solape de dedup cruzado caza una reimportación. Avisos **bloqueables**: el botón se apaga hasta el tick y el commit responde 409 sin él. Una revisión adversarial posterior destapó que esa huella salía de las **claves del parser**, fijas por contrato: era la misma constante para todo PDF y todo XLSX, así que F.1 estaba ciega justo en el caso de julio y la suite en verde no lo veía. Corregido —la cabecera real viaja aparte desde el parser— con los dos tests que faltaban | 🚧 pendiente prueba manual (parada A) | — |
+| 47.B | La bandeja + detalle por deuda | ⏳ bloqueada por la parada 2 (mes verde de mayo/junio + calibración) | — |
+| 47.C | Flujo unificado, retirada de los seis diálogos y paridad móvil | ⏳ | — |
+
+> Detalle de 47.A en [`phases/phase-47.A-debt-domain-and-import-guard.md`](phases/phase-47.A-debt-domain-and-import-guard.md).
+> Dos migraciones aditivas y reversibles. Todos los tests nuevos **verificados
+> rompiendo el código** — y ahí está la lección de la fase: **tres veces** un
+> test pasó por la razón equivocada, y las tres se destaparon rompiendo el
+> código, nunca releyéndolo. **D5 está respondida** en el plan de
+> [PHASE-48](improvements/phase-48-debt-early-settlement.md): los cuatro ADEUDO
+> de julio son liquidaciones anticipadas, así que el caso de regresión son items
+> `POSSIBLE_SETTLEMENT`, no items de cuota como decía el plan original.
+
 ---
 
 ## Estructura de este directorio

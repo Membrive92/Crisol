@@ -2,7 +2,12 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-import type { Category, ImportPreviewResponse, ImportSource } from '@crisol/types';
+import type {
+  Category,
+  ImportPreviewResponse,
+  ImportSource,
+  ImportWarningKey,
+} from '@crisol/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import { Button } from '../ui/button';
@@ -51,7 +56,10 @@ export interface PreviewStepProps {
    * usuario asignó. Se manda al endpoint de commit para autoasignar
    * categorías y guardar las equivalencias.
    */
-  onConfirm: (categoryOverrides: Record<string, string>) => void;
+  onConfirm: (
+    categoryOverrides: Record<string, string>,
+    acknowledgedWarnings: ImportWarningKey[],
+  ) => void;
   onRetryWithVision: () => void;
   onBack: () => void;
   /**
@@ -94,11 +102,26 @@ export function PreviewStep({
   const [conceptMapping, setConceptMapping] =
     useState<Record<string, string>>(initialMapping);
 
+  // PHASE-47.A — avisos de "este fichero puede no ser de esta cuenta". Cada uno
+  // se reconoce por separado, y hasta entonces el botón de importar está
+  // apagado: en julio de 2026 el import a la cuenta equivocada no produjo ni un
+  // error, así que lo que faltaba no era información en pantalla, era una
+  // parada.
+  const warnings = useMemo(() => preview.warnings ?? [], [preview.warnings]);
+  const [acknowledged, setAcknowledged] = useState<ImportWarningKey[]>([]);
+  const allAcknowledged = warnings.every((w) => acknowledged.includes(w.key));
+
   // Si cambia el preview (p.ej. tras "procesar con IA"), reinicializamos
   // el estado al nuevo set de grupos.
   useEffect(() => {
     setConceptMapping(initialMapping);
   }, [initialMapping]);
+
+  // Un preview nuevo trae sus propios avisos: arrastrar los ticks del anterior
+  // los daría por leídos sin que nadie los haya visto.
+  useEffect(() => {
+    setAcknowledged([]);
+  }, [warnings]);
 
   function handleConfirmClick() {
     // Filtra las entradas vacías — no se mandan al backend.
@@ -106,7 +129,7 @@ export function PreviewStep({
     for (const [concept, catId] of Object.entries(conceptMapping)) {
       if (catId) overrides[concept] = catId;
     }
-    onConfirm(overrides);
+    onConfirm(overrides, acknowledged);
   }
 
   return (
@@ -135,6 +158,78 @@ export function PreviewStep({
           {SOURCE_HELP[preview.source]}
         </p>
       </header>
+
+      {warnings.length > 0 ? (
+        <section
+          style={{
+            marginBottom: spacing.md,
+            padding: spacing.md,
+            border: `1px solid ${colors.warning}`,
+            borderRadius: radius.md,
+            backgroundColor: colors.warningSoft,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: spacing.sm,
+          }}
+        >
+          <h3
+            style={{
+              margin: 0,
+              fontSize: fontSize.sm,
+              fontWeight: fontWeight.semibold,
+              color: colors.text,
+            }}
+          >
+            ¿Seguro que este fichero es de esta cuenta?
+          </h3>
+          {warnings.map((warning) => {
+            const checked = acknowledged.includes(warning.key);
+            return (
+              <label
+                key={warning.key}
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: spacing.sm,
+                  cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(e) =>
+                    setAcknowledged((prev) =>
+                      e.target.checked
+                        ? [...prev, warning.key]
+                        : prev.filter((k) => k !== warning.key),
+                    )
+                  }
+                  style={{
+                    marginTop: 3,
+                    width: 16,
+                    height: 16,
+                    accentColor: colors.primary,
+                    cursor: 'pointer',
+                    flex: '0 0 auto',
+                  }}
+                />
+                <span
+                  style={{
+                    fontSize: fontSize.sm,
+                    color: colors.text,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {warning.message}{' '}
+                  <span style={{ color: colors.textMuted }}>
+                    Marca la casilla si la cuenta elegida es la correcta.
+                  </span>
+                </span>
+              </label>
+            );
+          })}
+        </section>
+      ) : null}
 
       {preview.bank_concept_groups.length > 0 ? (
         <BankConceptMappingSection
@@ -335,7 +430,12 @@ export function PreviewStep({
         <Button
           type="button"
           onClick={handleConfirmClick}
-          disabled={committing || reprocessing || preview.total_rows === 0}
+          disabled={
+            committing ||
+            reprocessing ||
+            preview.total_rows === 0 ||
+            !allAcknowledged
+          }
         >
           {committing
             ? 'Importando…'
@@ -343,6 +443,11 @@ export function PreviewStep({
                 preview.total_rows === 1 ? 'fila' : 'filas'
               }`}
         </Button>
+        {!allAcknowledged ? (
+          <span style={{ fontSize: fontSize.sm, color: colors.textMuted }}>
+            Revisa los avisos de arriba para poder importar.
+          </span>
+        ) : null}
       </div>
     </div>
   );

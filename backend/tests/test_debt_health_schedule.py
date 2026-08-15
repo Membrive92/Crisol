@@ -16,14 +16,14 @@ from decimal import Decimal
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.modules.personal_finance.accounts.debt_health import compute_debt_health
-from app.modules.personal_finance.accounts.installments_model import LiabilityInstallment
-from app.modules.personal_finance.accounts.installments_repository import (
+from app.modules.personal_finance.accounts.models import Account, AccountNature, AccountType
+from app.modules.personal_finance.categories.models import Category, CategoryKind, CategoryRole
+from app.modules.personal_finance.debt.health import compute_debt_health
+from app.modules.personal_finance.debt.installments_model import LiabilityInstallment
+from app.modules.personal_finance.debt.installments_repository import (
     generate_installments_for_account,
     list_installments,
 )
-from app.modules.personal_finance.accounts.models import Account, AccountNature, AccountType
-from app.modules.personal_finance.categories.models import Category, CategoryKind, CategoryRole
 from app.modules.personal_finance.debt.repository import debt_movement_bounds
 from app.modules.personal_finance.transactions.models import Transaction, TransactionFlow
 from app.modules.users.models import User

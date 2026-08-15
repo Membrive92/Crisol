@@ -25,8 +25,10 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.modules.ai import service as ai_service
 from app.modules.ai.exceptions import AiError
+from app.modules.personal_finance.accounts.repository import get_account_by_id
 from app.modules.personal_finance.accounts.service import (
     anchor_account_balance_at,
     ensure_account_exists,
@@ -49,6 +51,7 @@ from app.modules.personal_finance.fixed_expenses.reconciliation import (
     has_pending_expected,
     reconcile_with_expected,
 )
+from app.modules.personal_finance.imports.fingerprint import header_fingerprint
 from app.modules.personal_finance.imports.models import ImportJob, ImportJobStatus
 from app.modules.personal_finance.imports.parser import (
     NoTablesInPdfError,
@@ -62,13 +65,18 @@ from app.modules.personal_finance.imports.parser import (
     render_pdf_pages_to_png,
 )
 from app.modules.personal_finance.imports.repository import (
+    account_fingerprints,
+    accounts_holding_hashes,
     create_job,
     find_existing_hashes,
+    fingerprint_accounts,
     get_job_by_id,
 )
 from app.modules.personal_finance.imports.schemas import (
     ImportColumnMappings,
     ImportSource,
+    ImportWarning,
+    ImportWarningKey,
 )
 from app.modules.personal_finance.transactions.models import (
     Transaction,
@@ -170,7 +178,7 @@ async def run_import(
     job = await create_job(db, job)
 
     try:
-        rows, effective_mappings, _ = await _parse_with_fallbacks(
+        rows, effective_mappings, _, source_header = await _parse_with_fallbacks(
             payload=payload,
             filename=filename,
             content_type=content_type,
@@ -180,6 +188,12 @@ async def run_import(
         return await _mark_job_failed(db, job, f"Visión PDF falló: {e}")
     except ParseError as e:
         return await _mark_job_failed(db, job, str(e))
+
+    # PHASE-47.A — el import DIRECTO no pasa por el preview, así que no puede
+    # emitir avisos ni pedir que se reconozcan: es un camino sin pantalla. Pero
+    # sí registra su formato, porque si no la cuenta nunca acumularía el suyo y
+    # el guardarraíl del camino con preview avisaría de más en cada importación.
+    job.header_fingerprint = header_fingerprint(source_header) if source_header else None
 
     if default_category_id is not None:
         valid = await _user_owns_category(db, user_id, default_category_id)
@@ -244,7 +258,7 @@ async def run_preview(
     job = await create_job(db, job)
 
     try:
-        rows, effective_mappings, source = await _parse_with_fallbacks(
+        rows, effective_mappings, source, source_header = await _parse_with_fallbacks(
             payload=payload,
             filename=filename,
             content_type=content_type,
@@ -257,6 +271,24 @@ async def run_preview(
         return await _mark_job_failed(db, job, str(e))
 
     job.rows_total = len(rows)
+    # PHASE-47.A — la huella sale de la cabecera REAL del fichero, que el parser
+    # devuelve aparte. NO de `rows[0].keys()`: los dos smart-parsers emiten
+    # claves fijas por contrato, así que ese camino daba la MISMA constante para
+    # todo PDF y todo XLSX de cualquier banco — la señal no discriminaba nada y
+    # el caso de julio de 2026 (dos PDF del mismo banco, productos distintos)
+    # habría pasado en silencio. `None` cuando no hay cabecera que comparar
+    # (visión): ausente no es lo mismo que vacía, y una huella de cadena vacía
+    # casaría consigo misma en todos los ficheros a la vez.
+    job.header_fingerprint = header_fingerprint(source_header) if source_header else None
+    warnings = await _detect_wrong_account_warnings(
+        db,
+        user_id,
+        account_id=account_id,
+        rows=rows,
+        effective_mappings=effective_mappings,
+        currency=currency,
+        fingerprint=job.header_fingerprint,
+    )
     job.preview_payload = {
         "rows": rows,
         "effective_mappings": effective_mappings.model_dump(),
@@ -264,10 +296,133 @@ async def run_preview(
         "default_category_id": (str(default_category_id) if default_category_id else None),
         "source": source.value,
         "account_id": str(account_id),
+        "warnings": [w.model_dump(mode="json") for w in warnings],
     }
     await db.flush()
     await db.refresh(job)
     return job
+
+
+def _preview_row_hashes(
+    rows: list[dict[str, str]],
+    mappings: ImportColumnMappings,
+    *,
+    user_id: uuid.UUID,
+    currency: str,
+) -> list[str]:
+    """Hashes de dedup de las filas del preview, sin procesarlas enteras.
+
+    Reproduce `_compute_hash` con lo mínimo —importe, divisa, fecha,
+    descripción—; no pasa por `_parse_row`, que además resuelve categorías,
+    aplica reglas y clasifica el `flow`, y que en un preview de sólo aviso
+    sería mucho trabajo para nada.
+
+    Deliberadamente NO reproduce el ordinal de ocurrencia: dos filas idénticas
+    del mismo lote comparten aquí el hash base, así que el solape se **subestima**
+    en ese caso. Preferimos avisar de menos que de más — un aviso que salta sin
+    motivo se aprende a ignorar, y con él el que sí importa.
+    """
+    hashes: list[str] = []
+    for row in rows:
+        raw_amount = (row.get(mappings.amount) or "").strip()
+        raw_date = (row.get(mappings.occurred_at) or "").strip()
+        if not raw_amount or not raw_date:
+            continue
+        try:
+            amount, _sign = _parse_amount_signed(raw_amount)
+            occurred_at = _parse_datetime(raw_date)
+        except (_RowError, ValueError):
+            continue
+        description = (row.get(mappings.description) if mappings.description else None) or None
+        hashes.append(
+            _compute_hash(
+                user_id=user_id,
+                amount=amount,
+                currency=currency.upper(),
+                occurred_at=occurred_at,
+                description=description,
+            )
+        )
+    return hashes
+
+
+async def _detect_wrong_account_warnings(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    account_id: uuid.UUID,
+    rows: list[dict[str, str]],
+    effective_mappings: ImportColumnMappings,
+    currency: str,
+    fingerprint: str | None,
+) -> list[ImportWarning]:
+    """PHASE-47.A — ¿Este fichero parece de otra cuenta?
+
+    Dos señales que cubren casos DISTINTOS, y conviene saber cuál sirve para
+    qué: la huella de cabecera caza un fichero con el formato de otra cuenta
+    —incluida la primera vez que se importa, que es el caso de julio de 2026—;
+    el solape de dedup caza una RE-importación de algo que ya está en otra
+    cuenta, y en julio no habría dicho nada porque era la primera vez.
+
+    Ninguna prohíbe: el usuario puede tener razón. Devuelven avisos que el
+    commit exige reconocer.
+    """
+    warnings: list[ImportWarning] = []
+    account_names: dict[uuid.UUID, str] = {}
+
+    async def _name(target: uuid.UUID) -> str:
+        if target not in account_names:
+            account = await get_account_by_id(db, target, user_id)
+            account_names[target] = account.name if account else "otra cuenta"
+        return account_names[target]
+
+    if fingerprint:
+        others = [
+            a for a in await fingerprint_accounts(db, user_id, fingerprint) if a != account_id
+        ]
+        # Sólo avisa si el formato NO se ha usado nunca en la cuenta elegida:
+        # un extracto que ya entró aquí antes es el caso normal, y avisar
+        # entonces convertiría el guardarraíl en ruido mensual.
+        own = fingerprint in {f for f in await account_fingerprints(db, user_id, account_id) if f}
+        if others and not own:
+            other_id = others[0]
+            name = await _name(other_id)
+            warnings.append(
+                ImportWarning(
+                    key=ImportWarningKey.HEADER_MATCHES_OTHER_ACCOUNT,
+                    message=(
+                        f"Este fichero tiene el mismo formato que los que importas "
+                        f"en «{name}», y ninguno con este formato ha entrado nunca "
+                        f"en la cuenta elegida. ¿Es de «{name}»?"
+                    ),
+                    account_id=other_id,
+                    account_name=name,
+                    total_rows=len(rows),
+                )
+            )
+
+    hashes = _preview_row_hashes(rows, effective_mappings, user_id=user_id, currency=currency)
+    if hashes:
+        overlap = await accounts_holding_hashes(db, user_id, hashes, exclude_account_id=account_id)
+        if overlap:
+            other_id, matched = overlap[0]
+            pct = matched * 100 / len(hashes)
+            if pct > settings.import_cross_overlap_pct:
+                name = await _name(other_id)
+                warnings.append(
+                    ImportWarning(
+                        key=ImportWarningKey.ROWS_EXIST_IN_OTHER_ACCOUNT,
+                        message=(
+                            f"{matched} de las {len(hashes)} filas de este fichero ya "
+                            f"existen en «{name}». ¿Lo importaste allí por error?"
+                        ),
+                        account_id=other_id,
+                        account_name=name,
+                        matched_rows=matched,
+                        total_rows=len(hashes),
+                    )
+                )
+    return warnings
 
 
 async def run_commit(
@@ -276,6 +431,7 @@ async def run_commit(
     *,
     job_id: uuid.UUID,
     category_overrides: dict[str, uuid.UUID] | None = None,
+    acknowledged_warnings: list[ImportWarningKey] | None = None,
 ) -> ImportJob:
     """Confirma un job en estado PREVIEW: persiste sus filas como
     transacciones y deja el job en COMPLETED.
@@ -307,6 +463,25 @@ async def run_commit(
         )
 
     payload_data = job.preview_payload
+    # PHASE-47.A — los avisos de "esto parece de otra cuenta" se emiten en el
+    # preview y hay que reconocerlos UNO A UNO para poder confirmar. Es un tick
+    # explícito y no un banner: en julio de 2026 el import a la cuenta
+    # equivocada no produjo ni un error, así que lo que faltaba no era más
+    # información en pantalla, era una parada.
+    acknowledged = {k.value for k in (acknowledged_warnings or [])}
+    pending = [w for w in (payload_data.get("warnings") or []) if w.get("key") not in acknowledged]
+    if pending:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": (
+                    "Este fichero puede no ser de la cuenta elegida. "
+                    "Revisa los avisos y confírmalos para continuar."
+                ),
+                "warnings": pending,
+            },
+        )
+
     rows_raw = payload_data.get("rows") or []
     effective_mappings = ImportColumnMappings.model_validate(payload_data["effective_mappings"])
     currency = payload_data.get("currency") or DEFAULT_CURRENCY
@@ -1095,8 +1270,16 @@ async def _parse_with_fallbacks(
     content_type: str | None,
     mappings: ImportColumnMappings,
     force_vision: bool = False,
-) -> tuple[list[dict[str, str]], ImportColumnMappings, ImportSource]:
+) -> tuple[list[dict[str, str]], ImportColumnMappings, ImportSource, list[str] | None]:
     """Pipeline de parseo con cascada de fallbacks.
+
+    El cuarto elemento es la **cabecera REAL del fichero**, o `None` cuando no
+    la hay (visión: el modelo devuelve estructura, no columnas). Viaja aparte
+    porque los dos smart-parsers emiten filas con claves FIJAS por contrato
+    (`SMART_FORCED_MAPPING`), así que `rows[0].keys()` es la misma constante
+    para cualquier fichero de cualquier banco — y el guardarraíl de PHASE-47.A,
+    que compara formatos, no discriminaría nada. En los caminos legacy y CSV la
+    cabecera SÍ son las claves, porque `parse_file` indexa por ella.
 
     PDF: intenta `parse_pdf_smart` (detecta tabla de transacciones,
     keys fijas). Si la heurística no es confiable, cae al `parse_file`
@@ -1112,7 +1295,7 @@ async def _parse_with_fallbacks(
     fmt = detect_format(filename, content_type)
     if fmt == "csv":
         rows = await asyncio.to_thread(parse_file, payload, filename, content_type)
-        return rows, mappings, ImportSource.CSV
+        return rows, mappings, ImportSource.CSV, _keys_of(rows)
     if fmt == "xlsx":
         # Intentamos primero el smart parser (mismo enfoque que PDF):
         # detecta roles de columnas automáticamente y produce filas con
@@ -1122,29 +1305,35 @@ async def _parse_with_fallbacks(
         # ausentes), caemos al `parse_xlsx` legacy con el mapping del
         # usuario — comportamiento histórico.
         try:
-            rows = await asyncio.to_thread(parse_xlsx_smart, payload)
-            return rows, SMART_FORCED_MAPPING, ImportSource.XLSX_SMART
+            rows, header = await asyncio.to_thread(parse_xlsx_smart, payload)
+            return rows, SMART_FORCED_MAPPING, ImportSource.XLSX_SMART, header
         except SmartParseAmbiguousError:
             rows = await asyncio.to_thread(parse_file, payload, filename, content_type)
-            return rows, mappings, ImportSource.XLSX
+            return rows, mappings, ImportSource.XLSX, _keys_of(rows)
 
     # PDF
     if force_vision:
         rows = await _parse_pdf_with_vision(payload)
-        return rows, VISION_FORCED_MAPPING, ImportSource.VISION
+        # Visión no lee columnas: no hay cabecera que comparar.
+        return rows, VISION_FORCED_MAPPING, ImportSource.VISION, None
 
     try:
-        rows = await asyncio.to_thread(parse_pdf_smart, payload)
-        return rows, SMART_FORCED_MAPPING, ImportSource.PDFPLUMBER_SMART
+        rows, header = await asyncio.to_thread(parse_pdf_smart, payload)
+        return rows, SMART_FORCED_MAPPING, ImportSource.PDFPLUMBER_SMART, header
     except NoTablesInPdfError:
         rows = await _parse_pdf_with_vision(payload)
-        return rows, VISION_FORCED_MAPPING, ImportSource.VISION
+        return rows, VISION_FORCED_MAPPING, ImportSource.VISION, None
     except SmartParseAmbiguousError:
         # Heurística no encontró una tabla clara: caemos al legacy
         # parser que concatena todas las tablas y deja al usuario
         # mapear las columnas a mano (comportamiento histórico).
         rows = await asyncio.to_thread(parse_file, payload, filename, content_type)
-        return rows, mappings, ImportSource.PDFPLUMBER_LEGACY
+        return rows, mappings, ImportSource.PDFPLUMBER_LEGACY, _keys_of(rows)
+
+
+def _keys_of(rows: list[dict[str, str]]) -> list[str] | None:
+    """Cabecera de un lote parseado por `parse_file`, que indexa por ella."""
+    return list(rows[0].keys()) if rows else None
 
 
 async def _parse_pdf_with_vision(payload: bytes) -> list[dict[str, str]]:

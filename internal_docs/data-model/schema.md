@@ -60,6 +60,8 @@
 | `f2b84a6c1d9e73` | 44.14 | `listing_directory` (GLOBAL, PK `(isin, mic)`) + extensión `pg_trgm` + índice GIN sobre `name` — el directorio oficial UE/UK de FIRDS. Aditiva y reversible (el downgrade tira la tabla; la extensión se queda, porque desinstalarla en un downgrade parcial rompería a quien la use). |
 | `g3c95b7d2e8f41` | 44.21 | `scoring_thresholds.not_applicable_reason` (`TEXT NULL`). Aditiva y reversible. **Sin backfill**: las filas existentes quedan en `NULL` hasta que la sincronización del arranque las reescriba desde la calibración del engine — inventar aquí una razón para ~1.500 filas sería escribir a mano lo que el motor deriva. |
 | `h4d17c9e2f0b63` | 45 | `transactions.amortization_source_id` (FK auto-ref `ON DELETE CASCADE`, NULL) + índice parcial `ix_transactions_amortization_source`. Aditiva y reversible. **Sin backfill**: la declaración del usuario no se puede reconstruir a posteriori, y adivinarla por importe+fecha inventaría un dato. |
+| `i5e28d0f3a1c74` | 47.A | `accounts.settlement_account_id` (FK auto-ref `ON DELETE SET NULL`, NULL) — desde qué cuenta de activo se cobra un pasivo. Aditiva y reversible. **Sin backfill**: la app propone un candidato contando los enlaces de PHASE-45, y lo adjudica el usuario. |
+| `j6f39e1a4b2d85` | 47.A | `import_jobs.header_fingerprint` (`VARCHAR(64)` NULL) — huella del formato del fichero. Aditiva y reversible. **Backfill fuera de la migración** (`scripts/backfill_header_fingerprint.py`, con `--dry-run`): sin él la señal nace ciega y no habría cazado julio. |
 
 > **Deuda documental**: las 14 tablas del módulo Inversión (13 de PHASE-44.1 más
 > `listing_directory` de 44.14) y las migraciones intermedias entre
@@ -203,7 +205,8 @@ Challenge efímero de un flujo de registro/autenticación. Migraciones
 | `rows_skipped` | `INTEGER` | duplicados intra-batch + ya existentes en BD. |
 | `column_mappings` | `JSONB` | mapping enviado en el upload. |
 | `error_log` | `JSONB` | `[{ row, error }]`, capado a 100. |
-| `preview_payload` | `JSONB` NULLABLE | PHASE-20 (migración `f3a78b5c19d0`). Filas parseadas + metadata del wizard preview para el commit posterior; NULL en jobs directos/antiguos. |
+| `preview_payload` | `JSONB` NULLABLE | PHASE-20 (migración `f3a78b5c19d0`). Filas parseadas + metadata del wizard preview para el commit posterior; NULL en jobs directos/antiguos. Desde PHASE-47.A incluye `warnings[]` (avisos de cuenta equivocada), que el commit exige reconocidos. |
+| `header_fingerprint` | `VARCHAR(64)` NULLABLE | PHASE-47.A (migración `j6f39e1a4b2d85`). SHA-256 de la cabecera normalizada (trim + casefold + orden). Identifica el FORMATO del fichero, no su contenido, para avisar cuando uno con el formato de otra cuenta se importa a ésta. NULL en jobs que fallaron antes de parsear y en los históricos que el backfill no pudo derivar (`scripts/backfill_header_fingerprint.py`). |
 | `created_at` / `updated_at` | `TIMESTAMPTZ` | |
 
 ### `receipts` (`PHASE-5.1`)
@@ -337,6 +340,7 @@ otro campo, pero no se duplica la combinación exacta.
 | `interest_only_first_payment` | `NUMERIC(14, 2)` NULLABLE | opcional (PHASE-24.3, migración `q4g58i0ed3h1f7`). Primera cuota especial sólo de intereses cuando el contrato no arranca en fecha de cuota. |
 | `category_id` | `UUID` FK → `categories.id` `ON DELETE SET NULL` | opcional (PHASE-30.4, migración `t7j81l3hg6k4i0`). Categoría de pagos vinculada; sólo en liabilities cuya categoría tenga `role IN (DEBT_PAYMENT, DEBT_INTEREST)`. Índice parcial `ix_accounts_category_id`. |
 | `parent_account_id` | `UUID` FK → `accounts.id` `ON DELETE CASCADE` | opcional (PHASE-35, migración `a4q70s2pn4r3q9`). Tarjeta padre cuando la cuenta es una compra a plazos; NULL = cuenta normal. Índice parcial `ix_accounts_parent_account_id`. |
+| `settlement_account_id` | `UUID` FK → `accounts.id` `ON DELETE SET NULL` | opcional (PHASE-47.A, migración `i5e28d0f3a1c74`). Cuenta de **activo** desde la que se cobra este pasivo. Sólo en liabilities; el service valida activo + mismo usuario + no self-reference. NULL = sin declarar. `SET NULL` y no CASCADE: borrar el banco no borra la deuda. Sin backfill — se propone (`GET /accounts/{id}/settlement-candidate`) y lo adjudica el usuario ([ADR-0011](../decisions/0011-system-initiated-debt-event-translation.md)). |
 | `display_order` | `INTEGER` | default `0`. Orden en UI. |
 | `is_archived` | `BOOLEAN` | default `FALSE`. Si TRUE, oculta del selector pero conserva histórico. |
 | `is_default` | `BOOLEAN` | default `FALSE` (PHASE-32, migración `w0m25o7lk9n8m4`). Cuenta principal del usuario, pre-seleccionada en formularios. Única por usuario (la fuerza el service, sin constraint en BD). Su saldo refleja ahorro neto (ver excepción abajo). |

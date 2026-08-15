@@ -51,6 +51,29 @@ export interface ImportPreviewBankConceptGroup {
   has_mixed_rule_matches: boolean;
 }
 
+/**
+ * PHASE-47.A — Claves de los avisos "este fichero puede no ser de esta cuenta".
+ * Sincronizado con `ImportWarningKey` del backend.
+ */
+export type ImportWarningKey =
+  | 'header_matches_other_account'
+  | 'rows_exist_in_other_account';
+
+/**
+ * PHASE-47.A — Aviso BLOQUEABLE, no prohibición: el usuario puede tener razón.
+ * Confirmar exige devolver su `key` en `acknowledged_warnings`, o el backend
+ * responde 409.
+ */
+export interface ImportWarning {
+  key: ImportWarningKey;
+  /** Frase en español con los números dentro. */
+  message: string;
+  account_id: string | null;
+  account_name: string | null;
+  matched_rows: number;
+  total_rows: number;
+}
+
 export interface ImportPreviewResponse {
   job_id: string;
   source: ImportSource;
@@ -58,6 +81,8 @@ export interface ImportPreviewResponse {
   rows: ImportPreviewRow[];
   bank_concept_groups: ImportPreviewBankConceptGroup[];
   error_sample?: string[];
+  /** PHASE-47.A — vacío en el caso normal. */
+  warnings?: ImportWarning[];
 }
 
 export interface BankCategoryMapping {

@@ -10,16 +10,16 @@ import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.modules.personal_finance.accounts.installments_repository import (
-    generate_installments_for_account,
-    list_installments,
-)
 from app.modules.personal_finance.accounts.models import (
     Account,
     AccountNature,
     AccountType,
 )
 from app.modules.personal_finance.accounts.position_history import compute_position_as_of
+from app.modules.personal_finance.debt.installments_repository import (
+    generate_installments_for_account,
+    list_installments,
+)
 from app.modules.users.models import User
 
 
