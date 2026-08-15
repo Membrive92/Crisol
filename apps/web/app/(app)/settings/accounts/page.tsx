@@ -101,10 +101,14 @@ function toCreatePayload(form: AccountFormValue): AccountCreateRequest {
   if (isLiability && form.category_id) {
     payload.category_id = form.category_id;
   }
-  // PHASE-35: compra a plazos bajo una tarjeta. Sólo se envía para una
-  // credit_card con padre elegido; el backend valida que el padre es una
-  // tarjeta del usuario y exige plan completo (validado también en `validate`).
-  if (form.type === 'credit_card' && form.parent_account_id) {
+  // PHASE-35 + PHASE-47.E4: deuda colgada de una tarjeta. La condición era
+  // `type === 'credit_card'` porque en PHASE-35 sólo una compra a plazos podía
+  // colgar; desde E4 también un recibo aplazado, que se da de alta como
+  // PRÉSTAMO —es lo que vende el banco—. Con la condición vieja, el selector
+  // se enseñaba (el form ya lo abrió a cualquier pasivo) y la elección del
+  // usuario se descartaba al guardar: 201 OK y la cuenta sin tarjeta, que es
+  // justo el caso literal de la fase.
+  if (isLiability && form.parent_account_id) {
     payload.parent_account_id = form.parent_account_id;
   }
   // PHASE-40: una tarjeta normal (no compra a plazos) puede marcarse como

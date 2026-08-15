@@ -19,7 +19,7 @@ Los importes son los reales del usuario: recibo de junio de 2026, 700,26 €.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -477,3 +477,182 @@ async def test_the_savings_rate_is_computed_over_a_single_universe(
     assert gross == Decimal(str(summary["expenses"]))
     # Y la estructural no puede quedar por debajo de la bruta.
     assert structure["savings_rate_structural"] >= structure["savings_rate_gross"]
+
+
+# ── Las lecturas de la ventana móvil (runway y recurrencia) ──────────
+#
+# Estas dos miran la ventana de 6 meses cerrados de `analytics`, así que sus
+# fechas se derivan de HOY y no se escriben a mano: un test cuyo resultado
+# depende del mes en que se ejecute es una bomba de relojería (AUDIT-2026-08),
+# y con fechas fijas dejaría de probar nada en cuanto el mes elegido saliera
+# de la ventana.
+
+
+def _month_start(offset_back: int) -> datetime:
+    """Primer día del mes que está `offset_back` meses antes del actual."""
+    today = datetime.now(UTC)
+    year, month = today.year, today.month - offset_back
+    while month <= 0:
+        month += 12
+        year -= 1
+    return datetime(year, month, 1, tzinfo=UTC)
+
+
+async def _tx_at(
+    client: AsyncClient,
+    token: str,
+    *,
+    account_id: str,
+    category_id: str,
+    amount: str,
+    when: datetime,
+    flow: str = "OUT",
+    description: str = "COMPRA",
+) -> None:
+    r = await client.post(
+        "/transactions",
+        json={
+            "account_id": account_id,
+            "category_id": category_id,
+            "amount": amount,
+            "currency": "EUR",
+            "occurred_at": when.replace(hour=12).isoformat(),
+            "description": description,
+            "flow": flow,
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 201, r.text
+
+
+@pytest.fixture
+async def recurring_scenario(client: AsyncClient):  # type: ignore[no-untyped-def]
+    """Una categoría recurrente cuyo ÚLTIMO mes depende del ciclo aplazado.
+
+    La regla 3 exige 4 meses con importe en banda dentro de la ventana de 6.
+    Se siembran 3 meses de 400 € desde el banco y el cuarto —el del ciclo— sólo
+    con las compras de la tarjeta, 420 € en total (dentro de la banda ±40 % de
+    la mediana). Así el escenario DISCRIMINA: si la clasificación excluyera lo
+    aplazado, ese mes desaparecería, quedarían 3 y la categoría dejaría de ser
+    estructural. Con un mes que tuviera gasto por otro lado, el test pasaría
+    hiciera lo que hiciera el código.
+    """
+    token = await _register(client, "aplazado_ventana@example.com")
+    card = await _account(client, token, "Tarjeta BBVA", "credit_card")
+    bank = await _account(client, token, "BBVA", "bank")
+    groceries = await _category(client, token, "Supermercado", "expense")
+
+    for back in (2, 3, 4):
+        await _tx_at(
+            client,
+            token,
+            account_id=bank,
+            category_id=groceries,
+            amount="400.00",
+            when=_month_start(back) + timedelta(days=5),
+        )
+    cycle_month = _month_start(1)
+    await _tx_at(
+        client,
+        token,
+        account_id=card,
+        category_id=groceries,
+        amount="200.00",
+        when=cycle_month + timedelta(days=9),
+    )
+    await _tx_at(
+        client,
+        token,
+        account_id=card,
+        category_id=groceries,
+        amount="220.00",
+        when=cycle_month + timedelta(days=19),
+    )
+    return token, card, cycle_month
+
+
+def _month_params(month: datetime) -> dict[str, str]:
+    """Rango [primer día, último instante] del mes dado."""
+    end = (month + timedelta(days=32)).replace(day=1) - timedelta(seconds=1)
+    return {
+        "date_from": month.isoformat(),
+        "date_to": end.isoformat(),
+        "currency": "EUR",
+    }
+
+
+async def _structure(client: AsyncClient, token: str, month: datetime) -> dict:
+    r = await client.get(
+        "/analytics/expense-structure", params=_month_params(month), headers=_auth(token)
+    )
+    assert r.status_code == 200, r.text
+    return dict(r.json())
+
+
+async def _declare(client: AsyncClient, token: str, card: str, month: datetime) -> str:
+    r = await client.post(
+        "/accounts",
+        json={
+            "name": "Recibo aplazado",
+            "type": "loan",
+            "currency": "EUR",
+            "opening_balance": "420.00",
+            "apr": "0.10",
+            "term_months": 36,
+            "start_date": (month + timedelta(days=24)).date().isoformat(),
+            "parent_account_id": card,
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 201, r.text
+    liability = str(r.json()["id"])
+    applied = await client.post(
+        f"/debt/liabilities/{liability}/deferred-cycle", headers=_auth(token)
+    )
+    assert applied.status_code == 200, applied.text
+    return liability
+
+
+async def test_the_runway_base_does_not_count_deferred_purchases(
+    client: AsyncClient, recurring_scenario  # type: ignore[no-untyped-def]
+) -> None:
+    """El coste de vida mensual es CAJA: lo aplazado no salió de la cuenta.
+
+    `structural_monthly_avg` es el denominador de líquido ÷ consumo mensual.
+    Contándolo, el colchón se acorta — y cuando lleguen las cuotas, que caen en
+    una categoría de pago de deuda (estructural por la regla 2), los mismos
+    euros entrarían en la media por segunda vez.
+
+    Este test es el que FALTABA, y por eso el arreglo anterior pudo aplicarse a
+    la función de al lado sin que nada se quejara: verificar rompiendo el
+    código sólo prueba lo que algún test mira.
+    """
+    token, card, month = recurring_scenario
+
+    base_before = Decimal(str((await _structure(client, token, month))["structural_monthly_avg"]))
+    assert base_before > 0, "sin base estructural el test no probaría nada"
+
+    await _declare(client, token, card, month)
+
+    base_after = Decimal(str((await _structure(client, token, month))["structural_monthly_avg"]))
+    assert base_after < base_before
+
+
+async def test_recurrence_still_sees_a_deferred_purchase(
+    client: AsyncClient, recurring_scenario  # type: ignore[no-untyped-def]
+) -> None:
+    """Aplazar el pago NO deja de hacer recurrente a una categoría.
+
+    Qué categorías son estructurales lo decide el PATRÓN de gasto —¿aparece
+    Supermercado mes tras mes?— y cuándo salió el dinero no cambia si la compra
+    se hizo. Si la clasificación excluyera lo aplazado, la categoría podría
+    parecer que se salta un mes, dejaría de ser estructural, y su gasto pasaría
+    a puntual EN TODAS PARTES: la marca de un mes reescribiendo el histórico.
+    """
+    token, card, month = recurring_scenario
+    await _declare(client, token, card, month)
+
+    structure = await _structure(client, token, month)
+
+    puntuales = {c["category_name"] for c in structure["exceptional_by_category"]}
+    assert "Supermercado" not in puntuales

@@ -177,9 +177,15 @@ fila descartada nunca llega a existir.
   común; cerrar el otro exige que la cadena de saldos pueda CORREGIR una
   dirección deducida del texto, un cambio de radio mucho mayor que merece su
   propia fase. Anotado en el backlog.
-- La marca por compra se pinta en la lista de transacciones y el aviso en el
-  desglose, en web **y** móvil. Lo que no muestra la marca todavía es la
-  pantalla de DETALLE de una transacción.
+- **La marca POR COMPRA sólo existe en web.** El aviso del desglose sí está en
+  las dos plataformas, pero el asterisco de cada fila lo pinta únicamente
+  `apps/web/components/transactions/transaction-list.tsx`; en móvil no hay ni un
+  consumidor de `deferredPurchaseNotice`. Tampoco lo muestra la pantalla de
+  DETALLE de una transacción en ninguna de las dos.
+  *(Esta línea afirmaba lo contrario hasta que el crítico de completitud
+  contrastó el documento contra el código. La corrección se deja anotada aquí
+  a propósito: es la novena vez que una premisa escrita a mano caduca en este
+  repo, y la primera que la caza un revisor con ese encargo explícito.)*
 - El aplazamiento se declara por API. **No hay todavía un panel en la web** que
   lo ofrezca: el usuario tiene que llegar por el endpoint. La propuesta
   automática (ofrecerlo al enlazar la financiación con su cuadro, que es cuando

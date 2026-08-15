@@ -101,7 +101,13 @@ export function computeInsights(
   // P1 — Concentración de gasto: una sola categoría domina el periodo. (El
   // donut muestra el reparto pero no señala la concentración como alerta.)
   if (summary) {
-    const expenses = Number(summary.expenses);
+    // PHASE-47.E — el denominador se suma del PROPIO desglose, no de
+    // `summary.expenses`. Desde que el resultado del mes excluye las compras
+    // aplazadas y el desglose las mantiene, las dos cifras difieren a
+    // propósito: dividir una por la otra da porcentajes imposibles (con
+    // 609,14 € aplazados de 909,14 € de gasto, «Compras concentra el 220 % de
+    // tus gastos»). Un ratio tiene que salir de un solo universo.
+    const expenses = byCategory.reduce((acc, c) => acc + Number(c.total), 0);
     const top = [...byCategory].sort((a, b) => Number(b.total) - Number(a.total))[0];
     if (expenses > 0 && top) {
       const ratio = (Number(top.total) / expenses) * 100;

@@ -554,3 +554,29 @@ fase, con su golden de equivalencia.
 **Mitigación vigente**: con un extracto que sí trae signos —el caso común— la
 guarda de dirección funciona y hay test de regresión
 (`test_a_refund_of_the_receipt_is_not_a_duplicate_of_it`).
+
+## El cargo agregado de tarjeta no distingue de QUÉ tarjeta viene (PHASE-36, ampliado en PHASE-47.E4)
+
+`_load_aportaciones` recoge toda transacción cuya descripción case
+`is_card_financed_op`, y el reparto recorre **todos** los planes con cuadro que
+cuelgan de una tarjeta. Con dos tarjetas, cada cargo mensual avanza una cuota
+de los planes de **ambas**: dos cargos → cuatro cuotas.
+
+Viene de PHASE-36 («un cargo paga la siguiente cuota pendiente de CADA tarjeta
+con cuadro»), y PHASE-47.E4 lo amplió al meter en ese pool lo que cuelga de una
+tarjeta sea cual sea su tipo.
+
+**Por qué no se arregla ahora**: el cargo llega a la cuenta del BANCO y su
+descripción no nombra la tarjeta, así que atribuirlo exige una señal que hoy no
+existe — el número de tarjeta en el texto, o `settlement_account_id` combinado
+con el importe. Con **una sola tarjeta**, que es el caso actual del usuario, el
+reparto es correcto.
+
+## Re-colgar un pasivo de una tarjeta no revisa las cuotas ya marcadas (PHASE-47.E4)
+
+`update_account` valida el padre nuevo pero no toca el cuadro, y la guarda de
+idempotencia de la reconciliación sólo mira las cuotas del pasivo DESTINO. Una
+cuota marcada como pagada por un cargo que ya no le corresponde queda ahí.
+
+Cerrarlo bien pide desmarcar las cuotas cuyo `paid_transaction_id` proceda del
+pool antiguo al cambiar de padre — reversible y auditable, con su test.

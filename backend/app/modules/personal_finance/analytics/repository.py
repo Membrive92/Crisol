@@ -114,11 +114,12 @@ async def monthly_expense_by_category(
         date_to=window_end,
     )
     query = query.where(_is_internal_transfer().is_(False))
-    # PHASE-47.E — el runway es líquido ÷ gasto mensual, o sea CAJA pura. Un
-    # ciclo aplazado no salió de la cuenta ese mes, así que meterlo aquí sube
-    # el consumo mensual y acorta el colchón; y cuando empiecen a llegar las
-    # cuotas, los mismos euros contarían dos veces.
-    query = _exclude_deferred(query)
+    # PHASE-47.E — aquí NO se excluye lo aplazado, y es deliberado: esta query
+    # no mide dinero, decide QUÉ CATEGORÍAS son recurrentes. La recurrencia es
+    # un patrón de GASTO («¿aparece Supermercado mes tras mes?»), y cuándo salió
+    # el dinero no cambia si la compra se hizo. Excluyéndolas, un ciclo aplazado
+    # haría que su categoría pareciera saltarse un mes y dejaría de clasificarse
+    # como estructural — con lo que su gasto pasaría a puntual EN TODAS PARTES.
     rows = (await db.execute(query)).all()
     by_category: dict[uuid.UUID, list[Decimal]] = defaultdict(list)
     for cat_id, _month, total in rows:
@@ -344,6 +345,12 @@ async def structural_monthly_avg(
         date_to=window_end,
     )
     query = query.where(_is_internal_transfer().is_(False))
+    # PHASE-47.E — el runway es líquido ÷ consumo mensual, o sea CAJA pura. Un
+    # ciclo aplazado no salió de la cuenta ese mes, así que contarlo aquí sube
+    # el consumo y acorta el colchón; y cuando lleguen las cuotas —que caen en
+    # una categoría de pago de deuda, estructural por la regla 2— los mismos
+    # euros entrarían en esta media por segunda vez.
+    query = _exclude_deferred(query)
     rows = (await db.execute(query)).all()
     if not rows:
         return Decimal("0")

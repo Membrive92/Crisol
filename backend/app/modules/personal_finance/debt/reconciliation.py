@@ -481,9 +481,33 @@ async def build_reconcile_plan(db: AsyncSession, user_id: uuid.UUID) -> Reconcil
     # le avanzaría una segunda cuota cada mes, en silencio.
     #
     # Lo que de verdad separa a los dos es de qué tarjeta cuelga cada uno
-    # (PHASE-35): el banco cobra dentro de la línea agregada exactamente lo que
-    # se financió en esa tarjeta. Una hija cuenta sea cual sea su `type`.
-    card_ids = {a.id for a in liabilities if a.type == AccountType.CREDIT_CARD}
+    # (PHASE-35): el banco cobra en UNA línea agregada las cuotas de lo
+    # financiado con tarjeta, así que cuelgue de la tarjeta es lo que decide si
+    # un pasivo cobra ahí — no su `type`, que para un recibo aplazado es LOAN.
+    #
+    # Limitación heredada de PHASE-36, ampliada por este pool y NO resuelta
+    # aquí: el reparto no distingue de QUÉ tarjeta viene el cargo (llega a la
+    # cuenta del banco, sin referencia), así que con dos tarjetas cada cargo
+    # avanza una cuota de los planes de AMBAS. Con una sola tarjeta —el caso
+    # actual— es correcto. Anotado en el backlog.
+    # OJO: se pregunta a la BD por TODAS las tarjetas del usuario, archivadas
+    # incluidas. `liabilities` excluye las archivadas, así que derivar `card_ids`
+    # de ahí haría que archivar la tarjeta padre —un clic en Ajustes, sin
+    # aviso— convirtiera a sus hijas en huérfanas: una hija de tipo LOAN
+    # saldría del pool agregado y volvería al de préstamos, que es exactamente
+    # la ambigüedad que este arreglo existe para evitar. Archivar una cuenta
+    # dice «no me la enseñes», no «deshaz su historia».
+    card_ids = set(
+        (
+            await db.execute(
+                select(Account.id)
+                .where(Account.user_id == user_id)
+                .where(Account.type == AccountType.CREDIT_CARD)
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     def _hangs_off_a_card(a: Account) -> bool:
         return a.parent_account_id is not None and a.parent_account_id in card_ids

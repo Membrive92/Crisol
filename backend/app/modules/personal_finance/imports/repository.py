@@ -159,14 +159,24 @@ async def find_live_card_settlements(
     Se excluye lo soft-deleted A PROPÓSITO, y en las dos direcciones: si el
     usuario mandó una copia a la papelera, la que quede viva sigue tapando a la
     siguiente; y si las borró TODAS, reimportar vuelve a traer una — que es lo
-    que él esperaría de una papelera.
+    que él esperaría de una papelera. La excepción son los espejos absorbidos,
+    que no son papelera de usuario (ver el `or_` de abajo).
     """
     patterns = [Transaction.description.ilike(p) for p in _CARD_SETTLEMENT_LIKE]
     result = await db.execute(
         select(Transaction.occurred_at, Transaction.amount, Transaction.flow).where(
             Transaction.user_id == user_id,
             Transaction.account_id == account_id,
-            Transaction.deleted_at.is_(None),
+            or_(
+                Transaction.deleted_at.is_(None),
+                # Un "cargo espejo" absorbido está soft-deleted pero SIGUE
+                # contando como registrado, igual que en `find_existing_hashes`:
+                # fue un borrado del SISTEMA con contrapartida ya creada, no la
+                # papelera del usuario. Si no se viera, reimportar el extracto
+                # con la otra redacción del recibo lo insertaría otra vez y el
+                # saldo se descuadraría en silencio.
+                Transaction.absorbed_as_mirror.is_(True),
+            ),
             Transaction.occurred_at >= since,
             Transaction.occurred_at <= until,
             or_(*patterns),

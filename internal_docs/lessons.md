@@ -1663,6 +1663,32 @@ cuando reportes, di la cobertura junto al hallazgo — «seis defectos, con tres
 frentes sin verificar del todo» es información; «seis defectos» a secas es una
 falsa sensación de fondo tocado.
 
+### [PHASE-47.E] Un `replace(..., 1)` sobre un patrón que aparece dos veces edita la función equivocada — y romper el código no lo caza si la otra no tiene test
+**Error:** el arreglo del bloqueador debía excluir el gasto aplazado en DOS
+funciones de `analytics`: la base de las tasas de ahorro y la del runway. Apliqué
+la edición con un `str.replace(patrón, nuevo, 1)` cuyo patrón —el bloque
+`_apply_scope(... window_start ... window_end)` seguido del filtro de
+transferencias— **existe en dos funciones**. Se reemplazó la primera del fichero,
+que era `monthly_expense_by_category`. Resultado: el runway seguía contando lo
+aplazado y, de propina, la CLASIFICACIÓN de categorías recurrentes empezó a
+excluirlo, que es lo contrario de lo que debe hacer. El comentario que explica el
+runway quedó pegado a una función que no calcula el runway.
+**Por qué el gesto de verificar no lo cazó:** rompí la exclusión y un test falló,
+así que lo di por probado. Pero el test que falló miraba la OTRA función, la que
+sí quedó bien. Para el runway no había ningún test — y un arreglo sin test no
+está verificado por mucho que hayas roto algo cerca y visto rojo. La rotura te
+dice que ALGO está protegido, no que lo esté lo que tú crees.
+**Solución:** afirmar la unicidad antes de editar (`assert t.count(patrón) == 1`)
+o editar por número de línea comprobando su contenido; y escribir el test que
+faltaba —el del runway— antes de dar el arreglo por bueno.
+**Regla:** una edición programática sobre código exige que su ancla sea ÚNICA, y
+eso se comprueba contando, no mirando. Y al verificar rompiendo, comprueba que el
+test que se cae es el que cubre **la línea que acabas de tocar**: si tu cambio
+afecta a N sitios, necesitas N tests que fallen, uno por sitio. Corolario que
+duele: fue una revisión adversarial la que encontró esto, no la suite en verde ni
+el propio gesto de romper — porque ambos sólo pueden hablar de lo que alguien
+decidió mirar.
+
 ---
 
 ## Ejemplos de referencia (no son lecciones reales)

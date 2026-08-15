@@ -145,16 +145,28 @@ async def preview_deferred_cycle(
     declared = await _declared_cycle(db, user_id, liability_id)
     if declared:
         total = sum((p.amount for p in declared), Decimal(0))
+        # El recibo sigue siendo el capital del cuadro, NO la suma de lo que
+        # haya marcado ahora mismo. Si se devolviera esa suma como importe del
+        # recibo, `closes_exactly` sería cierto por construcción y el atajo
+        # afirmaría un cierre al céntimo aunque el usuario hubiera mandado una
+        # de las compras a la papelera — justo lo que «cierre exacto o nada»
+        # existe para impedir.
+        receipt = await _schedule_principal(db, liability_id)
+        closes = receipt > 0 and total == receipt
+        reason = (
+            f"Ya declarado: {len(declared)} compras marcadas como aplazadas por esta deuda."
+            if closes
+            else (
+                f"Las {len(declared)} compras marcadas suman {total}, que ya no coincide con el "
+                f"recibo ({receipt}). Alguna se ha borrado o cambiado de importe: retira la "
+                "marca y vuelve a declararla."
+            )
+        )
         return (
             liability,
             await _parent_card(db, user_id, liability),
-            total,
-            CycleSelection(
-                tuple(declared),
-                total,
-                True,
-                f"Ya declarado: {len(declared)} compras marcadas como aplazadas por esta deuda.",
-            ),
+            receipt if receipt > 0 else total,
+            CycleSelection(tuple(declared), total, closes, reason),
         )
 
     if liability.parent_account_id is None:
@@ -242,14 +254,26 @@ async def _cycle_close(
         )
     )
     settlements = [r[0] for r in rows.all() if is_card_settlement(r[2])]
+
+    # Cuándo se contrató ESTA financiación. Acota la búsqueda: el mismo importe
+    # se liquida dos meses seguidos más a menudo de lo que parece —577,16 € en
+    # marzo y en abril de 2026, en los datos reales—, y quedarse con la más
+    # reciente sin más anclaría el ciclo de marzo en el cierre de abril.
+    contracted = (
+        datetime.combine(liability.start_date, time.max, tzinfo=UTC)
+        if liability.start_date is not None
+        else None
+    )
     if settlements:
-        # La más reciente: si el mismo importe se liquidó dos veces, el ciclo
-        # que este pasivo salda es el último.
-        latest: datetime = max(settlements)
-        return latest
-    if liability.start_date is not None:
-        return datetime.combine(liability.start_date, time.max, tzinfo=UTC)
-    return None
+        candidates = (
+            [s for s in settlements if s <= contracted] if contracted is not None else settlements
+        )
+        if candidates:
+            # La más reciente de las ANTERIORES al contrato: es el ciclo que
+            # esta financiación salda.
+            latest: datetime = max(candidates)
+            return latest
+    return contracted
 
 
 async def apply_deferred_cycle(

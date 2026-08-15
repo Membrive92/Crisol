@@ -186,10 +186,16 @@ export default function AnalysisScreen() {
   // PHASE-47.E — la diferencia entre el donut (que mantiene lo aplazado) y los
   // KPI (que lo excluyen), dicha en voz alta. La redacción vive en
   // `@crisol/ui` para que las dos pantallas no la cuenten distinto.
-  const deferredNotice = deferredBreakdownNotice(
-    summaryQuery.data?.deferred_expenses,
-    currency,
-  );
+  // Sólo cuando el donut está enseñando GASTO: el aviso habla de gasto
+  // aplazado, y pintado bajo el donut de ingresos sería un pie de foto que no
+  // describe lo que hay encima.
+  // `all` también lo enseña: el donut incluye el gasto y el aviso lo explica.
+  // El que se excluye es `income`, donde sería un pie de foto que no describe
+  // lo que hay encima.
+  const deferredNotice =
+    donutKind === 'income'
+      ? null
+      : deferredBreakdownNotice(summaryQuery.data?.deferred_expenses, currency);
   const monthlyQuery = useDashboardByMonth(monthlyParams);
   const byCategoryQuery = useDashboardByCategory(byCategoryParams);
   const topExpensesQuery = useDashboardTopExpenses(topExpensesParams);
