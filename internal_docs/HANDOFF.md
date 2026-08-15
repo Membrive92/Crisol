@@ -1,13 +1,43 @@
-# Dónde estamos — 2026-08-13
+# Dónde estamos — 2026-08-15
 
-Punto de continuación tras la sesión del 13 de agosto. Se lee de arriba abajo;
+Punto de continuación tras la sesión del 15 de agosto. Se lee de arriba abajo;
 lo que hay que decidir está al final.
 
 ---
 
 ## Lo primero al retomar
 
-**PHASE-47.A está escrita y verde, y espera tu prueba manual.** Es la entrega de
+**Hay dos entregas commiteadas y verdes esperando tu prueba manual: 47.A y
+47.E.** La segunda es la que arregla el descuadre que destapaste el día 15 —el
+recibo de la tarjeta que se financia y suma deuda sin restar nada— y su detalle
+está en [`phases/phase-47.E-deferred-receipt.md`](phases/phase-47.E-deferred-receipt.md).
+
+### 47.E, en una frase
+
+Tu regla, tal cual la dijiste: *«no aparecen porque se han aplazado, pero se
+cuentan en categorías porque el gasto existe, lo único que está aplazado»*. El
+resultado del mes mide **caja** y excluye las compras aplazadas; el desglose por
+categorías mide **gasto** y las mantiene; y la pantalla dice la diferencia,
+porque a partir de aquí las dos cifras no cuadran a propósito.
+
+Con tres cosas más que salieron del camino:
+
+- El recibo que BBVA escribe de dos formas deja de entrar 2-4 veces. Medido en
+  tu BD: **~20 filas que venías borrando a mano** en siete meses. Y sin comerse
+  el par de financiación, que tiene la misma forma (mismo importe, mismo día) y
+  es el hecho contrario.
+- El cargo agregado de la tarjeta alcanza por fin al recibo aplazado.
+- Eso destapó que **tu préstamo amortiza sólo porque el recibo de junio está
+  archivado**: con dos deudas de tipo préstamo, el cargo de amortización se
+  vuelve ambiguo y el préstamo real se para sin decir nada. Ya está arreglado.
+
+Lo que **no** cierra: el recibo de 990,02 € de junio. Le faltan compras de mayo
+en la app, así que el sistema se niega a marcar el ciclo y lo dice, en vez de
+elegir «las que más se acerquen».
+
+---
+
+**PHASE-47.A sigue esperando su prueba manual.** Es la entrega de
 cimientos del plan de recomposición de deuda que trajiste el día 13
 ([`improvements/phase-47-implementation-plan.md`](improvements/phase-47-implementation-plan.md)),
 y no estrena comportamiento salvo un portero en el import. Detalle completo en

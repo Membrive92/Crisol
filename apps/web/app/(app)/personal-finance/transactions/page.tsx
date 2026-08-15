@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 
@@ -95,6 +95,14 @@ export default function TransactionsPage() {
   // PHASE-32 — reasignación en bloque a una cuenta (consolidar el mes en
   // la principal). El destino por defecto es la cuenta principal.
   const activeAccounts = (accounts ?? []).filter((a) => !a.is_archived);
+
+  // PHASE-47.E — nombre del pasivo que aplazó una compra, para el hover del
+  // asterisco. Se incluyen las archivadas a propósito: un recibo aplazado se
+  // archiva en cuanto se termina de pagar, y sus compras siguen marcadas.
+  const deferredLiabilityName = useCallback(
+    (accountId: string) => (accounts ?? []).find((a) => a.id === accountId)?.name,
+    [accounts],
+  );
   const [reassignTargetId, setReassignTargetId] = useState('');
   // AUDIT MEDIUM#9 / LOW#14 — destino por defecto: la principal, o el primer
   // ACTIVO (nunca un pasivo), nunca '' (antes dejaba el botón deshabilitado).
@@ -603,6 +611,7 @@ export default function TransactionsPage() {
               onToggleSelectAll={toggleSelectAll}
               allSelected={allSelected}
               someSelected={someSelected}
+              deferredLiabilityName={deferredLiabilityName}
             />
 
             <Pagination

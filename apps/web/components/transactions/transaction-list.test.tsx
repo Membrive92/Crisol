@@ -18,6 +18,7 @@ function makeTx(overrides: Partial<Transaction> = {}): Transaction {
     account_id: 'acc-1',
     category_id: 'cat-income',
     transfer_pair_id: null,
+    deferred_by_account_id: null,
     amount: '824.77',
     currency: 'EUR',
     occurred_at: '2026-04-15T12:00:00Z',
@@ -165,5 +166,35 @@ describe('TransactionList — selección por checkbox (PHASE-34)', () => {
     );
     const selectAll = screen.getByLabelText('Seleccionar todo') as HTMLInputElement;
     expect(selectAll.checked).toBe(true);
+  });
+});
+
+// ── PHASE-47.E · la marca de gasto aplazado ──────────────────────────
+//
+// El usuario lo pidió con estas palabras: «a los gastos de la tarjeta cuando un
+// recibo sea financiado, a los gastos trazados que se les ponga un asterisco
+// con un hover». El asterisco no dice «esto no cuenta» — dice «esto no ha
+// salido todavía», y el texto tiene que aclararlo o se entiende al revés.
+
+describe('TransactionList · gasto aplazado', () => {
+  it('marca la compra y explica que el gasto sigue contando en su categoría', () => {
+    render(
+      <TransactionList
+        items={[makeTx({ deferred_by_account_id: 'liab-1' })]}
+        categories={[]}
+        onDelete={vi.fn()}
+        deferredLiabilityName={() => 'Recibo junio aplazado'}
+      />,
+    );
+
+    const mark = screen.getByTestId('deferred-mark');
+    expect(mark.getAttribute('title')).toContain('Recibo junio aplazado');
+    expect(mark.getAttribute('title')).toContain('cuenta en su categoría');
+  });
+
+  it('no marca las compras normales', () => {
+    render(<TransactionList items={[makeTx()]} categories={[]} onDelete={vi.fn()} />);
+
+    expect(screen.queryByTestId('deferred-mark')).toBeNull();
   });
 });

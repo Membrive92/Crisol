@@ -3,7 +3,18 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { AnalyticsCategoryAmount, CategoryBreakdownItem } from '@crisol/types';
 
-import { deriveStructural, StructureSegmented } from './stitch-expense-breakdown';
+import {
+  deriveStructural,
+  StitchExpenseBreakdown,
+  StructureSegmented,
+} from './stitch-expense-breakdown';
+
+// El desglose navega al drill-down de categoría con `useRouter`; en jsdom no
+// hay AppRouterContext, así que lo mockeamos a un push no-op (mismo patrón que
+// `transaction-list.test.tsx`).
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}));
 
 function item(id: string | null, name: string, total: string): CategoryBreakdownItem {
   return {
@@ -60,5 +71,46 @@ describe('StructureSegmented', () => {
     expect(onChange).toHaveBeenCalledWith('exceptional');
     fireEvent.click(screen.getByRole('tab', { name: 'Fijo' }));
     expect(onChange).toHaveBeenCalledWith('structural');
+  });
+});
+
+// ── PHASE-47.E2/E3 · el aviso de gasto aplazado ──────────────────────
+//
+// Los meses con un recibo financiado, este desglose y el resultado del mes NO
+// cuadran a propósito: el gasto se hizo (está aquí) pero el dinero no salió
+// (no está allí). Si nadie lo dice, quien intente cuadrarlos concluirá que la
+// app está mal — y tendrá razón en desconfiar, porque nada se lo explicaba.
+
+describe('StitchExpenseBreakdown · aviso de aplazado', () => {
+  const items = [item('a', 'Supermercado', '700.26')];
+
+  it('lo explica cuando parte del gasto está aplazado', () => {
+    render(
+      <StitchExpenseBreakdown
+        items={items}
+        currency="EUR"
+        isLoading={false}
+        deferredExpenses="700.26"
+      />,
+    );
+
+    const notice = screen.getByTestId('deferred-notice');
+    expect(notice.textContent).toContain('700,26');
+    expect(notice.textContent).toContain('no salieron de tu cuenta');
+  });
+
+  it('no pinta nada el resto de los meses', () => {
+    // Que es casi siempre: un aviso permanente se convierte en ruido y deja de
+    // leerse justo el mes que importa.
+    render(
+      <StitchExpenseBreakdown
+        items={items}
+        currency="EUR"
+        isLoading={false}
+        deferredExpenses="0"
+      />,
+    );
+
+    expect(screen.queryByTestId('deferred-notice')).toBeNull();
   });
 });

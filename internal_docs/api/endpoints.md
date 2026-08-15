@@ -675,3 +675,15 @@ Notas del `AnalysisRun`:
 
 Todos los errores siguen el formato FastAPI estándar:
 `{ "detail": "..." }` o `{ "detail": [{ loc, msg, type }, ...] }`.
+
+## Ciclo aplazado (PHASE-47.E)
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/debt/liabilities/{id}/deferred-cycle` | Qué compras de la tarjeta cubriría este recibo aplazado. No escribe nada: el sistema propone con su aritmética a la vista (ADR-0011). |
+| POST | `/debt/liabilities/{id}/deferred-cycle` | Marca esas compras como aplazadas. **409** si el ciclo no cierra al céntimo — sin el ciclo completo no hay nada que marcar con honestidad. |
+| DELETE | `/debt/liabilities/{id}/deferred-cycle` | Retira la marca: las compras vuelven a contar como salida de caja. |
+
+Una compra marcada sale del **resultado mensual** (que mide caja) y sigue en el
+**desglose por categorías** (que mide gasto). `GET /dashboard/summary` publica
+`deferred_expenses` con la diferencia.

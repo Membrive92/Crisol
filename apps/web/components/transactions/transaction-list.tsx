@@ -7,6 +7,7 @@ import { useCurrencyStore } from '@crisol/store';
 import type { Category, CategoryKind, Transaction, TransactionFlow } from '@crisol/types';
 import {
   colors,
+  deferredPurchaseNotice,
   fontSize,
   fontWeight,
   formatAmount,
@@ -43,6 +44,13 @@ export interface TransactionListProps {
   onToggleSelectAll?: (() => void) | undefined;
   allSelected?: boolean | undefined;
   someSelected?: boolean | undefined;
+  /**
+   * PHASE-47.E — nombre del pasivo que aplazó una compra, para el hover del
+   * asterisco. Se pide como función en vez de una lista de cuentas porque la
+   * lista no las carga: sólo hace falta el nombre de las poquísimas filas
+   * marcadas. Sin ella el asterisco se pinta igual, con el texto genérico.
+   */
+  deferredLiabilityName?: ((accountId: string) => string | undefined) | undefined;
 }
 
 interface TransactionRow {
@@ -113,6 +121,7 @@ export function TransactionList({
   onToggleSelectAll,
   allSelected,
   someSelected,
+  deferredLiabilityName,
 }: TransactionListProps) {
   const router = useRouter();
   const activeCurrency = useCurrencyStore((s) => s.currency);
@@ -223,6 +232,21 @@ export function TransactionList({
           >
             {tx.description ?? '(sin descripción)'}
           </span>
+          {tx.deferred_by_account_id !== null ? (
+            <abbr
+              data-testid="deferred-mark"
+              title={deferredPurchaseNotice(deferredLiabilityName?.(tx.deferred_by_account_id))}
+              style={{
+                color: colors.primary,
+                fontWeight: fontWeight.semibold,
+                cursor: 'help',
+                textDecoration: 'none',
+                flex: '0 0 auto',
+              }}
+            >
+              *
+            </abbr>
+          ) : null}
           {isTransferFlow(tx.flow) ||
           tx.transfer_pair_id !== null ||
           category?.is_transfer ||

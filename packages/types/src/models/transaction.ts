@@ -44,6 +44,14 @@ export interface Transaction {
    * presupuestos pero SÍ afectan al saldo individual de su cuenta.
    */
   transfer_pair_id: string | null;
+  /**
+   * PHASE-47.E2 — el pasivo que APLAZÓ este gasto: el banco financió el recibo
+   * de la tarjeta, así que la compra se hizo pero el dinero no salió ese mes.
+   *
+   * La fila se marca y NO cuenta en el resultado mensual (que mide caja), pero
+   * SÍ en el desglose por categorías (que mide gasto). `null` en casi todas.
+   */
+  deferred_by_account_id: string | null;
   amount: string;
   currency: string;
   occurred_at: string;

@@ -17,7 +17,7 @@ import itertools
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 from fastapi import HTTPException, status
@@ -47,6 +47,10 @@ from app.modules.personal_finance.category_rules.repository import (
     find_first_matching_rule,
     list_rules_for_user,
 )
+from app.modules.personal_finance.debt.reconciliation import (
+    SETTLEMENT_DUPLICATE_WINDOW_DAYS,
+    is_card_settlement,
+)
 from app.modules.personal_finance.fixed_expenses.reconciliation import (
     has_pending_expected,
     reconcile_with_expected,
@@ -69,6 +73,7 @@ from app.modules.personal_finance.imports.repository import (
     accounts_holding_hashes,
     create_job,
     find_existing_hashes,
+    find_live_card_settlements,
     fingerprint_accounts,
     get_job_by_id,
 )
@@ -994,6 +999,15 @@ async def _process_and_persist(
         # deben colapsar en una sola `expected`.
         pending_inserts.append(p)
 
+    # PHASE-47.E1: un recibo de tarjeta llega escrito de varias formas y con
+    # fechas distintas. Se queda una copia y las demás se descartan. No se
+    # suman a `skipped_in_batch`: `skipped_existing` se DERIVA de lo que entra
+    # menos lo que se inserta, así que ya las cuenta — sumarlas las contaría
+    # dos veces en el resumen que ve el usuario.
+    pending_inserts, _duplicate_settlements = await _drop_duplicate_settlements(
+        db, user_id, account_id, pending_inserts
+    )
+
     inserted = await _flush_inserts(
         db,
         pending_inserts,
@@ -1067,6 +1081,79 @@ async def _process_and_persist(
 
     await db.flush()
     await db.refresh(job)
+
+
+def _settlement_preference(p: ParsedRow) -> tuple[int, int, int, str, str]:
+    """Orden de preferencia entre copias del MISMO recibo. Menor gana.
+
+    Cuando el mismo hecho llega escrito de varias formas, sobrevive la copia
+    que MÁS dice: la que el clasificador entendió (tiene dirección), la que
+    resolvió categoría, y la de texto más largo — que es la que trae el número
+    de tarjeta y permite saber de cuál se trata. La fecha y el hash cierran el
+    desempate para que el resultado no dependa del orden del fichero.
+    """
+    return (
+        0 if p.flow is not None else 1,
+        0 if p.category_id is not None else 1,
+        -len(p.description or ""),
+        p.occurred_at.isoformat(),
+        p.import_hash,
+    )
+
+
+async def _drop_duplicate_settlements(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    account_id: uuid.UUID,
+    pending: list[ParsedRow],
+) -> tuple[list[ParsedRow], int]:
+    """Deja UNA fila por recibo de tarjeta y descarta las copias.
+
+    El banco escribe el mismo recibo con dos redacciones y las fecha distinto,
+    y el extracto de la cuenta y el de la tarjeta lo traen los dos. Medido en
+    la BD del usuario: entre 2 y 4 filas por ciclo para un único cobro, todos
+    los meses, que él venía borrando a mano.
+
+    Compara contra lo que ya está persistido Y contra lo que va en este mismo
+    lote, porque las copias llegan por las dos vías. El `import_hash` no puede
+    hacer este trabajo: cambia con el texto y con la fecha, que es justo lo que
+    difiere entre las copias.
+
+    No se toca nada que no sea una liquidación: el resto de filas pasa entero.
+    """
+    settlements = [p for p in pending if is_card_settlement(p.description)]
+    if not settlements:
+        return pending, 0
+
+    window = timedelta(days=SETTLEMENT_DUPLICATE_WINDOW_DAYS)
+    dates = [p.occurred_at for p in settlements]
+    persisted = await find_live_card_settlements(
+        db,
+        user_id,
+        account_id,
+        since=min(dates) - window,
+        until=max(dates) + window,
+    )
+
+    # La regla se enuncia en DÍAS, así que se compara por fecha de calendario.
+    # Lo que llega del parser es naive y lo que devuelve la BD es aware
+    # (`TIMESTAMPTZ`); restarlos directamente revienta, y forzar una zona sería
+    # inventar una precisión que la regla no usa.
+    claimed = [(d.date(), a) for d, a in persisted]
+
+    dropped: set[str] = set()
+    for p in sorted(settlements, key=_settlement_preference):
+        day = p.occurred_at.date()
+        if any(a == p.amount and abs(d - day) <= window for d, a in claimed):
+            dropped.add(p.import_hash)
+            continue
+        claimed.append((day, p.amount))
+
+    if not dropped:
+        return pending, 0
+    # Se reconstruye en el ORDEN original: el descarte no debe reordenar el
+    # lote, que es lo que lee la cadena de saldos.
+    return [p for p in pending if p.import_hash not in dropped], len(dropped)
 
 
 async def _flush_inserts(

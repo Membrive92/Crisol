@@ -141,6 +141,23 @@ FINANCING_INFLOW_SEQUENCES: tuple[tuple[str, ...], ...] = (
 )
 
 
+#: Ventana dentro de la cual dos liquidaciones del MISMO importe en la misma
+#: cuenta son el mismo hecho contado dos veces, no dos cobros.
+#:
+#: El banco escribe el recibo de la tarjeta con dos redacciones —`Adeudo mensual
+#: de tarjeta` y `Recibo mes anterior`— y las fecha con días distintos: la fecha
+#: de la operación y la del apunte. Medido sobre siete ciclos reales, el desfase
+#: máximo observado es de 5 días. 7 los cubre con margen y se queda muy por
+#: debajo de la cadencia mensual del recibo, que es lo que impide que la ventana
+#: alcance al ciclo siguiente — dos meses seguidos con el mismo importe han
+#: ocurrido de verdad (577,16 € en marzo y abril de 2026).
+#:
+#: El importe tiene que coincidir EXACTO: es lo que hace específica la regla.
+#: Dos liquidaciones distintas del mismo céntimo en la misma semana serían una
+#: casualidad, y el usuario puede recuperarla desde la papelera.
+SETTLEMENT_DUPLICATE_WINDOW_DAYS = 7
+
+
 def is_card_settlement(description: str | None) -> bool:
     """Cargo que salda el ciclo de una tarjeta (no es gasto nuevo)."""
     return _matches_any_sequence(description, CARD_SETTLEMENT_SEQUENCES)

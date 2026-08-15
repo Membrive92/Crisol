@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.personal_finance.debt.reconciliation import (
+    CARD_SETTLEMENT_SEQUENCES,
+    sql_like_patterns,
+)
 from app.modules.personal_finance.imports.models import ImportJob, ImportJobStatus
 from app.modules.personal_finance.transactions.models import Transaction
+
+# Derivados de la ÚNICA declaración de qué es una liquidación (PHASE-46). Un
+# gate falla si alguien vuelve a enumerarlas por separado.
+_CARD_SETTLEMENT_LIKE = sql_like_patterns(CARD_SETTLEMENT_SEQUENCES)
 
 
 async def create_job(db: AsyncSession, job: ImportJob) -> ImportJob:
@@ -125,6 +135,39 @@ async def accounts_holding_hashes(
         .order_by(func.count().desc())
     )
     return [(row[0], row[1]) for row in result.all() if row[0] is not None]
+
+
+async def find_live_card_settlements(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    account_id: uuid.UUID,
+    *,
+    since: datetime,
+    until: datetime,
+) -> list[tuple[datetime, Decimal]]:
+    """Liquidaciones de tarjeta VIVAS de una cuenta dentro de un rango.
+
+    Sirve para no volver a insertar un recibo que ya está registrado con otra
+    redacción (PHASE-47.E1). Devuelve sólo fecha e importe porque es lo único
+    que compara la regla de duplicado; el texto ya lo filtra la query.
+
+    Se excluye lo soft-deleted A PROPÓSITO, y en las dos direcciones: si el
+    usuario mandó una copia a la papelera, la que quede viva sigue tapando a la
+    siguiente; y si las borró TODAS, reimportar vuelve a traer una — que es lo
+    que él esperaría de una papelera.
+    """
+    patterns = [Transaction.description.ilike(p) for p in _CARD_SETTLEMENT_LIKE]
+    result = await db.execute(
+        select(Transaction.occurred_at, Transaction.amount).where(
+            Transaction.user_id == user_id,
+            Transaction.account_id == account_id,
+            Transaction.deleted_at.is_(None),
+            Transaction.occurred_at >= since,
+            Transaction.occurred_at <= until,
+            or_(*patterns),
+        )
+    )
+    return [(row[0], row[1]) for row in result.all()]
 
 
 async def find_existing_hashes(db: AsyncSession, user_id: uuid.UUID, hashes: list[str]) -> set[str]:

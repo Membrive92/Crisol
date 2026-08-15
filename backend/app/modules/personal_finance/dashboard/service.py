@@ -233,6 +233,18 @@ async def get_summary(
         rate_prev = float(prev_balance / prev_income * 100)
         savings_rate_delta_pp = rate_now - rate_prev
 
+    # PHASE-47.E2 — cuánto del gasto del periodo está aplazado. No entra en
+    # `expenses` (que mide caja); viaja aparte para que el desglose pueda
+    # explicar por qué no cuadra con él.
+    deferred = await repository.get_deferred_expense_total(
+        db,
+        user_id,
+        currency=legacy,
+        target_currency=target,
+        date_from=date_from,
+        date_to=date_to,
+    )
+
     # PHASE-34 — límites globales (mes min/max con datos), independientes del
     # filtro de período, para acotar el navegador de período del Análisis.
     available_from, available_to = await repository.get_transaction_month_bounds(db, user_id)
@@ -244,6 +256,7 @@ async def get_summary(
         transaction_count=count,
         currency=displayed,
         unconvertible_count=unconvertible,
+        deferred_expenses=deferred,
         previous_period_income=prev_income,
         previous_period_expenses=prev_expenses,
         previous_period_balance=prev_balance,

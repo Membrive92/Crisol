@@ -1572,6 +1572,50 @@ las claves de Y» es una afirmación sobre el contrato de Y — si Y es un parse
 salida normalizada, es falsa por construcción, y escribirla en el comentario que
 justifica el código convierte el bug en doctrina.
 
+### [PHASE-47.E] Verificar rompiendo el código sólo vale si la rotura LLEGÓ: una sonda que no aplica se lee igual que un test que protege
+**Error:** Para comprobar que el test defendía la mitad «el desglose por
+categorías NO excluye lo aplazado», rompí esa mitad con un `replace` de cadena
+y relancé: **8 passed**. Estuve a un paso de anotarlo como «verificado» — y la
+conclusión habría sido la contraria de la verdad, porque el patrón que buscaba
+mi sonda no existía en el fichero y la rotura nunca se aplicó. El código seguía
+correcto, así que los tests seguían verdes.
+**Causa:** una sonda por `str.replace` falla **en silencio y devolviendo éxito**:
+si el patrón no casa, el fichero queda intacto, el proceso sale con 0 y la suite
+pasa. La señal que uno espera («pasa» = «el test no protege esto») es
+indistinguible de («pasa» = «no he roto nada»). Es la familia de [PHASE-44.14]
+—una revisión que no se ejecuta devuelve lo mismo que una limpia— aplicada al
+gesto que precisamente existe para no fiarse.
+**Solución:** afirmar la sonda antes de correr nada (`assert patrón in texto`, o
+insertar por número de línea comprobando el contenido de esa línea) e imprimir
+que se aplicó. Rehecha así, la rotura tumbó el test al instante.
+**Regla:** cuando verifiques un test rompiendo el código, **comprueba primero
+que la rotura entró**. Una sonda de edición tiene que fallar ruidosamente si no
+encuentra su objetivo; si no, el resultado «verde» no distingue «tu test es
+inútil» de «tu sonda es inútil», y sólo una de las dos cosas te lleva a
+reescribir el test. Corolario: en una tanda de roturas, la que **no** tumba
+nada es la que hay que mirar dos veces — no la que sí.
+
+### [PHASE-47.E] Un guardarraíl que sólo hace falta cuando el usuario modela BIEN sus datos no se activa nunca en las pruebas
+**Error (cazado por un test que falló):** al abrir el reparto del cargo agregado
+de la tarjeta para que alcanzara al recibo aplazado, el test dio **0 cuotas
+pagadas** en vez de 1. La causa no estaba en lo que acababa de tocar: con **dos**
+pasivos de tipo `LOAN`, `_resolve_target` declara ambiguo el cargo de
+amortización y **el préstamo de verdad deja de amortizar**, en silencio.
+**Causa:** el segundo `LOAN` sólo existe cuando el usuario registra su recibo
+aplazado como lo que el banco le vendió. Mientras tuviera una sola deuda de ese
+tipo —o la tuviera archivada, que es el estado actual— el defecto es invisible.
+O sea: el fallo aparece **al hacer las cosas bien**, que es el peor momento para
+descubrirlo y el que ningún test escrito «con los datos de hoy» reproduce.
+**Solución:** los dos pools se hacen disjuntos por la MISMA regla (¿cuelga de una
+tarjeta?), y un test afirma que el préstamo avanza exactamente una cuota cuando
+los dos cargos caen en el mismo mes.
+**Regla:** cuando amplíes qué entra en un reparto, comprueba también qué deja de
+ser único al otro lado — un desambiguador que hoy acierta porque sólo hay un
+candidato deja de acertar en cuanto haya dos, y esa segunda entidad suele
+aparecer precisamente cuando el usuario adopta el modelo que le propones.
+Hermana de [PHASE-44.21] «una decisión razonada sin test se revierte sola»: aquí
+lo que faltaba no era la razón, era el caso con dos.
+
 ---
 
 ## Ejemplos de referencia (no son lecciones reales)

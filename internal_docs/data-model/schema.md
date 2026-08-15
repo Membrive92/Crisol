@@ -507,3 +507,20 @@ cartera y sus análisis.
 (`ok` · `no_annual` · `non_gaap` · `not_supported` · NULL): el conjunto va a
 crecer y un `ALTER TYPE ADD VALUE` no es reversible en un `downgrade` limpio.
 Su traducción vive en `catalog/capabilities.py`, fuente única de la regla.
+
+## `transactions.deferred_by_account_id` (PHASE-47.E)
+
+`UUID NULL` → `accounts(id)` `ON DELETE SET NULL`, con índice parcial
+`ix_transactions_deferred_by_account`.
+
+El pasivo que **aplazó** ese gasto. Cuando el banco financia el recibo de una
+tarjeta, las compras del ciclo se hicieron —tienen categoría y fecha— pero no
+salieron de la cuenta: salen como cuota durante los años siguientes.
+
+Una sola marca sostiene las dos lecturas: el resultado mensual las excluye y el
+desglose por categorías las mantiene. `ON DELETE SET NULL` porque borrar el
+pasivo no puede llevarse la compra por delante; lo que se pierde es la marca, y
+entonces la compra vuelve a contar como salida de caja — que es lo correcto si
+el aplazamiento deja de existir.
+
+Migración: `k7g40f2b5c3e96`.

@@ -160,6 +160,20 @@ class Transaction(Base):
         ForeignKey("transactions.id", ondelete="CASCADE"),
         nullable=True,
     )
+    # PHASE-47.E2 — el pasivo que APLAZÓ este gasto. Cuando el banco financia
+    # el recibo de una tarjeta, las compras de ese ciclo siguen siendo gasto
+    # —se hicieron, tienen su categoría y su fecha— pero NO salieron de la
+    # cuenta ese mes: sale la cuota, durante los años siguientes.
+    #
+    # Una sola marca sostiene las dos lecturas, que es justo el punto: el
+    # resultado mensual las excluye (mide caja) y el desglose por categorías
+    # las mantiene (mide en qué se gastó). No hay dos contabilidades.
+    #
+    # NULL = no está aplazado, que es el caso de casi todas.
+    deferred_by_account_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("accounts.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     __table_args__ = (
         # Partial unique para dedup de imports — incluye `AND deleted_at
@@ -218,5 +232,13 @@ class Transaction(Base):
             "ix_transactions_amortization_source",
             "amortization_source_id",
             postgresql_where="amortization_source_id IS NOT NULL",
+        ),
+        # PHASE-47.E2 — las compras de un ciclo aplazado. Parcial porque son una
+        # minoría diminuta, y todas las consultas preguntan por las que la
+        # tienen o descuentan las que no.
+        Index(
+            "ix_transactions_deferred_by_account",
+            "deferred_by_account_id",
+            postgresql_where="deferred_by_account_id IS NOT NULL",
         ),
     )

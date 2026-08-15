@@ -163,7 +163,7 @@ La app tiene que reconocer el par en vez de dejárselo al usuario.
 
 ## 7. Qué se construye
 
-### E1 · Reconocer el par duplicado
+### E1 · Reconocer el par duplicado — HECHO (2026-08-15)
 
 Dos filas del mismo importe, misma cuenta, ventana corta, una con forma de
 liquidación → **un hecho, no dos**. Se conserva una y la otra se marca con la
@@ -171,21 +171,38 @@ maquinaria que ya existe (`absorbed_as_mirror`), no con un borrado.
 
 Retira siete borrados manuales al año y es lo que el usuario nota antes.
 
-### E2 · El aplazamiento como hecho
+### E2 · El aplazamiento como hecho — HECHO (2026-08-15)
 
-- El pasivo registra **qué saldó** al nacer (`refinanced_account_id`) → emite la
-  liquidación que baja la tarjeta, que hoy no ejecuta nadie.
-- Las transacciones del ciclo quedan **marcadas** como aplazadas por ese pasivo.
-  Una columna nullable en `transactions` apuntando al pasivo lo lleva todo: la
-  exclusión del resultado mensual, el asterisco, el hover y el enlace en las dos
-  direcciones.
-- Los ciclos se derivan de los datos (§8), no se le piden al usuario.
+`transactions.deferred_by_account_id` → el pasivo que aplazó ese gasto. Una
+columna lo lleva todo: la exclusión del resultado mensual, la marca y el enlace
+en las dos direcciones.
 
-### E3 · Las dos lecturas
+**`refinanced_account_id` no hizo falta.** El plan lo pedía para registrar qué
+saldó el pasivo al nacer, pero E4 ya había dejado esa relación puesta:
+`parent_account_id` dice de qué tarjeta cuelga, y la marca en cada compra dice
+qué cubrió. Una tercera columna habría afirmado lo mismo por tercera vez, que
+es como empiezan a divergir (PHASE-46).
 
-- **Resultado mensual**: excluye las marcadas.
-- **Categorías**: las incluye, con su marca y con el total aplazado dicho aparte.
-- Ambas salen de la misma columna. No hay dos contabilidades: hay una marca.
+**Tampoco hace falta emitir la liquidación** que baja la tarjeta: el extracto
+de la propia tarjeta ya trae su `Recibo mes anterior`, así que su saldo baja
+solo al importarlo. Inventar el apunte habría duplicado uno que existe.
+
+El ciclo se **deriva**: las últimas compras que suman EXACTO el recibo, hacia
+atrás desde el cierre. Y si no cuadra al céntimo, **no se marca nada** y se
+dice por qué — es el caso del recibo de 990,02 € de junio, al que le faltan
+compras de mayo. Elegir «las que más se acerquen» repartiría el gasto entre
+categorías que no son las suyas y el usuario no tendría forma de saberlo.
+
+### E3 · Las dos lecturas — HECHO (2026-08-15)
+
+- **Resultado mensual** (`get_summary_aggregates`, `get_totals_by_kind` y las
+  dos series mensuales): excluye las marcadas. Mide caja.
+- **Categorías** (`get_breakdown_by_category` y el drill-down): las mantiene.
+  Mide gasto.
+- `summary.deferred_expenses` publica la diferencia, y la pantalla la dice.
+  Sin ese número las dos cifras no cuadran y no hay forma de saber por qué.
+
+Ambas salen de la misma columna. No hay dos contabilidades: hay una marca.
 
 ### E4 · El bug que existe hoy — HECHO (2026-08-15)
 

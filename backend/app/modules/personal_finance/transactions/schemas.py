@@ -97,6 +97,10 @@ class TransactionResponse(BaseModel):
     account_id: uuid.UUID
     category_id: uuid.UUID | None
     transfer_pair_id: uuid.UUID | None = None
+    # PHASE-47.E2: el pasivo que APLAZÓ este gasto. La UI lo usa para marcar la
+    # fila y explicar por qué no cuenta en el resultado del mes aunque sí en el
+    # desglose por categorías. NULL en casi todas.
+    deferred_by_account_id: uuid.UUID | None = None
     amount: Decimal
     currency: str
     occurred_at: datetime

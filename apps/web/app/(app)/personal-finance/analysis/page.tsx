@@ -392,6 +392,7 @@ export default function AnalysisPage() {
           filter={filter}
           onFilterChange={(f) => apply({ filter: f })}
           backQuery={analysisQuery(period, anchorMonth, filter, customFrom, customTo)}
+          deferredExpenses={summary?.deferred_expenses}
         />
       </div>
 

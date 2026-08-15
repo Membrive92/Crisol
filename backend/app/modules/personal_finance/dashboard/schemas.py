@@ -64,6 +64,13 @@ class SummaryResponse(BaseModel):
     transaction_count: int
     currency: str
     unconvertible_count: int = 0
+    deferred_expenses: Decimal = Decimal("0")
+    """PHASE-47.E2 — parte del gasto del periodo que quedó APLAZADA por un
+    recibo financiado. NO está incluida en `expenses` (el resultado del mes
+    mide caja y ese dinero no salió), pero SÍ en el desglose por categorías,
+    porque el gasto se hizo. Es la diferencia entre las dos lecturas, y la
+    pantalla tiene que decirla: sin ella, las dos cifras no cuadran y no hay
+    forma de saber por qué."""
     previous_period_income: Decimal | None = None
     previous_period_expenses: Decimal | None = None
     previous_period_balance: Decimal | None = None

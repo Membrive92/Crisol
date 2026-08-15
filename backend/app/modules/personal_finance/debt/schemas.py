@@ -433,3 +433,35 @@ class DebtHistoryResponse(BaseModel):
     reference_currency: str
     months_historical: int
     months_projected: int
+
+
+# ── PHASE-47.E2 · el ciclo aplazado ──────────────────────────────────
+
+
+class DeferredCyclePurchase(BaseModel):
+    """Una compra del ciclo que el recibo aplazó."""
+
+    id: uuid.UUID
+    occurred_at: datetime
+    amount: Decimal
+    description: str | None
+
+
+class DeferredCyclePreview(BaseModel):
+    """Qué gasto quedó aplazado por este recibo financiado.
+
+    `closes_exactly` es lo que decide si se puede aplicar: sin cierre al
+    céntimo no se marca nada, porque marcar unas cuantas repartiría el gasto
+    entre categorías que no son las suyas (`debt/deferral.py`).
+    """
+
+    liability_id: uuid.UUID
+    liability_name: str
+    card_id: uuid.UUID | None
+    card_name: str | None
+    receipt_amount: Decimal
+    currency: str
+    purchases: list[DeferredCyclePurchase]
+    total: Decimal
+    closes_exactly: bool
+    reason: str

@@ -169,6 +169,25 @@ def _exclude_transfer_kind(query: Any) -> Any:
     return query.where(_is_internal_transfer().is_(False))
 
 
+def _exclude_deferred(query: Any) -> Any:
+    """Quita del CASHFLOW las compras de un ciclo aplazado (PHASE-47.E2).
+
+    El banco financió el recibo de la tarjeta, así que ese dinero NO salió de
+    la cuenta ese mes: sale como cuota durante los años siguientes, y esa sí
+    cuenta entera cuando llega.
+
+    Se aplica SÓLO a las lecturas de caja —el resultado del mes, que responde
+    a «¿he ahorrado?»—. El desglose por categorías las mantiene a propósito,
+    porque el gasto se hizo: preguntarle en qué se gastó el dinero y esconderle
+    700 € de compras sería mentir por omisión.
+
+    Consecuencia deliberada: los meses con aplazamiento, el resultado mensual y
+    la suma del desglose dejan de coincidir. Quien enseñe el desglose tiene que
+    decir la diferencia en voz alta (`deferred_expense`).
+    """
+    return query.where(Transaction.deferred_by_account_id.is_(None))
+
+
 def _amount_expr(target_currency: str | None) -> Any:
     """Devuelve la columna a sumar — convertida si target, cruda si no."""
     if target_currency is None:
@@ -209,6 +228,7 @@ async def get_totals_by_kind(
         date_to=date_to,
     )
     query = _exclude_transfer_kind(query)
+    query = _exclude_deferred(query)
 
     row = (await db.execute(query)).one()
     return {CategoryKind.INCOME: Decimal(row[0]), CategoryKind.EXPENSE: Decimal(row[1])}
@@ -274,6 +294,7 @@ async def get_summary_aggregates(
         date_to=date_to,
     )
     query = _exclude_transfer_kind(query)
+    query = _exclude_deferred(query)
 
     row = (await db.execute(query)).one()
     return (
@@ -282,6 +303,38 @@ async def get_summary_aggregates(
         int(row.total_count),
         int(row.unconvertible_count),
     )
+
+
+async def get_deferred_expense_total(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    currency: str | None = None,
+    target_currency: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+) -> Decimal:
+    """Cuánto del gasto del periodo está APLAZADO (PHASE-47.E2).
+
+    Es la diferencia, dicha en voz alta, entre las dos lecturas: el resultado
+    del mes no lo cuenta —no salió de la cuenta— y el desglose por categorías
+    sí. Sin este número, quien intente cuadrar las dos cifras a mano no puede,
+    y la pantalla estaría mintiendo por omisión.
+    """
+    amount = _amount_expr(target_currency)
+    query = (
+        select(
+            func.coalesce(func.sum(case((_is_expense(), amount), else_=Decimal("0"))), Decimal("0"))
+        )
+        .select_from(Transaction)
+        .outerjoin(Category, Category.id == Transaction.category_id)
+        .where(Transaction.deferred_by_account_id.is_not(None))
+    )
+    query = _apply_scope(
+        query, user_id=user_id, currency=currency, date_from=date_from, date_to=date_to
+    )
+    query = _exclude_transfer_kind(query)
+    return Decimal((await db.execute(query)).scalar_one())
 
 
 async def get_breakdown_by_category(
@@ -392,6 +445,8 @@ async def get_totals_by_month(
         # era redundante (belt-and-suspenders del caso legacy `flow NULL`); las
         # txs siguen impactando al saldo individual de su cuenta vía `flow`.
         .where(_is_internal_transfer().is_(False))
+        # PHASE-47.E2 — un ciclo aplazado no salió de la cuenta ese mes.
+        .where(Transaction.deferred_by_account_id.is_(None))
         .where(year_col == year)
         .where(kind_label.is_not(None))
         .group_by(month_col, kind_label)
@@ -432,6 +487,8 @@ async def get_totals_by_month_in_range(
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
         .where(_is_internal_transfer().is_(False))
+        # PHASE-47.E2 — un ciclo aplazado no salió de la cuenta ese mes.
+        .where(Transaction.deferred_by_account_id.is_(None))
         .where(Transaction.occurred_at >= date_from)
         .where(Transaction.occurred_at <= date_to)
         .where(kind_label.is_not(None))

@@ -3,6 +3,7 @@ export * from './format';
 export * from './category-presets';
 export * from './plural';
 export * from './amortization-copy';
+export * from './deferred-copy';
 export * from './investment-matrix';
 export * from './investment-metric-format';
 export * from './investment-metric-index';

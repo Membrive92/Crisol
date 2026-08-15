@@ -11,6 +11,7 @@ function tx(over: Partial<Transaction>): Transaction {
     account_id: 'bank',
     category_id: null,
     transfer_pair_id: null,
+    deferred_by_account_id: null,
     amount: '100.00',
     currency: 'EUR',
     occurred_at: '2026-06-01T00:00:00Z',

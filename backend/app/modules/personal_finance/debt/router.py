@@ -2,18 +2,29 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import date
+from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
+from app.modules.personal_finance.accounts.models import Account
 from app.modules.personal_finance.dashboard.schemas import ModuleDashboardSummary
+from app.modules.personal_finance.debt.deferral import CycleSelection
+from app.modules.personal_finance.debt.deferral_service import (
+    apply_deferred_cycle,
+    clear_deferred_cycle,
+    preview_deferred_cycle,
+)
 from app.modules.personal_finance.debt.schemas import (
     DebtCategorySummary,
     DebtTimeRange,
+    DeferredCyclePreview,
+    DeferredCyclePurchase,
 )
 from app.modules.personal_finance.debt.service import (
     compute_category_summary,
@@ -119,3 +130,77 @@ async def category_summary_endpoint(
         date_to=date_to,
         target_currency=target_currency,
     )
+
+
+# ── PHASE-47.E2 · el ciclo aplazado ──────────────────────────────────
+#
+# El sistema INICIA (propone el ciclo con su aritmética a la vista) y el usuario
+# DECLARA (ADR-0011). Por eso son dos endpoints y no uno: el GET no escribe
+# nada, y el POST sólo escribe lo que el GET ya había enseñado.
+
+
+def _preview_response(
+    liability: Account,
+    card: Account | None,
+    target: Decimal,
+    selection: CycleSelection,
+) -> DeferredCyclePreview:
+    return DeferredCyclePreview(
+        liability_id=liability.id,
+        liability_name=liability.name,
+        card_id=card.id if card is not None else None,
+        card_name=card.name if card is not None else None,
+        receipt_amount=target,
+        currency=liability.currency,
+        purchases=[
+            DeferredCyclePurchase(
+                id=p.id,
+                occurred_at=p.occurred_at,
+                amount=p.amount,
+                description=p.description,
+            )
+            for p in selection.purchases
+        ],
+        total=selection.total,
+        closes_exactly=selection.closes_exactly,
+        reason=selection.reason,
+    )
+
+
+@router.get("/liabilities/{liability_id}/deferred-cycle", response_model=DeferredCyclePreview)
+async def preview_deferred_cycle_endpoint(
+    liability_id: uuid.UUID,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> DeferredCyclePreview:
+    """Qué compras cubriría este aplazamiento. No escribe nada."""
+    liability, card, target, selection = await preview_deferred_cycle(db, user.id, liability_id)
+    return _preview_response(liability, card, target, selection)
+
+
+@router.post("/liabilities/{liability_id}/deferred-cycle", response_model=DeferredCyclePreview)
+async def apply_deferred_cycle_endpoint(
+    liability_id: uuid.UUID,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> DeferredCyclePreview:
+    """Marca las compras del ciclo como aplazadas por este recibo.
+
+    409 si el ciclo no cierra al céntimo: sin el ciclo completo no hay nada que
+    marcar con honestidad.
+    """
+    liability, card, target, selection = await apply_deferred_cycle(db, user.id, liability_id)
+    await db.commit()
+    return _preview_response(liability, card, target, selection)
+
+
+@router.delete("/liabilities/{liability_id}/deferred-cycle", status_code=204)
+async def clear_deferred_cycle_endpoint(
+    liability_id: uuid.UUID,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    """Retira la marca: las compras vuelven a contar como salida de caja."""
+    await clear_deferred_cycle(db, user.id, liability_id)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

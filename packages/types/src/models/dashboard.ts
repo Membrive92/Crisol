@@ -13,6 +13,19 @@ export interface DashboardSummary {
    */
   unconvertible_count: number;
   /**
+   * PHASE-47.E2 — parte del gasto del periodo que quedó APLAZADA porque el
+   * banco financió el recibo de una tarjeta.
+   *
+   * NO está incluida en `expenses`: el resultado del mes mide caja y ese
+   * dinero no salió (sale como cuota, durante los años siguientes). SÍ está
+   * en el desglose por categorías, porque el gasto se hizo.
+   *
+   * Es decir: es exactamente la diferencia entre las dos cifras, y hay que
+   * pintarla. Sin ella, quien intente cuadrarlas a mano no puede y la
+   * pantalla estaría mintiendo por omisión.
+   */
+  deferred_expenses: string;
+  /**
    * Totales del periodo previo de igual longitud (terminando justo antes
    * de `date_from`). El backend los devuelve cuando el caller pasa
    * `date_from` y `date_to`; sin rango, los tres son `null`.

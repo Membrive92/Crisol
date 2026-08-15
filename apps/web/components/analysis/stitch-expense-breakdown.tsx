@@ -10,7 +10,15 @@ import type {
   CategoryStructureExplain,
   StructureReason,
 } from '@crisol/types';
-import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@crisol/ui';
+import {
+  colors,
+  deferredBreakdownNotice,
+  fontSize,
+  fontWeight,
+  formatAmount,
+  radius,
+  spacing,
+} from '@crisol/ui';
 
 import { iconForCategoryName } from '@/lib/category-icons';
 import { Card } from '@/components/ui/card';
@@ -54,6 +62,14 @@ export interface StitchExpenseBreakdownProps {
    * variable. Opcional: sin ella el desglose funciona igual.
    */
   explain?: CategoryStructureExplain[] | undefined;
+  /**
+   * PHASE-47.E2 — cuánto del gasto de este periodo está APLAZADO por un recibo
+   * financiado. Estas compras SÍ están en el desglose (el gasto se hizo) pero
+   * NO en el resultado del mes (el dinero no salió), así que las dos cifras no
+   * cuadran a propósito. Se pinta el aviso para que quien lo intente sepa por
+   * qué, en vez de concluir que la app está mal.
+   */
+  deferredExpenses?: string | null | undefined;
 }
 
 const STRUCTURE_LABELS: Record<StructureFilter, string> = {
@@ -165,6 +181,7 @@ export function StitchExpenseBreakdown({
   onFilterChange,
   backQuery,
   explain,
+  deferredExpenses,
 }: StitchExpenseBreakdownProps) {
   const router = useRouter();
   const explainById = useMemo(() => {
@@ -183,6 +200,10 @@ export function StitchExpenseBreakdown({
   const [internalFilter, setInternalFilter] = useState<StructureFilter>('all');
   const filter = filterProp ?? internalFilter;
   const setFilter = onFilterChange ?? setInternalFilter;
+  // PHASE-47.E2 — la diferencia entre este desglose y el resultado del mes,
+  // dicha en voz alta. La redacción vive en `@crisol/ui` para que móvil no
+  // acabe explicándolo con otras palabras.
+  const deferredNotice = deferredBreakdownNotice(deferredExpenses, currency);
   // Paginación SÓLO de la leyenda (el donut nunca se pagina).
   const [page, setPage] = useState(0);
   // Al cambiar de filtro cambia el nº de categorías → a la primera página para
@@ -294,6 +315,20 @@ export function StitchExpenseBreakdown({
           </span>
         )}
       </header>
+
+      {deferredNotice ? (
+        <p
+          data-testid="deferred-notice"
+          style={{
+            margin: `0 0 ${spacing.md} 0`,
+            fontSize: fontSize.xs,
+            color: colors.textMuted,
+            lineHeight: 1.5,
+          }}
+        >
+          {deferredNotice}
+        </p>
+      ) : null}
 
       {empty ? (
         <p style={{ margin: 0, fontSize: fontSize.sm, color: colors.textMuted }}>

@@ -13,6 +13,7 @@ function makeTx(overrides: Partial<Transaction> = {}): Transaction {
     account_id: 'acc-1',
     category_id: 'cat-1',
     transfer_pair_id: null,
+    deferred_by_account_id: null,
     amount: '12.50',
     currency: 'EUR',
     occurred_at: '2026-04-15T12:00:00Z',
