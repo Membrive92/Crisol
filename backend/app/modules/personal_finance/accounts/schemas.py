@@ -109,6 +109,12 @@ class AccountUpdate(BaseModel):
     settlement_account_id: uuid.UUID | None = None
     """PHASE-47.A — Mismo contrato que en `AccountCreate`. Para desvincular,
     enviar explícitamente `null`."""
+    parent_account_id: uuid.UUID | None = None
+    """PHASE-47.E4 — Declarar (o retirar con `null`) de qué tarjeta cuelga esta
+    financiación. Antes sólo se podía al crear, y eso dejaba sin arreglo una
+    deuda dada de alta suelta: el cargo agregado de la tarjeta reparte cuotas
+    entre sus hijas, así que una financiación que no cuelga de ninguna no
+    amortiza nunca por esa vía."""
 
 
 class ReconcileBalanceRequest(BaseModel):

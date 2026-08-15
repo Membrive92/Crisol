@@ -220,11 +220,18 @@ export function AccountFormFields({
   // PHASE-35: esta cuenta es una COMPRA A PLAZOS dentro de una tarjeta si
   // tiene padre. Entonces el plan de financiación es obligatorio (capital +
   // TIN + plazo + fecha generan su cuadro propio).
-  const isInstallmentChild = value.type === 'credit_card' && !!value.parent_account_id;
-  // PHASE-35: el selector de tarjeta padre sólo en el flujo de CREAR
-  // (parentCardOptions presente) y para credit_card.
+  // PHASE-47.E4: una hija puede ser `credit_card` (compra a plazos) o `loan`
+  // (un recibo aplazado, que es como el banco lo vende). Las dos necesitan su
+  // propio cuadro.
+  const isInstallmentChild = isLiability && !!value.parent_account_id;
+  // PHASE-47.E4 — el selector de tarjeta padre aparece para CUALQUIER pasivo,
+  // no sólo para `credit_card`, y también al editar. El banco cobra dentro de
+  // la línea agregada de la tarjeta todo lo que se financió en ella, se haya
+  // dado de alta como tarjeta o como préstamo — y un recibo aplazado se da de
+  // alta como préstamo, porque es lo que el banco vende. Sin poder declararlo
+  // después, una deuda creada suelta no amortizaba nunca por esa vía.
   const showParentSelector =
-    value.type === 'credit_card' &&
+    isLiability &&
     variant === 'full' &&
     !!parentCardOptions &&
     parentCardOptions.length > 0;
@@ -309,14 +316,14 @@ export function AccountFormFields({
       {showParentSelector ? (
         <div>
           <Select
-            label="¿Es una compra a plazos dentro de una tarjeta?"
+            label="¿Se financió con una de tus tarjetas?"
             value={value.parent_account_id}
             onChange={(e) => patch('parent_account_id', e.target.value)}
           >
-            <option value="">No — tarjeta normal</option>
+            <option value="">No — deuda independiente</option>
             {(parentCardOptions ?? []).map((card) => (
               <option key={card.id} value={card.id}>
-                Sí, dentro de «{card.name}»
+                Sí, con «{card.name}»
               </option>
             ))}
           </Select>
@@ -328,9 +335,13 @@ export function AccountFormFields({
               lineHeight: 1.4,
             }}
           >
-            Para una compra financiada a plazos con tu tarjeta de crédito. Se
-            agrupa bajo la tarjeta en el módulo de deuda, con su propio plan de
-            pago, y no aparece como cuenta aparte al registrar transacciones.
+            Para una compra a plazos o un recibo aplazado con esa tarjeta —
+            cualquier cosa que el banco te cobre dentro de su cuota mensual
+            conjunta. Se agrupa bajo la tarjeta en el módulo de deuda, con su
+            propio plan de pago, y no aparece como cuenta aparte al registrar
+            transacciones. <strong>Declararlo es lo que permite que su cuota se
+            descuente del cargo mensual de la tarjeta</strong>; si no, esta deuda
+            no baja nunca por esa vía.
           </p>
         </div>
       ) : null}

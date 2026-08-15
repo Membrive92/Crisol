@@ -443,9 +443,43 @@ async def build_reconcile_plan(db: AsyncSession, user_id: uuid.UUID) -> Reconcil
                         )
                     )
 
-    loans = [a for a in liabilities if a.type in {AccountType.LOAN, AccountType.MORTGAGE}]
+    # PHASE-47.E4 — Qué pasivos paga el cargo AGREGADO de la tarjeta.
+    #
+    # Antes era `type == CREDIT_CARD`, y eso dejaba fuera una financiación real:
+    # un recibo de tarjeta aplazado se da de alta como préstamo (es lo que el
+    # banco te vende), así que nunca entraba en el reparto y su cuota no se
+    # atribuía JAMÁS — el pasivo no amortizaba por esa vía y el descuadre no
+    # tenía forma de resolverse.
+    #
+    # Y no basta con abrir el pool a «todo lo que se cobra de esta cuenta»: el
+    # préstamo personal también se cobra de ahí, pero tiene su PROPIA línea
+    # («Cargo por amortizacion…», que resuelve la rama de arriba). Meterlo aquí
+    # le avanzaría una segunda cuota cada mes, en silencio.
+    #
+    # Lo que de verdad separa a los dos es de qué tarjeta cuelga cada uno
+    # (PHASE-35): el banco cobra dentro de la línea agregada exactamente lo que
+    # se financió en esa tarjeta. Una hija cuenta sea cual sea su `type`.
+    card_ids = {a.id for a in liabilities if a.type == AccountType.CREDIT_CARD}
+
+    def _hangs_off_a_card(a: Account) -> bool:
+        return a.parent_account_id is not None and a.parent_account_id in card_ids
+
     cards_with_schedule = [
-        a for a in liabilities if a.type == AccountType.CREDIT_CARD and schedules.get(a.id)
+        a
+        for a in liabilities
+        if schedules.get(a.id) and (a.type == AccountType.CREDIT_CARD or _hangs_off_a_card(a))
+    ]
+    # Y el complemento, que es la otra mitad del mismo arreglo: lo que cuelga de
+    # una tarjeta NO lo paga la línea de amortización de préstamo. Sin esto, dar
+    # de alta un recibo aplazado como préstamo mete un segundo candidato en este
+    # pool, `_resolve_target` lo declara ambiguo y **el préstamo de verdad deja
+    # de amortizar** — un fallo silencioso que aparece justo cuando el usuario
+    # modela bien su deuda. Las dos ramas quedan disjuntas por la misma regla:
+    # ¿de qué tarjeta cuelga?
+    loans = [
+        a
+        for a in liabilities
+        if a.type in {AccountType.LOAN, AccountType.MORTGAGE} and not _hangs_off_a_card(a)
     ]
     # Orden estable para el reparto de cargos agregados (por inicio, luego nombre).
     cards_with_schedule.sort(key=lambda a: (a.start_date or date.max, a.name))

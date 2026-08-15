@@ -180,6 +180,72 @@ async def _validate_settlement_account(
         )
 
 
+async def _validate_parent_card(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    account_id: uuid.UUID | None,
+    account_type: AccountType,
+    parent_account_id: uuid.UUID | None,
+    has_own_plan: bool,
+) -> None:
+    """PHASE-35 — Colgar un pasivo financiado de la tarjeta con la que se financió.
+
+    Fuente ÚNICA de esta validación, usada al crear y al declarar el vínculo
+    después. Estaba escrita sólo en `create_account`; duplicarla para el update
+    es exactamente el patrón que costó la lección de [PHASE-46] (dos listas que
+    describen lo mismo y divergen).
+
+    PHASE-47.E4 — el hijo ya NO tiene que ser de tipo `credit_card`. La regla
+    original valía cuando el único caso era «compra a plazos en tienda», pero un
+    RECIBO de la tarjeta aplazado es igual de financiado-en-esa-tarjeta y el
+    usuario lo da de alta como préstamo. Lo que define a una hija es de dónde se
+    cobra, no cómo se tipó: el banco las cobra a todas dentro de la misma línea
+    agregada, y esa línea es la que reparte la reconciliación.
+    """
+    if parent_account_id is None:
+        return
+    if account_id is not None and parent_account_id == account_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Una cuenta no puede colgar de sí misma.",
+        )
+    parent = await get_account_by_id(db, parent_account_id, user_id)
+    if parent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="La tarjeta a la que asociar la financiación no existe.",
+        )
+    if parent.is_archived:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La tarjeta indicada está archivada; no puedes anidar financiaciones en ella.",
+        )
+    if parent.type != AccountType.CREDIT_CARD:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sólo se pueden colgar financiaciones de una tarjeta de crédito.",
+        )
+    if parent.parent_account_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se puede anidar: la tarjeta indicada ya es una financiación.",
+        )
+    if account_type not in LIABILITY_ACCOUNT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sólo una cuenta de deuda puede colgar de una tarjeta.",
+        )
+    if not has_own_plan:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Una financiación necesita su importe, TIN, plazo (meses) "
+                "y fecha de inicio para generar el cuadro."
+            ),
+        )
+
+
 DEFAULT_REFERENCE_CURRENCY = "EUR"
 
 
@@ -270,50 +336,20 @@ async def create_account(db: AsyncSession, user_id: uuid.UUID, data: AccountCrea
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Una cuenta de pasivo no puede ser la cuenta principal.",
         )
-    # PHASE-35 — compra a plazos dentro de una tarjeta: la cuenta se cuelga de
-    # una tarjeta padre y necesita su PROPIO plan (capital + TIN + plazo +
-    # fecha) para generar su cuadro de amortización independiente.
-    if data.parent_account_id is not None:
-        parent = await get_account_by_id(db, data.parent_account_id, user_id)
-        if parent is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="La tarjeta a la que asociar la compra no existe.",
-            )
-        if parent.is_archived:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="La tarjeta indicada está archivada; no puedes anidar compras en ella.",
-            )
-        if parent.type != AccountType.CREDIT_CARD:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Solo se pueden añadir compras a plazos a una tarjeta de crédito.",
-            )
-        if parent.parent_account_id is not None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No se puede anidar: la tarjeta indicada ya es una compra a plazos.",
-            )
-        if data.type != AccountType.CREDIT_CARD:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Una compra a plazos debe ser de tipo tarjeta de crédito.",
-            )
-        if (
-            data.opening_balance is None
-            or data.opening_balance <= 0
-            or data.apr is None
-            or data.term_months is None
-            or data.start_date is None
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "Una compra a plazos necesita su importe, TIN, plazo (meses) "
-                    "y fecha de inicio para generar el cuadro."
-                ),
-            )
+    await _validate_parent_card(
+        db,
+        user_id,
+        account_id=None,
+        account_type=data.type,
+        parent_account_id=data.parent_account_id,
+        has_own_plan=(
+            data.opening_balance is not None
+            and data.opening_balance > 0
+            and data.apr is not None
+            and data.term_months is not None
+            and data.start_date is not None
+        ),
+    )
     account = Account(
         user_id=user_id,
         name=data.name,
@@ -390,6 +426,25 @@ async def update_account(
             user_id,
             account_type=effective_type,
             category_id=payload["category_id"],
+        )
+    if "parent_account_id" in payload:
+        effective_type = payload.get("type") or account.type
+        # El cuadro ya existe: se comprueba contra las cuotas persistidas, no
+        # contra el payload — exigir apr/plazo/fecha en un PATCH obligaría a
+        # reenviar datos que ya están, y el cuadro es lo que de verdad importa.
+        existing_rows = await repo_list_installments(db, account.id, user_id)
+        await _validate_parent_card(
+            db,
+            user_id,
+            account_id=account.id,
+            account_type=effective_type,
+            parent_account_id=payload["parent_account_id"],
+            has_own_plan=bool(existing_rows)
+            or (
+                (payload.get("apr") or account.apr) is not None
+                and (payload.get("term_months") or account.term_months) is not None
+                and (payload.get("start_date") or account.start_date) is not None
+            ),
         )
     if "settlement_account_id" in payload:
         effective_type = payload.get("type") or account.type

@@ -199,6 +199,12 @@ function toUpdatePayload(
     isLiabilityForCategory && form.settlement_account_id
       ? form.settlement_account_id
       : null;
+  // PHASE-47.E4 — de qué tarjeta cuelga esta financiación. Antes no se enviaba
+  // nunca en el update (no se podía re-parentar), y eso dejaba sin arreglo una
+  // deuda dada de alta suelta: su cuota no se descuenta del cargo mensual de la
+  // tarjeta hasta que el vínculo existe.
+  payload.parent_account_id =
+    isLiabilityForCategory && form.parent_account_id ? form.parent_account_id : null;
   // PHASE-40: el flag "pagada íntegra" sólo aplica a tarjetas normales.
   if (form.type === 'credit_card' && !form.parent_account_id) {
     payload.counts_as_debt = form.counts_as_debt;
@@ -449,6 +455,7 @@ export default function AccountsSettingsPage() {
             items={active}
             balanceById={balanceById}
             settlementAccountOptions={settlementAccountOptions}
+            parentCardOptions={parentCardOptions}
           />
           {includeArchived && archived.length > 0 ? (
             <AccountGroup
@@ -456,6 +463,7 @@ export default function AccountsSettingsPage() {
               items={archived}
               balanceById={balanceById}
               settlementAccountOptions={settlementAccountOptions}
+              parentCardOptions={parentCardOptions}
             />
           ) : null}
         </div>
@@ -469,11 +477,13 @@ function AccountGroup({
   items,
   balanceById,
   settlementAccountOptions,
+  parentCardOptions,
 }: {
   title: string;
   items: Account[];
   balanceById: Map<string, AccountBalance>;
   settlementAccountOptions: Account[];
+  parentCardOptions: Account[];
 }) {
   if (items.length === 0) {
     return (
@@ -503,6 +513,7 @@ function AccountGroup({
                 account={account}
                 balance={balanceById.get(account.id)}
                 settlementAccountOptions={settlementAccountOptions}
+                parentCardOptions={parentCardOptions}
               />
             </li>
           ))}
@@ -546,10 +557,12 @@ function AccountRow({
   account,
   balance,
   settlementAccountOptions,
+  parentCardOptions,
 }: {
   account: Account;
   balance: AccountBalance | undefined;
   settlementAccountOptions: Account[];
+  parentCardOptions: Account[];
 }) {
   const update = useUpdateAccount(account.id);
   const remove = useDeleteAccount();
@@ -701,6 +714,7 @@ function AccountRow({
             (a) => a.id !== account.id,
           )}
           settlementSuggestion={settlementSuggestion}
+          parentCardOptions={parentCardOptions.filter((c) => c.id !== account.id)}
         />
         <div
           style={{

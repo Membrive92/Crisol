@@ -187,19 +187,42 @@ Retira siete borrados manuales al año y es lo que el usuario nota antes.
 - **Categorías**: las incluye, con su marca y con el total aplazado dicho aparte.
 - Ambas salen de la misma columna. No hay dos contabilidades: hay una marca.
 
-### E4 · El bug que existe hoy, independiente de todo esto
+### E4 · El bug que existe hoy — HECHO (2026-08-15)
 
 [`debt/reconciliation.py`](../../backend/app/modules/personal_finance/debt/reconciliation.py)
-reparte el cargo agregado de cuotas **sólo entre tarjetas**:
+repartía el cargo agregado de cuotas **sólo entre tarjetas**
+(`a.type == AccountType.CREDIT_CARD`). `Compra finaciada recibo junio` es de
+tipo `LOAN` —es lo que el banco vende— así que nunca entraba y su cuota no se
+atribuía jamás.
 
-```python
-cards_with_schedule = [
-    a for a in liabilities if a.type == AccountType.CREDIT_CARD and schedules.get(a.id)
-]
-```
+**La solución que este documento proponía era insegura**, y leer el código lo
+destapó: abrir el pool a `settlement_account_id == tx.account_id` habría metido
+también al préstamo personal, que se cobra de la misma cuenta pero tiene su
+PROPIA línea («Cargo por amortizacion…»). Habría avanzado **dos cuotas al mes**
+en silencio.
 
-`Compra finaciada recibo junio` es de tipo `LOAN`, así que **nunca entra**: su
-cuota no se atribuirá jamás. Hay que arreglarlo con o sin el resto.
+Lo que de verdad separa a los dos es **de qué tarjeta cuelga cada uno**
+(`parent_account_id`, PHASE-35): el banco cobra dentro de la línea agregada
+exactamente lo que se financió en esa tarjeta. Una hija cuenta sea cual sea su
+`type`.
+
+El arreglo tiene **dos mitades simétricas**, y la segunda salió de un test que
+falló:
+
+1. El pool del cargo agregado = con cuadro **y** (`credit_card` **o** cuelga de
+   una tarjeta).
+2. El pool de la línea de préstamo **excluye** lo que cuelga de una tarjeta.
+   Sin esto, dos pasivos de tipo `LOAN` hacen que `_resolve_target` declare
+   ambiguo el cargo de amortización y **el préstamo de verdad deja de
+   amortizar** — un fallo silencioso que aparece justo cuando el usuario modela
+   bien su deuda. Hoy no se ve sólo porque el recibo aplazado está archivado.
+
+Y hacía falta una tercera pieza para que fuera usable: `parent_account_id` sólo
+se podía declarar **al crear**, así que una deuda ya dada de alta suelta —el
+caso real— no tenía arreglo. Ahora se puede declarar y retirar después, con la
+validación extraída a una fuente única (`_validate_parent_card`) usada por los
+dos caminos, y relajada en un punto: una hija ya no tiene que ser
+`credit_card`.
 
 ---
 

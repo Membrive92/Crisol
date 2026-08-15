@@ -63,4 +63,8 @@ export interface AccountUpdateRequest {
   /** PHASE-47.A — Cuenta de activo desde la que se cobra este pasivo
    * (null para desvincular). */
   settlement_account_id?: string | null;
+  /** PHASE-47.E4 — Tarjeta con la que se financió esta deuda (null para
+   * desvincular). Antes sólo se podía declarar al crear, y sin el vínculo la
+   * cuota de esta deuda no se descuenta del cargo mensual de la tarjeta. */
+  parent_account_id?: string | null;
 }
