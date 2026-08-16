@@ -205,3 +205,41 @@ describe('DebtList · deuda pagada', () => {
     expect(screen.queryByText(/Deuda pagada/)).toBeNull();
   });
 });
+
+describe('DebtList · compras a plazos saldadas', () => {
+  it('una compra a plazos a cero sale de debajo de su tarjeta viva', () => {
+    // El primer arreglo sólo filtraba el nivel superior, así que una tarjeta
+    // con saldo seguía enseñando debajo sus compras ya pagadas — que es
+    // justo lo que se quería quitar de en medio.
+    useAccountsMock.mockReturnValue({ data: [] });
+    useCategoriesMock.mockReturnValue({ data: [] });
+
+    render(
+      <DebtList
+        loading={false}
+        liabilities={[
+          makeBalance({ account_id: 'tarjeta', name: 'Tarjeta', current_balance: '0.00' }),
+          makeBalance({
+            account_id: 'viva',
+            name: 'Recibo aplazado',
+            current_balance: '-957.60',
+            parent_account_id: 'tarjeta',
+          }),
+          makeBalance({
+            account_id: 'saldada',
+            name: 'Compra pagada',
+            current_balance: '0.00',
+            parent_account_id: 'tarjeta',
+          }),
+        ]}
+      />,
+    );
+
+    // La tarjeta sigue viva porque una hija tiene saldo.
+    expect(screen.getByText('1 pasivo activo')).toBeTruthy();
+    // Y la hija pagada se ha ido a la sección de pagadas.
+    expect(screen.getByText(/Deuda pagada \(1\)/)).toBeTruthy();
+    expect(screen.getByText('Compra pagada')).toBeTruthy();
+    expect(screen.getByText('Recibo aplazado')).toBeTruthy();
+  });
+});

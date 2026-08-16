@@ -155,8 +155,20 @@ export function DebtList({ liabilities, loading }: DebtListProps) {
     }
     return cents;
   }
+  function isSettled(item: AccountBalance): boolean {
+    return Math.round(Number(item.current_balance) * 100) === 0;
+  }
   const topLevel = allTopLevel.filter((i) => outstandingCents(i) !== 0);
-  const settled = allTopLevel.filter((i) => outstandingCents(i) === 0);
+  // Las saldadas de primer nivel, MÁS las compras a plazos a cero que cuelgan
+  // de una tarjeta viva: si sólo se filtrara el primer nivel, una tarjeta con
+  // saldo seguiría enseñando debajo sus compras ya pagadas, que es lo que se
+  // quería quitar de en medio.
+  const settled: AccountBalance[] = [
+    ...allTopLevel.filter((i) => outstandingCents(i) === 0),
+    ...topLevel.flatMap((parent) =>
+      (childrenByParent.get(parent.account_id) ?? []).filter(isSettled),
+    ),
+  ];
 
   if (loading) {
     return (
@@ -296,7 +308,7 @@ export function DebtList({ liabilities, loading }: DebtListProps) {
                 {...(category ? { category } : {})}
                 {...(groupTotal ? { groupTotal } : {})}
               />
-              {children.map((child) => {
+              {children.filter((child) => !isSettled(child)).map((child) => {
                 const childAccount = accounts.find((a) => a.id === child.account_id);
                 const childCategory =
                   childAccount?.category_id != null
