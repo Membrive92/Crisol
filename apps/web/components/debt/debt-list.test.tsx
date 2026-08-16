@@ -136,3 +136,72 @@ describe('DebtList — agrupación de compras a plazos (PHASE-35)', () => {
     expect(screen.getByText('Compra huérfana')).toBeTruthy();
   });
 });
+
+// ── PHASE-47.E · deuda pagada aparte ─────────────────────────────────
+//
+// Una deuda a cero ya no es deuda. Mezclada con las vivas, la lista crece sin
+// parar y cuesta ver lo que de verdad debes: el usuario acabó con seis
+// contratos de los que sólo dos tenían saldo. Se separan, pero no se ocultan —
+// saber qué terminaste de pagar es parte de la foto.
+
+describe('DebtList · deuda pagada', () => {
+  it('saca las saldadas de la lista principal y las agrupa aparte', () => {
+    useAccountsMock.mockReturnValue({ data: [] });
+    useCategoriesMock.mockReturnValue({ data: [] });
+
+    render(
+      <DebtList
+        loading={false}
+        liabilities={[
+          makeBalance({ account_id: 'viva', name: 'Prestamo', current_balance: '-22762.46' }),
+          makeBalance({ account_id: 'pagada', name: 'Compra financiada', current_balance: '0.00' }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('1 pasivo activo')).toBeTruthy();
+    expect(screen.getByText(/Deuda pagada \(1\)/)).toBeTruthy();
+    // Las dos siguen estando; lo que cambia es dónde.
+    expect(screen.getByText('Prestamo')).toBeTruthy();
+    expect(screen.getByText('Compra financiada')).toBeTruthy();
+  });
+
+  it('una tarjeta a cero con una compra a plazos viva sigue siendo deuda viva', () => {
+    // El saldo se mira sumando las hijas: si no, la tarjeta caería a «pagada»
+    // arrastrando consigo una deuda que sí tiene saldo.
+    useAccountsMock.mockReturnValue({ data: [] });
+    useCategoriesMock.mockReturnValue({ data: [] });
+
+    render(
+      <DebtList
+        loading={false}
+        liabilities={[
+          makeBalance({ account_id: 'tarjeta', name: 'Tarjeta', current_balance: '0.00' }),
+          makeBalance({
+            account_id: 'plazos',
+            name: 'Compra a plazos',
+            current_balance: '-500.00',
+            parent_account_id: 'tarjeta',
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('1 pasivo activo')).toBeTruthy();
+    expect(screen.queryByText(/Deuda pagada/)).toBeNull();
+  });
+
+  it('sin ninguna saldada no pinta la sección', () => {
+    useAccountsMock.mockReturnValue({ data: [] });
+    useCategoriesMock.mockReturnValue({ data: [] });
+
+    render(
+      <DebtList
+        loading={false}
+        liabilities={[makeBalance({ account_id: 'viva', current_balance: '-100.00' })]}
+      />,
+    );
+
+    expect(screen.queryByText(/Deuda pagada/)).toBeNull();
+  });
+});

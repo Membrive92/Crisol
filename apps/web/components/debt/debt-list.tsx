@@ -135,9 +135,28 @@ export function DebtList({ liabilities, loading }: DebtListProps) {
   const topLevelIds = new Set(
     liabilities.filter((i) => !i.parent_account_id).map((i) => i.account_id),
   );
-  const topLevel = liabilities.filter(
+  const allTopLevel = liabilities.filter(
     (i) => !i.parent_account_id || !topLevelIds.has(i.parent_account_id),
   );
+
+  // Una deuda a cero ya no es deuda: está pagada. Mezclarla con las vivas hace
+  // que la lista crezca sin parar y que cueste ver lo que de verdad debes —el
+  // usuario acaba con seis contratos de los que sólo dos tienen saldo—. Se
+  // separan, pero NO se ocultan: saber qué terminaste de pagar es parte de la
+  // foto, y archivarlas a mano para limpiar la lista es un gesto que además
+  // las saca de sitios donde sí hacen falta.
+  //
+  // El saldo se mira SUMANDO las hijas (una tarjeta a cero con una compra a
+  // plazos viva sigue siendo deuda viva).
+  function outstandingCents(item: AccountBalance): number {
+    let cents = Math.round(Number(item.current_balance) * 100);
+    for (const child of childrenByParent.get(item.account_id) ?? []) {
+      cents += Math.round(Number(child.current_balance) * 100);
+    }
+    return cents;
+  }
+  const topLevel = allTopLevel.filter((i) => outstandingCents(i) !== 0);
+  const settled = allTopLevel.filter((i) => outstandingCents(i) === 0);
 
   if (loading) {
     return (
@@ -297,6 +316,59 @@ export function DebtList({ liabilities, loading }: DebtListProps) {
           );
         })}
       </ul>
+
+      {settled.length > 0 ? (
+        <details style={{ marginTop: spacing.sm }}>
+          <summary
+            style={{
+              cursor: 'pointer',
+              fontSize: fontSize.sm,
+              fontWeight: fontWeight.medium,
+              color: colors.textMuted,
+              listStyle: 'revert',
+            }}
+          >
+            Deuda pagada ({settled.length})
+          </summary>
+          <p
+            style={{
+              margin: `${spacing.xs}px 0 ${spacing.sm}px 0`,
+              fontSize: fontSize.xs,
+              color: colors.textMuted,
+            }}
+          >
+            Contratos que terminaste de pagar. Se guardan aquí por si quieres
+            consultarlos; ya no cuentan en tu deuda viva.
+          </p>
+          <ul
+            style={{
+              listStyle: 'none',
+              margin: 0,
+              padding: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: spacing.sm,
+              opacity: 0.72,
+            }}
+          >
+            {settled.map((item) => {
+              const account = accounts.find((a) => a.id === item.account_id);
+              const category =
+                account?.category_id != null
+                  ? categoriesById.get(account.category_id) ?? null
+                  : null;
+              return (
+                <DebtRow
+                  key={item.account_id}
+                  balance={item}
+                  {...(account ? { account } : {})}
+                  {...(category ? { category } : {})}
+                />
+              );
+            })}
+          </ul>
+        </details>
+      ) : null}
     </Card>
   );
 }
