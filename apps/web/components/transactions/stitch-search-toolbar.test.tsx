@@ -73,3 +73,84 @@ describe('StitchSearchToolbar — filtro de categoría / sin categoría', () => 
     expect(select.value).toBe('__uncategorized__');
   });
 });
+
+// ── El filtro de cuenta, que es el que la gente busca ────────────────
+//
+// Reportado en uso: «cuando cambio de cuenta, sigue mostrando las mismas
+// transacciones». No era el filtro: la pantalla tenía DOS desplegables de
+// cuenta —éste, dentro del panel plegado, y el destino de la reasignación en
+// bloque, siempre visible y sin etiqueta— y se estaba usando el otro.
+//
+// Este test fija que el de aquí sí filtra; el arreglo del otro (etiqueta
+// visible + barra plegada) vive en la página.
+
+describe('StitchSearchToolbar · filtro de cuenta', () => {
+  const withAccounts: Account[] = [
+    {
+      id: 'acc-bank',
+      user_id: 'u-1',
+      name: 'BBVA',
+      type: 'bank',
+      nature: 'asset',
+      currency: 'EUR',
+      opening_balance: '0',
+      opening_balance_date: null,
+      color: null,
+      icon: null,
+      display_order: 0,
+      is_archived: false,
+      is_default: true,
+      counts_as_debt: true,
+      apr: null,
+      tae: null,
+      term_months: null,
+      start_date: null,
+      total_to_pay: null,
+      interest_only_first_payment: null,
+      category_id: null,
+      parent_account_id: null,
+      settlement_account_id: null,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    },
+  ];
+
+  it('emite el account_id elegido y vuelve a la primera página', async () => {
+    const onChange = vi.fn();
+    render(
+      <StitchSearchToolbar
+        value={{ limit: 50, offset: 100 }}
+        onChange={onChange}
+        categories={categories}
+        accounts={withAccounts}
+      />,
+    );
+    // El filtro vive dentro del panel plegable.
+    await userEvent.click(screen.getByRole('button', { name: /filtros/i }));
+
+    await userEvent.selectOptions(screen.getByLabelText('Cuenta'), 'acc-bank');
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ account_id: 'acc-bank', offset: 0 }),
+    );
+  });
+
+  it('«Todas» retira el filtro en vez de mandar una cadena vacía', async () => {
+    const onChange = vi.fn();
+    render(
+      <StitchSearchToolbar
+        value={{ limit: 50, offset: 0, account_id: 'acc-bank' }}
+        onChange={onChange}
+        categories={categories}
+        accounts={withAccounts}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: /filtros/i }));
+
+    await userEvent.selectOptions(screen.getByLabelText('Cuenta'), '');
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ account_id: undefined }),
+    );
+  });
+});

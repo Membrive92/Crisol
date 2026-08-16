@@ -61,6 +61,10 @@ export default function TransactionsPage() {
     // recorrer paginación.
     router.replace(`/personal-finance/transactions${qs ? `?${qs}` : ''}`, { scroll: false });
   }
+  // Las acciones en bloque arrancan plegadas: son destructivas o mueven
+  // dinero de sitio, y tenerlas siempre a la vista hacía que su desplegable de
+  // cuentas compitiera con el filtro.
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const currency = useCurrencyStore((s) => s.currency);
   const convertAll = useCurrencyStore((s) => s.convertAll);
@@ -461,19 +465,53 @@ export default function TransactionsPage() {
                   ? `${total} ${total === 1 ? 'resultado' : 'resultados'} con los filtros activos`
                   : `${total} ${total === 1 ? 'transacción' : 'transacciones'} en total`}
               </span>
+              {/* Plegada por defecto, como el panel de Filtros. Antes estaba
+                  siempre desplegada y su desplegable de cuentas —sin etiqueta
+                  visible, sólo `aria-label`— se leía como el filtro de cuenta,
+                  que en cambio vive dentro de «Filtros». Dos desplegables
+                  idénticos, y el que hacía lo obvio era el escondido. */}
+              <Button
+                variant="ghost"
+                onClick={() => setBulkOpen((v) => !v)}
+                aria-expanded={bulkOpen}
+              >
+                {bulkOpen ? 'Ocultar acciones en bloque' : 'Acciones en bloque'}
+              </Button>
+            </div>
+            {bulkOpen ? (
               <div
                 style={{
                   display: 'flex',
                   alignItems: 'center',
+                  justifyContent: 'flex-end',
                   gap: spacing.sm,
                   flexWrap: 'wrap',
+                  backgroundColor: colors.surfaceMuted,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: radius.md,
+                  padding: spacing.md,
                 }}
               >
+                <span style={{ fontSize: fontSize.xs, color: colors.textMuted, marginRight: 'auto' }}>
+                  Actúan sobre las {total}{' '}
+                  {total === 1 ? 'transacción' : 'transacciones'} que ves ahora, no
+                  sólo sobre esta página.
+                </span>
                 {/* PHASE-32 — reasignar en bloque a una cuenta (consolidar el
                     mes en tu cuenta principal). Usa los filtros activos. */}
                 {activeAccounts.length > 0 ? (
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: spacing.xs }}>
+                    {/* Etiqueta VISIBLE: un `aria-label` no lo lee quien mira la
+                        pantalla, y sin ella este desplegable era indistinguible
+                        del filtro de cuenta. */}
+                    <label
+                      htmlFor="reassign-target"
+                      style={{ fontSize: fontSize.xs, color: colors.textMuted }}
+                    >
+                      Mover a:
+                    </label>
                     <select
+                      id="reassign-target"
                       value={reassignTarget}
                       onChange={(e) => setReassignTargetId(e.target.value)}
                       aria-label="Cuenta destino para reasignar"
@@ -529,7 +567,7 @@ export default function TransactionsPage() {
                   {bulkDeleteMutation.isPending ? 'Borrando…' : 'Borrar todo'}
                 </Button>
               </div>
-            </div>
+            ) : null}
 
             {/* PHASE-34 — barra de selección: aparece al marcar checkboxes y
                 permite recategorizar TODAS las marcadas de una vez. */}
