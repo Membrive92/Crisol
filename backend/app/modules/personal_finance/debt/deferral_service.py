@@ -164,7 +164,7 @@ async def preview_deferred_cycle(
         total = sum((p.amount for p in declared), Decimal(0))
         # El recibo sigue siendo el capital del cuadro, NO la suma de lo que
         # haya marcado ahora mismo. Si se devolviera esa suma como importe del
-        # recibo, `closes_exactly` sería cierto por construcción y el atajo
+        # recibo, `closes` sería cierto por construcción y el atajo
         # afirmaría un cierre al céntimo aunque el usuario hubiera mandado una
         # de las compras a la papelera — justo lo que «cierre exacto o nada»
         # existe para impedir.
@@ -183,7 +183,7 @@ async def preview_deferred_cycle(
             liability,
             await _parent_card(db, user_id, liability),
             receipt if receipt > 0 else total,
-            CycleSelection(tuple(declared), total, closes, reason),
+            CycleSelection(tuple(declared), total, closes, receipt - total, reason),
         )
 
     if liability.parent_account_id is None:
@@ -195,6 +195,7 @@ async def preview_deferred_cycle(
                 (),
                 Decimal(0),
                 False,
+                Decimal(0),
                 (
                     "Esta deuda no tiene declarada la tarjeta con la que se financió. "
                     "Sin saber qué tarjeta, no hay ciclo que buscar."
@@ -214,6 +215,7 @@ async def preview_deferred_cycle(
                 (),
                 Decimal(0),
                 False,
+                Decimal(0),
                 "La cuenta declarada como tarjeta ya no existe o no es una tarjeta.",
             ),
         )
@@ -228,6 +230,7 @@ async def preview_deferred_cycle(
                 (),
                 Decimal(0),
                 False,
+                Decimal(0),
                 (
                     "Esta deuda no tiene cuadro de amortización, así que no se sabe cuánto "
                     "se aplazó. Genera el cuadro y vuelve a intentarlo."
@@ -298,7 +301,7 @@ async def apply_deferred_cycle(
 ) -> tuple[Account, Account | None, Decimal, CycleSelection]:
     """Marca las compras del ciclo. Sólo escribe lo que el preview enseñó."""
     liability, card, target, selection = await preview_deferred_cycle(db, user_id, liability_id)
-    if not selection.closes_exactly:
+    if not selection.closes:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=selection.reason)
 
     await db.execute(

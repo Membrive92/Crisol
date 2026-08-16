@@ -165,7 +165,9 @@ def _preview_response(
             for p in selection.purchases
         ],
         total=selection.total,
-        closes_exactly=selection.closes_exactly,
+        closes=selection.closes,
+        difference=selection.difference,
+        is_exact=selection.is_exact,
         already_declared=already_declared,
         reason=selection.reason,
     )

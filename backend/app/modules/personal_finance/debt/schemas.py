@@ -450,7 +450,7 @@ class DeferredCyclePurchase(BaseModel):
 class DeferredCyclePreview(BaseModel):
     """Qué gasto quedó aplazado por este recibo financiado.
 
-    `closes_exactly` es lo que decide si se puede aplicar: sin cierre al
+    `closes` es lo que decide si se puede aplicar: sin cierre al
     céntimo no se marca nada, porque marcar unas cuantas repartiría el gasto
     entre categorías que no son las suyas (`debt/deferral.py`).
     """
@@ -463,7 +463,14 @@ class DeferredCyclePreview(BaseModel):
     currency: str
     purchases: list[DeferredCyclePurchase]
     total: Decimal
-    closes_exactly: bool
+    closes: bool
+    """El ciclo está determinado y se puede declarar (exacto o por redondeo)."""
+    difference: Decimal = Decimal("0")
+    """Lo que le falta al tramo para sumar el recibo. `0` cuando es exacto."""
+    is_exact: bool = True
+    """`False` cuando cerró absorbiendo un redondeo del banco. La pantalla debe
+    decirlo: cerrar por un céntimo de más es válido, pero no es lo mismo que
+    cerrar exacto y no puede presentarse igual."""
     already_declared: bool = False
     """PHASE-47.E — el ciclo YA está marcado y esto es lo que hay guardado, no
     una propuesta. Viaja como dato y no se deduce del texto de `reason`: una

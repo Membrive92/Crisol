@@ -43,13 +43,13 @@ def _purchase(day: int, amount: str) -> CyclePurchase:
 # ── La derivación del ciclo (pura) ───────────────────────────────────
 
 
-def test_the_cycle_is_the_contiguous_run_that_closes_exactly() -> None:
+def test_the_cycle_is_the_contiguous_run_that_closes() -> None:
     """Las últimas compras que suman EXACTO el recibo son el ciclo."""
     purchases = [_purchase(1, "50.00"), _purchase(10, "300.26"), _purchase(20, "400.00")]
 
     selection = select_deferred_cycle(purchases, Decimal("700.26"))
 
-    assert selection.closes_exactly
+    assert selection.closes
     assert selection.count == 2
     assert selection.total == Decimal("700.26")
     # Contiguo y hacia atrás desde el cierre: la compra del día 1 pertenece al
@@ -68,7 +68,7 @@ def test_a_cycle_that_does_not_close_marks_nothing() -> None:
 
     selection = select_deferred_cycle(purchases, Decimal("700.26"))
 
-    assert not selection.closes_exactly
+    assert not selection.closes
     assert selection.count == 0
     assert "no suman" in selection.reason
 
@@ -85,7 +85,7 @@ def test_purchases_after_the_cut_off_belong_to_the_next_receipt() -> None:
         purchases, Decimal("700.26"), until=datetime(2026, 6, 25, tzinfo=UTC)
     )
 
-    assert selection.closes_exactly
+    assert selection.closes
     assert selection.count == 1
     assert selection.purchases[0].occurred_at.day == 10
 
@@ -100,7 +100,7 @@ def test_overshooting_stops_instead_of_searching_combinations() -> None:
 
     selection = select_deferred_cycle(purchases, Decimal("700.26"))
 
-    assert not selection.closes_exactly
+    assert not selection.closes
 
 
 # ── Las dos lecturas, end-to-end ─────────────────────────────────────
@@ -272,7 +272,7 @@ async def test_once_deferred_the_month_stops_counting_it_but_the_breakdown_does_
         f"/debt/liabilities/{liability}/deferred-cycle", headers=_auth(token)
     )
     assert preview.status_code == 200, preview.text
-    assert preview.json()["closes_exactly"] is True
+    assert preview.json()["closes"] is True
     assert preview.json()["already_declared"] is False, "aún no se ha declarado nada"
     assert len(preview.json()["purchases"]) == 2
 
@@ -328,7 +328,7 @@ async def test_a_liability_without_a_declared_card_says_so(
     )
 
     assert preview.status_code == 200, preview.text
-    assert preview.json()["closes_exactly"] is False
+    assert preview.json()["closes"] is False
     assert "tarjeta" in preview.json()["reason"]
     assert preview.json()["card_id"] is None
 
@@ -438,7 +438,7 @@ async def test_the_cycle_closes_at_the_card_settlement_not_the_contract_date(
     )
 
     assert preview.status_code == 200, preview.text
-    assert preview.json()["closes_exactly"] is True
+    assert preview.json()["closes"] is True
     marked = {p["amount"] for p in preview.json()["purchases"]}
     assert "55.00" not in marked
 
@@ -698,7 +698,7 @@ def test_a_refund_inside_the_cycle_is_netted() -> None:
 
     selection = select_deferred_cycle(movements, Decimal("700.26"))
 
-    assert selection.closes_exactly
+    assert selection.closes
     assert selection.count == 3
     assert selection.total == Decimal("700.26")
 
@@ -715,7 +715,7 @@ def test_the_walk_does_not_give_up_before_reaching_a_refund() -> None:
 
     selection = select_deferred_cycle(movements, Decimal("700.26"))
 
-    assert selection.closes_exactly
+    assert selection.closes
     assert selection.count == 3
 
 
@@ -752,7 +752,7 @@ async def test_a_refund_on_the_card_reaches_the_cycle(
     )
 
     assert preview.status_code == 200, preview.text
-    assert preview.json()["closes_exactly"] is True, preview.json()["reason"]
+    assert preview.json()["closes"] is True, preview.json()["reason"]
     assert Decimal(str(preview.json()["total"])) == Decimal("700.26")
     assert len(preview.json()["purchases"]) == 4
 
@@ -803,3 +803,118 @@ async def test_an_absorbed_mirror_is_not_user_trash(
             {"i": tx_id},
         )
         assert still.scalar_one() == 1
+
+
+# ── La holgura de redondeo ───────────────────────────────────────────
+#
+# Medido sobre los datos reales del usuario: el ciclo de junio de 2026 suma
+# 700,27 € contra un recibo de 700,26 €. UN céntimo. Exigir coincidencia
+# perfecta convertía un ciclo perfectamente identificable en «faltan datos»,
+# que es un diagnóstico falso y le manda a buscar un fichero inexistente.
+
+
+def test_a_one_cent_rounding_still_closes() -> None:
+    """700,27 contra un recibo de 700,26: cierra, y se dice que no es exacto."""
+    movements = [_purchase(10, "300.27"), _purchase(20, "400.00")]
+
+    selection = select_deferred_cycle(movements, Decimal("700.26"))
+
+    assert selection.closes
+    assert not selection.is_exact
+    assert selection.difference == Decimal("-0.01")
+    assert "redondeo" in selection.reason
+
+
+def test_an_exact_run_wins_over_a_tolerated_one() -> None:
+    """Si más atrás hay un tramo EXACTO, gana sobre el que sólo se acerca.
+
+    El recorrido encuentra antes el tolerado (2 movimientos, un céntimo de
+    más); seguir hasta el exacto y preferirlo es lo que impide que la holgura
+    se coma un ciclo que sí cuadraba.
+    """
+    movements = [_purchase(1, "-0.01"), _purchase(10, "300.27"), _purchase(20, "400.00")]
+
+    selection = select_deferred_cycle(movements, Decimal("700.26"))
+
+    assert selection.closes
+    assert selection.is_exact
+    assert selection.count == 3
+
+
+def test_the_tolerance_is_bounded_by_the_number_of_movements() -> None:
+    """Dos movimientos admiten dos céntimos, no más.
+
+    Es lo que impide que la holgura haga cuadrar un tramo EQUIVOCADO: entre dos
+    ciclos reales hay euros de diferencia, nunca céntimos, así que la ventana no
+    puede crecer hasta alcanzar una segunda respuesta.
+    """
+    justo = select_deferred_cycle(
+        [_purchase(10, "300.00"), _purchase(20, "400.28")], Decimal("700.26")
+    )
+    assert justo.closes, "0,02 con 2 movimientos entra"
+
+    pasado = select_deferred_cycle(
+        [_purchase(10, "300.00"), _purchase(20, "400.29")], Decimal("700.26")
+    )
+    assert not pasado.closes, "0,03 con 2 movimientos NO entra"
+
+
+def test_a_real_gap_is_still_refused() -> None:
+    """Faltar 39 € sigue siendo «faltan datos», no un redondeo."""
+    selection = select_deferred_cycle(
+        [_purchase(10, "300.00"), _purchase(20, "361.15")], Decimal("700.26")
+    )
+
+    assert not selection.closes
+    assert "no suman" in selection.reason
+
+
+def test_among_tolerated_runs_the_closest_one_wins() -> None:
+    """Sin ningún tramo exacto, gana el que menos se desvía.
+
+    Recorriendo hacia atrás aparece primero un tramo que se pasa por 2
+    céntimos y después uno que sólo se pasa por 1. Quedarse con el primero
+    marcaría un movimiento de menos. Es lo único que distingue la regla de
+    preferencia del retorno anticipado del exacto: en el caso exacto las dos
+    dan lo mismo, así que un test con exacto no puede probar ninguna.
+    """
+    movements = [_purchase(1, "-0.01"), _purchase(10, "300.28"), _purchase(20, "400.00")]
+
+    selection = select_deferred_cycle(movements, Decimal("700.26"))
+
+    assert selection.closes
+    assert not selection.is_exact
+    assert selection.count == 3, "gana el tramo de 700,27, no el de 700,28"
+    assert selection.total == Decimal("700.27")
+
+
+def test_the_cycle_may_end_before_the_cut_but_not_months_before() -> None:
+    """El corte que se conoce es el del COBRO, no el del cierre.
+
+    El banco cobra unos días después de cerrar la facturación, así que fijar el
+    final del tramo en la fecha del cargo arrastra las compras de esos días —que
+    ya son del ciclo siguiente— y el ciclo no cierra nunca. Es lo que pasaba con
+    el recibo real de 700,26 €: el tramo que cuadra termina 3 días antes del
+    cargo.
+
+    Pero la ventana tiene que estar acotada: sin ella, una compra suelta de
+    meses atrás que coincidiera con el importe cerraría el ciclo por
+    casualidad.
+    """
+    # Cierra 3 días antes del corte, con compras posteriores que son del
+    # ciclo siguiente.
+    dentro = select_deferred_cycle(
+        [_purchase(10, "300.26"), _purchase(20, "400.00"), _purchase(25, "88.00")],
+        Decimal("700.26"),
+        until=datetime(2026, 6, 23, tzinfo=UTC),
+    )
+    assert dentro.closes
+    assert dentro.count == 2
+
+    # La misma coincidencia, pero fuera de la ventana: no vale.
+    fuera = select_deferred_cycle(
+        [_purchase(1, "700.26"), _purchase(28, "88.00")],
+        Decimal("700.26"),
+        until=datetime(2026, 6, 28, 23, 59, tzinfo=UTC),
+    )
+    assert not fuera.closes, "una compra de 27 días antes no cierra el ciclo"

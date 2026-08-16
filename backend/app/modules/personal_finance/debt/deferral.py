@@ -14,19 +14,24 @@ La derivación va aquí, PURA y sin BD, por lo mismo que el resto del dominio de
 deuda: la decide una aritmética que se puede probar con una lista de números, y
 mezclarla con la sesión la volvería inauditable.
 
-**Cierre exacto o nada.** Si la suma no cuadra al céntimo, no se marca ninguna
-compra y se dice por qué. Es deliberado: una aproximación marcaría compras que
-no son del ciclo —o dejaría fuera algunas que sí— y el usuario no tendría forma
-de saber cuáles. Pasa de verdad: el recibo de 990,02 € de junio no cierra
-porque faltan compras de mayo en la app, y la respuesta correcta ahí es «faltan
-datos», no «he elegido unas cuantas».
+**Cierra o no cierra, sin aproximar.** Si la suma no cuadra, no se marca
+ninguna compra y se dice por qué: una aproximación marcaría compras que no son
+del ciclo —o dejaría fuera algunas que sí— y el usuario no tendría forma de
+saber cuáles.
+
+La única holgura es de REDONDEO, y está acotada por el número de movimientos
+(`CENT_TOLERANCE_PER_MOVEMENT`). Medido contra datos reales: el ciclo de junio
+de 2026 suma 700,27 € contra un recibo de 700,26 €. Un céntimo. Exigir
+coincidencia perfecta convertía un ciclo perfectamente identificable en «faltan
+datos», que es un diagnóstico falso y manda al usuario a buscar un fichero que
+no existe.
 """
 
 from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 
@@ -46,12 +51,54 @@ class CycleSelection:
 
     purchases: tuple[CyclePurchase, ...]
     total: Decimal
-    closes_exactly: bool
+    closes: bool
+    """El ciclo está determinado y se puede declarar.
+
+    Se llamaba `closes_exactly` cuando la coincidencia tenía que ser al
+    céntimo. Ya no lo es —ver `CENT_TOLERANCE_PER_MOVEMENT`— así que ese nombre
+    habría pasado a mentir en el caso más frecuente, que es justo cuando un
+    nombre engaña más.
+    """
+    difference: Decimal
+    """Lo que le falta al tramo para sumar el recibo. `0` cuando es exacto.
+
+    Se publica para que la pantalla pueda decirlo: cerrar por 700,27 cuando el
+    recibo dice 700,26 es válido, pero no es lo mismo que cerrar exacto y no
+    debe presentarse igual.
+    """
     reason: str
+
+    @property
+    def is_exact(self) -> bool:
+        return self.difference == 0
 
     @property
     def count(self) -> int:
         return len(self.purchases)
+
+
+#: Holgura por movimiento, para absorber redondeos del banco sin abrir la mano.
+#:
+#: Un tramo de N movimientos admite hasta N céntimos de diferencia: cada línea
+#: puede aportar como mucho un redondeo. Acotarla al número de movimientos —en
+#: vez de un margen fijo o un porcentaje— es lo que impide que cuadre un tramo
+#: EQUIVOCADO: entre dos ciclos reales hay euros de diferencia, nunca céntimos,
+#: así que ampliar la ventana no puede hacer aparecer una segunda respuesta.
+#:
+#: Un tramo exacto SIEMPRE gana sobre uno tolerado, y la diferencia viaja a la
+#: pantalla para que un cierre por redondeo no se presente como exacto.
+CENT_TOLERANCE_PER_MOVEMENT = Decimal("0.01")
+
+#: Cuántos días antes del corte puede terminar el ciclo.
+#:
+#: `until` es la fecha del CARGO, y el banco cobra unos días después de cerrar
+#: la facturación: en los datos medidos, entre 3 y 7. Buscar el final del tramo
+#: dentro de esa ventana es lo que permite acertar sin conocer la fecha exacta
+#: de cierre, que el extracto no publica.
+#:
+#: Acotarla importa: sin ventana, una compra aislada de meses atrás que
+#: coincidiera con el importe del recibo cerraría el ciclo por casualidad.
+CYCLE_END_WINDOW_DAYS = 15
 
 
 def select_deferred_cycle(
@@ -77,12 +124,18 @@ def select_deferred_cycle(
     Sin él entrarían las del ciclo siguiente, que aún no se ha facturado.
     """
     if target <= 0:
-        return CycleSelection((), Decimal(0), False, "El recibo tiene que ser un importe positivo.")
+        return CycleSelection(
+            (), Decimal(0), False, Decimal(0), "El recibo tiene que ser un importe positivo."
+        )
 
     eligible = [p for p in purchases if until is None or p.occurred_at <= until]
     if not eligible:
         return CycleSelection(
-            (), Decimal(0), False, "No hay compras registradas en la tarjeta antes de ese cierre."
+            (),
+            Decimal(0),
+            False,
+            target,
+            "No hay compras registradas en la tarjeta antes de ese cierre.",
         )
 
     # Desempate determinista. Las filas de un extracto caen todas a medianoche
@@ -104,31 +157,81 @@ def select_deferred_cycle(
         if purchase.amount < 0:
             running += purchase.amount
 
-    accumulated = Decimal(0)
-    picked: list[CyclePurchase] = []
-    for index in range(len(eligible) - 1, -1, -1):
-        accumulated += eligible[index].amount
-        picked.append(eligible[index])
-        if accumulated == target:
-            return CycleSelection(
-                tuple(reversed(picked)),
-                accumulated,
-                True,
-                f"{len(picked)} movimientos suman exactamente el recibo.",
-            )
-        # Salida anticipada, no una regla: se abandona sólo cuando ni
-        # recorriendo TODO lo que queda podría la suma volver al importe del
-        # recibo. Por construcción no puede cambiar el resultado —únicamente
-        # evita recorrer meses de compras para nada—, así que ningún test
-        # puede distinguirla de seguir hasta el final; se deja escrito para
-        # que nadie intente cubrirla y concluya que el test no sirve.
-        if accumulated + refunds_before[index] > target:
-            break
+    # `until` acota por ARRIBA, no marca el final exacto del ciclo. La fecha
+    # que se conoce es la del CARGO (el banco cobra unos días después de
+    # cerrar), así que fijar ahí el final del tramo arrastra las compras de esos
+    # días, que ya son del ciclo siguiente. Se prueban por tanto todos los
+    # finales posibles hasta el corte y gana el MÁS TARDÍO que cierre: el ciclo
+    # acaba tan tarde como pueda antes del cobro.
+    #
+    # Sigue sin haber elección entre subconjuntos —sólo tramos CONTIGUOS— así
+    # que el resultado es único y reproducible; lo que se amplía es dónde puede
+    # terminar, no qué combinaciones valen.
+    # Sin corte no se sabe dónde puede acabar el ciclo, así que sólo se admite
+    # el final natural: el movimiento más reciente.
+    if until is None:
+        primeros_finales = [len(eligible) - 1]
+    else:
+        ventana = until - timedelta(days=CYCLE_END_WINDOW_DAYS)
+        primeros_finales = [
+            i for i in range(len(eligible) - 1, -1, -1) if eligible[i].occurred_at >= ventana
+        ] or [len(eligible) - 1]
 
+    mejor_fallo = (Decimal(0), Decimal(0))
+    for end in primeros_finales:
+        accumulated = Decimal(0)
+        picked: list[CyclePurchase] = []
+        tolerated: tuple[Decimal, int, list[CyclePurchase], Decimal] | None = None
+
+        for index in range(end, -1, -1):
+            accumulated += eligible[index].amount
+            picked.append(eligible[index])
+            difference = target - accumulated
+            allowed = CENT_TOLERANCE_PER_MOVEMENT * len(picked)
+
+            if difference == 0:
+                return CycleSelection(
+                    tuple(reversed(picked)),
+                    accumulated,
+                    True,
+                    Decimal(0),
+                    f"{len(picked)} movimientos suman exactamente el recibo.",
+                )
+            if abs(difference) <= allowed and (
+                tolerated is None
+                or abs(difference) < tolerated[0]
+                or (abs(difference) == tolerated[0] and len(picked) < tolerated[1])
+            ):
+                tolerated = (abs(difference), len(picked), list(picked), accumulated)
+
+            # Salida anticipada: se abandona este final cuando ni recorriendo
+            # todo lo que queda podría la suma volver al entorno del recibo.
+            if accumulated + refunds_before[index] > target + allowed:
+                break
+
+        if tolerated is not None:
+            _diff, _n, movimientos, total = tolerated
+            signo = "más" if total > target else "menos"
+            return CycleSelection(
+                tuple(reversed(movimientos)),
+                total,
+                True,
+                target - total,
+                (
+                    f"{len(movimientos)} movimientos suman {total}, "
+                    f"{abs(target - total)} {signo} que el recibo ({target}). "
+                    "Es un redondeo del banco, no un ciclo distinto."
+                ),
+            )
+        if end == primeros_finales[0]:
+            mejor_fallo = (accumulated, target - accumulated)
+
+    accumulated, _ = mejor_fallo
     return CycleSelection(
         (),
         accumulated,
         False,
+        target - accumulated,
         (
             "Las compras registradas en la tarjeta no suman el importe del recibo "
             f"({target}). Probablemente falte por importar parte del ciclo: sin el "

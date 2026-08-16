@@ -125,9 +125,11 @@ export interface SettlementCandidate {
 /**
  * PHASE-47.E — Qué gasto aplazó un recibo financiado.
  *
- * `closes_exactly` decide si se puede declarar: sin cierre al céntimo no se
- * marca nada, porque marcar «las que más se acerquen» repartiría el gasto
- * entre categorías que no son las suyas. `reason` explica siempre por qué.
+ * `closes` decide si se puede declarar. La única holgura es de REDONDEO,
+ * acotada al número de movimientos: marcar «las que más se acerquen» con
+ * margen ancho repartiría el gasto entre categorías que no son las suyas.
+ * `is_exact` distingue el cierre perfecto del que absorbió un céntimo, y
+ * `reason` explica siempre lo que ha pasado.
  */
 export interface DeferredCyclePurchase {
   id: string;
@@ -145,7 +147,12 @@ export interface DeferredCyclePreview {
   currency: string;
   purchases: DeferredCyclePurchase[];
   total: string;
-  closes_exactly: boolean;
+  /** El ciclo está determinado y se puede declarar (exacto o por redondeo). */
+  closes: boolean;
+  /** Lo que le falta al tramo para sumar el recibo. `0` cuando es exacto. */
+  difference: string;
+  /** `false` cuando cerró absorbiendo un redondeo del banco. */
+  is_exact: boolean;
   /** El ciclo ya está marcado: esto es lo guardado, no una propuesta. */
   already_declared: boolean;
   reason: string;

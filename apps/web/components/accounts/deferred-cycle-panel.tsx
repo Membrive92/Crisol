@@ -18,11 +18,12 @@ import { Button } from '@/components/ui/button';
  *
  * El sistema INICIA y el usuario DECLARA (ADR-0011): el panel enseña la
  * aritmética completa —qué compras, por cuánto, si cuadra— antes de escribir
- * nada, y el botón sólo se enciende cuando el ciclo cierra al céntimo.
+ * nada, y el botón sólo se enciende cuando el ciclo queda determinado.
  *
- * Sin cierre exacto no se ofrece «aproximar»: marcar las que más se acerquen
- * repartiría el gasto entre categorías que no son las suyas, y el usuario no
- * tendría forma de saber cuáles. Se dice qué falta y se para.
+ * No se ofrece «aproximar»: marcar las que más se acerquen repartiría el gasto
+ * entre categorías que no son las suyas. La única holgura es de redondeo, y
+ * cuando se usa se DICE — un cierre por un céntimo es válido pero no es lo
+ * mismo que uno exacto, y no puede presentarse igual.
  */
 export function DeferredCyclePanel({
   liabilityId,
@@ -186,6 +187,7 @@ export function DeferredCyclePanel({
             <span style={{ fontSize: fontSize.xs, color: colors.textMuted }}>
               Suman {formatAmount(data.total, currency)} · recibo{' '}
               {formatAmount(data.receipt_amount, currency)}
+              {data.closes && !data.is_exact ? ' · cierra absorbiendo un redondeo' : ''}
             </span>
             {alreadyDeclared ? (
               <Button
@@ -198,7 +200,7 @@ export function DeferredCyclePanel({
             ) : (
               <Button
                 onClick={handleApply}
-                disabled={!data.closes_exactly || applyMutation.isPending}
+                disabled={!data.closes || applyMutation.isPending}
               >
                 {applyMutation.isPending ? 'Marcando…' : 'Declarar el aplazamiento'}
               </Button>
