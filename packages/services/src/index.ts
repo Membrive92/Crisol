@@ -79,10 +79,13 @@ export {
   useDeleteCategory,
 } from './query/hooks/useCategories';
 export {
+  useApplyDeferredCycle,
+  useClearDeferredCycle,
   useDebtCategorySummary,
   useDebtDashboardSummary,
   useDebtHealth,
   useDebtHistory,
+  useDeferredCycle,
 } from './query/hooks/useDebt';
 export {
   periodLabel,

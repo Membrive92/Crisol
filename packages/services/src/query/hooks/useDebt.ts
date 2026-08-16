@@ -1,14 +1,16 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type {
   DebtCategorySummary,
   DebtHealthKpis,
   DebtHistoryResponse,
   DebtTimeRange,
+  DeferredCyclePreview,
   ModuleDashboardSummary,
 } from '@crisol/types';
 
 import { debtApi } from '../../api/endpoints/debt';
+import { invalidateTransactionSideEffects } from '../invalidate';
 import { queryKeys } from '../keys';
 
 /**
@@ -114,5 +116,36 @@ export function useDebtHistory(
         ...(targetCurrency ? { target_currency: targetCurrency } : {}),
       }),
     staleTime: 1000 * 60,
+  });
+}
+
+/**
+ * PHASE-47.E — Qué gasto aplazó este recibo financiado. Sólo consulta: el
+ * sistema propone con su aritmética a la vista y el usuario declara (ADR-0011).
+ */
+export function useDeferredCycle(liabilityId: string | null) {
+  return useQuery<DeferredCyclePreview, Error>({
+    queryKey: queryKeys.debt.deferredCycle(liabilityId ?? 'none'),
+    queryFn: () => debtApi.deferredCyclePreview(liabilityId as string),
+    enabled: liabilityId !== null,
+    staleTime: 1000 * 30,
+  });
+}
+
+/** Marca las compras del ciclo como aplazadas por este recibo. */
+export function useApplyDeferredCycle() {
+  const queryClient = useQueryClient();
+  return useMutation<DeferredCyclePreview, Error, string>({
+    mutationFn: (liabilityId) => debtApi.deferredCycleApply(liabilityId),
+    onSuccess: () => invalidateTransactionSideEffects(queryClient),
+  });
+}
+
+/** Retira la marca: las compras vuelven a contar como salida de caja. */
+export function useClearDeferredCycle() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: (liabilityId) => debtApi.deferredCycleClear(liabilityId),
+    onSuccess: () => invalidateTransactionSideEffects(queryClient),
   });
 }

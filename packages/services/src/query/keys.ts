@@ -63,6 +63,9 @@ export const queryKeys = {
         dateFrom ?? 'none',
         dateTo ?? 'none',
       ] as const,
+    // PHASE-47.E — el ciclo aplazado de un pasivo concreto.
+    deferredCycle: (liabilityId: string) =>
+      [...queryKeys.debt.all, 'deferred-cycle', liabilityId] as const,
     health: (targetCurrency?: string) =>
       [...queryKeys.debt.all, 'health', targetCurrency ?? 'native'] as const,
     dashboardSummary: (targetCurrency?: string, dateFrom?: string, dateTo?: string) =>

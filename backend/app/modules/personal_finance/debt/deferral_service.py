@@ -68,7 +68,13 @@ async def _schedule_principal(db: AsyncSession, liability_id: uuid.UUID) -> Deci
 async def _card_purchases(
     db: AsyncSession, user_id: uuid.UUID, card_id: uuid.UUID
 ) -> list[CyclePurchase]:
-    """Las compras VIVAS de la tarjeta, sin las que ya están aplazadas.
+    """Los movimientos VIVOS de la tarjeta que componen un ciclo.
+
+    Compras (`OUT`) **y devoluciones** (`IN`, con importe negativo): el banco
+    liquida el NETO, así que un ciclo con una devolución dentro no puede sumar
+    el recibo si sólo se cuentan las compras. Medido contra los datos reales
+    del usuario, netarlas es exactamente lo que separa «cierra al céntimo» de
+    «no cierra» en dos de sus cuatro ciclos.
 
     Se excluyen las liquidaciones: el recibo que salda el ciclo no forma parte
     del ciclo, y sumarlo lo duplicaría. Y se excluyen las ya marcadas por otro
@@ -80,16 +86,22 @@ async def _card_purchases(
             Transaction.occurred_at,
             Transaction.amount,
             Transaction.description,
+            Transaction.flow,
         ).where(
             Transaction.user_id == user_id,
             Transaction.account_id == card_id,
             Transaction.deleted_at.is_(None),
-            Transaction.flow == TransactionFlow.OUT,
+            Transaction.flow.in_([TransactionFlow.OUT, TransactionFlow.IN]),
             Transaction.deferred_by_account_id.is_(None),
         )
     )
     return [
-        CyclePurchase(id=r[0], occurred_at=r[1], amount=r[2], description=r[3])
+        CyclePurchase(
+            id=r[0],
+            occurred_at=r[1],
+            amount=-r[2] if r[4] is TransactionFlow.IN else r[2],
+            description=r[3],
+        )
         for r in rows.all()
         if not is_card_settlement(r[3])
     ]
@@ -114,6 +126,11 @@ async def _declared_cycle(
     return [
         CyclePurchase(id=r[0], occurred_at=r[1], amount=r[2], description=r[3]) for r in rows.all()
     ]
+
+
+async def has_declared_cycle(db: AsyncSession, user_id: uuid.UUID, liability_id: uuid.UUID) -> bool:
+    """¿Este pasivo tiene ya un ciclo marcado?"""
+    return bool(await _declared_cycle(db, user_id, liability_id))
 
 
 async def _parent_card(db: AsyncSession, user_id: uuid.UUID, liability: Account) -> Account | None:

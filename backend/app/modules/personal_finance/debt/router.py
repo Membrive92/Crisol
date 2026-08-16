@@ -18,6 +18,7 @@ from app.modules.personal_finance.debt.deferral import CycleSelection
 from app.modules.personal_finance.debt.deferral_service import (
     apply_deferred_cycle,
     clear_deferred_cycle,
+    has_declared_cycle,
     preview_deferred_cycle,
 )
 from app.modules.personal_finance.debt.schemas import (
@@ -144,6 +145,8 @@ def _preview_response(
     card: Account | None,
     target: Decimal,
     selection: CycleSelection,
+    *,
+    already_declared: bool = False,
 ) -> DeferredCyclePreview:
     return DeferredCyclePreview(
         liability_id=liability.id,
@@ -163,6 +166,7 @@ def _preview_response(
         ],
         total=selection.total,
         closes_exactly=selection.closes_exactly,
+        already_declared=already_declared,
         reason=selection.reason,
     )
 
@@ -175,7 +179,8 @@ async def preview_deferred_cycle_endpoint(
 ) -> DeferredCyclePreview:
     """Qué compras cubriría este aplazamiento. No escribe nada."""
     liability, card, target, selection = await preview_deferred_cycle(db, user.id, liability_id)
-    return _preview_response(liability, card, target, selection)
+    declared = await has_declared_cycle(db, user.id, liability_id)
+    return _preview_response(liability, card, target, selection, already_declared=declared)
 
 
 @router.post("/liabilities/{liability_id}/deferred-cycle", response_model=DeferredCyclePreview)
@@ -191,7 +196,7 @@ async def apply_deferred_cycle_endpoint(
     """
     liability, card, target, selection = await apply_deferred_cycle(db, user.id, liability_id)
     await db.commit()
-    return _preview_response(liability, card, target, selection)
+    return _preview_response(liability, card, target, selection, already_declared=True)
 
 
 @router.delete("/liabilities/{liability_id}/deferred-cycle", status_code=204)

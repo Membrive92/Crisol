@@ -111,3 +111,9 @@ secrets/
 # configurable y las sondas escriben en el suyo (`edgar_probe_cache`, 5,8 MB),
 # así que una regla por nombre concreto deja fuera al siguiente que se cree.
 backend/data/
+
+# Volcados de datos reales del usuario (papelera, exports de auditoría). Se
+# generan para poder deshacer una operación irreversible, pero son movimientos
+# bancarios: no entran en el repositorio ni un commit, porque el historial de
+# git no se borra y esto acabaría en `origin`.
+backups/

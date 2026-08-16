@@ -11,6 +11,8 @@ export type {
   Account,
   AccountNature,
   AccountType,
+  DeferredCyclePreview,
+  DeferredCyclePurchase,
   SettlementCandidate,
 } from './models/account';
 export {

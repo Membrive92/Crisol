@@ -3,6 +3,7 @@ import type {
   DebtHealthKpis,
   DebtHistoryResponse,
   DebtTimeRange,
+  DeferredCyclePreview,
   ModuleDashboardSummary,
 } from '@crisol/types';
 
@@ -99,6 +100,27 @@ export const debtApi = {
       params,
     });
     return response.data;
+  },
+
+  /** PHASE-47.E — qué compras cubriría este aplazamiento. No escribe nada. */
+  async deferredCyclePreview(liabilityId: string): Promise<DeferredCyclePreview> {
+    const response = await apiClient.get<DeferredCyclePreview>(
+      `/debt/liabilities/${liabilityId}/deferred-cycle`,
+    );
+    return response.data;
+  },
+
+  /** Marca las compras del ciclo. 409 si no cierra al céntimo. */
+  async deferredCycleApply(liabilityId: string): Promise<DeferredCyclePreview> {
+    const response = await apiClient.post<DeferredCyclePreview>(
+      `/debt/liabilities/${liabilityId}/deferred-cycle`,
+    );
+    return response.data;
+  },
+
+  /** Retira la marca: las compras vuelven a contar como salida de caja. */
+  async deferredCycleClear(liabilityId: string): Promise<void> {
+    await apiClient.delete(`/debt/liabilities/${liabilityId}/deferred-cycle`);
   },
 
   async debtHistory(query: DebtHistoryQuery = {}): Promise<DebtHistoryResponse> {

@@ -92,19 +92,37 @@ def select_deferred_cycle(
     # entre filas indistinguibles.
     eligible.sort(key=lambda p: (p.occurred_at, p.amount, str(p.id)))
 
+    # Cuánto puede BAJAR todavía la suma si se sigue caminando hacia atrás:
+    # las devoluciones entran con importe negativo, así que pararse en cuanto
+    # se pasa del recibo cortaría antes de que una devolución anterior lo
+    # devolviera a su sitio. `refunds_before[i]` es el total (negativo) de las
+    # devoluciones que quedan por recorrer cuando ya se ha incluido `i`.
+    refunds_before: list[Decimal] = []
+    running = Decimal(0)
+    for purchase in eligible:
+        refunds_before.append(running)
+        if purchase.amount < 0:
+            running += purchase.amount
+
     accumulated = Decimal(0)
     picked: list[CyclePurchase] = []
-    for purchase in reversed(eligible):
-        accumulated += purchase.amount
-        picked.append(purchase)
+    for index in range(len(eligible) - 1, -1, -1):
+        accumulated += eligible[index].amount
+        picked.append(eligible[index])
         if accumulated == target:
             return CycleSelection(
                 tuple(reversed(picked)),
                 accumulated,
                 True,
-                f"{len(picked)} compras suman exactamente el recibo.",
+                f"{len(picked)} movimientos suman exactamente el recibo.",
             )
-        if accumulated > target:
+        # Salida anticipada, no una regla: se abandona sólo cuando ni
+        # recorriendo TODO lo que queda podría la suma volver al importe del
+        # recibo. Por construcción no puede cambiar el resultado —únicamente
+        # evita recorrer meses de compras para nada—, así que ningún test
+        # puede distinguirla de seguir hasta el final; se deja escrito para
+        # que nadie intente cubrirla y concluya que el test no sirve.
+        if accumulated + refunds_before[index] > target:
             break
 
     return CycleSelection(

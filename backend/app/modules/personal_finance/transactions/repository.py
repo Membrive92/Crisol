@@ -81,6 +81,14 @@ def _scope[Q: Select[Any] | Update | Delete](
         conditions.append(Transaction.deleted_at.is_(None))
     elif deleted == "trashed":
         conditions.append(Transaction.deleted_at.is_not(None))
+        # PHASE-47.E — un "cargo espejo" absorbido está soft-borrado pero NO es
+        # papelera del usuario: fue un borrado del SISTEMA con contrapartida ya
+        # creada (AUDIT-2026-07 H-04). Sin esta exclusión aparecía en la
+        # papelera como una fila más, así que restaurarlo duplicaba el cargo y
+        # —peor— «vaciar papelera» lo borraba de verdad: entonces reimportar el
+        # extracto lo resucita sin contrapartida y descuadra la cuenta en
+        # silencio, porque `find_existing_hashes` ya no puede reconocerlo.
+        conditions.append(Transaction.absorbed_as_mirror.is_(False))
     if account_id is not None:
         conditions.append(Transaction.account_id == account_id)
     if uncategorized:

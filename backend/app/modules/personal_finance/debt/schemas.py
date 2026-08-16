@@ -464,4 +464,9 @@ class DeferredCyclePreview(BaseModel):
     purchases: list[DeferredCyclePurchase]
     total: Decimal
     closes_exactly: bool
+    already_declared: bool = False
+    """PHASE-47.E — el ciclo YA está marcado y esto es lo que hay guardado, no
+    una propuesta. Viaja como dato y no se deduce del texto de `reason`: una
+    frase se reescribe cualquier día y quien la estuviera comparando se entera
+    en producción."""
     reason: str

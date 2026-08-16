@@ -23,7 +23,10 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+import pytest_asyncio
 from httpx import AsyncClient
+from sqlalchemy import text as sql_text
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.modules.personal_finance.debt.deferral import CyclePurchase, select_deferred_cycle
 
@@ -184,6 +187,13 @@ async def _breakdown_total(client: AsyncClient, token: str) -> Decimal:
     return sum((Decimal(str(i["total"])) for i in r.json()), Decimal(0))
 
 
+@pytest_asyncio.fixture
+async def session_factory(test_engine):  # type: ignore[no-untyped-def]
+    """Sesión directa a la BD de test, para preparar estados que la API no
+    expone — aquí, marcar una fila como espejo absorbido por el sistema."""
+    return async_sessionmaker(bind=test_engine, expire_on_commit=False, autoflush=False)
+
+
 @pytest.fixture
 async def deferred_scenario(client: AsyncClient):  # type: ignore[no-untyped-def]
     """Una tarjeta con dos compras de junio que suman el recibo de 700,26 €."""
@@ -263,6 +273,7 @@ async def test_once_deferred_the_month_stops_counting_it_but_the_breakdown_does_
     )
     assert preview.status_code == 200, preview.text
     assert preview.json()["closes_exactly"] is True
+    assert preview.json()["already_declared"] is False, "aún no se ha declarado nada"
     assert len(preview.json()["purchases"]) == 2
 
     applied = await client.post(
@@ -383,6 +394,11 @@ async def test_declaring_the_cycle_twice_does_not_mark_a_second_set(
     )
 
     assert second.status_code == 200, second.text
+    # El estado viaja como DATO. La pantalla decide con él si ofrece «declarar»
+    # o «retirar la marca»; deducirlo del texto de `reason` la rompería el día
+    # que alguien reescriba la frase.
+    assert first.json()["already_declared"] is True
+    assert second.json()["already_declared"] is True
     # Las MISMAS dos compras, no cuatro.
     assert len(second.json()["purchases"]) == 2
     assert {p["id"] for p in second.json()["purchases"]} == {
@@ -656,3 +672,134 @@ async def test_recurrence_still_sees_a_deferred_purchase(
 
     puntuales = {c["category_name"] for c in structure["exceptional_by_category"]}
     assert "Supermercado" not in puntuales
+
+
+# ── La devolución dentro del ciclo ───────────────────────────────────
+#
+# Lo destapó mirar los datos reales del usuario: con las devoluciones netadas,
+# DOS de sus cuatro recibos cierran al céntimo; sin netarlas, ninguno. El banco
+# liquida el neto, así que un ciclo con una devolución dentro no puede sumar el
+# recibo si sólo se cuentan las compras.
+
+
+def _refund(day: int, amount: str) -> CyclePurchase:
+    """Una devolución: mismo sitio que una compra, importe en negativo."""
+    return CyclePurchase(
+        id=uuid.uuid4(),
+        occurred_at=datetime(2026, 6, day, 12, 0, tzinfo=UTC),
+        amount=Decimal(amount),
+        description=f"DEVOLUCION {day}",
+    )
+
+
+def test_a_refund_inside_the_cycle_is_netted() -> None:
+    """400 + 350 − 49,74 = 700,26: el ciclo cierra con la devolución dentro."""
+    movements = [_purchase(10, "400.00"), _refund(12, "-49.74"), _purchase(20, "350.00")]
+
+    selection = select_deferred_cycle(movements, Decimal("700.26"))
+
+    assert selection.closes_exactly
+    assert selection.count == 3
+    assert selection.total == Decimal("700.26")
+
+
+def test_the_walk_does_not_give_up_before_reaching_a_refund() -> None:
+    """Pasarse NO es motivo de abandono si aún queda una devolución detrás.
+
+    Recorriendo de la más reciente hacia atrás, la suma llega a 750,00 —por
+    encima del recibo— y sólo vuelve a 700,26 al alcanzar la devolución, que
+    es más antigua. Con el corte ingenuo «me he pasado, paro», este ciclo no
+    cerraría nunca.
+    """
+    movements = [_refund(5, "-49.74"), _purchase(10, "400.00"), _purchase(20, "350.00")]
+
+    selection = select_deferred_cycle(movements, Decimal("700.26"))
+
+    assert selection.closes_exactly
+    assert selection.count == 3
+
+
+async def test_a_refund_on_the_card_reaches_the_cycle(
+    client: AsyncClient, deferred_scenario  # type: ignore[no-untyped-def]
+) -> None:
+    """End-to-end: la devolución tiene que llegar desde la CONSULTA.
+
+    Los dos tests de arriba son puros y no tocan la BD, así que no dicen nada
+    sobre qué filas selecciona `_card_purchases`. Este sí: con la consulta
+    filtrando sólo `flow='OUT'` —como estaba— la devolución no llega, la suma
+    se queda alta y el ciclo no cierra.
+    """
+    token, card = deferred_scenario
+    returns = await _category(client, token, "Devoluciones", "income")
+    # El escenario tiene 300,26 + 400,00 = 700,26. Se añade una compra de más
+    # y su devolución: el NETO sigue siendo el recibo.
+    groceries = await _category(client, token, "Ocio", "expense")
+    await _tx(client, token, account_id=card, category_id=groceries, amount="49.74", day=12)
+    await _tx(
+        client,
+        token,
+        account_id=card,
+        category_id=returns,
+        amount="49.74",
+        day=14,
+        flow="IN",
+        description="DEVOLUCION Ocio",
+    )
+
+    liability = await _financed_receipt(client, token, card, "700.26")
+    preview = await client.get(
+        f"/debt/liabilities/{liability}/deferred-cycle", headers=_auth(token)
+    )
+
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["closes_exactly"] is True, preview.json()["reason"]
+    assert Decimal(str(preview.json()["total"])) == Decimal("700.26")
+    assert len(preview.json()["purchases"]) == 4
+
+
+# ── La papelera no es donde vive lo que absorbió el sistema ──────────
+
+
+async def test_an_absorbed_mirror_is_not_user_trash(
+    client: AsyncClient,
+    deferred_scenario,  # type: ignore[no-untyped-def]
+    session_factory,  # type: ignore[no-untyped-def]
+) -> None:
+    """Un cargo espejo absorbido no se lista, ni se restaura, ni se purga.
+
+    Está soft-borrado, pero lo borró el SISTEMA al crear su contrapartida
+    (AUDIT-2026-07 H-04), y `find_existing_hashes` cuenta con que siga ahí para
+    no resucitarlo al reimportar. Apareciendo en la papelera, «vaciar» lo
+    borraba de verdad — y el siguiente import lo traía de vuelta sin
+    contrapartida, descuadrando la cuenta sin que nada avisara.
+    """
+    token, card = deferred_scenario
+    groceries = await _category(client, token, "Ocio", "expense")
+    tx_id = await _tx(client, token, account_id=card, category_id=groceries, amount="99.00", day=5)
+
+    # Se marca como espejo absorbido, que es lo que hace el sistema al
+    # convertir una compra en deuda.
+    async with session_factory() as db:
+        await db.execute(
+            sql_text(
+                "UPDATE transactions SET deleted_at = now(), absorbed_as_mirror = true "
+                "WHERE id = CAST(:i AS uuid)"
+            ),
+            {"i": tx_id},
+        )
+        await db.commit()
+
+    listed = await client.get("/transactions/trash", headers=_auth(token))
+    assert listed.status_code == 200, listed.text
+    assert tx_id not in {t["id"] for t in listed.json()["items"]}
+
+    purged = await client.delete("/transactions/trash", headers=_auth(token))
+    assert purged.status_code == 200, purged.text
+
+    # Sigue ahí: el vaciado no se lo llevó.
+    async with session_factory() as db:
+        still = await db.execute(
+            sql_text("SELECT count(*) FROM transactions WHERE id = CAST(:i AS uuid)"),
+            {"i": tx_id},
+        )
+        assert still.scalar_one() == 1

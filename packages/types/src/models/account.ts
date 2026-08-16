@@ -121,3 +121,32 @@ export interface SettlementCandidate {
   /** Cargos con origen identificable examinados en total. */
   total: number;
 }
+
+/**
+ * PHASE-47.E — Qué gasto aplazó un recibo financiado.
+ *
+ * `closes_exactly` decide si se puede declarar: sin cierre al céntimo no se
+ * marca nada, porque marcar «las que más se acerquen» repartiría el gasto
+ * entre categorías que no son las suyas. `reason` explica siempre por qué.
+ */
+export interface DeferredCyclePurchase {
+  id: string;
+  occurred_at: string;
+  amount: string;
+  description: string | null;
+}
+
+export interface DeferredCyclePreview {
+  liability_id: string;
+  liability_name: string;
+  card_id: string | null;
+  card_name: string | null;
+  receipt_amount: string;
+  currency: string;
+  purchases: DeferredCyclePurchase[];
+  total: string;
+  closes_exactly: boolean;
+  /** El ciclo ya está marcado: esto es lo guardado, no una propuesta. */
+  already_declared: boolean;
+  reason: string;
+}

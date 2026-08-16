@@ -580,3 +580,19 @@ cuota marcada como pagada por un cargo que ya no le corresponde queda ahí.
 
 Cerrarlo bien pide desmarcar las cuotas cuyo `paid_transaction_id` proceda del
 pool antiguo al cambiar de padre — reversible y auditable, con su test.
+
+## Dos ciclos que no cierran por menos de un euro (PHASE-47.E)
+
+Medido el 2026-08-16 sobre los datos reales, con las devoluciones ya netadas:
+el recibo del 4-may y el del 1-abr **cierran al céntimo**; el del 4-jun se
+queda a 1,41 € y el aplazamiento de junio a 0,88 € del mejor tramo contiguo.
+
+Sobre una ventana estricta 26→25 la diferencia es mayor (170,75 € y 39,11 €),
+lo que dice que el corte del banco no cae siempre el mismo día — de ahí que la
+derivación busque el tramo que cuadra en vez de recortar por fecha.
+
+Un sospechoso concreto: `Parking aeropuerto alicante` 38,00 € del 10-jun está
+en la papelera, borrada a mano por parecerse a otra idéntica del 17-may que
+sigue viva. Si eran dos viajes distintos, restaurarla deja el ciclo de junio a
+1,11 € de cerrar. Requiere que el usuario mire su extracto: es una pregunta
+sobre su vida, no sobre sus datos.

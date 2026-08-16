@@ -39,6 +39,7 @@ import {
   type AccountFormValue,
 } from '@/components/accounts/account-form-fields';
 import { AccountSwatch } from '@/components/accounts/account-swatch';
+import { DeferredCyclePanel } from '@/components/accounts/deferred-cycle-panel';
 import { DebtPaymentWizard } from '@/components/accounts/debt-payment-wizard';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -720,6 +721,12 @@ function AccountRow({
           settlementSuggestion={settlementSuggestion}
           parentCardOptions={parentCardOptions.filter((c) => c.id !== account.id)}
         />
+        {/* PHASE-47.E — sólo tiene sentido en una deuda que cuelga de una
+            tarjeta: es la que puede haber aplazado un recibo. Sin el vínculo
+            declarado, el panel no tendría dónde buscar el ciclo. */}
+        {account.parent_account_id ? (
+          <DeferredCyclePanel liabilityId={account.id} currency={account.currency} />
+        ) : null}
         <div
           style={{
             display: 'flex',

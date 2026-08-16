@@ -105,6 +105,18 @@ habría duplicado uno que existe.
 Los meses con aplazamiento las dos cifras dejan de cuadrar **a propósito**. Sin
 ese número, quien lo intente concluirá que la app está mal.
 
+## El panel (web)
+
+`DeferredCyclePanel`, dentro del editor de una deuda que cuelga de una tarjeta
+—que es la única que puede haber aplazado un recibo—. Enseña la aritmética
+entera antes de escribir nada: qué movimientos, con sus fechas e importes, lo
+que suman y lo que dice el recibo. El botón **sólo se enciende cuando cierra al
+céntimo**; si no, se explica qué falta y no se ofrece aproximar.
+
+Una vez declarado, el mismo panel ofrece retirar la marca. El estado viaja como
+dato (`already_declared`) y no se deduce del texto del mensaje: una frase se
+reescribe cualquier día y quien la estuviera comparando se entera en producción.
+
 ## Endpoints añadidos
 
 - `GET /debt/liabilities/{id}/deferred-cycle` — qué compras cubriría. No escribe.
@@ -186,13 +198,19 @@ fila descartada nunca llega a existir.
   contrastó el documento contra el código. La corrección se deja anotada aquí
   a propósito: es la novena vez que una premisa escrita a mano caduca en este
   repo, y la primera que la caza un revisor con ese encargo explícito.)*
-- El aplazamiento se declara por API. **No hay todavía un panel en la web** que
-  lo ofrezca: el usuario tiene que llegar por el endpoint. La propuesta
-  automática (ofrecerlo al enlazar la financiación con su cuadro, que es cuando
-  el sistema ya sabe todo lo necesario) queda para 47.C.
-- El recibo de 990,02 € de junio no cierra: faltan compras de mayo en la app.
-  El sistema lo dice en vez de aproximar, que es lo correcto, pero el usuario
-  tendrá que importar ese ciclo para poder declararlo.
+- La propuesta **automática** —ofrecer el aplazamiento al enlazar la
+  financiación con su cuadro, que es cuando el sistema ya sabe todo lo
+  necesario— queda para 47.C. Hoy hay que abrir la deuda en Ajustes → Cuentas
+  y pulsar «¿Qué gasto aplazó este recibo?».
+- **Dos de los cuatro ciclos del usuario cierran al céntimo; dos no.** Medido
+  el 2026-08-16 sobre sus datos reales: el recibo del 4-may (1.278,34 €) y el
+  del 1-abr (577,16 €) cierran exactos; el del 4-jun (990,02 €) y el
+  aplazamiento de junio (700,26 €) se quedan a 1,41 € y 0,88 € del mejor tramo
+  contiguo. No es «faltan compras de mayo» —eso se afirmó antes de medirlo y
+  era falso—: es que a esos dos ciclos les falta algún movimiento suelto. Uno
+  identificado: una compra de 38,00 € del 10-jun (Parking aeropuerto) está en
+  la papelera, borrada a mano por parecerse a otra idéntica del 17-may que
+  sigue viva; restaurarla deja el ciclo de junio a 1,11 € de cerrar.
 
 ## Próximo paso
 
