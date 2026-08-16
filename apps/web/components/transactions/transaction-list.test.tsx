@@ -197,4 +197,21 @@ describe('TransactionList · gasto aplazado', () => {
 
     expect(screen.queryByTestId('deferred-mark')).toBeNull();
   });
+
+  it('no marca nada cuando el servidor no manda el campo', () => {
+    // Visto en la app: el asterisco salía en TODAS las filas con cero
+    // aplazamientos declarados. El backend en marcha era anterior al campo,
+    // así que llegaba `undefined` — y `undefined !== null` es cierto.
+    const { deferred_by_account_id: _omitido, ...sinCampo } = makeTx();
+
+    render(
+      <TransactionList
+        items={[sinCampo as Transaction]}
+        categories={[]}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId('deferred-mark')).toBeNull();
+  });
 });

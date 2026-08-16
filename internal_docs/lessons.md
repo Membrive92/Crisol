@@ -1689,6 +1689,30 @@ duele: fue una revisión adversarial la que encontró esto, no la suite en verde
 el propio gesto de romper — porque ambos sólo pueden hablar de lo que alguien
 decidió mirar.
 
+### [PHASE-47.E] `campo !== null` marca TODAS las filas cuando el servidor aún no manda el campo — y el tipo dice que sí lo manda
+**Error:** el asterisco de «gasto aplazado» salía en **todas** las
+transacciones, con **cero** aplazamientos declarados en la base. La condición
+era `tx.deferred_by_account_id !== null`, y el backend en marcha del usuario era
+anterior al campo: llegaba AUSENTE, y `undefined !== null` es cierto. La app le
+anunciaba a la cara un aplazamiento que no existía, en cada fila.
+**Causa:** el tipo declara `deferred_by_account_id: string | null` —obligatorio—
+así que `tsc` no ve nada raro en compararlo con `null`. Pero un tipo describe el
+contrato, no lo que el servidor en ejecución está devolviendo: durante un
+despliegue a medias, con una respuesta cacheada o con el backend sin recargar,
+el campo simplemente no viene. Es la lección de [PHASE-44.16] («ausente y vacío
+no son lo mismo») en su versión de API viva en vez de documento persistido.
+**Solución:** comprobar por VERDAD (`tx.campo ? … : null`), que cubre `null`,
+`undefined` y cadena vacía a la vez; y un test que renderiza una fila con el
+campo OMITIDO, no puesto a null — que es el caso que ocurrió.
+**Regla:** para decidir si pintas una marca, usa una comprobación por verdad y
+no una comparación con `null`. La comparación estricta sólo es correcta si
+estás seguro de que el campo SIEMPRE viaja, y de eso no puedes estar seguro
+mientras exista una versión del servidor que no lo mandaba. Corolario de test:
+un caso de «campo ausente» se escribe **omitiendo la clave**, no poniéndola a
+`null` — con `null` el test pasa igual y no prueba nada. Y quien lo destapó fue
+una captura de pantalla del usuario, no la suite: las 186 pruebas en verde
+convivían con un asterisco en cada fila.
+
 ---
 
 ## Ejemplos de referencia (no son lecciones reales)

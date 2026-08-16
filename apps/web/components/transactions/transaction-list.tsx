@@ -232,7 +232,13 @@ export function TransactionList({
           >
             {tx.description ?? '(sin descripción)'}
           </span>
-          {tx.deferred_by_account_id !== null ? (
+          {/* Comprobación por VERDAD, no `!== null`: si el campo llega AUSENTE
+              —un backend anterior al despliegue, una respuesta cacheada— la
+              comparación con `null` da cierto y el asterisco sale en TODAS las
+              filas, anunciando un aplazamiento que no existe. Es la lección de
+              PHASE-44.16: ausente y nulo no son lo mismo, y el tipo no protege
+              de lo que el servidor no manda. */}
+          {tx.deferred_by_account_id ? (
             <abbr
               data-testid="deferred-mark"
               title={deferredPurchaseNotice(deferredLiabilityName?.(tx.deferred_by_account_id))}
