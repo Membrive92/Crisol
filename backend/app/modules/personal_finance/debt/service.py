@@ -976,16 +976,38 @@ async def compute_category_summary(
     debt_fixed = await _load_debt_fixed_expenses(
         db, user_id, native_currency, target_currency=target_currency
     )
+    # Las categorías que YA tienen un contrato con cuadro detrás. La sección
+    # existe para pedirle al usuario que vincule lo que le falta; una cuota
+    # cuyo pasivo ya está declarado no es una tarea pendiente, y seguir
+    # ofreciéndole «Vincular» le dice que no ha hecho algo que sí hizo.
+    linked_category_ids = set(
+        (
+            await db.execute(
+                select(Account.category_id)
+                .where(Account.user_id == user_id)
+                .where(Account.nature == AccountNature.LIABILITY)
+                .where(Account.category_id.is_not(None))
+            )
+        )
+        .scalars()
+        .all()
+    )
     recurring_quotas = [
         RecurringQuotaRef(
             fixed_expense_id=fe.id,
-            merchant=fe.merchant,
+            # `merchant` es la clave NORMALIZADA que usa el detector para
+            # agrupar (minúsculas, sin espacios): en pantalla salía
+            # «cargoporamortizaciondeprestamo». El texto tal cual lo escribe el
+            # banco está en `raw_description`, que es lo que el usuario
+            # reconoce. La clave se queda donde sirve, agrupando.
+            merchant=fe.raw_description or fe.merchant,
             amount=display_amount.quantize(Decimal("0.01")),
             currency=effective_currency if target_currency else fe.currency,
             category_id=cat.id,
             category_name=cat.name,
         )
         for fe, cat, display_amount in debt_fixed
+        if cat.id not in linked_category_ids
     ]
 
     # ── 6. Límites de períodos con datos (navegador de período) ──────
