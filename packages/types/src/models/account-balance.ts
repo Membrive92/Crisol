@@ -37,6 +37,32 @@ export interface AccountBalance {
    * cuentas normales. La vista de deuda agrupa las hijas bajo su tarjeta.
    */
   parent_account_id?: string | null;
+  /**
+   * PHASE-47.G — lo que la app calcula MENOS lo que dijo el extracto del banco.
+   * `null` si la cuenta nunca se ancló; `"0.00"` es lo normal. Cualquier otra
+   * cosa significa que la app y el banco han dejado de coincidir.
+   *
+   * Opcional a propósito: un backend anterior a 47.G no manda el campo, y
+   * comparar con `null` lo daría por presente (lección [PHASE-47.E]).
+   */
+  statement_gap?: string | null;
+  /** PHASE-47.G — tramos de extracto que faltan por importar. */
+  statement_seams?: StatementSeam[];
+}
+
+/**
+ * PHASE-47.G — un tramo que el banco movió y la app no tiene.
+ *
+ * Sale de la columna Saldo: si el saldo anterior implícito de una fila no
+ * aparece en ninguna otra, entre medias hay movimientos sin importar. No da
+ * error por sí solo —el anclaje lo absorbe en el saldo inicial—, así que hay
+ * que decirlo o no se entera nadie.
+ */
+export interface StatementSeam {
+  after: string;
+  before: string;
+  /** Cuánto se movió el saldo ahí dentro. Negativo = salió dinero. */
+  amount: string;
 }
 
 export interface AccountBalancesResponse {

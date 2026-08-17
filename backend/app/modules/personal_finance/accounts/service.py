@@ -20,6 +20,7 @@ from app.modules.personal_finance.accounts.repository import (
     clear_settlement_references_to,
     count_child_accounts,
     count_transactions_for_account,
+    find_statement_seams,
     get_account_by_id,
     get_account_by_name,
     get_account_movement_until,
@@ -41,6 +42,7 @@ from app.modules.personal_finance.accounts.schemas import (
     AccountBalancesResponse,
     AccountCreate,
     AccountUpdate,
+    StatementSeamOut,
 )
 from app.modules.personal_finance.debt.amortization import build_schedule
 from app.modules.personal_finance.debt.installments_model import (
@@ -762,6 +764,8 @@ async def get_balances(
     # patrimonio ya usaba caja, así que esto no cambia el net_worth (HIGH#1).
     effective_target = target_currency.upper() if target_currency else None
 
+    seams_by_account = await find_statement_seams(db, user_id)
+
     items: list[AccountBalance] = []
     active_currencies: set[str] = set()
     total_assets = Decimal("0")
@@ -847,8 +851,25 @@ async def get_balances(
         _insts = insts_by_account.get(account.id, [])
         item_monthly_payment = Decimal(_insts[0].payment) if _insts else None
 
+        # PHASE-47.G — la app se compara con el banco por su cuenta. El testigo
+        # (`anchored_statement_balance`) lleva desde PHASE-39 en la BD y sólo se
+        # escribía; con eso, un desvío de 700,26 € vivió semanas sin que nada lo
+        # dijera. Se compara la CAJA nativa, no el saldo mostrado: un pasivo con
+        # cuadro reexpresa su saldo desde las cuotas y no tiene extracto.
+        item_statement_gap: Decimal | None = None
+        if account.anchored_statement_balance is not None and account.nature == AccountNature.ASSET:
+            item_statement_gap = (
+                account.opening_balance + cash_movement
+            ) - account.anchored_statement_balance
+        item_seams = [
+            StatementSeamOut(after=s.after, before=s.before, amount=s.amount)
+            for s in seams_by_account.get(account.id, [])
+        ]
+
         items.append(
             AccountBalance(
+                statement_gap=item_statement_gap,
+                statement_seams=item_seams,
                 account_id=account.id,
                 name=account.name,
                 type=account.type,

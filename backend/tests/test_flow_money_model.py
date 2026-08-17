@@ -196,6 +196,9 @@ async def test_out_flow_in_transfer_category_counts_as_expense(session_factory) 
     assert expense == Decimal("50")
 
 
+
+
+
 async def test_null_flow_falls_back_to_category(session_factory) -> None:  # type: ignore[no-untyped-def]
     """Transición: una fila SIN flow cae a category.kind/is_transfer."""
     uid = await _seed_user(session_factory)
@@ -261,14 +264,20 @@ async def test_balance_liability_signs_inverted(session_factory) -> None:  # typ
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Operación financiada → deuda: anulación del "cargo espejo" (PHASE-34).
+# Operación financiada → deuda: las DOS líneas del extracto se quedan y se
+# cancelan solas (PHASE-47.F, antes se borraba el "cargo espejo").
 # ─────────────────────────────────────────────────────────────────────
 
 
-async def test_convert_to_debt_absorbs_mirror_charge(session_factory) -> None:  # type: ignore[no-untyped-def]
-    """Al registrar la operación financiada como deuda, el cargo espejo (un
-    ADEUDO del MISMO importe que en el banco la compensa) se mueve a la
-    papelera → saldo neto 0 + deuda. Un cargo de OTRO importe no se toca."""
+async def test_convert_to_debt_keeps_the_mirror_charge_and_nets_to_zero(session_factory) -> None:  # type: ignore[no-untyped-def]
+    """El cargo que compensa al abono NO se borra: los dos suman 0 por sí solos.
+
+    Cuando el banco financia una compra imprime dos líneas del mismo importe
+    —el abono y el cargo que lo consume— y el saldo del extracto no se mueve.
+    Antes se mandaba el cargo a la papelera y se anulaba el abono, lo que da el
+    MISMO número por dos correcciones en vez de por ninguna; lo único que
+    añadía era una forma de emparejar mal.
+    """
     from app.modules.personal_finance.transfers.service import convert_to_debt_operation
 
     uid = await _seed_user(session_factory)
@@ -294,42 +303,34 @@ async def test_convert_to_debt_absorbs_mirror_charge(session_factory) -> None:  
         flow=TransactionFlow.OUT,
         description="ADEUDO MENSUAL DE TARJETA",
     )
-    other = await _seed_tx(
-        session_factory,
-        uid,
-        bbva,
-        amount=Decimal("43.93"),
-        flow=TransactionFlow.OUT,
-        description="ADEUDO MENSUAL DE TARJETA",
-    )
 
     async with session_factory() as db:
-        resp = await convert_to_debt_operation(
+        await convert_to_debt_operation(
             db, uid, source_transaction_id=abono, destination_account_id=card, new_liability=None
         )
         await db.commit()
 
-    assert resp.absorbed_mirror_amount == Decimal("824.77")
     async with session_factory() as db:
         m = await db.get(Transaction, mirror)
-        o = await db.get(Transaction, other)
-    assert m is not None and m.deleted_at is not None  # espejo → papelera
-    assert o is not None and o.deleted_at is None  # otro importe intacto
+        balances = await get_balances_for_user(db, uid)
+    assert m is not None and m.deleted_at is None  # el cargo sigue vivo
+    assert balances[bbva] == Decimal("0.00")  # +824,77 − 824,77
+    assert balances[card] == Decimal("824.77")  # y la deuda queda
 
 
-async def test_convert_to_debt_absorbs_mirror_with_the_financed_receipt_wording(  # type: ignore[no-untyped-def]
+async def test_convert_to_debt_keeps_the_financing_credit_in_the_balance(  # type: ignore[no-untyped-def]
     session_factory,
 ) -> None:
-    """PHASE-46 — La forma REAL de julio de 2026, extraída de la BD.
+    """El caso REAL de julio de 2026: el abono SIN su cargo gemelo en la cuenta.
 
-    El banco financia el recibo de la tarjeta: abona `Recibo anterior jun-26
-    Otras financiaciones` (+700,26) y al día siguiente cobra `Recibo mes
-    anterior` (−700,26). Neto de caja cero, y queda la deuda.
+    BBVA abonó 700,26 € el 07-jul —el saldo del propio extracto subió de 717,10
+    a 1.417,36— y no cobró nada equivalente en esa cuenta: el recibo se saldó
+    contra la tarjeta. Al registrarlo como deuda, la app anulaba ese abono, y el
+    saldo de BBVA quedaba 700,26 € por debajo del que imprimía el banco.
 
-    Antes de unificar las listas, `find_mirror_charge` sólo conocía
-    `%adeudo%tarjeta%` y `%liquidacion%tarjeta%`, así que el espejo NO se
-    encontraba: al registrar la operación como deuda, el cargo quedaba suelto
-    restando 700,26 € del saldo de BBVA sin contraparte.
+    Ahora el abono cuenta como lo que es, caja que entró; la deuda la lleva la
+    contrapartida y el patrimonio no se mueve, que es lo que significa que te
+    presten dinero.
     """
     from app.modules.personal_finance.transfers.service import convert_to_debt_operation
 
@@ -348,17 +349,9 @@ async def test_convert_to_debt_absorbs_mirror_with_the_financed_receipt_wording(
         flow=TransactionFlow.IN,
         description="Recibo anterior jun-26 Otras financiaciones",
     )
-    espejo = await _seed_tx(
-        session_factory,
-        uid,
-        bbva,
-        amount=Decimal("700.26"),
-        flow=TransactionFlow.OUT,
-        description="Recibo mes anterior No categorizable",
-    )
 
     async with session_factory() as db:
-        resp = await convert_to_debt_operation(
+        await convert_to_debt_operation(
             db,
             uid,
             source_transaction_id=abono,
@@ -367,14 +360,53 @@ async def test_convert_to_debt_absorbs_mirror_with_the_financed_receipt_wording(
         )
         await db.commit()
 
-    assert resp.absorbed_mirror_amount == Decimal("700.26")
     async with session_factory() as db:
         origen = await db.get(Transaction, abono)
-        cargo = await db.get(Transaction, espejo)
-    assert cargo is not None and cargo.deleted_at is not None
-    # La pata origen deja de ser un ingreso y pasa a ser dinero prestado.
+        balances = await get_balances_for_user(db, uid)
+    assert balances[bbva] == Decimal("700.26")
+    assert balances[prestamo] == Decimal("700.26")
+    # Sale del cashflow (es dinero prestado, no un ingreso) pero conserva su
+    # dirección: emparejar cambia QUÉ es el movimiento, no hacia dónde fue.
     assert origen is not None and origen.flow == TransactionFlow.TRANSFER_IN
     assert origen.transfer_pair_id is not None
+
+
+async def test_convert_to_debt_keeps_the_direction_of_a_charge(session_factory) -> None:  # type: ignore[no-untyped-def]
+    """Una tx origen que es un CARGO no se convierte en un abono al emparejarla.
+
+    Se le imponía `TRANSFER_IN` fuera cual fuera su dirección, y era inocuo sólo
+    porque el saldo la anulaba justo después. Sin esa anulación, imponerla haría
+    que una compra SUBIERA el saldo de la cuenta.
+    """
+    from app.modules.personal_finance.transfers.service import convert_to_debt_operation
+
+    uid = await _seed_user(session_factory)
+    bbva = await _seed_account(
+        session_factory, uid, nature=AccountNature.ASSET, type_=AccountType.BANK
+    )
+    card = await _seed_account(
+        session_factory, uid, nature=AccountNature.LIABILITY, type_=AccountType.CREDIT_CARD
+    )
+    cargo = await _seed_tx(
+        session_factory,
+        uid,
+        bbva,
+        amount=Decimal("500.00"),
+        flow=TransactionFlow.OUT,
+        description="OPERACION FINANCIADA",
+    )
+
+    async with session_factory() as db:
+        await convert_to_debt_operation(
+            db, uid, source_transaction_id=cargo, destination_account_id=card, new_liability=None
+        )
+        await db.commit()
+
+    async with session_factory() as db:
+        origen = await db.get(Transaction, cargo)
+        balances = await get_balances_for_user(db, uid)
+    assert origen is not None and origen.flow == TransactionFlow.TRANSFER_OUT
+    assert balances[bbva] == Decimal("-500.00")
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -496,6 +528,42 @@ def test_classify_financing_wording_as_charge_is_still_a_real_expense() -> None:
     )
 
 
+def test_classify_financing_inflow_without_bank_sign_is_still_not_income() -> None:
+    """El extracto de la TARJETA no trae signos, y la regla tenía que mirarlos.
+
+    El caso real de julio de 2026: la financiación del recibo entró desde el
+    extracto de la tarjeta, donde `bank_sign` vale 0 porque el fichero sólo
+    trae magnitudes. La regla de financiación entrante exigía signo positivo,
+    así que no podía dispararse ni cuando la dirección se conocía por otra vía
+    —aquí, el kind de la categoría resuelta— y la fila entraba como `IN`:
+    700,26 € de ingreso que nadie cobró, el 100 % del ingreso que la app
+    atribuía al mes.
+
+    La dirección y el signo no son lo mismo. La regla mira la primera.
+    """
+    assert (
+        classify_import_flow(
+            bank_sign=0,
+            text="Recibo anterior jun-26 Otras financiaciones",
+            category_is_transfer=False,
+            category_kind=CategoryKind.INCOME,
+        )
+        == TransactionFlow.TRANSFER_IN
+    )
+    # Y el reverso, que es lo que impide arreglar esto de más: sin signo pero
+    # con dirección de SALIDA, el mismo producto vuelve a ser gasto real. Quien
+    # quite la condición de dirección en vez de cambiarla rompe esta línea.
+    assert (
+        classify_import_flow(
+            bank_sign=0,
+            text="Otras financiaciones cuota 3/36",
+            category_is_transfer=False,
+            category_kind=CategoryKind.EXPENSE,
+        )
+        == TransactionFlow.OUT
+    )
+
+
 def test_classify_card_settlement_new_wording_is_transfer() -> None:
     """ "Recibo mes anterior" es la liquidación de la tarjeta, igual que
     "Adeudo mensual de tarjeta": las compras ya contaron una a una en su mes,
@@ -529,19 +597,24 @@ def test_financing_inflow_and_card_settlement_are_not_confused() -> None:
     assert is_card_settlement(cargo) and not is_financing_inflow(cargo)
 
 
-def test_card_settlement_definition_is_shared_with_the_mirror_finder() -> None:
-    """Gate: el clasificador y el buscador del espejo hablan de LA MISMA lista.
+def test_card_settlement_definition_is_shared_with_its_sql_consumer() -> None:
+    """Gate: el clasificador y el consumidor SQL hablan de LA MISMA lista.
 
     Eran dos listas —una en el servicio, otra en el repositorio— y divergieron
     en silencio: "Recibo mes anterior" no estaba en ninguna, así que el cargo
     se contó como gasto Y quedó sin absorber. Este test falla si alguien vuelve
     a enumerar liquidaciones en un solo lado.
+
+    Apuntaba al buscador del cargo espejo, que PHASE-47.F retiró. El gate NO se
+    va con él: se repunta al consumidor SQL que sobrevive —el dedup de imports—
+    porque lo que protege es que la definición siga siendo una sola, no quién
+    la use.
     """
     from app.modules.personal_finance.debt.reconciliation import (
         CARD_SETTLEMENT_SEQUENCES,
         sql_like_patterns,
     )
-    from app.modules.personal_finance.transfers.repository import _CARD_SETTLEMENT_LIKE
+    from app.modules.personal_finance.imports.repository import _CARD_SETTLEMENT_LIKE
     from app.modules.personal_finance.transfers.service import is_internal_movement_text
 
     assert sql_like_patterns(CARD_SETTLEMENT_SEQUENCES) == _CARD_SETTLEMENT_LIKE
@@ -595,7 +668,7 @@ def test_balance_chain_resolves_an_unsigned_inflow() -> None:
         ),
         _fila(importe="700.26", saldo="1417.36", texto="Operación financiada 4940121100185049"),
     ]
-    assert resolve_flows_from_balance_chain(filas) == 1
+    assert resolve_flows_from_balance_chain(filas) == (1, 0)
     assert filas[1].flow == TransactionFlow.TRANSFER_IN
 
 
@@ -608,7 +681,7 @@ def test_balance_chain_resolves_an_unsigned_outflow() -> None:
         ),
         _fila(importe="40.00", saldo="960.00", texto="Concepto mudo"),
     ]
-    assert resolve_flows_from_balance_chain(filas) == 1
+    assert resolve_flows_from_balance_chain(filas) == (1, 0)
     assert filas[1].flow == TransactionFlow.OUT
 
 
@@ -627,12 +700,20 @@ def test_balance_chain_stays_quiet_when_the_jump_does_not_match() -> None:
         ),
         _fila(importe="40.00", saldo="925.00", texto="Concepto mudo"),  # salto de 75, no de 40
     ]
-    assert resolve_flows_from_balance_chain(filas) == 0
+    assert resolve_flows_from_balance_chain(filas) == (0, 0)
     assert filas[1].flow is None
 
 
-def test_balance_chain_does_not_touch_rows_already_classified() -> None:
-    """El signo del extracto sigue mandando: esto sólo rellena huecos."""
+def test_balance_chain_corrects_a_row_that_contradicts_the_statement() -> None:
+    """PHASE-47.G — cuando el saldo contradice a la conjetura, gana el saldo.
+
+    Este test afirmaba lo contrario («esto sólo rellena huecos») y su escenario
+    era EXACTAMENTE el bug: el saldo sube 40 y la fila está marcada como gasto.
+    Con esa regla, seis devoluciones entraron como gasto entre abril y julio de
+    2026 —238,87 €, con el signo cambiado, que es el doble de error que
+    perderlas— y ninguna llegó a contrastarse, porque una conjetura que acierta
+    a decidir nunca se comprobaba.
+    """
     from app.modules.personal_finance.imports.service import resolve_flows_from_balance_chain
 
     filas = [
@@ -641,7 +722,27 @@ def test_balance_chain_does_not_touch_rows_already_classified() -> None:
         ),
         _fila(importe="40.00", saldo="1040.00", texto="Otro", flow=TransactionFlow.OUT),
     ]
-    assert resolve_flows_from_balance_chain(filas) == 0
+    assert resolve_flows_from_balance_chain(filas) == (0, 1)
+    assert filas[1].flow == TransactionFlow.IN
+
+
+def test_balance_chain_leaves_alone_a_row_the_statement_confirms() -> None:
+    """Y si el saldo confirma lo que la fila decía, no se toca nada.
+
+    Es el guardarraíl del cambio de arriba: la cadena gobierna la DIRECCIÓN y
+    sólo eso. Aquí el saldo baja 40 y la fila ya es un gasto — coinciden, así
+    que no se reescribe (ni se reclasifica su transfer-ness, que la decide el
+    texto y de la que el saldo no sabe nada).
+    """
+    from app.modules.personal_finance.imports.service import resolve_flows_from_balance_chain
+
+    filas = [
+        _fila(
+            importe="10.00", saldo="1000.00", texto="Algo", fecha_dia=5, flow=TransactionFlow.OUT
+        ),
+        _fila(importe="40.00", saldo="960.00", texto="Otro", flow=TransactionFlow.OUT),
+    ]
+    assert resolve_flows_from_balance_chain(filas) == (0, 0)
     assert filas[1].flow == TransactionFlow.OUT
 
 
@@ -657,7 +758,7 @@ def test_balance_chain_reads_a_newest_first_statement() -> None:
             importe="21.97", saldo="717.10", texto="Amazon", fecha_dia=5, flow=TransactionFlow.OUT
         ),
     ]
-    assert resolve_flows_from_balance_chain(filas) == 1
+    assert resolve_flows_from_balance_chain(filas) == (1, 0)
     assert filas[0].flow == TransactionFlow.TRANSFER_IN
 
 

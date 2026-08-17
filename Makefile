@@ -1,7 +1,7 @@
 # Crisol — Comandos de desarrollo
 # Usa: make <comando>
 
-.PHONY: dev dev-web dev-mobile dev-backend setup lint typecheck test verify format knip knip-all deps-lock db-migrate db-upgrade docker-up docker-down clean
+.PHONY: dev dev-web dev-mobile dev-backend setup lint typecheck test verify format knip knip-all audit-balances deps-lock db-migrate db-upgrade docker-up docker-down clean
 
 # ═══════════════════════════════════════
 # SETUP
@@ -83,6 +83,14 @@ verify: ## Verificación completa (lint + typecheck + tests + código muerto + d
 	@make knip
 	@make docs-check
 	@echo "✅ Todo OK — fase lista para documentar y commitear."
+
+audit-balances: ## ¿Coincide cada saldo con el extracto del banco? ¿Falta algún tramo?
+	@cd backend && .venv/Scripts/python.exe -m scripts.audit_balances_vs_statement
+# Deliberadamente FUERA de `verify`: esto audita DATOS, no código. Meterlo ahí
+# haría que un extracto sin importar bloqueara un commit que no tiene nada que
+# ver, y un gate que falla por algo ajeno se acaba ignorando — que es la forma
+# más cara de no tener gate. El aviso que sí ve el usuario a diario vive en la
+# pantalla de cuentas (`statementIntegrityNotices`).
 
 # ═══════════════════════════════════════
 # BASE DE DATOS

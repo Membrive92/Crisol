@@ -187,6 +187,19 @@ class SettlementCandidateResponse(BaseModel):
     """Cargos con origen identificable examinados en total."""
 
 
+class StatementSeamOut(BaseModel):
+    """PHASE-47.G — un tramo de extracto que la app no tiene.
+
+    El banco imprime el saldo tras cada movimiento, así que un salto que no
+    cuadra con ninguna fila conocida prueba que faltan movimientos entre esas
+    dos fechas — y `amount` dice cuánto se movió el dinero ahí dentro.
+    """
+
+    after: datetime
+    before: datetime
+    amount: Decimal
+
+
 class AccountBalance(BaseModel):
     """Saldo calculado de una cuenta (PHASE-19.4)."""
 
@@ -213,6 +226,18 @@ class AccountBalance(BaseModel):
     activos y liabilities sin cuadro. La lista de deuda pinta la "Cuota est."
     real de las tarjetas financiadas (cuyo `opening_balance` es 0 y no se
     puede recomputar la cuota francesa)."""
+    statement_gap: Decimal | None = None
+    """PHASE-47.G — lo que la app calcula MENOS lo que dijo el extracto.
+
+    `None` si la cuenta nunca se ancló a un extracto (no hay con qué
+    comparar). `0` es lo normal. Cualquier otra cosa significa que algo movió
+    el saldo DESPUÉS de anclarlo y la app y el banco han dejado de coincidir.
+
+    Existe porque ese testigo llevaba desde PHASE-39 guardado en la BD y nadie
+    lo consultaba: un desvío de 700,26 € vivió semanas sin que nada avisara.
+    """
+    statement_seams: list[StatementSeamOut] = []
+    """PHASE-47.G — tramos de extracto que faltan (ver `find_statement_seams`)."""
     is_unvalued: bool = False
     """PHASE-31.4 — `True` para cuentas cuyo saldo NO entra al agregado
     de patrimonio neto porque su valoración real depende del mercado y

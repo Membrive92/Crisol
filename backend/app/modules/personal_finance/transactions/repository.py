@@ -139,10 +139,13 @@ async def list_transactions(
     El tercer elemento de la tupla es `is_debt_pair`: `True` cuando la
     tx forma parte de un par de conversión a deuda (activo↔pasivo), es
     decir cuando su cuenta O la cuenta de su pareja es una liability. La
-    UI usa esa señal para marcar la fila como "Deuda" (en vez de
-    "Transferencia") y pintar el importe en neutro — coherente con que
-    la pata-activo aporta 0 al patrimonio (fix activo-fantasma). Un par
-    de transferencia interna activo↔activo da `False`.
+    UI usa esa señal para marcar la fila como "Deuda" en vez de
+    "Transferencia". Un par de transferencia interna activo↔activo da
+    `False`.
+
+    Esa marca ya no dice nada sobre el saldo: desde PHASE-47.F la
+    pata-activo aporta su propio signo como cualquier otra línea del
+    extracto. Es una etiqueta de QUÉ es el movimiento, no de cuánto suma.
     """
     count_query = select(func.count()).select_from(Transaction)
     if debt_only:

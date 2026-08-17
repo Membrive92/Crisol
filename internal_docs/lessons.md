@@ -1713,6 +1713,92 @@ un caso de «campo ausente» se escribe **omitiendo la clave**, no poniéndola a
 una captura de pantalla del usuario, no la suite: las 186 pruebas en verde
 convivían con un asterisco en cada fila.
 
+### [PHASE-47.F] Dos correcciones para un mismo hecho dan el número bueno hasta el día que una de las dos se equivoca — y un dato con testigo externo no admite ninguna
+**Error:** el saldo de BBVA salía **700,26 € por debajo** del que imprimía el
+banco. La app aplicaba DOS correcciones al mismo hecho: anulaba el abono de la
+financiación en el saldo (un carve-out en `signed_amount_expr`) **y** borraba el
+cargo que lo compensaba (`find_mirror_charge`). Con las dos, el neto salía 0 —
+correcto. En julio la segunda se comió una línea que venía del extracto de la
+TARJETA importado por error en la cuenta del banco, así que la primera se quedó
+sin pareja y anuló un abono real.
+**Causa:** la justificación escrita del carve-out estaba **invertida**: decía que
+contar el dinero prestado dejaría un «activo fantasma» que inflaría el
+patrimonio. Al revés — caja +X contra deuda +X deja el patrimonio IGUAL; caja 0
+contra deuda +X lo deja en −X. La app apuntaba la deuda y escondía el dinero, y
+recibir un préstamo te empobrecía sobre el papel. El error sobrevivió cuatro
+fases porque la segunda corrección lo compensaba.
+**Lo que lo destapó:** ejecutar la función REAL contra la BD y compararla con
+`anchored_statement_balance`, el saldo que el propio banco imprimió y que
+PHASE-39 lleva guardando desde entonces. Nadie lo consultaba **después** de
+anclarlo. La entrada previa del backlog, escrita leyendo las filas en vez de
+ejecutando el cálculo, afirmaba la diferencia en la dirección CONTRARIA.
+**Solución:** una sola verdad — cada línea del extracto aporta su propio signo,
+sin carve-out y sin absorción. Cuando el espejo es real, borrar las dos líneas y
+dejarlas vivas dan **el mismo número**: lo único que añadía la mecánica era una
+forma de equivocarse. Más `scripts/audit_balances_vs_statement.py`, que compara
+cada saldo con su testigo y sale con código 1 si alguno diverge.
+**Regla:** si un número sale bien por dos correcciones que se compensan, no está
+bien: está empatado. Cuenta cuántas veces tocas el mismo hecho y déjalo en una.
+Y cuando un dato tenga un **testigo externo** —un saldo que imprime un banco, un
+total que declara un tercero— escribe el chequeo que los compara y hazlo fallar
+ruidosamente: guardar el testigo y no consultarlo es tener la prueba en el cajón.
+Corolario que casi cuesta caro: al retirar una corrección, comprueba qué OTRA
+cosa la estaba compensando — aquí, la dirección de la tx origen se reescribía a
+«entrada» fuera cual fuera, inofensivo sólo mientras el saldo la anulara después;
+sin la anulación, una compra de 500 € subiría el saldo 500 €.
+
+### [PHASE-47.G] Una prueba que se consulta la ÚLTIMA no protege de nada: la conjetura que acierta a decidir nunca llega a contrastarse
+**Error:** seis devoluciones (Amazon, Sanareva) entraron como GASTO entre abril
+y julio de 2026 — 238,87 € con el signo cambiado, o sea 477,74 € de desvío en el
+saldo, el doble de error que si se hubieran perdido. Las seis rompían la cadena
+`saldo ± importe` de su propio extracto, que estaba guardada en la misma fila
+desde PHASE-39.
+**Causa, en dos capas.** La primera: `_parse_amount_signed` sólo llama «entrada»
+a un importe con `+` explícito, y un `33,58 €` a secas devuelve «el extracto no
+declara dirección», así que decide la categoría — y para un Amazon dice
+«compras». Mirando UNA fila es correcto (hay extractos que son magnitudes
+puras); mirando el FICHERO no, porque ese mismo fichero escribe los cargos en
+negativo. **La convención de signos es una propiedad del lote, no de la línea.**
+La segunda, y es la que importa: la comprobación por saldo existía, pero sólo se
+aplicaba a las filas que se habían quedado SIN dirección. Una conjetura que
+acertaba a decidir —mal— jamás se contrastaba con la prueba.
+**Solución:** la cadena de saldos MANDA sobre la conjetura, no la rellena. Si el
+salto contradice la dirección asignada, gana el salto (y el preview lo dice).
+Sigue exigiendo que el salto sea exactamente el importe, y gobierna sólo la
+DIRECCIÓN — la transfer-ness la decide el texto, de la que el saldo no sabe nada.
+**Regla:** cuando tengas una señal que DEMUESTRA (una identidad aritmética, un
+testigo externo) y varias que DESCRIBEN (un texto, una categoría, una
+convención), la que demuestra va PRIMERO y las otras sólo cubren lo que ella no
+alcanza. Ponerla de último recurso la deja sin ejercitar justo en los casos en
+que las demás se equivocan con seguridad, que son los únicos que importan: una
+conjetura que falla en silencio se lee igual que un acierto. Corolario del
+método, aprendido en esta misma fase: al verificar rompiendo, una sonda que **no
+tumba nada** es información — aquí destapó que el `if` que yo creía guardarraíl
+era redundante y que el que protegía de verdad era otro, tres líneas más abajo.
+
+### [PHASE-47.G] Guardar un testigo y no consultarlo es tener la prueba en el cajón
+**Error:** `anchored_statement_balance` —el saldo que el propio banco imprimió—
+lleva persistido desde PHASE-39. Se escribía al importar y **no lo leía nadie
+más**. Con él en la BD, el saldo de BBVA estuvo 700,26 € por debajo del real
+durante semanas sin que ninguna pantalla, test o job lo dijera; lo destapó el
+usuario porque no se creyó un número.
+**Causa:** el dato se capturó para un fin concreto (anclar el `opening_balance`)
+y nadie volvió a preguntarse qué MÁS demuestra. Y el mecanismo del anclaje es
+justo el que lo esconde: al reanclar, cualquier error anterior se absorbe en el
+saldo inicial y la cuenta vuelve a «cuadrar» sola.
+**Solución:** `statement_gap` por cuenta en la API, el aviso en la pantalla de
+cuentas, `find_statement_seams` para los tramos que faltan (1.211,95 € entre el
+30-jun y el 5-jul en los datos reales) y `make audit-balances`. **Fuera de `make
+verify` a propósito**: audita datos, no código, y un gate que falla por algo
+ajeno al commit se acaba ignorando.
+**Regla:** por cada dato que persistas como testigo de una verdad externa,
+escribe también QUIÉN lo comprueba y CADA CUÁNTO. Si la respuesta es «nadie,
+sólo se escribe», no es un testigo: es una columna. Y desconfía de los
+mecanismos que restauran la coherencia recalculando un tapón (un
+`opening_balance`, un ajuste, un residuo): dejan el número de hoy correcto y
+borran la única señal de que algo iba mal.
+
+
 ---
 
 ## Ejemplos de referencia (no son lecciones reales)

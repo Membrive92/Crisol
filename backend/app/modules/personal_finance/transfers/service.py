@@ -53,7 +53,6 @@ from app.modules.personal_finance.transfers.repository import (
 from app.modules.personal_finance.transfers.repository import (
     count_registered_outflows,
     find_amortization_counterpart,
-    find_mirror_charge,
     get_or_create_default_transfer_category,
     list_liabilities_awaiting_origination,
     list_misclassified_transfers,
@@ -84,12 +83,7 @@ def _delta_days(tx_a: Transaction, tx_b: Transaction) -> int:
     return abs((tx_a.occurred_at - tx_b.occurred_at).days)
 
 
-def _pair_to_schema(
-    out_tx: Transaction,
-    in_tx: Transaction,
-    *,
-    absorbed_mirror_amount: Decimal | None = None,
-) -> TransferPairResponse:
+def _pair_to_schema(out_tx: Transaction, in_tx: Transaction) -> TransferPairResponse:
     return TransferPairResponse(
         out_transaction_id=out_tx.id,
         in_transaction_id=in_tx.id,
@@ -100,7 +94,6 @@ def _pair_to_schema(
         out_occurred_at=out_tx.occurred_at,
         in_occurred_at=in_tx.occurred_at,
         delta_days=_delta_days(out_tx, in_tx),
-        absorbed_mirror_amount=absorbed_mirror_amount,
     )
 
 
@@ -446,9 +439,11 @@ def classify_import_flow(
     tarjeta). Nunca se infiere la dirección de `category.kind` cuando hay
     signo de extracto.
     """
-    internal = is_internal_movement_row(
-        bank_sign=bank_sign, text=text, category_is_transfer=category_is_transfer
-    )
+    # La DIRECCIÓN se resuelve primero porque la transfer-ness depende de ella
+    # (una financiación es entrante o es una cuota, y eso cambia qué es). Al
+    # revés —que era como estaba— la regla de financiación entrante sólo podía
+    # dispararse con el signo del extracto, así que un fichero sin signos la
+    # dejaba fuera por construcción.
     if bank_sign > 0:
         income = True
     elif bank_sign < 0:
@@ -458,6 +453,9 @@ def classify_import_flow(
         if kind is None:
             return None
         income = kind == CategoryKind.INCOME
+    internal = is_internal_movement_row(
+        income=income, text=text, category_is_transfer=category_is_transfer
+    )
     return flow_for_direction(income=income, internal=internal)
 
 
@@ -468,16 +466,14 @@ def flow_for_direction(*, income: bool, internal: bool) -> TransactionFlow:
     return TransactionFlow.IN if income else TransactionFlow.OUT
 
 
-def is_internal_movement_row(
-    *, bank_sign: int, text: str | None, category_is_transfer: bool
-) -> bool:
+def is_internal_movement_row(*, income: bool, text: str | None, category_is_transfer: bool) -> bool:
     """La "transfer-ness" de una fila importada, en UN solo sitio.
 
-    Se separa de `classify_import_flow` porque hay dos momentos que necesitan
-    la misma respuesta: la clasificación inicial y la segunda pasada que deduce
-    la dirección del salto del saldo del extracto. Si cada una lo decidiera por
-    su cuenta, una fila podría entrar como `TRANSFER_IN` por un camino y como
-    `IN` por el otro.
+    Recibe la DIRECCIÓN ya resuelta, no el signo del extracto. Son cosas
+    distintas y confundirlas es lo que dejó pasar el ingreso falso de julio:
+    un extracto de tarjeta no trae signos, así que `bank_sign` valía 0 y la
+    regla de financiación entrante —condicionada al signo— no podía dispararse
+    ni cuando la dirección se conocía por otra vía.
     """
     # La "transfer-ness" por TEXTO se tempera con el override de ingreso
     # externo (W-01): una nómina/pensión por transferencia es ingreso real. El
@@ -504,12 +500,17 @@ def is_internal_movement_row(
     # "Recibo anterior jun-26 Otras financiaciones" se coló como ingreso del
     # mes —700,26 € que nadie cobró—.
     #
-    # La condición del signo NO es defensiva, es lo que hace correcta la regla:
-    # el mismo producto ("Otras financiaciones") vuelve a aparecer con signo
-    # contrario cuando se cobra la cuota, y ésa SÍ es gasto real de caja
-    # (PHASE-38, porque su compra no cuenta como gasto en ningún otro sitio).
-    # Sin el signo, apagar el ingreso falso apagaría el gasto verdadero.
-    text_says_financing_inflow = bank_sign > 0 and is_financing_inflow(text)
+    # La condición de dirección NO es defensiva, es lo que hace correcta la
+    # regla: el mismo producto ("Otras financiaciones") vuelve a aparecer en
+    # sentido contrario cuando se cobra la cuota, y ésa SÍ es gasto real de
+    # caja (PHASE-38, porque su compra no cuenta como gasto en ningún otro
+    # sitio). Sin ella, apagar el ingreso falso apagaría el gasto verdadero.
+    #
+    # Se condiciona a `income` y no al signo del extracto porque hay ficheros
+    # que no traen signo —el extracto de la tarjeta de BBVA, sin ir más lejos—
+    # y en ellos la dirección la resuelve el texto o la categoría. Con el signo
+    # crudo, esas filas entraban como ingreso del mes: 700,26 € que nadie cobró.
+    text_says_financing_inflow = income and is_financing_inflow(text)
     return (
         category_is_transfer or text_says_internal or text_says_financing_inflow
     ) and not is_card_financed_op(text)
@@ -764,6 +765,13 @@ async def convert_to_debt_operation(
     `mortgage`) → el saldo de la liability sube por el importe (debt
     contraída). Ambas quedan emparejadas → fuera del cashflow.
 
+    **La tx origen conserva su dirección** (PHASE-47.F). Antes se le
+    imponía `TRANSFER_IN` fuera cual fuera, lo que sólo era inocuo porque
+    el saldo la anulaba después; sin esa anulación, imponerla convertiría
+    un cargo en un abono y una compra subiría el saldo de la cuenta.
+    Emparejar cambia la transfer-ness (el movimiento deja de ser cashflow),
+    nunca el sentido en que se movió el dinero.
+
     Exactamente uno de `destination_account_id` o `new_liability` debe
     venir:
     - `destination_account_id`: usa una liability existente del usuario.
@@ -862,32 +870,28 @@ async def convert_to_debt_operation(
     db.add(counterpart)
     await db.flush()
 
-    # PHASE-34: la pata origen (dinero PRESTADO entrando en el activo) es
-    # TRANSFER_IN; el carve-out pata-activo del saldo la sigue dejando en 0.
-    source.flow = TransactionFlow.TRANSFER_IN
+    # PHASE-47.F — emparejar cambia la transfer-ness, no el sentido: la pata
+    # origen pasa a `TRANSFER_*` para salir del cashflow, pero conservando la
+    # dirección con la que entró. `is_inflow()`/`is_outflow()` tratan igual
+    # `IN`/`TRANSFER_IN`, así que convertir a deuda YA NO MUEVE el saldo del
+    # activo — y por tanto deja de caducar el ancla del extracto, que es lo que
+    # produjo el descuadre de 700,26 € de julio.
+    source.flow = (
+        TransactionFlow.TRANSFER_OUT
+        if source.flow in (TransactionFlow.OUT, TransactionFlow.TRANSFER_OUT)
+        else TransactionFlow.TRANSFER_IN
+    )
     await repo_link_pair(db, source, counterpart)
 
-    # PHASE-34 — Anular el "cargo espejo": cuando el banco financia una
-    # compra muestra el abono (esta tx, +X) y un cargo `ADEUDO/LIQUIDACIÓN
-    # DE TARJETA` del MISMO importe (−X) que lo compensa (neto 0). Si lo
-    # dejáramos suelto restaría del saldo sin contraparte. Lo movemos a la
-    # papelera (reversible) — el saldo queda en neto 0 + la deuda creada.
-    absorbed_mirror_amount: Decimal | None = None
-    mirror = await find_mirror_charge(db, user_id, source)
-    if mirror is not None:
-        mirror.deleted_at = datetime.now(UTC)
-        # AUDIT-2026-07 (H-04): marca el borrado como "absorbido por el
-        # sistema" (no papelera de usuario) para que reimportar el extracto
-        # no resucite este −X — `find_existing_hashes` lo tratará como
-        # existente.
-        mirror.absorbed_as_mirror = True
-        await db.flush()
-        absorbed_mirror_amount = mirror.amount
-
-    # Para el response, presentamos el par con el origen como "in"
-    # (entró dinero en BBVA) y la contraparte como "out" (deuda creada
-    # en la liability).
-    return _pair_to_schema(counterpart, source, absorbed_mirror_amount=absorbed_mirror_amount)
+    # Aquí se anulaba el "cargo espejo" (PHASE-34): el cargo del mismo importe
+    # que compensa al abono se mandaba a la papelera para que el neto quedara
+    # en 0. Retirado en PHASE-47.F — con el abono contando su propio signo, las
+    # dos líneas ya se cancelan solas y dan EXACTAMENTE el mismo número. Lo
+    # único que aportaba era una forma de equivocarse: en julio absorbió una
+    # línea que ni siquiera era de esta cuenta (venía del extracto de la
+    # tarjeta importado por error en el banco) y el abono se quedó anulado
+    # contra un cargo inexistente.
+    return _pair_to_schema(counterpart, source)
 
 
 # ─────────────────────────────────────────────────────────────────────

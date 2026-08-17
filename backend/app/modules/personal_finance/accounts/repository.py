@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import ColumnElement, case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
 
 from app.modules.personal_finance.accounts.models import Account, AccountNature
 from app.modules.personal_finance.categories.models import Category, CategoryKind
@@ -43,26 +43,34 @@ def _is_internal_transfer() -> ColumnElement[bool]:
     )
 
 
-def signed_amount_expr(account: Any, paired_account: Any) -> ColumnElement[Decimal]:
+def signed_amount_expr(account: Any) -> ColumnElement[Decimal]:
     """PHASE-37 — expresión de signo COMPARTIDA: cómo una tx afecta al saldo de
-    SU cuenta según `account.nature` + flow (incluye el carve-out H-02 de la
-    pata-activo de un par de deuda). Un ÚNICO lugar para que
+    SU cuenta según `account.nature` + flow. Un ÚNICO lugar para que
     `get_balances_for_user` y `position_history` (37.1) no diverjan — el
     invariante es que el último punto de la serie de patrimonio == los saldos
-    actuales. `account`/`paired_account` son la tabla o el alias de la cuenta y
-    su pareja de transferencia.
+    actuales. `account` es la tabla o el alias de la cuenta.
 
-    Convención (PHASE-19.4 + PHASE-22 + H-02):
-    - Pata-activo de conversión a deuda que ENTRA → 0 (dinero prestado, no ahorro).
+    Convención (PHASE-19.4 + PHASE-22):
     - LIABILITY: salida/cargo sube la deuda (+amount), entrada/pago la baja (-amount).
     - ASSET: entrada suma, salida resta.
     - Sin flujo ni categoría → 0 (PHASE-31.3).
+
+    **Aquí vivía un carve-out y por qué ya no (PHASE-47.F).** La pata-activo de
+    un par de deuda —el abono con el que el banco te presta el dinero— aportaba
+    0, con el argumento de que era un «activo fantasma» que inflaría el
+    patrimonio. El argumento estaba invertido: caja +X contra deuda +X deja el
+    patrimonio IGUAL, mientras que caja 0 contra deuda +X lo deja en −X. O sea
+    que la app apuntaba la deuda y escondía el dinero, y recibir un préstamo te
+    empobrecía sobre el papel.
+
+    El coste real fue peor que un patrimonio torcido: el abono de 700,26 € que
+    BBVA ingresó el 07-jul-2026 —con el saldo del propio extracto subiendo de
+    717,10 a 1.417,36— desaparecía del saldo de la cuenta, que quedaba 700,26 €
+    por debajo del banco. Un saldo de activo tiene un testigo externo
+    (`anchored_statement_balance`, PHASE-39) y ninguna línea que el banco
+    imprimió puede aportar 0 sin romperlo.
     """
-    asset_leg_of_debt_pair = (account.nature == AccountNature.ASSET) & (
-        paired_account.nature == AccountNature.LIABILITY
-    )
     return case(
-        (asset_leg_of_debt_pair & is_inflow(), Decimal("0")),
         ((account.nature == AccountNature.LIABILITY) & is_outflow(), Transaction.amount),
         ((account.nature == AccountNature.LIABILITY) & is_inflow(), -Transaction.amount),
         (is_outflow(), -Transaction.amount),
@@ -222,17 +230,11 @@ async def get_balances_for_user(db: AsyncSession, user_id: uuid.UUID) -> dict[uu
       NO se aplica aquí para no romper la cancelación de patas en el
       agregado (si lo hiciéramos, una transferencia interna a la cuenta
       principal encogería el patrimonio neto — bug HIGH#1).
-    - EXCEPCIÓN deuda (fix pata-activo fantasma): la pata-ACTIVO de un
-      par de conversión a deuda (activo↔pasivo, p.ej. una compra
-      financiada / aplazamiento de tarjeta) aporta 0. Ese ingreso es
-      dinero PRESTADO, no ahorro disponible: si contara, inflaría
-      `total_assets` mientras la pata-pasivo eleva `total_liabilities`,
-      dejando un "activo fantasma". A diferencia de activo↔activo (donde
-      las dos patas caen en total_assets con signo opuesto y se anulan),
-      un par activo↔pasivo NO se cancela dentro de un bucket. Se anula
-      SÓLO la pata cuya cuenta es ASSET y cuya pareja es LIABILITY; la
-      pata-pasivo se mantiene intacta (sigue elevando la deuda y el
-      principal de la liability).
+    - Un par activo↔pasivo (conversión a deuda) NO recibe trato especial
+      desde PHASE-47.F: el abono con el que el banco presta el dinero es
+      una línea del extracto y suma al activo, mientras la contrapartida
+      eleva el pasivo. El patrimonio no se mueve, que es justo lo que
+      significa recibir un préstamo. Ver `signed_amount_expr`.
 
     Sólo agrega txs cuya `currency` coincide con la `currency` de la
     cuenta. Multi-divisa dentro de una cuenta queda fuera.
@@ -240,16 +242,14 @@ async def get_balances_for_user(db: AsyncSession, user_id: uuid.UUID) -> dict[uu
     El saldo final del frontend es:
         opening_balance + balances[account_id]
     """
-    # Pareja (self-join) para detectar la pata-activo de un par de deuda.
-    # `paired_account.nature == LIABILITY` con esta cuenta ASSET = dinero
-    # prestado entrando en un activo → no es patrimonio (ver docstring).
-    paired_tx = aliased(Transaction)
-    paired_account = aliased(Account)
-
     # PHASE-34: la dirección la manda `flow`; `account.nature` decide el signo.
     # PHASE-37: la expresión vive en `signed_amount_expr` (compartida con
     # position_history) para no divergir.
-    signed_amount = signed_amount_expr(Account, paired_account)
+    #
+    # El `outerjoin(Category)` NO es opcional: `is_inflow`/`is_outflow` caen a
+    # `Category.kind` cuando `flow` es NULL (filas heredadas) y sin el join
+    # SQLAlchemy mete `categories` en el FROM como producto cartesiano.
+    signed_amount = signed_amount_expr(Account)
     query = (
         select(
             Transaction.account_id,
@@ -258,8 +258,6 @@ async def get_balances_for_user(db: AsyncSession, user_id: uuid.UUID) -> dict[uu
         .select_from(Transaction)
         .join(Account, Account.id == Transaction.account_id)
         .outerjoin(Category, Category.id == Transaction.category_id)
-        .outerjoin(paired_tx, paired_tx.id == Transaction.transfer_pair_id)
-        .outerjoin(paired_account, paired_account.id == paired_tx.account_id)
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
         .where(Transaction.currency == Account.currency)
@@ -282,28 +280,16 @@ async def get_net_savings_movement_for_account(
     siguen usando el saldo cash de `get_balances_for_user` para que las
     dos patas de una transferencia interna se cancelen (HIGH#1).
 
-    La pata-activo de un par de conversión a deuda también aporta 0 aquí
-    (vía la misma señal pareja-LIABILITY que usa `get_balances_for_user`),
-    no sólo vía `is_transfer`: así el saldo MOSTRADO de la principal y el
-    AGREGADO excluyen el activo fantasma de forma idéntica aunque la tx
-    origen no hubiera quedado marcada como transferencia.
+    Aquí había una COPIA del carve-out de la pata-activo, retirada en
+    PHASE-47.F con él. Era además redundante: las dos patas de un par de
+    deuda son `TRANSFER_*`, así que la rama de transferencia interna de
+    arriba ya las deja en 0 sin necesidad de mirar la naturaleza de la
+    pareja.
     """
-    paired_tx = aliased(Transaction)
-    paired_account = aliased(Account)
     # PHASE-34: transferencias internas (flow TRANSFER_*; fallback is_transfer)
     # aportan 0 — mover dinero entre cuentas propias no es ahorrar ni gastar.
     signed_amount = case(
         (_is_internal_transfer(), Decimal("0")),
-        # Pata-activo de una conversión a deuda (activo↔pasivo): SÓLO la
-        # entrada de dinero prestado aporta 0 (consistente con
-        # get_balances_for_user, AUDIT-2026-07 H-02). Una salida de activo
-        # que amortiza deuda cae a la rama `is_outflow` → -amount.
-        (
-            (Account.nature == AccountNature.ASSET)
-            & (paired_account.nature == AccountNature.LIABILITY)
-            & is_inflow(),
-            Decimal("0"),
-        ),
         ((Account.nature == AccountNature.LIABILITY) & is_outflow(), Transaction.amount),
         ((Account.nature == AccountNature.LIABILITY) & is_inflow(), -Transaction.amount),
         (is_outflow(), -Transaction.amount),
@@ -315,8 +301,6 @@ async def get_net_savings_movement_for_account(
         .select_from(Transaction)
         .join(Account, Account.id == Transaction.account_id)
         .outerjoin(Category, Category.id == Transaction.category_id)
-        .outerjoin(paired_tx, paired_tx.id == Transaction.transfer_pair_id)
-        .outerjoin(paired_account, paired_account.id == paired_tx.account_id)
         .where(Transaction.user_id == user_id)
         .where(Transaction.account_id == account_id)
         .where(Transaction.deleted_at.is_(None))
@@ -325,27 +309,115 @@ async def get_net_savings_movement_for_account(
     return Decimal((await db.execute(query)).scalar_one())
 
 
+@dataclass(frozen=True, slots=True)
+class StatementSeam:
+    """Un tramo del extracto que la app no tiene (PHASE-47.G)."""
+
+    after: datetime
+    """Fecha del último movimiento conocido antes del hueco."""
+    before: datetime
+    """Fecha del primer movimiento conocido después."""
+    amount: Decimal
+    """Cuánto se movió el saldo ahí dentro, con signo. Negativo = salió dinero."""
+
+
+async def find_statement_seams(
+    db: AsyncSession, user_id: uuid.UUID
+) -> dict[uuid.UUID, list[StatementSeam]]:
+    """Dónde le falta extracto a cada cuenta, por cuenta.
+
+    **Cómo se sabe.** Cada fila importada de un extracto con columna Saldo
+    guarda el saldo que el banco imprimió DESPUÉS de ella (PHASE-39). Así que
+    toda fila tiene un saldo anterior implícito: `saldo − movimiento`. Si ese
+    valor no aparece en ninguna otra fila de la cuenta, entre medias hay
+    movimientos que la app no tiene.
+
+    La fila MÁS ANTIGUA de cada cuenta rompe la cadena por definición —no hay
+    nada antes— y no cuenta como hueco. Las demás sí: son la costura entre dos
+    extractos que no se tocan.
+
+    **Por qué hace falta decirlo.** Un hueco no da ningún error: al anclar el
+    saldo (PHASE-39), la diferencia se absorbe en `opening_balance` y la cuenta
+    sigue cuadrando con el banco a día de hoy. Lo único que se rompe, en
+    silencio, es la historia. En los datos del usuario había 1.211,95 € entre
+    el 30-jun y el 5-jul de 2026 que no estaban en ningún extracto importado, y
+    la app no tenía forma de decirlo.
+    """
+    rows = (
+        (
+            await db.execute(
+                select(
+                    Transaction.account_id,
+                    Transaction.occurred_at,
+                    Transaction.amount,
+                    Transaction.flow,
+                    Transaction.statement_balance,
+                    Category.kind,
+                )
+                .outerjoin(Category, Category.id == Transaction.category_id)
+                .where(Transaction.user_id == user_id)
+                .where(Transaction.deleted_at.is_(None))
+                .where(Transaction.statement_balance.is_not(None))
+                .order_by(Transaction.account_id, Transaction.occurred_at)
+            )
+        )
+        .tuples()
+        .all()
+    )
+
+    by_account: dict[uuid.UUID, list[tuple[datetime, Decimal, Decimal]]] = {}
+    for account_id, occurred_at, amount, flow, balance, kind in rows:
+        if balance is None:  # el WHERE ya lo filtra; el tipo no lo sabe
+            continue
+        outflow = flow in (TransactionFlow.OUT, TransactionFlow.TRANSFER_OUT) or (
+            flow is None and kind == CategoryKind.EXPENSE
+        )
+        signed = -amount if outflow else amount
+        by_account.setdefault(account_id, []).append((occurred_at, signed, balance))
+
+    seams: dict[uuid.UUID, list[StatementSeam]] = {}
+    for account_id, entries in by_account.items():
+        balances = {balance for _when, _signed, balance in entries}
+        for index, (when, signed, balance) in enumerate(entries):
+            previous_balance = balance - signed
+            if previous_balance in balances:
+                continue
+            # El último saldo conocido ANTES de esta fila. Sirve para dos cosas
+            # y las dos importan: da el importe exacto del hueco, y exime a la
+            # fila más antigua de cada cuenta —que rompe la cadena por
+            # definición, porque no hay nada antes—. Sin esa exención, toda
+            # cuenta avisaria de un hueco inexistente al importar su primer
+            # extracto, y un aviso que sale siempre se deja de leer.
+            earlier = [e for e in entries[:index] if e[0] < when]
+            if not earlier:
+                continue
+            last_when, _last_signed, last_balance = earlier[-1]
+            seams.setdefault(account_id, []).append(
+                StatementSeam(
+                    after=last_when,
+                    before=when,
+                    amount=(previous_balance - last_balance).quantize(Decimal("0.01")),
+                )
+            )
+    return seams
+
+
 async def get_account_movement_until(
     db: AsyncSession, user_id: uuid.UUID, account_id: uuid.UUID, *, until: datetime
 ) -> Decimal:
     """PHASE-39 — Σ firmado de UNA cuenta con `occurred_at <= until`.
 
     MISMA expresión de signo que `get_balances_for_user`
-    (`signed_amount_expr`, incluido el carve-out H-02 de la pata-activo de
-    un par de deuda) para que el anclaje sea coherente con el saldo
+    (`signed_amount_expr`) para que el anclaje sea coherente con el saldo
     mostrado: `opening = saldo_extracto(D) − Σmov(≤D)` garantiza que el
     saldo de la app a fecha D coincide EXACTAMENTE con el del banco.
     """
-    paired_tx = aliased(Transaction)
-    paired_account = aliased(Account)
-    signed_amount = signed_amount_expr(Account, paired_account)
+    signed_amount = signed_amount_expr(Account)
     query = (
         select(func.coalesce(func.sum(signed_amount), 0))
         .select_from(Transaction)
         .join(Account, Account.id == Transaction.account_id)
         .outerjoin(Category, Category.id == Transaction.category_id)
-        .outerjoin(paired_tx, paired_tx.id == Transaction.transfer_pair_id)
-        .outerjoin(paired_account, paired_account.id == paired_tx.account_id)
         .where(Transaction.user_id == user_id)
         .where(Transaction.account_id == account_id)
         .where(Transaction.deleted_at.is_(None))

@@ -29,7 +29,6 @@ from decimal import Decimal
 
 from sqlalchemy import Row, Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
 
 from app.modules.personal_finance.accounts.models import (
     UNVALUED_ACCOUNT_TYPES,
@@ -257,14 +256,11 @@ async def compute_position_as_of(
         a.id for a in included if a.nature == AccountNature.ASSET or a.id in nonsched_liab_ids
     ]
 
-    paired_tx = aliased(Transaction)
-    paired_account = aliased(Account)
-
     def _base() -> Select[tuple[AccountNature, Decimal]]:
         return (
             select(
                 Account.nature,
-                func.coalesce(func.sum(signed_amount_expr(Account, paired_account)), 0),
+                func.coalesce(func.sum(signed_amount_expr(Account)), 0),
             )
             .select_from(Transaction)
             .join(Account, Account.id == Transaction.account_id)
@@ -272,8 +268,6 @@ async def compute_position_as_of(
             # el join es obligatorio o SA mete `categories` como producto
             # cartesiano e infla la suma (misma unión que la serie histórica).
             .outerjoin(Category, Category.id == Transaction.category_id)
-            .outerjoin(paired_tx, paired_tx.id == Transaction.transfer_pair_id)
-            .outerjoin(paired_account, paired_account.id == paired_tx.account_id)
             .where(Transaction.user_id == user_id)
             .where(Transaction.deleted_at.is_(None))
             .where(Transaction.account_id.in_(tx_ids))
@@ -372,19 +366,15 @@ async def _historical_points(
     asset_by_month: dict[str, Decimal] = {}
     nonsched_liab_by_month: dict[str, Decimal] = {}
     if tx_ids:
-        paired_tx = aliased(Transaction)
-        paired_account = aliased(Account)
         query = (
             select(
                 Account.nature,
                 month_bucket.label("bucket"),
-                func.coalesce(func.sum(signed_amount_expr(Account, paired_account)), 0),
+                func.coalesce(func.sum(signed_amount_expr(Account)), 0),
             )
             .select_from(Transaction)
             .join(Account, Account.id == Transaction.account_id)
             .outerjoin(Category, Category.id == Transaction.category_id)
-            .outerjoin(paired_tx, paired_tx.id == Transaction.transfer_pair_id)
-            .outerjoin(paired_account, paired_account.id == paired_tx.account_id)
             .where(Transaction.user_id == user_id)
             .where(Transaction.deleted_at.is_(None))
             .where(Transaction.account_id.in_(tx_ids))

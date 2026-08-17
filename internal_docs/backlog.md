@@ -597,39 +597,63 @@ sigue viva. Si eran dos viajes distintos, restaurarla deja el ciclo de junio a
 1,11 € de cerrar. Requiere que el usuario mire su extracto: es una pregunta
 sobre su vida, no sobre sus datos.
 
-## El saldo de BBVA está +700,26 € por un espejo absorbido de más (PHASE-47.E)
+## El saldo de BBVA está −700,26 € porque un abono real se anula contra un cargo que no existía (PHASE-47.E)
 
-**Comprobado el 2026-08-17 sobre la BD real.** En BBVA hay tres filas de
-700,26 € y sólo una viva:
+> **Código arreglado en [PHASE-47.F](phases/phase-47.F-borrowed-money-is-money.md);
+> queda el arreglo de DATOS**, que no es opcional: sin él el saldo se va a
+> 3.057,95 € (hay cuatro pares de deuda, no uno). El detalle está en la phase
+> doc. Se conserva esta entrada porque documenta cómo se diagnosticó.
 
-| Fecha | Concepto | Estado |
-|---|---|---|
-| 04-jul | `Recibo mes anterior` (CARGO) | borrada, `absorbed_as_mirror` |
-| 04-jul | `Recibo anterior jun-26` (ABONO) | borrada |
-| 07-jul | `Operación financiada` (ABONO) | **viva**, `TRANSFER_IN` |
+**Reverificado el 2026-08-17 ejecutando `get_balances_for_user` —la función
+real— contra la BD del usuario.** La primera redacción de esta entrada decía
+«+700,26 € por encima del real» y **estaba al revés**; salía de leer las filas
+sin ejecutar el cálculo. Lo que hay:
 
-En el extracto esas dos líneas del día 4 se anulan: el banco abona 700,26 € y
-cobra el recibo el mismo día, neto cero en la cuenta. La app se quedó con el
-abono y borró el cargo, así que **el saldo de BBVA queda 700,26 € por encima
-del real**.
+| Cuenta | app | extracto (`anchored_statement_balance`) | diferencia |
+|---|---|---|---|
+| BBVA | 1.077,93 | 1.778,19 | **−700,26** |
 
-El mismo abono está además en la TARJETA (04-jul, `TRANSFER_IN`), donde sí
-corresponde: es lo que salda su deuda de junio.
+Las demás cuentas de activo cuadran al céntimo.
 
-**Causa a investigar**: la absorción del cargo espejo al convertir el abono en
-deuda (`convert_to_debt_operation` / `find_mirror_charge`). Absorbe el cargo que
-compensa al abono, lo cual es correcto cuando los dos son la misma pata. Aquí no
-lo eran: el cargo pagaba la tarjeta y el abono creaba la deuda. Son dos hechos,
-no uno.
+**El dinero entró de verdad.** La fila `Operación financiada 4940…` del 07-jul
+lleva `statement_balance = 1.417,36` y la anterior del extracto tenía 717,10:
+el banco abonó 700,26 € y **su propio saldo subió**. No es un apunte neutro.
 
-**Cuidado al arreglarlo**: toca la absorción, que gobierna todos los pares de
-deuda. Hace falta un golden de saldos antes/después y comprobar que reimportar
-el extracto no resucita el cargo (`find_existing_hashes` cuenta los absorbidos
-como existentes precisamente para eso).
+**Por qué la app lo esconde.** Esa fila es la pata-activo de un par de deuda, y
+`signed_amount_expr` ([accounts/repository.py:65](../backend/app/modules/personal_finance/accounts/repository.py#L65))
+la fija en 0: *«dinero prestado, no ahorro»*. El carve-out asume que el abono
+viene compensado por un cargo del mismo importe en la misma cuenta —el «cargo
+espejo», que `convert_to_debt_operation` borra— y entonces el neto es 0. Aquí
+el cargo que absorbió (`Recibo mes anterior`, 04-jul) **no tiene
+`statement_balance`**: venía del extracto de la TARJETA importado por error en
+la cuenta del banco. Se anuló un abono real contra un cargo que en esa cuenta
+nunca existió.
 
-## El abono de financiación entra como INGRESO desde el extracto de la tarjeta (PHASE-47.E)
+Generalizando: el carve-out es correcto cuando el dinero prestado NO aterriza
+(par neto cero) y falso cuando sí aterriza — caja +X y deuda +X dejan el
+patrimonio neto igual, que es justo lo que el docstring quiere proteger.
 
-`classify_import_flow` exige `bank_sign > 0` para reconocer una financiación
+**Lo que hay debajo, y es más feo.** Cinco filas con `absorbed_as_mirror`
+suman 2.196,01 € frente a 1.980,02 € de patas-activo vivas. Entre ellas **dos
+filas idénticas de 215,99 €** (el mismo abono absorbió dos cargos) y una compra
+normal, `Taxdown Ocio`, que no se parece a una liquidación. El desfase de los
+espejos viejos está enterrado en `opening_balance`: el anclaje de PHASE-39 lo
+reabsorbe en cada importación, así que sólo asoma el error posterior al último
+anclaje.
+
+**Cuidado al arreglarlo**: toca `signed_amount_expr`, que gobierna saldos,
+patrimonio neto y la serie histórica. Hace falta un golden de saldos
+antes/después y comprobar que reimportar el extracto no resucita el cargo
+(`find_existing_hashes` cuenta los absorbidos como existentes precisamente
+para eso).
+
+## ~~El abono de financiación entra como INGRESO desde el extracto de la tarjeta~~ (PHASE-47.E → resuelto en 47.F)
+
+> **Resuelto**: la regla mira ahora la DIRECCIÓN ya resuelta, no el signo crudo
+> del fichero. Test verificado rompiendo la línea. Queda por lo que sigue el
+> registro de cómo se diagnosticó.
+
+`classify_import_flow` exigía `bank_sign > 0` para reconocer una financiación
 entrante (`transfers/service.py`, ~línea 512). El extracto de la tarjeta **no
 trae signos**, así que `bank_sign` es 0, la regla no dispara y la fila entra
 como `IN` — ingreso que nadie cobró. En julio de 2026 eran 700,26 €: la app

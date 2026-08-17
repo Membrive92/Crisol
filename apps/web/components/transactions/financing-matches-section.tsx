@@ -120,17 +120,12 @@ function FinancingMatchRow({ item }: { item: FinancingMatch }) {
         destination_account_id: item.liability_id,
       },
       {
-        onSuccess: (pair) => {
+        onSuccess: () => {
           setDone(true);
-          // El "cargo espejo" es el cobro que el banco compensa con este abono.
-          // Si se absorbió hay que decirlo: desaparece de la lista, y una fila
-          // que se esfuma sin explicación se lee como un borrado accidental.
-          const absorbed = pair.absorbed_mirror_amount;
-          toast.success(
-            absorbed
-              ? `Enlazado con «${item.liability_name}». También se retiró el cargo espejo de ${formatAmount(absorbed, item.currency)}, que lo compensaba.`
-              : `Enlazado con «${item.liability_name}»: ya no cuenta como ingreso.`,
-          );
+          // Ya no se retira ningún "cargo espejo" (PHASE-47.F): el cobro que
+          // compensa a este abono se queda vivo y las dos líneas se cancelan
+          // solas en el saldo, que es lo que hace el extracto.
+          toast.success(`Enlazado con «${item.liability_name}»: ya no cuenta como ingreso.`);
         },
         onError: (err) =>
           toast.error(formatApiError(err, 'No se pudo enlazar con la deuda')),

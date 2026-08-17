@@ -72,19 +72,19 @@ describe('FinancingMatchesSection', () => {
     );
   });
 
-  it('dice que se retiró el cargo espejo cuando el servidor lo absorbe', () => {
-    // Una fila que desaparece del extracto sin explicación se lee como un
-    // borrado accidental. El espejo es el cobro que este abono compensa.
+  it('no promete que se haya retirado ninguna otra fila', () => {
+    // PHASE-47.F: enlazar ya no borra el cargo que compensa al abono — las dos
+    // líneas se quedan y se cancelan solas en el saldo. Prometer un borrado que
+    // no ocurre manda al usuario a buscarlo a la papelera.
     matches = [makeMatch()];
     convertMutate.mockImplementation(
       (_payload: unknown, opts?: { onSuccess?: (p: TransferPair) => void }) => {
-        opts?.onSuccess?.({ absorbed_mirror_amount: '700.26' } as TransferPair);
+        opts?.onSuccess?.({} as TransferPair);
       },
     );
     render(<FinancingMatchesSection />);
     fireEvent.click(screen.getByRole('button', { name: /Es una financiación/i }));
-    expect(toastSuccess).toHaveBeenCalledWith(
-      expect.stringContaining('cargo espejo'),
-    );
+    expect(toastSuccess).toHaveBeenCalledWith(expect.stringContaining('ya no cuenta como ingreso'));
+    expect(toastSuccess).not.toHaveBeenCalledWith(expect.stringContaining('espejo'));
   });
 });

@@ -7,30 +7,42 @@ lo que hay que decidir está al final.
 
 ## Lo primero al retomar
 
-**Dos saldos que mienten, los dos comprobados contra la BD real el 17-ago.**
-Están en [`backlog.md`](backlog.md) con su diagnóstico completo; aquí el
-titular:
+**BBVA cuadra al céntimo con el banco** (1.778,19 €), y ahora la app lo comprueba
+sola. Lo que queda es prueba manual y una decisión sobre datos viejos.
 
-1. **El saldo de BBVA está +700,26 € por encima del real.** Al convertir el
-   abono de financiación en deuda, el sistema absorbió el cargo que lo
-   compensaba — correcto cuando abono y cargo son la misma pata, y aquí no lo
-   eran: el cargo pagaba la tarjeta, el abono creaba la deuda. Toca la
-   absorción del espejo, que gobierna todos los pares de deuda: hace falta un
-   golden de saldos antes/después.
-2. **Un abono de financiación entra como INGRESO** cuando viene del extracto de
-   la tarjeta, porque la regla exige signo y ese fichero no lo trae. Los datos
-   del usuario están corregidos a mano; el clasificador no.
+Dos fases cerradas hoy, las dos **sin commitear**:
 
-**Y una pregunta abierta del usuario**, que es la que destapó todo: dice haber
-ahorrado ~1.000 € y la app le da −522,27 € en julio. Parte se explica —dedicó
-1.099,64 € a cancelar deudas anticipadamente, que es caja fuera pero no
-empobrecerse— y parte es el saldo inflado del punto 1. Merece cerrarse entero
-antes de dar julio por bueno.
+- [PHASE-47.F](phases/phase-47.F-borrowed-money-is-money.md) — el dinero prestado
+  es dinero. Se retiran el carve-out de la pata-activo y la absorción del cargo
+  espejo: eran **dos correcciones del mismo hecho** que daban el número bueno
+  hasta que una falló.
+- [PHASE-47.G](phases/phase-47.G-the-statement-is-the-authority.md) — el extracto
+  manda sobre la conjetura, y la app desconfía sola. Seis devoluciones entraban
+  como gasto (238,87 €, o sea 477,74 € de desvío); corregidas con la aritmética
+  del banco fila a fila.
 
-Lo demás de la sesión del 15-17 de agosto quedó cerrado y verde: PHASE-47.E
-completa (el modelo del recibo aplazado, el panel, la sección de deuda pagada),
-backend **1429 tests** y frontend **329**, diez commits en `main` **sin
-empujar**.
+### Lo que falta
+
+1. **Prueba manual.** El backend corre en 8002 (relanzado dos veces hoy: el
+   reloader no recarga, hay que matarlo y arrancarlo). Mira la pantalla de
+   cuentas: BBVA debe avisar del hueco de extracto.
+2. **Importa el extracto de BBVA del 1 al 5 de julio.** Es el único hueco que
+   queda y lo dice la propia app: **1.211,95 €** que el banco movió y no
+   tenemos. Ahí dentro está, con toda probabilidad, el cargo del recibo de la
+   tarjeta de junio (990,02 €) — el ciclo que no cerraba en 47.E.
+3. **Cuatro filas absorbidas siguen muertas a propósito** (`Taxdown` de marzo,
+   dos `Western union` de mayo, `Recibo mes anterior` de julio). No constan como
+   líneas de BBVA: vienen del extracto de la **tarjeta** importado en la cuenta
+   del banco, y eso lleva pasando **desde marzo**. Decidirlas requiere mirar los
+   extractos. Igual que la operación financiada de 239 € del 24-mar, viva en
+   BBVA y que tampoco es suya.
+4. **Orden obligatorio si tocas datos**: arreglar → re-anclar → y sólo entonces
+   reimportar. Al revés no: `re_anchor_from_stored` corre en cada commit de
+   import y absorbería la diferencia en silencio.
+
+Nota comprobada sobre tu pregunta del ahorro: en Trade Republic la app no tiene
+**ni un movimiento** —sus 4.000 € son el saldo inicial tecleado— y no hay **nada
+de agosto** importado. La app se queda el 30 de julio.
 
 ---
 

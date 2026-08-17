@@ -33,11 +33,6 @@ class TransferPairResponse(BaseModel):
     out_occurred_at: datetime
     in_occurred_at: datetime
     delta_days: int
-    # PHASE-34: importe del "cargo espejo" anulado al registrar la operación
-    # financiada (el ADEUDO del mismo importe que en el banco la compensa,
-    # neto 0). `None` si no se encontró espejo. La UI lo usa para avisar en
-    # el toast que ese cargo se ha movido a la papelera.
-    absorbed_mirror_amount: Decimal | None = None
 
 
 class MisclassifiedTransfer(BaseModel):

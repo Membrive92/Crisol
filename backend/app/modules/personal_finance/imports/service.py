@@ -19,6 +19,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from typing import NamedTuple
 
 from fastapi import HTTPException, status
 from sqlalchemy import select, update
@@ -538,6 +539,41 @@ async def run_commit(
     return job
 
 
+def _file_declares_signs(rows: list[dict[str, str]], mappings: ImportColumnMappings) -> bool:
+    """PHASE-47.G — ¿este fichero expresa la dirección con el SIGNO del importe?
+
+    `_parse_amount_signed` sólo llama «entrada» a un importe con `+` explícito,
+    y un `33,58 €` a secas lo deja en «no declara dirección». Es lo correcto
+    mirando UNA fila: hay extractos que son magnitudes puras y ahí la dirección
+    la da el texto o la categoría.
+
+    Pero mirando el FICHERO entero deja de ser cierto. Si alguna línea trae un
+    cargo en negativo, ese banco expresa la dirección por el signo — y entonces
+    un positivo desnudo no es un hueco, es un abono. Sin esta pregunta, las
+    DEVOLUCIONES (un reembolso de Amazon, la anulación de un cobro) caían al
+    kind de su categoría, que dice «compras», y entraban como gasto: el importe
+    contado con el signo cambiado, o sea el doble de error que perderlo.
+
+    Medido sobre los extractos reales del usuario: seis devoluciones entre abril
+    y julio de 2026, 238,87 € que sumaban 477,74 € de desvío en el saldo. Las
+    seis rompían la cadena `saldo ± importe` del propio extracto, que es la
+    prueba independiente de que el signo estaba mal.
+    """
+    if not mappings.amount:
+        return False
+    for raw in rows:
+        amount_raw = raw.get(mappings.amount, "")
+        if not amount_raw:
+            continue
+        try:
+            _amount, bank_sign = _parse_amount_signed(amount_raw)
+        except (ArithmeticError, ValueError, _RowError):
+            continue
+        if bank_sign < 0:
+            return True
+    return False
+
+
 def _direction_ambiguous_concepts(
     rows: list[dict[str, str]], mappings: ImportColumnMappings
 ) -> set[str]:
@@ -715,35 +751,54 @@ def _rows_oldest_first(rows: list[ParsedRow]) -> list[ParsedRow]:
     return list(reversed(with_balance)) if newest_first else with_balance
 
 
-def resolve_flows_from_balance_chain(rows: list[ParsedRow]) -> int:
-    """PHASE-46 — deduce la dirección de las filas SIN clasificar a partir del
-    salto del saldo del extracto. Devuelve cuántas se resolvieron.
+class ChainOutcome(NamedTuple):
+    """Qué hizo la cadena de saldos: huecos rellenados y direcciones corregidas."""
 
-    **Por qué existe.** Muchos extractos traen el importe sin signo, así que la
-    dirección se deduce del texto y, si falla, del kind de la categoría. Una
-    fila que no dice ni "abono" ni "recibido" y que no resuelve categoría se
-    queda sin clasificar — neutra, que es lo honesto pero no lo cierto. Medido
-    en un extracto real: `Operación financiada 4940…` por 700,26 € entró así,
-    y era un ABONO; la prueba estaba en la propia fila, en la columna Saldo que
-    PHASE-39 ya captura y que nadie consultaba.
+    resolved: int
+    corrected: int
+
+
+def resolve_flows_from_balance_chain(rows: list[ParsedRow]) -> ChainOutcome:
+    """La dirección la manda el SALDO del extracto, no la conjetura.
+
+    **Por qué existe.** La dirección se venía deduciendo del signo del importe,
+    y si no del texto, y si no del kind de la categoría. Son tres señales que
+    DESCRIBEN el movimiento; ninguna lo demuestra, y las tres han fallado ya
+    (PHASE-28, 32, 34, 37, 38, 46, 47.F, 47.G — la misma familia nueve veces).
+    El salto del saldo sí lo demuestra: `saldo_anterior ± importe = saldo` es
+    aritmética, no interpretación, y le da igual cómo redacte el banco.
+
+    **PHASE-47.G — y por eso manda, en vez de rellenar huecos.** Hasta aquí
+    esto sólo tocaba las filas que se habían quedado SIN dirección. Una
+    conjetura que acertaba a decidir —mal— nunca llegaba a contrastarse: seis
+    devoluciones de abril a julio de 2026 entraron como gasto, 238,87 € con el
+    signo cambiado, y las seis rompían la cadena de su propio extracto. Ahora,
+    cuando el extracto contradice a la conjetura, gana el extracto.
 
     **Por qué es seguro.** Se exige que el salto entre dos saldos consecutivos
     sea EXACTAMENTE el importe de la fila. Si entre ambas hubiera otro
     movimiento sin saldo, el salto no cuadraría y no se toca nada: mejor una
-    fila neutra que una dirección inventada. Y la fila resuelta vuelve a pasar
-    por `classify_import_flow` con el signo deducido, así que su transfer-ness
-    se decide con la misma regla que el resto — no con una copia.
+    fila neutra —o incluso una conjetura— que una dirección inventada a partir
+    de un salto que no cuadra. Y la fila vuelve a pasar por
+    `classify_import_flow` con el signo deducido, así que su transfer-ness se
+    decide con la misma regla que el resto y no con una copia.
+
+    Sólo gobierna la DIRECCIÓN. Si la cadena confirma el sentido que ya tenía,
+    no se toca nada aunque la transfer-ness difiera: eso lo decide el texto, y
+    el saldo no sabe nada de eso.
     """
     ordered = _rows_oldest_first(rows)
     resolved = 0
+    corrected = 0
     for previous, current in itertools.pairwise(ordered):
-        if current.flow is not None:
-            continue
         assert previous.statement_balance is not None  # `_rows_oldest_first` filtra
         assert current.statement_balance is not None
         delta = current.statement_balance - previous.statement_balance
         if abs(delta) != current.amount or delta == 0:
             continue
+        already = _bank_signed_amount(current)
+        if already is not None and (already > 0) == (delta > 0):
+            continue  # el extracto confirma lo que la fila ya decía
         flow = classify_import_flow(
             bank_sign=1 if delta > 0 else -1,
             text=current.classify_text,
@@ -751,9 +806,12 @@ def resolve_flows_from_balance_chain(rows: list[ParsedRow]) -> int:
         )
         if flow is None:
             continue
+        if already is None:
+            resolved += 1
+        else:
+            corrected += 1
         current.flow = flow
-        resolved += 1
-    return resolved
+    return ChainOutcome(resolved=resolved, corrected=corrected)
 
 
 def _pick_balance_anchor(rows: list[ParsedRow]) -> tuple[datetime, Decimal] | None:
@@ -857,6 +915,9 @@ async def _process_and_persist(
     # usuario en lugar de guardar un signo erróneo en silencio.
     review: list[dict[str, object]] = []
 
+    # Se pregunta UNA vez por lote: la convención de signos es del fichero.
+    declares_signs = _file_declares_signs(rows, effective_mappings)
+
     for idx, raw in enumerate(rows, start=1):
         try:
             parsed_row, review_note = _parse_row(
@@ -872,6 +933,7 @@ async def _process_and_persist(
                 transfer_by_kind=transfer_by_kind,
                 category_kinds=category_kinds,
                 sibling_by_name_kind=sibling_by_name_kind,
+                file_declares_signs=declares_signs,
             )
         except _RowError as e:
             failed_count += 1
@@ -882,21 +944,34 @@ async def _process_and_persist(
             review.append({"row": idx, "error": review_note, "review": True})
         parsed.append(parsed_row)
 
-    # PHASE-46: segunda pasada sobre las filas que quedaron sin dirección. Va
-    # aquí y no dentro del bucle porque el salto de saldo es una relación ENTRE
-    # filas consecutivas: mirando una sola no se puede saber. Sólo actúa cuando
-    # el extracto trae la columna Saldo y el salto cuadra exactamente con el
-    # importe de la fila.
-    resolved_by_balance = resolve_flows_from_balance_chain(parsed)
-    if resolved_by_balance and len(review) < MAX_ERROR_LOG:
-        plural = "movimiento" if resolved_by_balance == 1 else "movimientos"
+    # PHASE-46/47.G: segunda pasada con la columna Saldo, que es la ÚNICA
+    # prueba aritmética de la dirección. Va aquí y no dentro del bucle porque el
+    # salto de saldo es una relación ENTRE filas consecutivas: mirando una sola
+    # no se puede saber. Rellena las filas sin dirección y CORRIGE las que la
+    # tengan al revés.
+    chain = resolve_flows_from_balance_chain(parsed)
+    if chain.resolved and len(review) < MAX_ERROR_LOG:
+        plural = "movimiento" if chain.resolved == 1 else "movimientos"
         review.append(
             {
                 "row": 0,
                 "error": (
-                    f"{resolved_by_balance} {plural} sin signo en el extracto: la "
+                    f"{chain.resolved} {plural} sin signo en el extracto: la "
                     "dirección se ha deducido del salto de la columna Saldo. "
                     "Compruébalos antes de confirmar."
+                ),
+                "review": True,
+            }
+        )
+    if chain.corrected and len(review) < MAX_ERROR_LOG:
+        plural = "movimiento" if chain.corrected == 1 else "movimientos"
+        review.append(
+            {
+                "row": 0,
+                "error": (
+                    f"{chain.corrected} {plural} entraban con la dirección al revés "
+                    "(típicamente una devolución leída como gasto): la columna Saldo "
+                    "del extracto dice lo contrario y manda ella."
                 ),
                 "review": True,
             }
@@ -1501,6 +1576,7 @@ def _parse_row(
     transfer_by_kind: dict[CategoryKind, uuid.UUID] | None = None,
     category_kinds: dict[uuid.UUID, CategoryKind] | None = None,
     sibling_by_name_kind: dict[tuple[str, CategoryKind], uuid.UUID] | None = None,
+    file_declares_signs: bool = False,
 ) -> tuple[ParsedRow, str | None]:
     """Aplica mapping + validación + hash a una fila.
 
@@ -1558,6 +1634,11 @@ def _parse_row(
         raise _RowError(f"columna '{mappings.occurred_at}' vacía")
 
     amount, bank_sign = _parse_amount_signed(amount_raw)
+    # Un positivo desnudo sólo significa «entrada» si este fichero expresa la
+    # dirección con el signo, cosa que se sabe mirando el LOTE y no la fila
+    # (ver `_file_declares_signs`). Sin esto, una devolución entraba como gasto.
+    if bank_sign == 0 and file_declares_signs:
+        bank_sign = 1
     occurred_at = _parse_datetime(occurred_raw)
     description = description_raw or None
 

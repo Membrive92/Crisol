@@ -90,6 +90,68 @@ async def test_import_csv_creates_transactions(client: AsyncClient) -> None:
     assert all(t["source"] == "import" for t in body["items"])
 
 
+async def test_import_reads_a_bare_positive_as_inflow_when_the_file_uses_signs(
+    client: AsyncClient,
+) -> None:
+    """Una DEVOLUCIÓN entraba como gasto, con el signo cambiado (PHASE-47.G).
+
+    `_parse_amount_signed` sólo llama «entrada» a un importe con `+` explícito.
+    Mirando una fila es correcto: hay extractos que son magnitudes puras. Pero
+    si el fichero escribe los cargos en negativo, un positivo desnudo no es un
+    hueco — es un abono. Sin esa lectura, el reembolso caía al kind de su
+    categoría («Compras» → gasto) y se contaba al revés.
+
+    Medido en los extractos reales del usuario: seis devoluciones entre abril y
+    julio de 2026, 238,87 € que desviaban el saldo 477,74 €. Las seis rompían la
+    cadena `saldo ± importe` del propio extracto.
+    """
+    token, account_id = await _setup_user(client, "refund-sign@example.com")
+    await client.post(
+        "/categories",
+        json={"name": "Compras", "kind": "expense"},
+        headers=_auth(token),
+    )
+    csv_text = (
+        "Fecha,Importe,Concepto,Categoria\n"
+        "2026-04-15,-40.00,COMPRA AMAZON,Compras\n"
+        "2026-04-16,33.58,DEVOLUCION AMAZON,Compras\n"
+    )
+    await _post_csv(client, token, account_id, csv_text)
+
+    r = await client.get("/transactions", headers=_auth(token))
+    by_desc = {t["description"]: t for t in r.json()["items"]}
+    assert by_desc["COMPRA AMAZON"]["flow"] == "OUT"
+    assert by_desc["DEVOLUCION AMAZON"]["flow"] == "IN"
+
+
+async def test_import_keeps_a_bare_positive_ambiguous_when_the_file_has_no_signs(
+    client: AsyncClient,
+) -> None:
+    """Y al revés: sin un solo negativo, el fichero son magnitudes.
+
+    Ahí un positivo desnudo NO prueba nada y la dirección la sigue decidiendo la
+    categoría, que es el comportamiento de siempre para los extractos que no
+    traen signo — el de la tarjeta, sin ir más lejos. Quien «arregle» lo de
+    arriba tratando todo positivo como entrada rompe esta línea y convierte cada
+    compra de esos extractos en un ingreso.
+    """
+    token, account_id = await _setup_user(client, "nosign-sign@example.com")
+    await client.post(
+        "/categories",
+        json={"name": "Compras", "kind": "expense"},
+        headers=_auth(token),
+    )
+    csv_text = (
+        "Fecha,Importe,Concepto,Categoria\n"
+        "2026-04-15,40.00,COMPRA AMAZON,Compras\n"
+        "2026-04-16,33.58,OTRA COMPRA,Compras\n"
+    )
+    await _post_csv(client, token, account_id, csv_text)
+
+    r = await client.get("/transactions", headers=_auth(token))
+    assert {t["flow"] for t in r.json()["items"]} == {"OUT"}
+
+
 async def test_import_persists_flow_from_statement_sign(client: AsyncClient) -> None:
     """AUDIT-2026-07 (LOW): el import escribe `flow` (fuente de verdad del
     dinero, ADR-0004) desde el SIGNO del extracto: + → IN, − → OUT, y una

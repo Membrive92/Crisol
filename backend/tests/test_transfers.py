@@ -744,17 +744,19 @@ async def test_from_source_debt_creates_new_liability_and_pairs(
     assert new_acc["nature"] == "liability"
     assert new_acc["type"] == "credit_card"
 
-    # Balances: la pata-activo del par de deuda NO infla el activo (0),
-    # pero la deuda sí sube (+824.77). total_assets excluye el fantasma y
-    # net_worth refleja la deuda completa (-824.77, sin compensar).
+    # PHASE-47.F — el abono con el que el banco te presta el dinero SUMA al
+    # activo, porque su saldo real subió, y la deuda sube en paralelo: el
+    # patrimonio no se mueve, que es exactamente lo que significa recibir un
+    # préstamo. Antes el activo se dejaba en 0 y el patrimonio salía en −824,77:
+    # la app apuntaba la deuda y escondía el dinero.
     balances = await client.get("/accounts/balances", headers=_auth(token))
     body = balances.json()
     by_id = {b["account_id"]: b for b in body["items"]}
-    assert Decimal(by_id[acc_a]["movements_balance"]) == Decimal("0.00")
+    assert Decimal(by_id[acc_a]["movements_balance"]) == Decimal("824.77")
     assert Decimal(by_id[new_acc["id"]]["movements_balance"]) == Decimal("824.77")
-    assert Decimal(body["total_assets"]) == Decimal("0.00")
+    assert Decimal(body["total_assets"]) == Decimal("824.77")
     assert Decimal(body["total_liabilities"]) == Decimal("824.77")
-    assert Decimal(body["net_worth"]) == Decimal("-824.77")
+    assert Decimal(body["net_worth"]) == Decimal("0.00")
 
     # Cashflow agregado: cero (par emparejado excluido)
     summary = await client.get("/dashboard/summary?currency=EUR", headers=_auth(token))
@@ -804,16 +806,21 @@ async def test_from_source_debt_uses_existing_liability(
     liabilities = [a for a in accs.json() if a["nature"] == "liability"]
     assert len(liabilities) == 1
 
-    # El fix es agnóstico al kind del origen: aquí la tx origen es un
-    # GASTO (-500) en el activo. Tras convertirla a deuda, la pata-activo
-    # se anula igual (no resta del activo) y la deuda sube +500.
+    # Aquí la tx origen es un CARGO (−500) en el activo, y conserva su signo
+    # (PHASE-47.F): antes se le imponía la dirección de entrada y el saldo la
+    # anulaba después, lo que daba −500 de patrimonio. Ahora salen −1.000, y no
+    # es un defecto del cálculo: pagar 500 Y deber 500 por la misma compra es
+    # contradictorio, y la app lo enseña en vez de taparlo. Cuando el banco
+    # financia de verdad, el extracto trae también el abono que lo compensa;
+    # para una compra a plazos, la ruta es dar de alta el pasivo con su capital
+    # (PHASE-35), que no crea pata-activo ninguna.
     balances = await client.get("/accounts/balances", headers=headers)
     body = balances.json()
     by_id = {b["account_id"]: b for b in body["items"]}
-    assert Decimal(by_id[acc_a]["movements_balance"]) == Decimal("0.00")
+    assert Decimal(by_id[acc_a]["movements_balance"]) == Decimal("-500.00")
     assert Decimal(by_id[liability_id]["movements_balance"]) == Decimal("500.00")
     assert Decimal(body["total_liabilities"]) == Decimal("500.00")
-    assert Decimal(body["net_worth"]) == Decimal("-500.00")
+    assert Decimal(body["net_worth"]) == Decimal("-1000.00")
 
 
 async def test_from_source_debt_nests_purchase_under_parent_card(
@@ -866,11 +873,13 @@ async def test_from_source_debt_nests_purchase_under_parent_card(
     assert child["parent_account_id"] == parent_id
     assert child["term_months"] == 9
 
-    # La deuda vive en la hija (+239); el activo no se infla (pata fantasma);
-    # la tarjeta padre no tiene movimientos propios (0).
+    # La deuda vive en la hija (+239) y la tarjeta padre no tiene movimientos
+    # propios (0). La tx origen es un CARGO y conserva su signo (PHASE-47.F):
+    # en el extracto de verdad esa compra financiada llega acompañada del abono
+    # que la compensa, y son las dos líneas juntas las que dejan el saldo igual.
     balances = await client.get("/accounts/balances", headers=headers)
     by_id = {b["account_id"]: b for b in balances.json()["items"]}
-    assert Decimal(by_id[acc_a]["movements_balance"]) == Decimal("0.00")
+    assert Decimal(by_id[acc_a]["movements_balance"]) == Decimal("-239.00")
     assert Decimal(by_id[child["id"]]["movements_balance"]) == Decimal("239.00")
     assert Decimal(by_id[parent_id]["movements_balance"]) == Decimal("0.00")
 

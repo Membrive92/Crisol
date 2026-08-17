@@ -30,6 +30,7 @@ import {
   layout,
   radius,
   spacing,
+  statementIntegrityNotices,
 } from '@crisol/ui';
 
 import {
@@ -788,6 +789,16 @@ function AccountRow({
 
   const balanceColor = isLiability ? colors.danger : colors.text;
   const balancePrefix = isLiability ? '-' : '';
+  // PHASE-47.G — que la app desconfíe sola: si su saldo ya no coincide con el
+  // que imprimió el banco, o si le falta un tramo de extracto, lo dice aquí en
+  // vez de dejar que el saldo inicial lo absorba en silencio.
+  const integrityNotices = balance
+    ? statementIntegrityNotices({
+        statementGap: balance.statement_gap,
+        seams: balance.statement_seams,
+        currency: balance.currency,
+      })
+    : [];
 
   return (
     <div
@@ -877,6 +888,32 @@ function AccountRow({
             </>
           ) : null}
         </div>
+        {integrityNotices.length > 0 ? (
+          <ul
+            data-testid="statement-integrity"
+            style={{
+              listStyle: 'none',
+              margin: `${spacing.xs}px 0 0`,
+              padding: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 2,
+            }}
+          >
+            {integrityNotices.map((notice) => (
+              <li
+                key={notice.message}
+                style={{
+                  fontSize: fontSize.xs,
+                  color: colors.warning,
+                  lineHeight: 1.4,
+                }}
+              >
+                ⚠ {notice.message}
+              </li>
+            ))}
+          </ul>
+        ) : null}
         {hasFullAmortization ? (
           <div style={{ marginTop: 2 }}>
             <Link
