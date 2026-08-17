@@ -31,6 +31,7 @@ from app.modules.personal_finance.dashboard.repository import (
     _exclude_deferred,
     _is_expense,
     _is_internal_transfer,
+    expense_amount_expr,
 )
 from app.modules.personal_finance.fixed_expenses.models import FixedExpense, FixedExpenseStatus
 from app.modules.personal_finance.transactions.models import Transaction
@@ -99,7 +100,11 @@ async def monthly_expense_by_category(
     )
     amount = _amount_expr(target_currency)
     query = (
-        select(Transaction.category_id, month_col, func.coalesce(func.sum(amount), Decimal("0")))
+        select(
+            Transaction.category_id,
+            month_col,
+            func.coalesce(func.sum(expense_amount_expr(amount)), Decimal("0")),
+        )
         .select_from(Transaction)
         .outerjoin(Category, Category.id == Transaction.category_id)
         .where(_is_expense())
@@ -285,8 +290,9 @@ async def expense_split_totals(
     """
     amount = _amount_expr(target_currency)
     is_struct = is_structural_expr(structural_category_ids)
-    structural_amount = case((is_struct, amount), else_=Decimal("0"))
-    exceptional_amount = case((is_struct, Decimal("0")), else_=amount)
+    gasto = expense_amount_expr(amount)
+    structural_amount = case((is_struct, gasto), else_=Decimal("0"))
+    exceptional_amount = case((is_struct, Decimal("0")), else_=gasto)
     query = (
         select(
             func.coalesce(func.sum(structural_amount), Decimal("0")),
@@ -329,7 +335,7 @@ async def structural_monthly_avg(
     )
     amount = _amount_expr(target_currency)
     is_struct = is_structural_expr(structural_category_ids)
-    structural_amount = case((is_struct, amount), else_=Decimal("0"))
+    structural_amount = case((is_struct, expense_amount_expr(amount)), else_=Decimal("0"))
     query = (
         select(month_col, func.coalesce(func.sum(structural_amount), Decimal("0")))
         .select_from(Transaction)
@@ -407,7 +413,7 @@ async def exceptional_by_category(
     """
     amount = _amount_expr(target_currency)
     is_struct = is_structural_expr(structural_category_ids)
-    total_col = func.coalesce(func.sum(amount), Decimal("0")).label("total")
+    total_col = func.coalesce(func.sum(expense_amount_expr(amount)), Decimal("0")).label("total")
     query = (
         select(Category.id, Category.name, Category.color, Category.icon, total_col)
         .select_from(Transaction)

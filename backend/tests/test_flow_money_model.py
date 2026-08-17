@@ -196,7 +196,127 @@ async def test_out_flow_in_transfer_category_counts_as_expense(session_factory) 
     assert expense == Decimal("50")
 
 
+async def test_a_refund_is_negative_spending_not_income(session_factory) -> None:  # type: ignore[no-untyped-def]
+    """PHASE-47.H — una devolución resta de su categoría; NO es ingreso.
 
+    Un reembolso de Amazon entra con `flow=IN` (el extracto lo prueba) pero su
+    categoría es de compras: es una compra que se deshace. Contarlo como ingreso
+    inflaba los ingresos del mes —2.664 € con una nómina de 2.520 €— y con ellos
+    la tasa de ahorro y el DTI del módulo de deuda.
+
+    La propiedad que lo hace seguro: el NETO no se mueve. 100 de gasto y 30
+    devueltos dan −70 se cuenten como se cuenten; lo único que cambia es dónde.
+    """
+    uid = await _seed_user(session_factory)
+    bbva = await _seed_account(
+        session_factory, uid, nature=AccountNature.ASSET, type_=AccountType.BANK
+    )
+    compras = await _seed_category(session_factory, uid, kind=CategoryKind.EXPENSE)
+    nomina = await _seed_category(session_factory, uid, kind=CategoryKind.INCOME)
+    await _seed_tx(
+        session_factory,
+        uid,
+        bbva,
+        amount=Decimal("100"),
+        flow=TransactionFlow.OUT,
+        category_id=compras,
+    )
+    await _seed_tx(
+        session_factory,
+        uid,
+        bbva,
+        amount=Decimal("30"),
+        flow=TransactionFlow.IN,
+        category_id=compras,
+    )
+    await _seed_tx(
+        session_factory,
+        uid,
+        bbva,
+        amount=Decimal("1000"),
+        flow=TransactionFlow.IN,
+        category_id=nomina,
+    )
+
+    async with session_factory() as db:
+        income, expense, _count, _unconv = await get_summary_aggregates(db, uid, currency="EUR")
+    assert income == Decimal("1000")  # la nómina y nada más
+    assert expense == Decimal("70")  # 100 − 30
+    assert income - expense == Decimal("930")
+
+
+async def test_income_without_a_category_is_still_income(session_factory) -> None:  # type: ignore[no-untyped-def]
+    """La regla de las devoluciones NO puede envenenar a quien no tiene categoría.
+
+    `_is_refund()` mira `Category.kind`, que es NULL cuando la fila no está
+    categorizada. Sin `coalesce`, eso da `TRUE AND NULL` = NULL y ese NULL se
+    propaga al `AND NOT` de `_is_income()`: la entrada deja de ser ingreso y
+    desaparece del cashflow. Medido al introducirlo: cinco tests en rojo, la
+    tasa de ahorro en `None` y el titular del mes en −1.500 € en vez de +500.
+
+    Las transacciones sin categoría son lo normal recién importadas, así que
+    este caso no es una rareza: es el estado por defecto de media app.
+    """
+    uid = await _seed_user(session_factory)
+    bbva = await _seed_account(
+        session_factory, uid, nature=AccountNature.ASSET, type_=AccountType.BANK
+    )
+    await _seed_tx(
+        session_factory,
+        uid,
+        bbva,
+        amount=Decimal("2000"),
+        flow=TransactionFlow.IN,
+        category_id=None,
+    )
+    await _seed_tx(
+        session_factory,
+        uid,
+        bbva,
+        amount=Decimal("500"),
+        flow=TransactionFlow.OUT,
+        category_id=None,
+    )
+
+    async with session_factory() as db:
+        income, expense, _count, _unconv = await get_summary_aggregates(db, uid, currency="EUR")
+    assert income == Decimal("2000")
+    assert expense == Decimal("500")
+
+
+async def test_a_refund_does_not_move_the_account_balance(session_factory) -> None:  # type: ignore[no-untyped-def]
+    """El saldo NO sabe de devoluciones: ahí una entrada suma, y punto.
+
+    Es el guardarraíl del helper explícito. El signo vive en
+    `expense_amount_expr` y no en `_amount_expr` justamente porque esa segunda
+    la comparten los saldos y los presupuestos — firmar allí habría movido el
+    saldo, que es lo único que no puede cambiar por una cuestión de etiquetas.
+    """
+    uid = await _seed_user(session_factory)
+    bbva = await _seed_account(
+        session_factory, uid, nature=AccountNature.ASSET, type_=AccountType.BANK
+    )
+    compras = await _seed_category(session_factory, uid, kind=CategoryKind.EXPENSE)
+    await _seed_tx(
+        session_factory,
+        uid,
+        bbva,
+        amount=Decimal("100"),
+        flow=TransactionFlow.OUT,
+        category_id=compras,
+    )
+    await _seed_tx(
+        session_factory,
+        uid,
+        bbva,
+        amount=Decimal("30"),
+        flow=TransactionFlow.IN,
+        category_id=compras,
+    )
+
+    async with session_factory() as db:
+        balances = await get_balances_for_user(db, uid)
+    assert balances[bbva] == Decimal("-70.00")  # −100 + 30, como en el banco
 
 
 async def test_null_flow_falls_back_to_category(session_factory) -> None:  # type: ignore[no-untyped-def]

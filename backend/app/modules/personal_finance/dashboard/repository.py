@@ -40,18 +40,72 @@ from app.modules.personal_finance.transactions.models import Transaction, Transa
 # Los tres helpers son NULL-safe: un row sin flow ni categoría no rompe el
 # WHERE. Se elimina el fallback (y el join a Category de la clasificación) en
 # 34.6. Equivalente por construcción al backfill de 34.1.
+def _is_refund() -> ColumnElement[bool]:
+    """PHASE-47.H — una DEVOLUCIÓN: dinero que entra en una categoría de gasto.
+
+    Un reembolso de Amazon no es un ingreso, es una compra que se deshace. Con
+    `flow=IN` a secas se contaba como ingreso, y en julio de 2026 los ingresos
+    del usuario salían 2.664 € con una nómina de 2.520 €.
+
+    Cada señal responde a lo que sabe, que es la regla que costó nueve
+    lecciones: la DIRECCIÓN la manda `flow` —probada contra la cadena de saldos
+    del extracto (PHASE-47.G)— y la categoría sólo responde «¿esto es una
+    categoría de compras?». Si un ingreso real estuviera mal categorizado,
+    pasaría a contar como gasto negativo en vez de como ingreso: cambia la
+    etiqueta, **nunca el neto ni el saldo**. Ese es el modo de fallo que hace
+    aceptable apoyarse aquí en la categoría.
+
+    Sólo con `flow` explícito: una fila heredada sin flow no tiene dirección
+    probada, y adivinarla desde la categoría es justo lo que no se hace.
+
+    **NULL-safe, y no es cosmético.** Sin el `coalesce`, una entrada SIN
+    categoría da `TRUE AND NULL` = NULL, y ese NULL envenena el `AND NOT` de
+    `_is_income()`: la fila deja de ser ingreso y desaparece del cashflow. Se
+    midió — una nómina sin categorizar dejaba la tasa de ahorro en `None` y el
+    titular del mes en −1.500 € en vez de +500. Los otros tres helpers de este
+    fichero ya lo declaraban arriba; éste nació sin ello.
+    """
+    return (Transaction.flow == TransactionFlow.IN) & func.coalesce(
+        Category.kind == CategoryKind.EXPENSE, literal(False)
+    )
+
+
 def _is_income() -> ColumnElement[bool]:
     return case(
-        (Transaction.flow.is_not(None), Transaction.flow == TransactionFlow.IN),
+        (
+            Transaction.flow.is_not(None),
+            (Transaction.flow == TransactionFlow.IN) & ~_is_refund(),
+        ),
         else_=(Category.kind == CategoryKind.INCOME),
     )
 
 
 def _is_expense() -> ColumnElement[bool]:
+    """Pertenece al cubo de GASTO — incluidas las devoluciones.
+
+    Una devolución entra aquí a propósito: es gasto de su categoría, con signo
+    contrario. Por eso todo sitio que SUME bajo este predicado tiene que usar
+    `expense_amount_expr`, o estaría sumando el reembolso en vez de restarlo.
+    """
     return case(
-        (Transaction.flow.is_not(None), Transaction.flow == TransactionFlow.OUT),
+        (
+            Transaction.flow.is_not(None),
+            (Transaction.flow == TransactionFlow.OUT) | _is_refund(),
+        ),
         else_=(Category.kind == CategoryKind.EXPENSE),
     )
+
+
+def expense_amount_expr(amount: Any) -> ColumnElement[Decimal]:
+    """El importe con el que una fila cuenta COMO GASTO: negativo si devuelve.
+
+    Existe como helper explícito en vez de meter el signo en `_amount_expr`
+    porque esa expresión la comparten 39 sitios, entre ellos los SALDOS y los
+    presupuestos, donde una devolución no lleva signo invertido — ahí es una
+    entrada normal. Firmar allí habría movido el saldo, que es lo único que en
+    esta app no puede moverse por un cambio de etiqueta.
+    """
+    return case((_is_refund(), -amount), else_=amount)
 
 
 def _is_internal_transfer() -> ColumnElement[bool]:
@@ -211,7 +265,7 @@ async def get_totals_by_kind(
     """
     amount = _amount_expr(target_currency)
     income_amount = case((_is_income(), amount), else_=Decimal("0"))
-    expense_amount = case((_is_expense(), amount), else_=Decimal("0"))
+    expense_amount = case((_is_expense(), expense_amount_expr(amount)), else_=Decimal("0"))
     query = (
         select(
             func.coalesce(func.sum(income_amount), Decimal("0")),
@@ -255,7 +309,7 @@ async def get_summary_aggregates(
     """
     amount = _amount_expr(target_currency)
     income_amount = case((_is_income(), amount), else_=Decimal("0"))
-    expense_amount = case((_is_expense(), amount), else_=Decimal("0"))
+    expense_amount = case((_is_expense(), expense_amount_expr(amount)), else_=Decimal("0"))
 
     if target_currency is not None:
         unconv_subq = (
@@ -324,7 +378,10 @@ async def get_deferred_expense_total(
     amount = _amount_expr(target_currency)
     query = (
         select(
-            func.coalesce(func.sum(case((_is_expense(), amount), else_=Decimal("0"))), Decimal("0"))
+            func.coalesce(
+                func.sum(case((_is_expense(), expense_amount_expr(amount)), else_=Decimal("0"))),
+                Decimal("0"),
+            )
         )
         .select_from(Transaction)
         .outerjoin(Category, Category.id == Transaction.category_id)
@@ -371,7 +428,7 @@ async def get_breakdown_by_category(
             Category.kind,
             Category.color,
             Category.icon,
-            func.coalesce(func.sum(amount), 0),
+            func.coalesce(func.sum(expense_amount_expr(amount)), 0),
             func.count(Transaction.id),
         )
         .outerjoin(Category, Category.id == Transaction.category_id)

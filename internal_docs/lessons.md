@@ -1798,6 +1798,42 @@ mecanismos que restauran la coherencia recalculando un tapón (un
 `opening_balance`, un ajuste, un residuo): dejan el número de hoy correcto y
 borran la única señal de que algo iba mal.
 
+### [PHASE-47.H] Apoyarse en una señal que ya ha mentido es aceptable si el peor caso sólo cambia la ETIQUETA — dilo, y ponle el test que lo ata
+**Error (de diseño, evitado):** para distinguir una devolución de un ingreso hay
+que mirar la categoría, que es exactamente la señal que ha causado nueve
+lecciones de esta lista. La tentación era descartarlo por principio.
+**Causa del matiz:** las nueve veces anteriores la categoría decidía la
+DIRECCIÓN del dinero, y equivocarse ahí invierte un signo: mueve el saldo, el
+patrimonio y el cashflow a la vez. Aquí la dirección ya viene probada por la
+cadena de saldos del extracto y la categoría sólo responde «¿es una categoría de
+compras?». Si se equivoca, un ingreso real cuenta como gasto negativo: el
+reparto cambia y **el neto no**.
+**Solución:** apoyarse en ella, pero (a) escribir el peor caso en el docstring,
+(b) meter el signo en un helper EXPLÍCITO (`expense_amount_expr`) en vez de en
+la expresión de importe compartida —que la usan 39 sitios, incluidos los saldos
+y los presupuestos, donde firmar habría movido el saldo—, y (c) un test que
+afirma que el saldo NO se mueve, que es el guardarraíl del diseño y no una
+cobertura más.
+**Regla:** al evaluar una señal poco fiable, no preguntes «¿ha fallado antes?»
+sino «¿qué se rompe cuando falle esta vez?». Una señal que sólo puede
+equivocarse en la etiqueta es utilizable; la misma señal decidiendo un signo, no.
+Escribe esa diferencia donde vive el código, porque el que la lea dentro de seis
+meses verá «esto usa la categoría» y tendrá razón en sospechar. Corolario de
+alcance: cuando el predicado cambie de significado, inventaría sus usos y
+clasifícalos —de 26 llamadas, sólo **7 sumaban** y son las únicas que necesitan
+el signo; las demás filtran, cuentan o etiquetan—. Firmar donde no toca es tan
+error como no firmar donde sí.
+**Corolario que costó cinco tests en rojo:** el fichero abría con *«los TRES
+helpers son NULL-safe: un row sin flow ni categoría no rompe el WHERE»*, y el
+cuarto que añadí nació sin serlo. `(flow == IN) AND (Category.kind == EXPENSE)`
+con categoría NULL da **NULL**, no `false`, y ese NULL se propagó al `AND NOT`
+de `_is_income()`: toda entrada SIN CATEGORÍA —que es el estado por defecto de
+media app recién importada— dejó de contar como ingreso. Síntoma: tasa de ahorro
+`None` y titular del mes en −1.500 € en vez de +500. Cuando añadas un miembro a
+una familia de helpers, lee el comentario que gobierna la familia y compruebe
+que **el tuyo también lo cumple**: un invariante escrito para «los tres» no se
+extiende solo al cuarto. Y en SQL, la lógica de tres valores convierte un
+descuido de NULL en un filtro que descarta filas en silencio, nunca en un error.
 
 ---
 

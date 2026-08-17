@@ -358,10 +358,13 @@ async def test_by_category_kind_classifies_by_flow_not_category(
     """AUDIT-2026-06 — El donut (by-category con `kind`) decide
     income/expense por `flow`, NO por `Category.kind`. Cuando flow y la
     categoría discrepan (lo que PHASE-34/ADR-0004 permite a propósito),
-    el donut debe sumar igual que el KPI "Gastos" y la barra roja: un
-    OUT aparcado en categoría de ingreso ES gasto; un IN aparcado en
-    categoría de gasto ES ingreso. Antes filtraba por `Category.kind` y
-    el donut no cuadraba con el resto de la pantalla."""
+    el donut debe sumar igual que el KPI "Gastos" y la barra roja. Antes
+    filtraba por `Category.kind` y no cuadraba con el resto de la pantalla.
+
+    PHASE-47.H afina uno de los dos casos. Un OUT aparcado en categoría de
+    ingreso sigue siendo gasto: la DIRECCIÓN la manda `flow`. Pero un IN
+    aparcado en categoría de GASTO ya no es ingreso — es una DEVOLUCIÓN, y
+    cuenta como gasto negativo de su propia categoría."""
     token, account_id = await _register(client, "dash-flow-donut@example.com")
     income_cat = await _make_category(client, token, name="Nómina", kind="income")
     expense_cat = await _make_category(client, token, name="Compras", kind="expense")
@@ -387,21 +390,27 @@ async def test_by_category_kind_classifies_by_flow_not_category(
         flow="IN",
     )
 
-    expense_donut = (
-        await client.get("/dashboard/by-category", params={"kind": "expense"}, headers=_auth(token))
-    ).json()
-    # El único gasto es el OUT, que vive en la categoría de ingreso "Nómina".
-    assert len(expense_donut) == 1
-    assert expense_donut[0]["category_name"] == "Nómina"
-    assert Decimal(expense_donut[0]["total"]) == Decimal("30.00")
+    expense_donut = {
+        row["category_name"]: Decimal(row["total"])
+        for row in (
+            await client.get(
+                "/dashboard/by-category", params={"kind": "expense"}, headers=_auth(token)
+            )
+        ).json()
+    }
+    # El OUT sigue siendo gasto aunque viva en una categoría de ingreso: la
+    # DIRECCIÓN la manda `flow` y eso no ha cambiado (PHASE-34).
+    assert expense_donut["Nómina"] == Decimal("30.00")
+    # PHASE-47.H — lo que sí cambia: un IN en una categoría de GASTO ya no es
+    # ingreso, es una DEVOLUCIÓN. Cae en el cubo de gasto restando de su propia
+    # categoría, que es lo que hace un reembolso de Amazon.
+    assert expense_donut["Compras"] == Decimal("-80.00")
 
     income_donut = (
         await client.get("/dashboard/by-category", params={"kind": "income"}, headers=_auth(token))
     ).json()
-    # El único ingreso es el IN, que vive en la categoría de gasto "Compras".
-    assert len(income_donut) == 1
-    assert income_donut[0]["category_name"] == "Compras"
-    assert Decimal(income_donut[0]["total"]) == Decimal("80.00")
+    # …y por eso el donut de ingresos se queda vacío: aquí no hay ninguno.
+    assert income_donut == []
 
 
 # ---------- /dashboard/by-month ----------
