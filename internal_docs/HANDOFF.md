@@ -1,4 +1,4 @@
-# Dónde estamos — 2026-08-15
+# Dónde estamos — 2026-08-17
 
 Punto de continuación tras la sesión del 15 de agosto. Se lee de arriba abajo;
 lo que hay que decidir está al final.
@@ -6,6 +6,35 @@ lo que hay que decidir está al final.
 ---
 
 ## Lo primero al retomar
+
+**Dos saldos que mienten, los dos comprobados contra la BD real el 17-ago.**
+Están en [`backlog.md`](backlog.md) con su diagnóstico completo; aquí el
+titular:
+
+1. **El saldo de BBVA está +700,26 € por encima del real.** Al convertir el
+   abono de financiación en deuda, el sistema absorbió el cargo que lo
+   compensaba — correcto cuando abono y cargo son la misma pata, y aquí no lo
+   eran: el cargo pagaba la tarjeta, el abono creaba la deuda. Toca la
+   absorción del espejo, que gobierna todos los pares de deuda: hace falta un
+   golden de saldos antes/después.
+2. **Un abono de financiación entra como INGRESO** cuando viene del extracto de
+   la tarjeta, porque la regla exige signo y ese fichero no lo trae. Los datos
+   del usuario están corregidos a mano; el clasificador no.
+
+**Y una pregunta abierta del usuario**, que es la que destapó todo: dice haber
+ahorrado ~1.000 € y la app le da −522,27 € en julio. Parte se explica —dedicó
+1.099,64 € a cancelar deudas anticipadamente, que es caja fuera pero no
+empobrecerse— y parte es el saldo inflado del punto 1. Merece cerrarse entero
+antes de dar julio por bueno.
+
+Lo demás de la sesión del 15-17 de agosto quedó cerrado y verde: PHASE-47.E
+completa (el modelo del recibo aplazado, el panel, la sección de deuda pagada),
+backend **1429 tests** y frontend **329**, diez commits en `main` **sin
+empujar**.
+
+---
+
+## (anterior) Lo primero al retomar
 
 **Hay dos entregas commiteadas y verdes esperando tu prueba manual: 47.A y
 47.E.** La segunda es la que arregla el descuadre que destapaste el día 15 —el

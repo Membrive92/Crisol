@@ -596,3 +596,49 @@ en la papelera, borrada a mano por parecerse a otra idéntica del 17-may que
 sigue viva. Si eran dos viajes distintos, restaurarla deja el ciclo de junio a
 1,11 € de cerrar. Requiere que el usuario mire su extracto: es una pregunta
 sobre su vida, no sobre sus datos.
+
+## El saldo de BBVA está +700,26 € por un espejo absorbido de más (PHASE-47.E)
+
+**Comprobado el 2026-08-17 sobre la BD real.** En BBVA hay tres filas de
+700,26 € y sólo una viva:
+
+| Fecha | Concepto | Estado |
+|---|---|---|
+| 04-jul | `Recibo mes anterior` (CARGO) | borrada, `absorbed_as_mirror` |
+| 04-jul | `Recibo anterior jun-26` (ABONO) | borrada |
+| 07-jul | `Operación financiada` (ABONO) | **viva**, `TRANSFER_IN` |
+
+En el extracto esas dos líneas del día 4 se anulan: el banco abona 700,26 € y
+cobra el recibo el mismo día, neto cero en la cuenta. La app se quedó con el
+abono y borró el cargo, así que **el saldo de BBVA queda 700,26 € por encima
+del real**.
+
+El mismo abono está además en la TARJETA (04-jul, `TRANSFER_IN`), donde sí
+corresponde: es lo que salda su deuda de junio.
+
+**Causa a investigar**: la absorción del cargo espejo al convertir el abono en
+deuda (`convert_to_debt_operation` / `find_mirror_charge`). Absorbe el cargo que
+compensa al abono, lo cual es correcto cuando los dos son la misma pata. Aquí no
+lo eran: el cargo pagaba la tarjeta y el abono creaba la deuda. Son dos hechos,
+no uno.
+
+**Cuidado al arreglarlo**: toca la absorción, que gobierna todos los pares de
+deuda. Hace falta un golden de saldos antes/después y comprobar que reimportar
+el extracto no resucita el cargo (`find_existing_hashes` cuenta los absorbidos
+como existentes precisamente para eso).
+
+## El abono de financiación entra como INGRESO desde el extracto de la tarjeta (PHASE-47.E)
+
+`classify_import_flow` exige `bank_sign > 0` para reconocer una financiación
+entrante (`transfers/service.py`, ~línea 512). El extracto de la tarjeta **no
+trae signos**, así que `bank_sign` es 0, la regla no dispara y la fila entra
+como `IN` — ingreso que nadie cobró. En julio de 2026 eran 700,26 €: la app
+mostraba +177,99 € de ahorro cuando lo real era −522,27 €.
+
+La condición del signo NO es un descuido: el mismo producto aparece con signo
+contrario cuando llega la cuota, y ésa sí es gasto real (PHASE-38). Lo que
+falta es distinguir **dirección** de **signo**: la regla debería mirar la
+dirección ya resuelta, no el signo crudo del fichero.
+
+Corregido a mano en los datos del usuario (esa fila es ahora `TRANSFER_IN`); el
+clasificador sigue igual.
