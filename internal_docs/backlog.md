@@ -666,3 +666,32 @@ dirección ya resuelta, no el signo crudo del fichero.
 
 Corregido a mano en los datos del usuario (esa fila es ahora `TRANSFER_IN`); el
 clasificador sigue igual.
+
+## Una declaración manual no sobrevive a una reimportación (PHASE-47.H, visto 2026-08-18)
+
+**Medido en datos reales.** El usuario reimportó julio (fichero nuevo con los
+días 1-5 que faltaban) y la reimportación borró las filas viejas y creó otras
+nuevas. Con las viejas se fueron sus declaraciones: los cuatro `Adeudo mensual`
+que había declarado GASTO (liquidaciones anticipadas, 1.099,64 €) renacieron
+neutros, y el resultado de julio pasó de −253,17 a +398,87 **sin que nadie lo
+decidiera**. También se fue el enlace del abono de financiación con su deuda
+(un clic en la app lo rehace; el flow hubo que restaurarlo a mano).
+
+**Lo que sí sobrevive**: las cuotas pagadas del cuadro (viven en
+`liability_installments`, no en las filas) y las marcas de aplazamiento de
+junio (`deferred_by_account_id` — vivirían el mismo problema si se reimportara
+JUNIO).
+
+**El alcance real**: toda declaración a nivel de fila muere con la fila —
+`flow` corregido a mano, `amortization_source_id`, `deferred_by_account_id`,
+categoría elegida por el usuario (ésta se re-resuelve vía bank-mappings, las
+demás no tienen mecanismo).
+
+**Pista para el arreglo**: el `import_hash` se construye con
+usuario+importe+fecha+descripción, así que la fila reimportada llega con EL
+MISMO hash que la borrada. Un import podría re-aplicar las declaraciones de la
+fila anterior buscándola por hash en la papelera (la reimportación de julio
+habría conservado las cuatro declaraciones y el enlace sin tocar nada). La
+alternativa —una tabla de overrides por hash— cubre además el caso de purga
+dura. Sin esto, cada reimportación exige re-auditar a mano qué declaraciones
+existían, que es exactamente el trabajo que la app debería recordar.
