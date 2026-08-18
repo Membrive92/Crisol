@@ -35,10 +35,14 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.main  # noqa: F401  (efecto lateral: registra todos los modelos)
 from app.core.config import settings
-from app.modules.personal_finance.accounts.models import Account
+from app.modules.personal_finance.accounts.models import Account, AccountNature
 from app.modules.personal_finance.accounts.repository import (
     find_statement_seams,
     get_balances_for_user,
+)
+from app.modules.personal_finance.debt.installments_repository import (
+    installments_by_account,
+    resolve_liability_outstanding,
 )
 from app.modules.users.models import User
 
@@ -73,13 +77,26 @@ async def audit(email: str | None) -> int:
                     continue
                 balances = await get_balances_for_user(db, user.id)
                 seams = await find_statement_seams(db, user.id)
+                # PHASE-36: el saldo vivo de un pasivo CON cuadro lo manda el
+                # cuadro, no sus movimientos. Sin esto el informe enseñaba 0 en
+                # una deuda de 700,26 € y parecía un descuadre de la app cuando
+                # el descuadre era de este script.
+                insts = await installments_by_account(
+                    db, user.id, [a.id for a in accounts if a.nature == AccountNature.LIABILITY]
+                )
                 print(f"\n{user.email}")
                 print(f"  {'cuenta':<30} {'app':>12} {'extracto':>12} {'diferencia':>12}")
                 print(f"  {'-' * 68}")
                 for account in sorted(accounts, key=lambda a: (a.nature.value, a.name)):
-                    app_balance = (account.opening_balance or Decimal(0)) + balances.get(
-                        account.id, Decimal(0)
-                    )
+                    movement = balances.get(account.id, Decimal(0))
+                    app_balance = (account.opening_balance or Decimal(0)) + movement
+                    if account.nature == AccountNature.LIABILITY:
+                        resolved = resolve_liability_outstanding(
+                            opening_balance=account.opening_balance,
+                            movements_balance=movement,
+                            installments=insts.get(account.id, []),
+                        )
+                        app_balance = resolved.value
                     anchor = account.anchored_statement_balance
                     if anchor is None:
                         # Un pasivo no tiene extracto con saldo corriente, y una
