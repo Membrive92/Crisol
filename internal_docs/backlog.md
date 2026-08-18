@@ -695,3 +695,14 @@ habría conservado las cuatro declaraciones y el enlace sin tocar nada). La
 alternativa —una tabla de overrides por hash— cubre además el caso de purga
 dura. Sin esto, cada reimportación exige re-auditar a mano qué declaraciones
 existían, que es exactamente el trabajo que la app debería recordar.
+
+## Feature propuesta — el mes lo define el usuario (ciclo de nómina en Ajustes)
+
+El usuario cobra los días 14-15 y su ciclo de pagos corre nómina-a-nómina; los
+agregados mensuales cortan por mes natural y las dos ventanas divergen 3-4×
+(medido 2026-08-18: +1.2k vs +0.3k para el mismo agosto). Diseño completo, con
+inventario de consumidores de «mes», plan V1/V2/V3 y preguntas abiertas, en
+[`improvements/user-defined-month-cycle.md`](improvements/user-defined-month-cycle.md).
+V1 es barata: `users.cycle_start_day` + preset «Mi ciclo» sobre el
+`date_from/date_to` de PHASE-42, sin SQL nuevo. Invariante: presentación pura,
+ni un céntimo de saldo se mueve.
