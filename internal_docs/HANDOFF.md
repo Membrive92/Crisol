@@ -1,48 +1,52 @@
-# Dónde estamos — 2026-08-17
+# Dónde estamos — 2026-08-18
 
-Punto de continuación tras la sesión del 15 de agosto. Se lee de arriba abajo;
-lo que hay que decidir está al final.
+Punto de continuación tras las sesiones del 15-18 de agosto. Se lee de arriba
+abajo; lo que hay que decidir está al final.
 
 ---
 
 ## Lo primero al retomar
 
-**BBVA cuadra al céntimo con el banco** (1.778,19 €), y ahora la app lo comprueba
-sola. Lo que queda es prueba manual y una decisión sobre datos viejos.
+**Julio está completo y cuadrado, y el usuario lo dio por bueno** («ya me
+cuadra»). BBVA coincide al céntimo con el banco (1.778,19 € a 30-jul), la
+cadena de saldos no tiene huecos y la auditoría (`make audit-balances`) sale
+limpia. Las fases 47.F, 47.G y 47.H están commiteadas y **empujadas a `main`**.
 
-Dos fases cerradas hoy, las dos **sin commitear**:
+Estado de julio bajo el modelo del usuario (caja pura, decidido por él):
+**−700,77 €** — absorbió 1.099,64 € de liquidaciones anticipadas de las tres
+compras financiadas (por eso agosto viene ligero). Junio: **+1.137,48 €** con
+685,01 € de compras aplazadas excluidas (el recibo financiado). El desglose por
+categorías mantiene ambas cifras de gasto a propósito; la pantalla dice la
+diferencia.
 
-- [PHASE-47.F](phases/phase-47.F-borrowed-money-is-money.md) — el dinero prestado
-  es dinero. Se retiran el carve-out de la pata-activo y la absorción del cargo
-  espejo: eran **dos correcciones del mismo hecho** que daban el número bueno
-  hasta que una falló.
-- [PHASE-47.G](phases/phase-47.G-the-statement-is-the-authority.md) — el extracto
-  manda sobre la conjetura, y la app desconfía sola. Seis devoluciones entraban
-  como gasto (238,87 €, o sea 477,74 € de desvío); corregidas con la aritmética
-  del banco fila a fila.
+**La lección operativa del 18-ago**: una reimportación BORRA las declaraciones
+manuales a nivel de fila. La de julio se llevó tres — el flow de gasto de los
+cuatro adeudos, las 19 marcas de aplazamiento y el enlace de la financiación —
+y hubo que restaurarlas (las dos primeras, hechas; el enlace sigue pendiente de
+un clic del usuario). Entrada en `backlog.md` con la pista del arreglo (mismo
+`import_hash` → re-aplicar desde la papelera). **Tras cualquier reimportación,
+comprobar las tres cosas.**
 
 ### Lo que falta
 
-1. **Prueba manual.** El backend corre en 8002 (relanzado dos veces hoy: el
-   reloader no recarga, hay que matarlo y arrancarlo). Mira la pantalla de
-   cuentas: BBVA debe avisar del hueco de extracto.
-2. **Importa el extracto de BBVA del 1 al 5 de julio.** Es el único hueco que
-   queda y lo dice la propia app: **1.211,95 €** que el banco movió y no
-   tenemos. Ahí dentro está, con toda probabilidad, el cargo del recibo de la
-   tarjeta de junio (990,02 €) — el ciclo que no cerraba en 47.E.
+1. **Un clic del usuario**: «Es una financiación» para re-enlazar el abono de
+   700,26 (6-jul) con su deuda (capital del cuadro coincide al céntimo). No
+   mueve ningún número; deja declarado el origen.
+2. **Importar agosto** cuando esté. Predicción falsable dejada por escrito:
+   recibo de ~589,38 cargado ~2-ago (NO financiado, confirmado por el usuario),
+   1ª cuota del financiado 26,60 el ~6-ago, y su «+1k de ahorro hasta el 15»
+   es agosto natural (1→15), no nómina-a-nómina (que da ~+300/600). La nómina
+   se fecha el **14**, así que un filtro 15→15 la deja fuera.
 3. **Cuatro filas absorbidas siguen muertas a propósito** (`Taxdown` de marzo,
-   dos `Western union` de mayo, `Recibo mes anterior` de julio). No constan como
-   líneas de BBVA: vienen del extracto de la **tarjeta** importado en la cuenta
-   del banco, y eso lleva pasando **desde marzo**. Decidirlas requiere mirar los
-   extractos. Igual que la operación financiada de 239 € del 24-mar, viva en
-   BBVA y que tampoco es suya.
-4. **Orden obligatorio si tocas datos**: arreglar → re-anclar → y sólo entonces
-   reimportar. Al revés no: `re_anchor_from_stored` corre en cada commit de
-   import y absorbería la diferencia en silencio.
-
-Nota comprobada sobre tu pregunta del ahorro: en Trade Republic la app no tiene
-**ni un movimiento** —sus 4.000 € son el saldo inicial tecleado— y no hay **nada
-de agosto** importado. La app se queda el 30 de julio.
+   dos `Western union` de mayo, `Recibo mes anterior` de julio). No constan
+   como líneas de BBVA: venían del extracto de la tarjeta importado en el
+   banco. Decidirlas requiere mirar los extractos. Igual que la operación
+   financiada de 239 € del 24-mar, viva en BBVA y que tampoco es suya.
+4. **Orden obligatorio si se tocan datos**: arreglar → re-anclar → y sólo
+   entonces reimportar (`re_anchor_from_stored` corre en cada commit de import
+   y absorbería la diferencia en silencio).
+5. **Presupuestos ignoran las devoluciones** — decisión del usuario («no están
+   probados»), no un olvido.
 
 ---
 
