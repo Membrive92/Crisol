@@ -3,6 +3,8 @@
  * Lógica pura sin dependencias de plataforma.
  */
 
+import { shortMonthEs } from './civil-dates';
+
 /**
  * Etiqueta corta del `kind` de una categoría — usada en dropdowns,
  * badges y resúmenes. Aceptamos `string` en lugar de `CategoryKind`
@@ -58,13 +60,49 @@ export function formatDate(isoString: string, locale = 'es-ES'): string {
 
 /**
  * Convierte una fecha ISO a `YYYY-MM-DD` para inputs nativos de fecha.
+ *
+ * Lee en **UTC**, que es la zona en la que su pareja `fromDateInputValue`
+ * escribe. Hasta PHASE-47 leía con getters LOCALES y escribía en UTC — una
+ * asimetría que en Madrid tapaba el desfase del importador (una fila guardada
+ * a las 23:00Z se leía como el día siguiente y al guardar quedaba corregida a
+ * medianoche UTC, que es por lo que 21 filas de la base real están ya bien) y
+ * que en cualquier huso NEGATIVO hace lo contrario: abrir el formulario de una
+ * transacción y guardarlo sin tocar nada le restaría un día, cada vez.
+ *
+ * Es para leer una fecha CIVIL ya almacenada. Para «¿qué día es hoy?» —que sí
+ * es una pregunta local— usa `todayDayStr()` de `@crisol/services`.
  */
+/**
+ * Formatea una fecha CIVIL como `DD/MM/YYYY`, leyéndola en UTC.
+ *
+ * Una fecha civil —el día que imprime el banco, el vencimiento de una cuota, la
+ * fecha de un movimiento— no tiene hora ni zona: se almacena como medianoche
+ * UTC (PHASE-47). Formatearla con `formatDate`, que usa la zona del navegador,
+ * la deja bien en husos positivos y muestra el día ANTERIOR en los negativos,
+ * porque las 00:00Z son la tarde del día previo en América.
+ *
+ * `formatDate` sigue siendo lo correcto para un INSTANTE real —cuándo se creó
+ * un ticket, cuándo se usó una passkey—: ahí la hora local es la que el usuario
+ * reconoce. Por eso son dos funciones y no un parámetro: la diferencia no es de
+ * formato, es de qué representa el dato.
+ */
+export function formatCivilDate(isoString: string, locale = 'es-ES'): string {
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return isoString;
+  return new Intl.DateTimeFormat(locale, {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(date);
+}
+
 export function toDateInputValue(isoString: string): string {
   const date = new Date(isoString);
   if (Number.isNaN(date.getTime())) return '';
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
 
@@ -79,16 +117,22 @@ export function fromDateInputValue(value: string): string {
 /**
  * Formatea un mes `YYYY-MM` como etiqueta legible (`Abr 2026`).
  * Si el formato es inválido devuelve el valor original.
+ *
+ * El nombre del mes sale de la tabla de `civil-dates.ts` y NO de `Intl`. Con
+ * `Intl` septiembre salía «Sept 2026» mientras el resto de la app decía «sep»
+ * — misma pantalla, dos grafías del mismo mes— y en Hermes la forma no está
+ * garantizada. Ver el porqué completo en `civil-dates.ts`.
+ *
+ * Ya NO admite `locale`: la etiqueta es castellano fijo. El parámetro existía y
+ * ningún llamante lo usaba (los tres pasan sólo el mes); mantenerlo habría sido
+ * prometer una traducción que la tabla no hace.
  */
-export function formatMonthLabel(yearMonth: string, locale = 'es-ES'): string {
+export function formatMonthLabel(yearMonth: string): string {
   const match = /^(\d{4})-(\d{2})$/.exec(yearMonth);
   if (!match) return yearMonth;
   const [, year, month] = match;
-  const date = new Date(Number(year), Number(month) - 1, 1);
-  if (Number.isNaN(date.getTime())) return yearMonth;
-  const label = new Intl.DateTimeFormat(locale, {
-    month: 'short',
-    year: 'numeric',
-  }).format(date);
-  return label.charAt(0).toUpperCase() + label.slice(1);
+  const monthNumber = Number(month);
+  if (monthNumber < 1 || monthNumber > 12) return yearMonth;
+  const label = shortMonthEs(monthNumber);
+  return `${label.charAt(0).toUpperCase()}${label.slice(1)} ${year}`;
 }

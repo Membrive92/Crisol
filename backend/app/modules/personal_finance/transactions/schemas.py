@@ -9,6 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.core.civil_dates import CivilDatetime
 from app.modules.personal_finance.transactions.models import TransactionFlow, TransactionSource
 
 
@@ -39,7 +40,7 @@ class TransactionCreate(BaseModel):
     category_id: uuid.UUID | None = None
     amount: Decimal = Field(decimal_places=2, ge=Decimal("0.01"))
     currency: str = Field(default="EUR", max_length=3)
-    occurred_at: datetime
+    occurred_at: CivilDatetime
     description: str | None = Field(default=None, max_length=500)
     source: TransactionSource = TransactionSource.MANUAL
     # PHASE-34: dirección + transfer-ness del movimiento. Si el form la
@@ -68,7 +69,7 @@ class TransactionUpdate(BaseModel):
     category_id: uuid.UUID | None = None
     amount: Decimal | None = Field(default=None, decimal_places=2, ge=Decimal("0.01"))
     currency: str | None = Field(default=None, max_length=3)
-    occurred_at: datetime | None = None
+    occurred_at: CivilDatetime | None = None
     description: str | None = None
     flow: TransactionFlow | None = None
     # PHASE-37.3 — override tri-estado. Con `exclude_unset` en el service,

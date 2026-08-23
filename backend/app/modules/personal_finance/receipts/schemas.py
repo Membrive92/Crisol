@@ -9,6 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.core.civil_dates import CivilDatetime
 from app.modules.ai.schemas import ReceiptExtraction
 from app.modules.personal_finance.receipts.models import ReceiptStatus
 
@@ -57,7 +58,7 @@ class ReceiptConfirmRequest(BaseModel):
 
     account_id: uuid.UUID
     amount: Decimal = Field(gt=0)
-    occurred_at: datetime
+    occurred_at: CivilDatetime
     currency: str = Field(min_length=3, max_length=3)
     description: str | None = Field(default=None, max_length=500)
     category_id: uuid.UUID | None = None

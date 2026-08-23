@@ -86,7 +86,7 @@ describe('fromDateInputValue', () => {
 
 describe('formatMonthLabel', () => {
   it('convierte YYYY-MM a una etiqueta legible capitalizada', () => {
-    const result = formatMonthLabel('2026-04', 'es-ES');
+    const result = formatMonthLabel('2026-04');
     expect(result).toMatch(/^[A-Z]/);
     expect(result).toContain('2026');
   });
@@ -95,8 +95,19 @@ describe('formatMonthLabel', () => {
     expect(formatMonthLabel('not-a-month')).toBe('not-a-month');
   });
 
-  it('soporta locales distintos', () => {
-    const result = formatMonthLabel('2026-01', 'en-US');
-    expect(result).toMatch(/Jan/i);
+  it('devuelve el valor original si el mes no existe', () => {
+    expect(formatMonthLabel('2026-13')).toBe('2026-13');
+    expect(formatMonthLabel('2026-00')).toBe('2026-00');
+  });
+
+  it('la etiqueta es castellano fijo y NO depende del build de ICU', () => {
+    // Antes esta función delegaba en `Intl` y aquí se afirmaba que "soportaba
+    // locales distintos" (`en-US` → /Jan/). Nadie la llamaba nunca con un
+    // locale, y a cambio el ICU decidía la grafía: en el Node de este repo
+    // septiembre salía «Sept», donde el resto de la app dice «sep». En Hermes
+    // podía salir con punto o en inglés. El texto es un contrato de la app, así
+    // que sale de una tabla propia.
+    expect(formatMonthLabel('2026-01')).toBe('Ene 2026');
+    expect(formatMonthLabel('2026-09')).toBe('Sep 2026');
   });
 });

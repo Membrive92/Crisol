@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 
 from pydantic import BaseModel, Field
+
+from app.core.civil_dates import CivilDatetime
 
 
 class TransferLinkRequest(BaseModel):
@@ -30,8 +32,8 @@ class TransferPairResponse(BaseModel):
     currency: str
     out_account_id: uuid.UUID
     in_account_id: uuid.UUID
-    out_occurred_at: datetime
-    in_occurred_at: datetime
+    out_occurred_at: CivilDatetime
+    in_occurred_at: CivilDatetime
     delta_days: int
 
 
@@ -45,7 +47,7 @@ class MisclassifiedTransfer(BaseModel):
     amount: Decimal
     currency: str
     account_id: uuid.UUID
-    occurred_at: datetime
+    occurred_at: CivilDatetime
     description: str | None
     current_category_id: uuid.UUID
     current_category_name: str
@@ -67,7 +69,7 @@ class FinancingMatchResponse(BaseModel):
     description: str | None
     amount: Decimal
     currency: str
-    occurred_at: datetime
+    occurred_at: CivilDatetime
     counted_as_income: bool
     """`True` si HOY está sumando en la gráfica de ingresos — el estado a corregir."""
     liability_id: uuid.UUID

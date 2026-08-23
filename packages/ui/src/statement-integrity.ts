@@ -15,7 +15,7 @@
  *   por eso hay que decirlo en voz alta o no se entera nadie.
  */
 
-import { formatAmount, formatDate } from './format';
+import { formatAmount, formatCivilDate } from './format';
 
 export interface StatementSeamLike {
   after: string;
@@ -69,7 +69,7 @@ export function statementIntegrityNotices({
     notices.push({
       kind: 'seam',
       message:
-        `Faltan movimientos entre el ${formatDate(seam.after)} y el ${formatDate(seam.before)}: ` +
+        `Faltan movimientos entre el ${formatCivilDate(seam.after)} y el ${formatCivilDate(seam.before)}: ` +
         `${formatAmount(String(Math.abs(Number(seam.amount))), currency)} que tu banco movió y ` +
         'la app no tiene. Importa el extracto de esos días.',
     });
