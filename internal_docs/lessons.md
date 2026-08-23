@@ -1835,6 +1835,227 @@ que **el tuyo también lo cumple**: un invariante escrito para «los tres» no s
 extiende solo al cuarto. Y en SQL, la lógica de tres valores convierte un
 descuido de NULL en un filtro que descarta filas en silencio, nunca en un error.
 
+### [PHASE-47] Un dato CIVIL guardado en un tipo que exige zona elige zona por accidente — y el accidente es la máquina que lo escribió
+**Error:** «13/02/2026» —la fecha que imprime el banco— se persistía en
+`transactions.occurred_at` (`TIMESTAMPTZ`) como `2026-02-12T23:00:00Z`. Medido
+en la base real: **469 de 491** filas vivas desplazadas un día, **14 de mes
+natural** (una transferencia de 4.267,47 € contando en marzo siendo del 1 de
+abril, un cargo de amortización de 232,27 € en mayo siendo del 1 de junio).
+**Causa:** `_parse_datetime` devolvía un `datetime` NAIVE, y asyncpg codifica un
+naive con `astimezone(utc)` — que sobre un naive asume la zona **del proceso**.
+Con el backend en Europe/Madrid, la medianoche civil se convertía en las 23:00Z
+del día anterior (22:00 en horario de verano; las dos firmas están en los datos:
+354 filas a 22:00 y 194 a 23:00). O sea: **el valor almacenado dependía del
+ordenador que hizo el import y de la estación del año.** Una fecha civil no
+tiene hora ni zona; guardarla en un tipo que exige instante obliga a elegir una,
+y si no la eliges tú la elige el driver.
+**Por qué nadie lo vio en cuatro fases:** la pantalla formatea en hora LOCAL, así
+que mostraba el día correcto y cuadraba con el extracto. El desajuste sólo asoma
+en los BORDES, porque los filtros de rango se construyen en UTC (`T00:00:00Z`):
+un movimiento que la app muestra el día 13 vivía a las 23:00Z del 12 y quedaba
+fuera de un rango que empieza el 13. Con el mes natural el borde cae el día 1,
+que suele tener poco movimiento; lo destapó el ciclo del usuario con D=13, que
+puso el borde en medio de datos densos — 3 movimientos en febrero y 6 en marzo.
+Y la suite no podía verlo: **todos** sus tests crean transacciones por la API con
+cadenas `...T00:00:00Z` explícitas, o sea viviendo ya en el mundo donde la fecha
+está bien. Ninguno recorría el camino del importador.
+**Solución:** el parser ancla en UTC (anclar, no convertir: convertir asumiría
+que venía en local, que es el bug), un `CivilDatetime` compartido en los schemas
+de ENTRADA para que ninguna otra ruta reintroduzca un naive, y un script de
+datos. Más el test que faltaba: importar `13/02/2026` y afirmar que la fila cae
+dentro del día 13 — tz-independiente, así que falla en cualquier máquina que no
+esté en UTC.
+**Regla:** cuando un dato del dominio sea una fecha CIVIL (el día de un extracto,
+un vencimiento, una fecha de operación) y la columna sea `TIMESTAMPTZ`, fija tú
+la zona en la frontera de entrada y escríbelo donde el compilador lo vea (un tipo
+anotado), no en un comentario. Y desconfía del formateo local: hace que el dato
+se lea bien mientras los filtros lo tratan como otro día, así que el bug no se
+manifiesta hasta que alguien mira un BORDE. Corolario de test: una suite que
+siembra por la API con fechas ya normalizadas no prueba el camino del importador
+— para un pipeline de ingesta, el test tiene que entrar por donde entra el dato.
+**Corolario de método, y es lo que hizo segura la corrección:** antes de mover
+469 filas, busca un TESTIGO que ya tengas. El `import_hash` se calculó con la
+fecha civil que el parser leyó del fichero, así que recomputarlo con la fecha
+candidata **prueba** que la candidata es la del extracto — 536 de 548 filas se
+movieron con esa prueba delante y las 12 restantes (contrapartidas que genera el
+propio backend, sin hash) se reportaron aparte. El mismo testigo resolvió un
+bloqueante: serializar la fecha SIN el sufijo de zona reproduce byte a byte el
+hash que producía el naive, así que el cambio del parser es invisible al dedup y
+no hubo que rehashear ni una fila. Verificado contra filas reales antes de
+escribir el arreglo, no después.
+
+### [PHASE-47] La octava premisa caducada — y esta vez el detector mira el CABLEADO, no el símbolo
+**Error:** La página de Análisis pasaba `range={period === 'cycle' ? 'month' :
+period}` al navegador de período, con el comentario «el navegador habla
+`DebtTimeRange`, sin `cycle` · rama inalcanzable hasta C3a». Era cierto al
+escribirlo y dejó de serlo en C3a, cuando el navegador pasó a declarar
+`range: PeriodKey` —CON `cycle`— y a sacar de ahí el chip marcado y la etiqueta
+«Ciclo del D mes». Resultado: el preset quedaba activo por dentro (los datos se
+pedían con `cycle=true` y el chart pintaba barras de ciclo) mientras el toggle
+seguía marcando «Mes».
+**Causa:** la misma de [PHASE-43], por octava vez. Pero con una forma que los
+detectores anteriores no cubren: aquí no sobraba un símbolo (knip no ve nada, el
+componente se usa) ni faltaba un tipo (`'month'` es un `PeriodKey` perfectamente
+válido, así que `tsc` calla). Lo que estaba mal era **el valor que un consumidor
+decide pasar**, y eso no lo mide ningún eje de los que ya teníamos.
+**Solución:** un gate estático que recorre las pantallas y falla si alguna
+colapsa `cycle` antes de entregárselo a un selector de período. Verificado
+reintroduciendo la línea exacta: falla señalando fichero, número y el texto.
+**Regla:** cuando arregles un cableado que ninguna herramienta podía ver, el test
+de regresión va sobre **el cableado de todas las pantallas**, no sobre la que
+arreglaste — la reintroducción llega en una pantalla que aún no existe, y un test
+de las que hoy hay no la vería. Y comprueba que el gate recorre ficheros de
+verdad (un `expect(paginas.length).toBeGreaterThan(5)`): un gate que se queda sin
+entrada pasa por vacuidad, que es la forma más cara de no tener gate.
+
+### [PHASE-47] Una serie en una unidad DESPLAZADA no se puede indexar por el año natural de su ancla: el primer bucket se cae, y con él dinero real
+**Error:** El histórico «en ciclos» (`by-month?year=2026&cycle=true`) devolvía
+los **12 ciclos que ABREN en 2026**, y así estaba escrito en el docstring — o
+sea, era una decisión, no un descuido. Pero los días 1..D−1 de enero no
+pertenecen a ninguno de esos doce: pertenecen al que abrió el día D de
+**diciembre del año anterior**. Con D=13 sobre los datos reales eso son **30
+movimientos, 69,62 € de entradas y 698,70 € de salidas** que no aparecían en
+ninguna barra. La suma del histórico en ciclos daba 25.115,19 € de gasto contra
+25.813,89 € del año natural: **698,70 € de diferencia**, exactamente los que
+faltaban.
+**Causa:** confundir «etiquetar por el ancla» con «filtrar por el ancla». La
+etiqueta del bucket sí sale del ancla (el ciclo del 13-dic-2025 se llama
+`2025-12`), pero el CONJUNTO de buckets que cubre un año natural no es «los que
+abren dentro de él» — es «los que lo tocan», y en los bordes eso incluye uno del
+año anterior. Es la misma familia que [AUDIT-2026-08] (una ventana que no
+contiene sólo meses realmente observados), pero por el otro extremo: aquí la
+ventana deja fuera un bucket que sí tiene datos.
+**Por qué la suite lo bendecía:** había un test —`test_el_ciclo_cruza_el_ano_sin_partirse`—
+que afirmaba `_sum(en_2026, 'expenses') == 0` para un gasto del 5 de enero. O
+sea, el comportamiento roto estaba **escrito como criterio**. El test no estaba
+mal por descuido: comprobaba que el año se lee del instante desplazado, que es
+correcto; lo que no comprobaba es que ese dinero apareciera en ALGUNA parte de
+la vista que el usuario mira.
+**Solución:** trece buckets cuando el ciclo está activo, empezando por el que
+abre en diciembre del año anterior. Que ese ciclo aparezca también en la vista
+del año anterior es deliberado —es un bucket de SOLAPE, no un doble conteo
+dentro de una misma vista, y la etiqueta lo dice: «Ciclo del 13 dic 2025»—.
+Verificado contra los datos reales: la serie en ciclos y la natural suman
+**exactamente lo mismo**, 21.035,58 € y 25.813,89 €.
+**Regla:** cuando una serie temporal cambie de unidad (ciclos, semanas fiscales,
+trimestres desplazados), escribe primero el test de CONSERVACIÓN —la suma de los
+buckets tiene que ser la del período en la unidad vieja— y sólo después los
+tests de reparto. El de reparto puede pasar entero con dinero desaparecido; el
+de conservación no. Y si un test existente afirma que cierto dinero vale cero en
+una vista, pregúntate dónde vale distinto de cero: si la respuesta es «en
+ninguna», el test está protegiendo un agujero.
+
+### [PHASE-47] Un ajuste que se ofrece como PRESET compite con lo que redefine — y el usuario acaba con dos vocabularios para la misma pregunta
+**Error:** El día en que empieza el mes del usuario (`users.cycle_start_day`) se
+expuso como un chip «Mi ciclo» al lado de «Mes». Convivían: el ajuste estaba
+puesto y la app seguía enseñando el mes natural hasta que el usuario pulsaba el
+chip, en cada pantalla y cada vez. Su veredicto, que vale más que cualquier
+especificación: *«sigue siendo raro e incómodo»*.
+**Causa:** confundir «el usuario declara un dato» con «el usuario elige una
+vista». El día de cobro no es una opción de visualización: es la respuesta a
+«¿qué es un mes para ti?», y esa pregunta ya tenía una respuesta por defecto en
+el producto. Ofrecer las dos a la vez obliga a mantenerlas sincronizadas para
+siempre — y no lo estaban: sólo CINCO endpoints entendían el ciclo y el resto
+del backend cortaba por mes natural aunque el ajuste existiera.
+**Solución:** el día REDEFINE el mes. El chip desaparece, «Mes» es el mes del
+usuario, y en Ajustes hay un check «Modo predeterminado» que dice en voz alta
+cuál es el comportamiento por defecto. Una declaración por capa —
+`user-month.ts` en el frontend, `user_month.py` en el backend— en vez de un
+ternario repetido en seis pantallas y un mes natural derivado a mano en cinco
+agregados.
+**Regla:** cuando un ajuste REDEFINA un concepto que el producto ya tiene
+(qué es un mes, qué es una semana laboral, qué cuenta como gasto), no lo
+ofrezcas también como opción paralela: sustituye el concepto y deja el
+comportamiento anterior como el default explícito. Dos vocabularios para la
+misma pregunta no son flexibilidad, son dos sitios que hay que mantener de
+acuerdo y una pregunta que el usuario tiene que volver a responder cada vez.
+**Corolario de método, y es lo que hizo el cambio abarcable:** para un
+reemplazo así, **borra el valor del TIPO primero** y deja que el compilador
+enumere. Quitar `'cycle'` de `PeriodKey` produjo la lista exacta de ~35 puntos;
+escribirla a mano habría dejado ramas fuera, y una rama olvidada aquí devuelve
+el mes natural **en silencio** —mismo tipo, rango distinto, ningún error—. De
+paso, la lista destapó tres bugs que llevaban tiempo ahí y que nadie habría
+visto leyendo: el Dashboard afirmaba recibir sus bounds en ciclos sin pedirlos
+nunca así, la semilla de «Personalizado» se construía con el mes de calendario,
+y la serie diaria de Deuda se habría pintado vacía porque el backend sólo la
+calcula con `range=month`. Los cazaron, por ese orden, el compilador, un gate y
+un test — ninguno una revisión.
+
+### [PHASE-47] Al reemplazar un concepto, el test que hay que escribir PRIMERO es el de conservación
+**Error (evitado, y la razón por la que no hubo sorpresas):** migrar cinco
+agregados a «el mes del usuario» significa cambiar la ventana de la proyección,
+del runway, de los presupuestos, de la clasificación estructural y del DTI. Con
+tests de reparto («este gasto cae en este período») se puede pasar la suite
+entera con dinero desaparecido en los bordes.
+**Solución:** el primer test del helper compartido no comprueba dónde cae cada
+cosa, sino tres propiedades: que los períodos son CONTIGUOS (ni un día huérfano
+ni contado dos veces), que `D = 1` degenera **byte a byte** en el mes natural, y
+que la aritmética de Python y la de SQL —que existen las dos, porque una acota
+y la otra agrupa— dan el mismo período para todos los días de un año.
+**Regla:** un cambio que redefine una unidad temporal necesita tests de
+PROPIEDAD antes que de caso. «La suma no se mueve», «los períodos son
+contiguos» y «el caso degenerado es idéntico al anterior» se escriben en diez
+líneas y cubren los bordes que nadie enumera. Y el de degeneración vale doble:
+es lo que garantiza que quien no ha configurado nada no note nada — por eso 62
+tests de presupuestos, proyección y estructura pasaron sin tocarles una línea.
+Corolario: si tu cambio deja DOS implementaciones de la misma regla (aquí, una
+en Python para acotar y otra en SQL para agrupar), el test que las ata no es
+opcional — cuando divergen, el usuario ve dos cifras del mismo dinero y ninguna
+avisa.
+
+### [PHASE-47] Un guardarraíl que comprueba la PRESENCIA de algo no comprueba su EFECTO — y tres veces seguidas el mío se conformó con la presencia
+**Error:** En una sola sesión escribí tres verificadores que no verificaban lo
+que su nombre decía, y los tres pasaron en verde:
+1. Un gate que exigía que una pantalla reanclara al período en curso… y lo
+   comprobaba mirando si el fichero **mencionaba** `cycleAnchorContaining`. En
+   las dos pantallas de Deuda la llamada estaba, citada y muerta: vivía en un
+   manejador que otro manejador pisaba en el mismo evento.
+2. Un test de la serie de deuda que sembraba en un bucket **intermedio**,
+   cuando el único tramo que el defecto dejaba fuera era el final del ÚLTIMO.
+   Sobrevivió intacto a la rotura.
+3. El mismo gate, recorriendo sólo `apps/web`: las tres pantallas de móvil con
+   el mismo defecto le eran invisibles.
+**Causa:** en los tres casos verifiqué que algo ESTUVIERA (una cadena, un
+bucket, un fichero) en vez de que HICIERA lo que promete. La presencia es fácil
+de comprobar con una regex o un assert genérico, y por eso es la trampa por
+defecto: el verificador se escribe en dos minutos, pasa a la primera y da la
+sensación exacta de estar cubierto.
+**Cómo se destaparon los tres:** rompiendo la línea concreta que cada uno decía
+proteger. Ninguno se cayó releyéndolo — se leen igual de bien estén ciegos o no
+—, y dos de los tres los encontró una revisión adversarial, no la suite.
+**Regla:** al escribir un guardarraíl, pregúntate qué forma tendría el bug si
+volviera y comprueba que tu verificación distingue esa forma de la correcta. En
+concreto: (a) si compruebas que una llamada existe, comprueba también DÓNDE
+está, porque el mismo código en un manejador o en un efecto es código muerto o
+código que corre; (b) si siembras datos para un caso de borde, siémbralos en el
+borde y no cerca; (c) si tu detector recorre ficheros, comprueba que recorre
+TODOS los que pueden tener el defecto — un gate en un paquete no ve el paquete
+de al lado. Y rómpelo siempre: el gesto de romper es el único que separa un
+guardarraíl de un adorno, pero **sólo si la rotura ENTRA** — una sonda que no
+encuentra su objetivo devuelve verde igual que un guardarraíl sano.
+
+### [PHASE-47] «¿Qué período CONTIENE este día?» y «¿cuál EMPIEZA en este mes?» son dos preguntas, y confundirlas desplaza una serie entera
+**Error:** La serie mensual de deuda se acotó con `user_month_bounds(months[0])`,
+donde `months` son las anclas de los buckets — que viajan como día 1. Con un
+corte en el día 13, el día 1 pertenece al período que abrió el mes ANTERIOR, así
+que la ventana quedó desplazada un bucket entero: el ÚLTIMO salía a 0,00 €
+siempre y sus movimientos se consultaban y se tiraban, mientras el KPI de la
+misma pantalla sí los contaba.
+**Causa:** una misma función respondía a dos preguntas que se parecen. Para un
+día concreto («¿en qué período cayó esta transacción?») la correcta es
+«contiene»; para un ancla `YYYY-MM` («¿qué período representa este bucket?») es
+«empieza». Con el mes natural las dos coinciden —el mes que contiene el día 1 es
+ese mes— y por eso la confusión es invisible hasta que existe un corte propio.
+**Solución:** dos funciones con nombres que se leen distintos
+(`user_month_bounds` / `user_month_bounds_for_anchor`) y la diferencia escrita
+en el docstring de la segunda, con el fallo concreto que produce mezclarlas.
+**Regla:** cuando una feature introduzca un desplazamiento (un mes que no
+empieza el 1, una semana que no empieza el lunes), inventaría qué preguntas de
+calendario hace tu código y sepáralas por lo que RESPONDEN, no por lo que
+devuelven — aquí las dos devuelven `(date, date)` y el compilador no puede
+ayudar. La señal de que hay dos preguntas: si con el caso degenerado (día 1)
+ambas dan lo mismo, es que llevaban años siendo la misma por accidente.
+
 ---
 
 ## Ejemplos de referencia (no son lecciones reales)

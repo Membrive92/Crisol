@@ -1,8 +1,14 @@
 # Schema de base de datos
 
 > Estado actual del modelo de datos. Se actualiza cuando una fase
-> introduce migraciones. Última actualización: PHASE-37.3 (head Alembic
-> `c6s92u4rp6t5s1`).
+> introduce migraciones. Última actualización: `users.cycle_start_day`
+> (el mes lo define el usuario, entregable C1).
+>
+> Aquí NO se escribe cuál es el head de Alembic: se consulta con
+> `alembic heads`. El literal que había en esta cabecera llevaba muchas
+> migraciones siendo falso sin que nada avisara — es la lección PHASE-43
+> («una premisa escrita a mano caduca en silencio») y el propio documento ya
+> declara la regla más abajo.
 
 ## Convenciones
 
@@ -62,6 +68,9 @@
 | `h4d17c9e2f0b63` | 45 | `transactions.amortization_source_id` (FK auto-ref `ON DELETE CASCADE`, NULL) + índice parcial `ix_transactions_amortization_source`. Aditiva y reversible. **Sin backfill**: la declaración del usuario no se puede reconstruir a posteriori, y adivinarla por importe+fecha inventaría un dato. |
 | `i5e28d0f3a1c74` | 47.A | `accounts.settlement_account_id` (FK auto-ref `ON DELETE SET NULL`, NULL) — desde qué cuenta de activo se cobra un pasivo. Aditiva y reversible. **Sin backfill**: la app propone un candidato contando los enlaces de PHASE-45, y lo adjudica el usuario. |
 | `j6f39e1a4b2d85` | 47.A | `import_jobs.header_fingerprint` (`VARCHAR(64)` NULL) — huella del formato del fichero. Aditiva y reversible. **Backfill fuera de la migración** (`scripts/backfill_header_fingerprint.py`, con `--dry-run`): sin él la señal nace ciega y no habría cazado julio. |
+| `k7g40f2b5c3e96` | 47.E | `transactions.deferred_by_account_id` (FK → `accounts` `ON DELETE SET NULL`, NULL) + índice parcial — marca de compra aplazada por el recibo de una tarjeta. Aditiva y reversible. |
+| `l8h51g3c6d4f07` | C1 (ciclo del usuario) | `users.cycle_start_day` (`SMALLINT` NULL) + `CHECK (cycle_start_day BETWEEN 1 AND 28)`. Aditiva y reversible. **Sin backfill y sin default numérico**: `NULL` **es** el estado correcto de todo el mundo (mes natural), no un hueco por rellenar — un `1` por defecto afirmaría que el usuario declaró que su mes empieza el día 1 (lección PHASE-44.11). |
+| `m9i62h4d7e5g18` | 47 | `transactions.flow_declared_at` (`TIMESTAMPTZ` NULL) — firma de que la DIRECCIÓN la declaró el usuario, y cuándo. Aditiva y reversible. **Sin backfill**: `NULL` es el estado honesto de todo lo existente (de esas filas no consta declaración), y deducirla comparando con el clasificador de hoy es justo la conjetura que la columna existe para evitar. Consecuencia dicha en voz alta: las declaraciones anteriores a esta migración no llevan firma, así que una reimportación todavía se las llevaría; a partir de aquí, no. |
 
 > **Deuda documental**: las 14 tablas del módulo Inversión (13 de PHASE-44.1 más
 > `listing_directory` de 44.14) y las migraciones intermedias entre
@@ -99,6 +108,7 @@ ortogonales — el dictamen y la vara de medir (lección PHASE-23.1).
 | `password_hash` | `VARCHAR(512)` | argon2id. |
 | `display_name` | `VARCHAR(100)` | |
 | `is_active` | `BOOLEAN` | default `TRUE`. Soft-disable para futuros flujos de baja. |
+| `cycle_start_day` | `SMALLINT` NULLABLE | Migración `l8h51g3c6d4f07`. Día (1-28) en que EMPIEZA el mes del usuario a efectos de **presentación**; `NULL` = mes natural (el estado por defecto de todo el mundo, sin default numérico a propósito). Rango reafirmado por `CHECK (cycle_start_day BETWEEN 1 AND 28)`; 29-31 quedan fuera para que el ciclo nunca necesite clamping de fin de mes. Es la **primera preferencia de usuario** del sistema. Ninguna query de dinero (saldo, patrimonio, cuadro de deuda, ancla de extracto) puede leerla — lo afirma `tests/test_user_cycle.py::test_el_ciclo_no_mueve_ni_un_centimo`. |
 | `created_at` | `TIMESTAMPTZ` | `now()`. |
 | `updated_at` | `TIMESTAMPTZ` | `now()`, `onupdate=now()`. |
 
@@ -507,6 +517,29 @@ cartera y sus análisis.
 (`ok` · `no_annual` · `non_gaap` · `not_supported` · NULL): el conjunto va a
 crecer y un `ALTER TYPE ADD VALUE` no es reversible en un `downgrade` limpio.
 Su traducción vive en `catalog/capabilities.py`, fuente única de la regla.
+
+## `transactions.flow_declared_at` (PHASE-47)
+
+`TIMESTAMPTZ NULL`. Cuándo declaró el usuario la **dirección** de este
+movimiento. `NULL` = la puso el sistema (el clasificador del import, o el form
+derivándola de la categoría).
+
+**Para qué.** Reimportar un extracto borra la fila vieja y crea otra; con la
+vieja se van sus declaraciones. En julio de 2026 eso revirtió cuatro adeudos
+que el usuario había declarado gasto (1.099,64 €) y movió el resultado del mes
+652 € sin que nadie lo decidiera. La fila nueva llega con el MISMO
+`import_hash` —usuario+importe+fecha+descripción—, así que la anterior es
+localizable en la papelera; lo que no era localizable es **qué** de ella era
+decisión y qué conjetura, porque las dos viven en `flow` y ninguna iba firmada.
+
+Quién la escribe: `update_transaction` cuando el cliente manda `flow`
+explícito, y el panel «Es una amortización» (PHASE-45) al declarar si el cargo
+cuenta como gasto. Quién la BORRA: la re-derivación desde la categoría — si la
+dirección vuelve a salir de la categoría, ya no consta declaración sobre ella.
+
+Quién la lee: `imports.repository.find_declarations_in_trash`, que sólo repone
+un `flow` firmado. Sin firma manda el clasificador de hoy, que puede haber
+mejorado.
 
 ## `transactions.deferred_by_account_id` (PHASE-47.E)
 

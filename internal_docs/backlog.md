@@ -16,6 +16,37 @@
 >   se borran los follow-ups resueltos (seed de umbrales, golden test, módulo
 >   oculto en el frontend) y se alta la **prueba manual pendiente**, que bloquea
 >   el commit).
+> - 2026-08-20: **se borra la entrada del saldo de BBVA (−700,26 €)**, resuelta.
+>   Verificado ejecutando `make audit-balances` contra la BD del usuario: las
+>   cuatro cuentas de activo cuadran al céntimo con su extracto (BBVA
+>   1.778,19 €) y no falta ningún tramo. Los residuos que la entrada citaba
+>   aparte también están hechos: los cuatro adeudos de julio vuelven a ser gasto
+>   (1.099,64 € en `flow=OUT`), las 19 marcas de aplazamiento siguen puestas y el
+>   extracto de la tarjeta está reimportado en su cuenta. Traza en
+>   [`phases/phase-47.F-borrowed-money-is-money.md`](phases/phase-47.F-borrowed-money-is-money.md).
+>   Queda sólo el enlace declarativo del abono de 700,26 € con su pasivo — un
+>   clic que no mueve ningún número (el saldo del pasivo sale del cuadro).
+> - 2026-08-20 (2): **AUDIT-2026-07-13 se cierra**. Reverificada contra la BD:
+>   los cinco puntos estaban resueltos o eran falsos, y dos lo eran por la misma
+>   razón (leer filas repetidas sin reconstruir la cadena de saldos). El «doble
+>   conteo de Taxdown» no existía —son siete compras distintas— y los «posibles
+>   duplicados» de marzo encajan al céntimo en el extracto.
+> - 2026-08-20 (3): **dos entradas se cierran con código.** Una declaración
+>   manual ahora sobrevive a una reimportación (`transactions.flow_declared_at`
+>   firma la dirección; el import la recupera de la papelera por `import_hash` y
+>   lo dice en el resumen), y el cargo agregado de tarjeta se acota a SU tarjeta
+>   —con `settlement_account_id`, que existía desde 47.A sin lector— en vez de
+>   avanzar una cuota de todas.
+> - 2026-08-22: **el desfase de zona horaria en las fechas de movimiento**, que
+>   no estaba inventariado porque nadie lo había visto. `_parse_datetime`
+>   devolvía un naive y asyncpg lo interpretaba en la zona DEL PROCESO, así que
+>   «13/02/2026» se guardaba como `2026-02-12T23:00:00Z`: 469 de 491 filas
+>   desplazadas un día y 14 de mes. Arreglado en la raíz (parser en UTC + tipo
+>   `CivilDatetime` en los schemas de entrada) y en los datos
+>   (`scripts/normalize_civil_dates.py`, 548 filas + 10 cuotas, con el
+>   `import_hash` como testigo). Los saldos no se movieron y los 557 hashes
+>   siguen válidos. Lo destapó el preset «Mi ciclo» con D=13, que puso el borde
+>   del período en medio de datos densos. Detalle en `lessons.md`.
 > - 2026-07-24: alta de **UI-2026-07-24 — auditoría responsive** (aplicada, sin
 >   commitear, pendiente de validación visual).
 > - 2026-08-09 (2): entran los tres charts del informe web (PHASE-44.22) y se
@@ -81,29 +112,41 @@ incremental en 5 fases (T1–T5), sin migración destructiva, en
 
 ---
 
-## AUDIT-2026-07-13 — integridad de datos (pendiente de verificar)
+## AUDIT-2026-07-13 — integridad de datos (**cerrada el 2026-08-20**)
 
 Hallazgos de la auditoría de integridad de datos sobre la BD del usuario
 `membrij7@gmail.com`, disparada por una revisión manual del drill-down de
 categoría. Inventario completo en
 [`audits/2026-07-13-data-integrity-pending-check.md`](audits/2026-07-13-data-integrity-pending-check.md).
-**Ninguno corregido todavía.**
 
-- ✅ ~~🐛 **Selector temporal desincronizado (UTC vs local)** en el drill-down
-  de categoría~~ **CORREGIDO 2026-07-13** (`analysis/category/[id]/page.tsx`
-  ahora construye el rango con `Date.UTC`; typecheck+lint+test verdes).
-  Pendiente verificación manual + commit.
-- 💾 **Doble conteo de gasto** en compra financiada de Taxdown (239 € cuenta
-  como gasto en "Impuestos" Y en las cuotas). Contradice el modelo PHASE-38.
-- 🟡 **Pares de transferencia incoherentes** en operaciones financiadas.
-  **4a CORREGIDO 2026-07-13** (pata BBVA de la compra financiada de 824,77 €
-  volteada `TRANSFER_OUT`→`TRANSFER_IN`; BBVA −11.777,93 → −10.953,16 €). Queda
-  **4b** (Western Union de 215,99 € con `TRANSFER_IN` de signo dudoso, pendiente
-  extracto) + guardarraíl de código para forzar el par canónico OUT↔IN.
-- 💾 **Saldos sin `opening_balance` real** (BBVA −11.322,94 € con apertura 0;
-  Wise con apertura −5.000 € de apaño + 210 € de patas huérfanas).
-- 🔍 **Verificar contra extracto**: hueco de tarjeta en abril 2026; posibles
-  duplicados en BBVA (12/03 dos cargos de 900 €; 18/03 dos de 1.000 €).
+**Reverificada consultando la BD el 2026-08-20: los cinco puntos están
+resueltos o eran falsos.** Se conserva la entrada porque dos de ellos eran
+falsos por la MISMA razón —se leyeron las filas sin reconstruir la cadena de
+saldos— y ese es el mecanismo que [PHASE-47.G] convirtió en regla.
+
+- **Doble conteo de Taxdown: NO EXISTÍA.** Hay siete filas «Taxdown» y son
+  compras distintas (150 · 300 · 150 · 957,71 · 2.601,90 · 33,29 en abril,
+  más la de 239 € de marzo). La de 239 € está en la papelera y el cuadro de
+  `Compra financiada mar-2026` suma exactamente 239,00 € de capital en sus 9
+  cuotas, todas pagadas: el gasto entra **una sola vez**, por las cuotas, que
+  es lo que manda PHASE-38 y no lo que lo contradice.
+- **«Posibles duplicados» del 12/03 y el 18/03: NO LO ERAN.** Las cuatro filas
+  encajan al céntimo en la cadena del extracto: 3.411,87 −900 → 2.511,87 +1200
+  → 3.711,87 −900 → 2.811,87 −300 → 2.511,87 −18,49 → 2.493,38, que enlaza con
+  el 15/03. Ídem las dos de 1.000 € el 18/03. La sospecha salió de mirar
+  importes repetidos sin reconstruir el saldo.
+- **Pares de transferencia incoherentes (4b)**: resuelto. Las dos Western Union
+  de 215,99 € están borradas y absorbidas; no queda ninguna pata viva con
+  dirección dudosa.
+- **Saldos sin `opening_balance` real**: resuelto. BBVA 2.109,78 € de apertura
+  con ancla 1.778,19 € (y `make audit-balances` da diferencia 0,00); Wise a
+  0,00, ya sin el −5.000 € de apaño.
+- **Selector temporal UTC vs local**: corregido el 2026-07-13 y commiteado.
+
+**Lo único no verificable al céntimo**: el supuesto hueco de la tarjeta en
+abril. `Tarjeta BBVA credito` no tiene `anchored_statement_balance`, así que la
+auditoría no la cubre; el recuento de abril (11 movimientos) está en línea con
+marzo (10) y no hay evidencia de hueco, pero tampoco prueba aritmética.
 
 ---
 
@@ -555,22 +598,32 @@ fase, con su golden de equivalencia.
 guarda de dirección funciona y hay test de regresión
 (`test_a_refund_of_the_receipt_is_not_a_duplicate_of_it`).
 
-## El cargo agregado de tarjeta no distingue de QUÉ tarjeta viene (PHASE-36, ampliado en PHASE-47.E4)
+## El cargo agregado de tarjeta: resuelto por señal, y si no la hay lo dice (PHASE-36 → PHASE-47)
 
-`_load_aportaciones` recoge toda transacción cuya descripción case
-`is_card_financed_op`, y el reparto recorre **todos** los planes con cuadro que
-cuelgan de una tarjeta. Con dos tarjetas, cada cargo mensual avanza una cuota
-de los planes de **ambas**: dos cargos → cuatro cuotas.
+> **Resuelto.** `_plans_of_charge` acota el reparto a la tarjeta del cargo con
+> una cascada: una sola tarjeta con plan → esa; `settlement_account_id`
+> (PHASE-47.A) → la que cobra de esa cuenta; vínculo por categoría
+> (PHASE-30.4). Si tras las tres sigue habiendo varias candidatas **no se marca
+> ninguna cuota** y el motivo llega a `skipped_payments`. Se conserva el
+> registro porque el diagnóstico enseña el mecanismo.
 
-Viene de PHASE-36 («un cargo paga la siguiente cuota pendiente de CADA tarjeta
-con cuadro»), y PHASE-47.E4 lo amplió al meter en ese pool lo que cuelga de una
-tarjeta sea cual sea su tipo.
+`_load_aportaciones` recogía toda transacción cuya descripción case
+`is_card_financed_op`, y el reparto recorría **todos** los planes con cuadro
+que cuelgan de una tarjeta. Con dos tarjetas, cada cargo mensual avanzaba una
+cuota de **ambas**: dos cargos → cuatro cuotas, y la deuda bajaba el doble de
+lo pagado, en silencio.
 
-**Por qué no se arregla ahora**: el cargo llega a la cuenta del BANCO y su
-descripción no nombra la tarjeta, así que atribuirlo exige una señal que hoy no
-existe — el número de tarjeta en el texto, o `settlement_account_id` combinado
-con el importe. Con **una sola tarjeta**, que es el caso actual del usuario, el
-reparto es correcto.
+Lo que desbloqueó el arreglo: la señal ya existía y no la leía nadie.
+`settlement_account_id` se creó en PHASE-47.A —«qué cuenta de activo cobra cada
+pasivo»— exactamente para poder saber qué cargo cierra el ciclo de qué tarjeta,
+y la reconciliación seguía sin consultarla.
+
+**Limitación que queda dicha**: un plan sólo declara de qué tarjeta cuelga
+desde PHASE-35 (`parent_account_id`). Los que no lo declaran comparten un único
+grupo y se reparten entre sí, que es el comportamiento previo — así el acotado
+sólo muerde cuando el usuario SÍ ha declarado la pertenencia. Una tarjeta con
+cuadro propio y sin hijas cae en ese grupo común: distinguirla exigiría separar
+«tarjeta» de «compra a plazos», y ambas son `CREDIT_CARD`.
 
 ## Re-colgar un pasivo de una tarjeta no revisa las cuotas ya marcadas (PHASE-47.E4)
 
@@ -597,56 +650,6 @@ sigue viva. Si eran dos viajes distintos, restaurarla deja el ciclo de junio a
 1,11 € de cerrar. Requiere que el usuario mire su extracto: es una pregunta
 sobre su vida, no sobre sus datos.
 
-## El saldo de BBVA está −700,26 € porque un abono real se anula contra un cargo que no existía (PHASE-47.E)
-
-> **Código arreglado en [PHASE-47.F](phases/phase-47.F-borrowed-money-is-money.md);
-> queda el arreglo de DATOS**, que no es opcional: sin él el saldo se va a
-> 3.057,95 € (hay cuatro pares de deuda, no uno). El detalle está en la phase
-> doc. Se conserva esta entrada porque documenta cómo se diagnosticó.
-
-**Reverificado el 2026-08-17 ejecutando `get_balances_for_user` —la función
-real— contra la BD del usuario.** La primera redacción de esta entrada decía
-«+700,26 € por encima del real» y **estaba al revés**; salía de leer las filas
-sin ejecutar el cálculo. Lo que hay:
-
-| Cuenta | app | extracto (`anchored_statement_balance`) | diferencia |
-|---|---|---|---|
-| BBVA | 1.077,93 | 1.778,19 | **−700,26** |
-
-Las demás cuentas de activo cuadran al céntimo.
-
-**El dinero entró de verdad.** La fila `Operación financiada 4940…` del 07-jul
-lleva `statement_balance = 1.417,36` y la anterior del extracto tenía 717,10:
-el banco abonó 700,26 € y **su propio saldo subió**. No es un apunte neutro.
-
-**Por qué la app lo esconde.** Esa fila es la pata-activo de un par de deuda, y
-`signed_amount_expr` ([accounts/repository.py:65](../backend/app/modules/personal_finance/accounts/repository.py#L65))
-la fija en 0: *«dinero prestado, no ahorro»*. El carve-out asume que el abono
-viene compensado por un cargo del mismo importe en la misma cuenta —el «cargo
-espejo», que `convert_to_debt_operation` borra— y entonces el neto es 0. Aquí
-el cargo que absorbió (`Recibo mes anterior`, 04-jul) **no tiene
-`statement_balance`**: venía del extracto de la TARJETA importado por error en
-la cuenta del banco. Se anuló un abono real contra un cargo que en esa cuenta
-nunca existió.
-
-Generalizando: el carve-out es correcto cuando el dinero prestado NO aterriza
-(par neto cero) y falso cuando sí aterriza — caja +X y deuda +X dejan el
-patrimonio neto igual, que es justo lo que el docstring quiere proteger.
-
-**Lo que hay debajo, y es más feo.** Cinco filas con `absorbed_as_mirror`
-suman 2.196,01 € frente a 1.980,02 € de patas-activo vivas. Entre ellas **dos
-filas idénticas de 215,99 €** (el mismo abono absorbió dos cargos) y una compra
-normal, `Taxdown Ocio`, que no se parece a una liquidación. El desfase de los
-espejos viejos está enterrado en `opening_balance`: el anclaje de PHASE-39 lo
-reabsorbe en cada importación, así que sólo asoma el error posterior al último
-anclaje.
-
-**Cuidado al arreglarlo**: toca `signed_amount_expr`, que gobierna saldos,
-patrimonio neto y la serie histórica. Hace falta un golden de saldos
-antes/después y comprobar que reimportar el extracto no resucita el cargo
-(`find_existing_hashes` cuenta los absorbidos como existentes precisamente
-para eso).
-
 ## ~~El abono de financiación entra como INGRESO desde el extracto de la tarjeta~~ (PHASE-47.E → resuelto en 47.F)
 
 > **Resuelto**: la regla mira ahora la DIRECCIÓN ya resuelta, no el signo crudo
@@ -667,42 +670,25 @@ dirección ya resuelta, no el signo crudo del fichero.
 Corregido a mano en los datos del usuario (esa fila es ahora `TRANSFER_IN`); el
 clasificador sigue igual.
 
-## Una declaración manual no sobrevive a una reimportación (PHASE-47.H, visto 2026-08-18)
+## ~~Feature propuesta — el mes lo define el usuario~~ (IMPLEMENTADA, PHASE-47)
 
-**Medido en datos reales.** El usuario reimportó julio (fichero nuevo con los
-días 1-5 que faltaban) y la reimportación borró las filas viejas y creó otras
-nuevas. Con las viejas se fueron sus declaraciones: los cuatro `Adeudo mensual`
-que había declarado GASTO (liquidaciones anticipadas, 1.099,64 €) renacieron
-neutros, y el resultado de julio pasó de −253,17 a +398,87 **sin que nadie lo
-decidiera**. También se fue el enlace del abono de financiación con su deuda
-(un clic en la app lo rehace; el flow hubo que restaurarlo a mano).
+> **Hecha, y con un alcance mayor que el propuesto.** El diseño original la
+> planteaba como un PRESET («Mi ciclo» junto a «Mes»), y así se construyó. El
+> usuario la probó y dio el veredicto que reorientó todo: *«sigue siendo raro e
+> incómodo»* — el ajuste estaba puesto y media app le seguía enseñando el mes
+> natural. Ahora el día **redefine** qué es un mes: el chip desaparece, «Mes» es
+> su mes en toda la app, y en Ajustes hay un check «Modo predeterminado» que
+> nombra el comportamiento por defecto.
+>
+> Alcance final: los dos toggles, los dos navegadores, el `TimeSelector`, y las
+> pantallas de Dashboard, Análisis y Deuda de web y móvil; en backend, la
+> proyección de fin de mes, el runway, los presupuestos, la ventana de gasto
+> estructural, el DTI, la tarjeta del dashboard y la serie mensual de deuda.
+> Una declaración por capa (`packages/services/src/period/user-month.ts` y
+> `backend/app/modules/personal_finance/user_month.py`) en vez de un ternario
+> repetido en seis pantallas y un mes natural derivado a mano en seis agregados.
+>
+> Lecciones en [`lessons.md`](lessons.md): por qué un ajuste que redefine un
+> concepto no debe ofrecerse además como preset, y por qué el primer test de un
+> reemplazo así es el de conservación.
 
-**Lo que sí sobrevive**: las cuotas pagadas del cuadro (viven en
-`liability_installments`, no en las filas) y las marcas de aplazamiento de
-junio (`deferred_by_account_id` — vivirían el mismo problema si se reimportara
-JUNIO).
-
-**El alcance real**: toda declaración a nivel de fila muere con la fila —
-`flow` corregido a mano, `amortization_source_id`, `deferred_by_account_id`,
-categoría elegida por el usuario (ésta se re-resuelve vía bank-mappings, las
-demás no tienen mecanismo).
-
-**Pista para el arreglo**: el `import_hash` se construye con
-usuario+importe+fecha+descripción, así que la fila reimportada llega con EL
-MISMO hash que la borrada. Un import podría re-aplicar las declaraciones de la
-fila anterior buscándola por hash en la papelera (la reimportación de julio
-habría conservado las cuatro declaraciones y el enlace sin tocar nada). La
-alternativa —una tabla de overrides por hash— cubre además el caso de purga
-dura. Sin esto, cada reimportación exige re-auditar a mano qué declaraciones
-existían, que es exactamente el trabajo que la app debería recordar.
-
-## Feature propuesta — el mes lo define el usuario (ciclo de nómina en Ajustes)
-
-El usuario cobra los días 14-15 y su ciclo de pagos corre nómina-a-nómina; los
-agregados mensuales cortan por mes natural y las dos ventanas divergen 3-4×
-(medido 2026-08-18: +1.2k vs +0.3k para el mismo agosto). Diseño completo, con
-inventario de consumidores de «mes», plan V1/V2/V3 y preguntas abiertas, en
-[`improvements/user-defined-month-cycle.md`](improvements/user-defined-month-cycle.md).
-V1 es barata: `users.cycle_start_day` + preset «Mi ciclo» sobre el
-`date_from/date_to` de PHASE-42, sin SQL nuevo. Invariante: presentación pura,
-ni un céntimo de saldo se mueve.

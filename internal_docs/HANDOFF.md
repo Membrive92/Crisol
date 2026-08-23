@@ -1,52 +1,61 @@
-# Dónde estamos — 2026-08-18
+# Dónde estamos — 2026-08-23
 
-Punto de continuación tras las sesiones del 15-18 de agosto. Se lee de arriba
+Punto de continuación tras las sesiones del 20-23 de agosto. Se lee de arriba
 abajo; lo que hay que decidir está al final.
 
 ---
 
 ## Lo primero al retomar
 
-**Julio está completo y cuadrado, y el usuario lo dio por bueno** («ya me
-cuadra»). BBVA coincide al céntimo con el banco (1.778,19 € a 30-jul), la
-cadena de saldos no tiene huecos y la auditoría (`make audit-balances`) sale
-limpia. Las fases 47.F, 47.G y 47.H están commiteadas y **empujadas a `main`**.
+**Hay tres entregas commiteadas y verdes esperando tu prueba manual**, y las
+tres tocan cómo se reparte el dinero por períodos. Nada se ha probado contra la
+app en marcha.
 
-Estado de julio bajo el modelo del usuario (caja pura, decidido por él):
-**−700,77 €** — absorbió 1.099,64 € de liquidaciones anticipadas de las tres
-compras financiadas (por eso agosto viene ligero). Junio: **+1.137,48 €** con
-685,01 € de compras aplazadas excluidas (el recibo financiado). El desglose por
-categorías mantiene ambas cifras de gasto a propósito; la pantalla dice la
-diferencia.
+| Entrega | Qué |
+|---|---|
+| [47.I](phases/phase-47.I-declarations-survive-reimport.md) | Una declaración manual sobrevive a una reimportación · el cargo de tarjeta sabe de cuál viene |
+| [47.J](phases/phase-47.J-a-statement-date-is-a-civil-date.md) | Una fecha de extracto es una fecha CIVIL (469 de 491 filas estaban desplazadas un día) |
+| [48](phases/phase-48-the-user-defines-the-month.md) | El día en que cobras REDEFINE qué es un mes en toda la app |
 
-**La lección operativa del 18-ago**: una reimportación BORRA las declaraciones
-manuales a nivel de fila. La de julio se llevó tres — el flow de gasto de los
-cuatro adeudos, las 19 marcas de aplazamiento y el enlace de la financiación —
-y hubo que restaurarlas (las dos primeras, hechas; el enlace sigue pendiente de
-un clic del usuario). Entrada en `backlog.md` con la pista del arreglo (mismo
-`import_hash` → re-aplicar desde la papelera). **Tras cualquier reimportación,
-comprobar las tres cosas.**
+### Cómo probarlo
 
-### Lo que falta
+1. `.\dev.ps1` — **reinicia**: el backend en marcha puede ser anterior a estos
+   cambios, y eso ya nos costó una sesión entera de diagnóstico.
+2. Ajustes → desmarca «Modo predeterminado» → elige tu día → Guardar. La
+   previsualización enseña qué cae a cada lado ANTES de guardar.
+3. Análisis: el toggle es «Mes / Año / Personalizado», sin chip. Comprueba que
+   cuadran entre sí la proyección de fin de mes (los días restantes cuentan
+   hasta TU corte), los presupuestos, el DTI de Deuda y el chart.
+4. Transacciones: pulsa un chip de mes — debe darte tu período, no del 1 al 31.
 
-1. **Un clic del usuario**: «Es una financiación» para re-enlazar el abono de
-   700,26 (6-jul) con su deuda (capital del cuadro coincide al céntimo). No
-   mueve ningún número; deja declarado el origen.
-2. **Importar agosto** cuando esté. Predicción falsable dejada por escrito:
-   recibo de ~589,38 cargado ~2-ago (NO financiado, confirmado por el usuario),
-   1ª cuota del financiado 26,60 el ~6-ago, y su «+1k de ahorro hasta el 15»
-   es agosto natural (1→15), no nómina-a-nómina (que da ~+300/600). La nómina
-   se fecha el **14**, así que un filtro 15→15 la deja fuera.
-3. **Cuatro filas absorbidas siguen muertas a propósito** (`Taxdown` de marzo,
-   dos `Western union` de mayo, `Recibo mes anterior` de julio). No constan
-   como líneas de BBVA: venían del extracto de la tarjeta importado en el
-   banco. Decidirlas requiere mirar los extractos. Igual que la operación
-   financiada de 239 € del 24-mar, viva en BBVA y que tampoco es suya.
+### Lo que ya sabemos que verás distinto
+
+- El chart de Ingresos vs Gastos son **12 barras de tu año** (12-ene → 11-ene),
+  no del año natural. Los días 1..D−1 de enero caen en tu año anterior.
+- **Un solo aviso** en Análisis de móvil, bajo la evolución de patrimonio: es la
+  única tarjeta que sigue en meses naturales (su serie son 12 meses fijos).
+- El tooltip de cada barra dice el rango exacto («12 dic – 11 ene»).
+
+### Lo que sigue pendiente de antes
+
+1. **Un clic**: «Es una financiación» para re-enlazar el abono de 700,26 € del
+   6-jul con su deuda. No mueve ningún número; deja declarado el origen.
+2. **Importar agosto** cuando esté.
+3. **Las tablas de respaldo** `_bak_civil_dates_20260822` y
+   `_bak_civil_paid_at_20260822` guardan las fechas anteriores al arreglo de
+   47.J. Bórralas cuando lo des por bueno.
 4. **Orden obligatorio si se tocan datos**: arreglar → re-anclar → y sólo
-   entonces reimportar (`re_anchor_from_stored` corre en cada commit de import
-   y absorbería la diferencia en silencio).
-5. **Presupuestos ignoran las devoluciones** — decisión del usuario («no están
-   probados»), no un olvido.
+   entonces reimportar.
+
+### La lección de estas sesiones
+
+Una revisión adversarial encontró **nueve defectos** en el trabajo de 48, cinco
+de ellos introducidos en ese mismo trabajo y cuatro en cosas ya declaradas
+arregladas. Ninguno era visible con la suite en verde. Y la primera vez que se
+lanzó **no llegó a ejecutarse** —las cinco lentes murieron por límite de
+sesión— devolviendo un resultado indistinguible de una revisión limpia; el
+script ahora reporta cuántas lentes trajeron resultado, para que «cero
+hallazgos» y «cero ejecuciones» no se confundan.
 
 ---
 

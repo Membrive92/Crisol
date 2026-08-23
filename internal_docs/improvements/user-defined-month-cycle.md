@@ -3,6 +3,9 @@
 > Propuesta — no implementada. Escrita el 2026-08-18, el mismo día en que el
 > caso motivador se midió con datos reales. Documento de diseño para una fase
 > futura; decide el usuario cuándo entra.
+>
+> **Plan de implementación** (2026-08-20, verificado contra el código):
+> [user-defined-month-cycle-implementation-plan.md](user-defined-month-cycle-implementation-plan.md).
 
 ## Qué se pide
 
@@ -70,6 +73,15 @@ cimiento que abarata la V1.
 
 ## Diseño propuesto, por entregas
 
+> **Re-alcance (2026-08-20, decisión del usuario — D6 del
+> [plan](user-defined-month-cycle-implementation-plan.md))**: el corazón de V2
+> —las series mensuales de P&G cortando por ciclo, histórico entero— es
+> REQUISITO de la entrega, no una fase posterior: *«si el usuario define que
+> el 13 es su fecha de inicio de mes, debería ajustarse todo el histórico para
+> ver los flujos de caja de pérdidas y ganancias de todos los meses»*. El plan
+> lo recoge como entregable C4. El resto de V2 (recurrencia, month-outlook,
+> series de deuda, patrimonio) sigue como fase posterior, y presupuestos en V3.
+
 ### V1 — el preset «Mi ciclo» (barata: cero SQL nuevo)
 
 - **Dato**: `users.cycle_start_day` (1–28; NULL = mes natural). Se guarda en
@@ -104,18 +116,31 @@ Los presupuestos usan clave `YYYY-MM` y el usuario los declaró zona no probada
 (PHASE-47.H: «no los toques»). Migrarlos a ciclo es una decisión suya con su
 propia fase; V1/V2 no los tocan.
 
-## Preguntas abiertas (decide el usuario)
+## Preguntas abiertas — RESUELTAS por el usuario el 2026-08-20
+
+Respondidas al cerrar el
+[plan de implementación](user-defined-month-cycle-implementation-plan.md)
+(decisiones D1–D5 en su §8).
 
 1. **Etiqueta del ciclo**: `[14-ago → 13-sep]` ¿se llama «Agosto» (mes del
    cobro que lo abre) o «14 ago – 13 sep» (explícito)? Recomendación:
    explícito en V1 («Ciclo del 14 ago»), porque un «Agosto» que no es agosto
    genera los mismos «no me cuadra» que esto viene a matar.
+   → **Respuesta (2026-08-20): «el día de cobro de la nómina»** — la etiqueta
+   ancla el ciclo a su día de cobro («Ciclo del 14 ago»); el rango explícito
+   «14 ago – 13 sep» acompaña en los displays que ya son de rango. «Agosto» a
+   secas queda descartado.
 2. **¿Cambiar el ajuste re-corta la historia entera?** Recomendación: sí — es
    presentación pura y recalcular es gratis; pero el selector debe avisar de
    que las comparativas «vs mes anterior» cambian de base.
+   → **Respuesta (2026-08-20): sí, todo** — con el aviso de cambio de base en
+   el selector.
 3. **¿El día del corte es fecha-valor o fecha contable?** La nómina del caso
    real se fecha el 14 cobrándose «el 15». La previsualización de Ajustes
    existe para que esta pregunta no necesite respuesta teórica.
+   → **Respuesta (2026-08-20): se responde mirando las filas** en la
+   previsualización de Ajustes (PARADA 1 del plan), como el propio diseño
+   proponía; no se fija respuesta teórica.
 
 ## Qué NO es esta feature
 

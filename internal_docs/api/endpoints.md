@@ -45,6 +45,32 @@ Reglas:
   rota a otro refresh con TTL extendido.
 - Password hashing: argon2id.
 
+## Users — preferencias del perfil
+
+| Método | Ruta | Auth | Body | Response |
+|--------|------|------|------|----------|
+| PATCH | `/users/me` | sí | `{ cycle_start_day: int \| null }` (requerido, nullable) | `200` `UserResponse` |
+
+La LECTURA del perfil sigue viviendo en `GET /auth/me` — devuelve el mismo
+`UserResponse`, así que no hay un `GET /users/me` que pueda divergir de él.
+
+`cycle_start_day` (entregable C1, «el mes lo define el usuario») — día **1-28**
+en que empieza el mes del usuario a efectos de **presentación**; `null` lo
+devuelve al mes natural. Fuera de rango → `422` (lo valida el schema y lo
+reafirma un `CHECK` en la BD). El campo es **requerido en el body** aunque
+acepte `null`: enviar `null` significa «vuelvo al mes natural», así que no hace
+falta distinguir ausente-vs-`None`.
+
+Presente en toda `UserResponse` desde esta fase. **Los clientes deben tratarlo
+como posiblemente AUSENTE** mientras exista un backend anterior en marcha, y
+decidir por verdad (`cycle_start_day ? … : …`), nunca comparando con `null`
+(lección PHASE-47.E). El endpoint no acepta identificador de usuario ni en la
+ruta ni en el body: el único perfil alcanzable es el del token.
+
+Es una convención de presentación: cambiarla **no mueve ni un céntimo** de
+ningún saldo, patrimonio o KPI de deuda (guardarraíl en
+`tests/test_user_cycle.py::test_el_ciclo_no_mueve_ni_un_centimo`).
+
 ## WebAuthn / Passkeys
 
 | Método | Ruta | Auth | Body | Response |
@@ -96,7 +122,7 @@ asociadas conservan `category_id = NULL` (`ON DELETE SET NULL`).
 
 | Método | Ruta | Auth | Body / Query | Response |
 |--------|------|------|--------------|----------|
-| GET | `/transactions` | sí | `account_id?` (PHASE-21.3), `category_id?`, `uncategorized?` (bool, PHASE-31.3 — filtra las sin categoría; ignora `category_id` si llegan ambos), `date_from?`, `date_to?`, `search?`, `target_currency?` (3 letras, PHASE-8.4), `limit` (1..200, def 50), `offset` (def 0) | `200` `{ items, total, limit, offset }` (sólo activas) |
+| GET | `/transactions` | sí | `account_id?` (PHASE-21.3), `category_id?`, `uncategorized?` (bool, PHASE-31.3 — filtra las sin categoría; ignora `category_id` si llegan ambos), `date_from?`, `date_to?`, `search?`, `target_currency?` (3 letras, PHASE-8.4), `order?` (`asc \| desc`, def `desc`), `limit` (1..200, def 50), `offset` (def 0) | `200` `{ items, total, limit, offset }` (sólo activas) |
 | GET | `/transactions/trash` | sí | `limit` (1..200, def 50), `offset` (def 0) | `200` `{ items, total, limit, offset }` — soft-deleted, `deleted_at DESC` (PHASE-10.1) |
 | GET | `/transactions/{id}` | sí | — | `200` `TransactionResponse` (404 si trasheada) |
 | POST | `/transactions` | sí | `{ account_id, amount, occurred_at, category_id?, currency?, description?, source?, flow?, is_exceptional? }` (PHASE-21.2: `account_id` obligatorio; PHASE-34: `flow` = `IN\|OUT\|TRANSFER_IN\|TRANSFER_OUT`, si se omite se deriva de la categoría; PHASE-37.3: `is_exceptional` tri-estado `null`/`true`/`false`) | `201` `TransactionResponse` (puede traer `budget_alert`, PHASE-14.5) |
@@ -107,13 +133,20 @@ asociadas conservan `category_id = NULL` (`ON DELETE SET NULL`).
 | POST | `/transactions/reassign-account` | sí | `{ target_account_id, account_id?, category_id?, date_from?, date_to?, search? }` (PHASE-32; filtros = los de `GET /transactions`) | `200 { reassigned_count, skipped_other_currency }` — mueve en bloque las tx **activas** que matchean a `target_account_id`. Excluye transferencias internas, las ya en destino y (HIGH#3) las de **otra divisa** que la cuenta destino (moverlas las sacaría del saldo); estas se cuentan en `skipped_other_currency`. 404 si la cuenta destino no es del usuario |
 | POST | `/transactions/trash/restore` | sí | — | `200 { restored_count }` — restaura TODAS las tx en papelera del usuario (idempotente) — PHASE-10.2 |
 | DELETE | `/transactions/trash` | sí | — | `200 { purged_count }` — DELETE real de TODAS las tx en papelera (IRREVERSIBLE, idempotente) — PHASE-10.2 |
-| GET | `/transactions/available-periods` | sí | — | `200 { periods: [{ year, months[] }] }` — años + meses con tx activas, para el selector temporal (PHASE-27) |
+| GET | `/transactions/available-periods` | sí | `cycle?` (def `false`) | `200 { periods: [{ year, months[] }] }` — años + meses con tx activas, para el selector temporal (PHASE-27). Con `cycle=true` los `(año, mes)` son **anclas de ciclo** del usuario, no meses naturales — mismo portero que el dashboard: el día sale del perfil y sin ajuste configurado responde `422` (ver [«`cycle`»](#cycle--el-histórico-agrupado-por-el-mes-que-define-el-usuario)) |
 | GET | `/transactions/uncategorized-summary` | sí | — | `200 { count, total_amount, currency }` — conteo + suma de tx activas sin categoría (banner UX, PHASE-31.3) |
 | DELETE | `/transactions` | sí | `account_id?`, `category_id?`, `date_from?`, `date_to?`, `search?` (filtros = `GET /transactions`) | `200 { deleted_count }` — mueve a papelera en bloque las tx activas que matchean; sin filtros, todas. Idempotente |
 | POST | `/transactions/bulk-categorize` | sí | `{ transaction_ids[], category_id }` | `200 { updated }` — relabel puro de categoría de las tx seleccionadas; NO toca el dinero (`flow`/par). `400` si `category_id` ajeno (PHASE-34) |
 
 `source`: `manual | import | receipt | expected` (default `manual`).
 Importes positivos.
+
+`order` (entregable C1 del ciclo del usuario) — sentido del `ORDER BY
+occurred_at` del LISTADO (`asc | desc`, default `desc`, vocabulario cerrado:
+otro valor es `422`). Con `asc` las primeras `limit` filas son las **más
+antiguas** de la ventana, que es lo que necesita la previsualización del ciclo
+en Ajustes para enseñar con qué EMPIEZA el mes nuevo. No filtra: `total` es el
+mismo recuento con cualquiera de los dos valores.
 
 `flow` (PHASE-34) — fuente de verdad de la dirección del dinero
 (`IN | OUT | TRANSFER_IN | TRANSFER_OUT`). Siempre presente en
@@ -173,12 +206,59 @@ gana `target_currency` si llegan ambos. Sin ninguno, default a
 | Método | Ruta | Query | Response |
 |--------|------|-------|----------|
 | GET | `/dashboard/currencies` | — | `string[]` con las monedas distintas presentes en las transacciones del usuario (ordenadas alfabéticamente). |
-| GET | `/dashboard/summary` | `currency` (def `USD` legacy), `target_currency?` (cross-currency), `date_from?`, `date_to?` | `{ income, expenses, balance, transaction_count, currency, unconvertible_count, previous_period_income, previous_period_expenses, previous_period_balance }` |
+| GET | `/dashboard/summary` | `currency` (def `USD` legacy), `target_currency?` (cross-currency), `date_from?`, `date_to?`, `cycle?` (def `false`) | `{ income, expenses, balance, transaction_count, currency, unconvertible_count, previous_period_income, previous_period_expenses, previous_period_balance, available_from, available_to }` |
 | GET | `/dashboard/by-category` | `currency` o `target_currency`, `date_from?`, `date_to?`, `kind?` (`income\|expense`) | `[{ category_id, category_name, category_kind, total, count }]` |
-| GET | `/dashboard/by-month` | `year` (def actual), `currency` o `target_currency`, `date_from?`/`date_to?` (PHASE-42) | `[{ month: "YYYY-MM", income, expenses, balance }]` — 12 buckets del año, o (con `date_from`+`date_to`) **un bucket por mes tocado por el rango**, con los meses de borde PARCIALES para cuadrar con los KPIs de flujo del mismo rango |
+| GET | `/dashboard/by-month` | `year` (def actual), `currency` o `target_currency`, `date_from?`/`date_to?` (PHASE-42), `cycle?` (def `false`) | `[{ month: "YYYY-MM", income, expenses, balance }]` — 12 buckets del año, o (con `date_from`+`date_to`) **un bucket por mes tocado por el rango**, con los meses de borde PARCIALES para cuadrar con los KPIs de flujo del mismo rango |
 | GET | `/dashboard/top-expenses` | `currency` o `target_currency`, `date_from?`, `date_to?`, `limit` (1..50, def 10) | `[{ transaction_id, description, amount, occurred_at, category_id, category_name, original_amount, original_currency }]` (PHASE-8.4: `original_*` siempre presentes; `amount` es el convertido en cross-currency, original en legacy) |
-| GET | `/dashboard/category/{category_id}` | `currency` o `target_currency`, `date_from?`, `date_to?`, `months_back` (1..36, def 12) | `200 CategoryDetailResponse` — drill-down de una categoría: KPIs del rango + evolución mensual + top 10 tx (PHASE-25) |
-| GET | `/dashboard/category/{category_id}/available-periods` | — | `200 CategoryAvailablePeriodsResponse` — años + meses con tx activas de la categoría, para el selector temporal del drill-down (PHASE-27) |
+| GET | `/dashboard/category/{category_id}` | `currency` o `target_currency`, `date_from?`, `date_to?`, `months_back` (1..36, def 12), `cycle?` (def `false`) | `200 CategoryDetailResponse` — drill-down de una categoría: KPIs del rango + evolución mensual + top 10 tx (PHASE-25) |
+| GET | `/dashboard/category/{category_id}/available-periods` | `cycle?` (def `false`) | `200 CategoryAvailablePeriodsResponse` — años + meses con tx activas de la categoría, para el selector temporal del drill-down (PHASE-27) |
+
+#### `cycle` — el histórico agrupado por el mes que define el usuario
+
+`cycle=true` cambia la **pregunta** que responde el endpoint: en vez de «¿qué
+pasó en agosto?», «¿qué pasó de nómina a nómina?». Los buckets dejan de ser
+meses naturales y pasan a ser los **ciclos** del usuario, para todo el
+histórico. Lo llevan `by-month`, `summary`, `category/{id}` y su
+`available-periods`, más `GET /transactions/available-periods`.
+
+- **El día NUNCA viaja en la query**: sale de `users.cycle_start_day` (el perfil
+  que `CurrentUser` ya trae en cada request). El flag sólo dice *qué* pregunta
+  se hace, no con qué número responderla — si el cliente pudiera mandar el día,
+  dos pantallas podrían pintar cortes distintos del mismo dato.
+- **`cycle=true` sin el ajuste configurado → `422`** con mensaje que remite a
+  Ajustes. No se degrada a mes natural con un `200`: el cliente creería estar
+  viendo sus ciclos.
+- **PHASE-48 — el flag lo manda el cliente SIEMPRE que el perfil tenga día.**
+  Aquí decía «`cycle` ausente = comportamiento de hoy, aunque el usuario tenga
+  su día configurado: son dos preguntas distintas y las dos conservan su vista».
+  Eso describía el diseño de PRESET, que el usuario rechazó al probarlo: el
+  ajuste estaba puesto y media app le seguía enseñando el mes natural. Ahora el
+  día REDEFINE el mes, así que el cliente pide con `cycle=true` en cuanto el
+  perfil lo declara, y `cycle` ausente significa «este usuario no ha declarado
+  ninguno».
+- **La etiqueta del bucket sigue siendo `YYYY-MM`**, y es el mes que **ABRE** el
+  período: `2026-08` con `D = 14` significa «del 14-ago al 13-sep». El frontend
+  lo pinta como «Agosto 2026» —decisión del usuario: su mes se llama como
+  siempre se ha llamado— y enseña el rango exacto en el tooltip.
+- **La vista de año son los 12 períodos que abren en ese año**, y el AÑO del
+  usuario también se desplaza: su 2026 va del 14-ene-2026 al 13-ene-2027. Hubo
+  brevemente un 13.º bucket (el que abre en diciembre del año anterior) para no
+  perder los días 1..D−1 de enero; el usuario lo cortó al verlo —«si estoy
+  viendo gastos de 2026, no debería salir ese diciembre de 2025»— y la
+  conclusión correcta era desplazar el año, no añadir una barra. Consecuencia
+  dicha en voz alta: esos días caen en SU año anterior.
+- **`available_from`/`available_to` también se desplazan**: son anclas de ciclo,
+  no meses naturales, para que las flechas ◀▶ aterricen en períodos con datos.
+- **`previous_period_*` pasa a ser ciclo-exacto** cuando el rango recibido ES un
+  ciclo entero (ancla − 1), en vez de una ventana de igual longitud. Con un
+  rango libre y el preset activo sigue siendo la ventana.
+- **Ninguna query de dinero lo lee.** El desplazamiento vive sólo en el
+  bucketing de flujos: saldos, patrimonio, anclas de extracto y cuadro de deuda
+  son idénticos con y sin ajuste
+  (`tests/test_user_cycle.py::test_el_ciclo_no_mueve_ni_un_centimo`).
+- Fuera de esta lista siguen cortando por mes natural: analytics (recurrencia,
+  `month-outlook`, insights), las series de Deuda y el DTI, la evolución de
+  patrimonio y los presupuestos.
 
 Reglas relevantes:
 - `summary.transaction_count` cuenta todas las transacciones del rango,
@@ -189,11 +269,12 @@ Reglas relevantes:
   legacy; en modo cross-currency cuenta las transacciones sin tasa
   histórica disponible (ni exacta ni en ventana de 14 días).
 - `summary.previous_period_*` se computa cuando llegan `date_from` y
-  `date_to` (PHASE-42, `_previous_period`): si el rango es un **mes
-  natural** completo → el mes natural anterior; si es un **año** completo
-  → el año anterior; en otro caso (rango libre) → una **ventana de igual
-  longitud** inmediatamente anterior. Si no llega rango, los tres campos
-  son `null` y el frontend no pinta delta.
+  `date_to` (PHASE-42, `_previous_period`): si el rango es un **ciclo**
+  completo del usuario y viene `cycle=true` → el **ciclo anterior exacto**
+  (ancla − 1); si es un **mes natural** completo → el mes natural anterior; si
+  es un **año** completo → el año anterior; en otro caso (rango libre) → una
+  **ventana de igual longitud** inmediatamente anterior. Si no llega rango, los
+  tres campos son `null` y el frontend no pinta delta.
 - `currencies` permite al frontend hidratar el selector de moneda con
   valores reales del usuario en lugar de hardcodear `USD`/`EUR`.
 - `by-category` incluye un bucket `{ category_id: null, category_name:
