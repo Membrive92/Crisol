@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 
-import { pickPreferredAccount, useAccounts, useCategories } from '@crisol/services';
+import { pickPreferredAccount, useAccounts, useCategories, todayDayStr } from '@crisol/services';
 import type { ReceiptConfirmRequest, ReceiptExtraction } from '@crisol/types';
 import {
   colors,
@@ -44,7 +44,7 @@ function buildInitialValues(extraction: ReceiptExtraction | Record<string, unkno
   return {
     amount: asString(ext['total']),
     currency: asString(ext['currency']) || 'EUR',
-    occurred_at: occurred ? toDateInputValue(occurred) : toDateInputValue(new Date().toISOString()),
+    occurred_at: occurred ? toDateInputValue(occurred) : todayDayStr(),
     category_id: '',
     account_id: '',
     description: asString(ext['merchant']),

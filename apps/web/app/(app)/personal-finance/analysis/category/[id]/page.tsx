@@ -16,6 +16,8 @@ import {
 import {
   useCategoryAvailablePeriods,
   useCategoryDetail,
+  userMonthIsCycle,
+  useMe,
 } from '@crisol/services';
 import { useCurrencyStore } from '@crisol/store';
 import {
@@ -23,7 +25,7 @@ import {
   fontSize,
   fontWeight,
   formatAmount,
-  formatDate,
+  formatCivilDate,
   layout,
   radius,
   spacing,
@@ -70,7 +72,21 @@ export default function CategoryDetailPage() {
     return { dateFrom: start.toISOString(), dateTo: end.toISOString() };
   });
 
-  const { data: availablePeriods = [] } = useCategoryAvailablePeriods(id);
+  // El día en que empieza el mes del usuario. Sin ajuste llega `undefined` y
+  // todo sigue igual.
+  const { data: me } = useMe();
+  const cycleStartDay = me?.cycle_start_day ?? undefined;
+  /*
+   * PHASE-47 — el RANGO y el BUCKETING, en la misma unidad.
+   *
+   * El `TimeSelector` de abajo emite rangos de ciclo, así que los KPIs y el
+   * top-10 ya salían del ciclo; pero la serie mensual y los chips volvían en
+   * meses naturales, en la misma pantalla y sin aviso. No era un olvido: el
+   * tipo de la query no declaraba el campo, así que la página NO PODÍA
+   * pedirlo, y el soporte del backend —con su test— era inalcanzable.
+   */
+  const esCiclo = userMonthIsCycle(cycleStartDay);
+  const { data: availablePeriods = [] } = useCategoryAvailablePeriods(id, esCiclo);
 
   // Construimos la query del backend sólo con los campos definidos
   // (TS strict no admite `undefined` explícito en props opcionales).
@@ -78,6 +94,7 @@ export default function CategoryDetailPage() {
     ...(convertAll ? { target_currency: currency } : { currency }),
     ...(range.dateFrom ? { date_from: range.dateFrom } : {}),
     ...(range.dateTo ? { date_to: range.dateTo } : {}),
+    ...(esCiclo ? { cycle: true } : {}),
   };
 
   const { data, isLoading, isError, error } = useCategoryDetail(id, query);
@@ -190,6 +207,7 @@ export default function CategoryDetailPage() {
           availablePeriods={availablePeriods}
           value={range}
           onChange={setRange}
+          cycleStartDay={cycleStartDay}
         />
       </div>
 
@@ -370,7 +388,7 @@ export default function CategoryDetailPage() {
                 <tbody>
                   {data.top_transactions.map((tx) => (
                     <tr key={tx.transaction_id}>
-                      <Td>{formatDate(tx.occurred_at)}</Td>
+                      <Td>{formatCivilDate(tx.occurred_at)}</Td>
                       <Td style={{ overflowWrap: 'anywhere' }}>
                         <Link
                           href={

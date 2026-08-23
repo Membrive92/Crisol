@@ -58,6 +58,7 @@ from app.modules.personal_finance.dashboard.conversion import (
 from app.modules.personal_finance.dashboard.repository import (
     _is_income,
     _is_internal_transfer,
+    cycle_shifted_occurred_at,
 )
 from app.modules.personal_finance.debt.amortization import (
     build_schedule,
@@ -73,6 +74,7 @@ from app.modules.personal_finance.debt.installments_repository import (
 )
 from app.modules.personal_finance.debt.schemas import DebtHealthKpis, DebtTypeSlice
 from app.modules.personal_finance.transactions.models import Transaction
+from app.modules.personal_finance.user_month import user_months_back
 
 DEFAULT_REFERENCE_CURRENCY = "EUR"
 
@@ -126,6 +128,7 @@ async def monthly_income_avg(
     *,
     months: int = 6,
     target_currency: str | None = None,
+    cycle_start_day: int | None = None,
 ) -> Decimal:
     """Media de ingresos mensuales en los últimos `months` meses
     completos. Excluye papelera y transferencias internas.
@@ -152,29 +155,21 @@ async def monthly_income_avg(
     today = _today_utc()
     # Último día del mes pasado (no incluimos el mes en curso porque
     # estaría incompleto y bajaría la media).
-    last_full_month_end = _start_of_month(today) - timedelta(days=1)
-    window_end = datetime(
-        last_full_month_end.year,
-        last_full_month_end.month,
-        last_full_month_end.day,
-        23,
-        59,
-        59,
-        tzinfo=UTC,
-    )
-    # Inicio: primer día del mes `months` atrás.
-    window_start_month = last_full_month_end
-    for _ in range(months - 1):
-        window_start_month = _start_of_month(window_start_month) - timedelta(days=1)
+    # PHASE-47 — la ventana son los `months` meses DEL USUARIO ya cerrados.
+    #
+    # Es el número que el ciclo existe para arreglar: quien cobra el 14 tiene
+    # una nómina en cada período de nómina a nómina, pero el mes natural le mete
+    # dos en unos meses y ninguna en otros, así que el ingreso medio con el que
+    # se divide la deuda oscila sin que su vida cambie — y con él la tasa de
+    # esfuerzo que decide si sale «sobreendeudado». Sin día declarado,
+    # `user_months_back` devuelve meses naturales exactos.
+    ventana = user_months_back(today, cycle_start_day, months)
+    primer_inicio, _ = ventana[0]
+    _, ultimo_fin = ventana[-1]
     window_start = datetime(
-        window_start_month.year,
-        window_start_month.month,
-        1,
-        0,
-        0,
-        0,
-        tzinfo=UTC,
+        primer_inicio.year, primer_inicio.month, primer_inicio.day, 0, 0, 0, tzinfo=UTC
     )
+    window_end = datetime(ultimo_fin.year, ultimo_fin.month, ultimo_fin.day, 23, 59, 59, tzinfo=UTC)
 
     amount_expr = (
         converted_amount_expr(target_currency)
@@ -184,7 +179,10 @@ async def monthly_income_avg(
     # AUDIT-2026-06 (fix #6) — Agrupamos por mes (truncado en UTC, igual
     # criterio de bucket que debt_history) para poder dividir por el nº de
     # meses con ingreso, no por un fijo `months`.
-    month_bucket = func.date_trunc("month", func.timezone("UTC", Transaction.occurred_at))
+    # El bucket usa la MISMA expresión desplazada que las series del dashboard
+    # (`cycle_shifted_occurred_at`): dos aritméticas del mismo período acabarían
+    # discrepando en los bordes, que es donde se cuentan las nóminas.
+    month_bucket = func.date_trunc("month", cycle_shifted_occurred_at(cycle_start_day))
     query = (
         select(month_bucket.label("bucket"), func.coalesce(func.sum(amount_expr), 0))
         .select_from(Transaction)
@@ -711,6 +709,7 @@ async def compute_debt_health(
     user_id: uuid.UUID,
     *,
     target_currency: str | None = None,
+    cycle_start_day: int | None = None,
 ) -> DebtHealthKpis:
     """Computa todos los KPIs de salud financiera para el usuario.
 
@@ -919,6 +918,7 @@ async def compute_debt_health(
         native_currency,
         months=6,
         target_currency=target_currency,
+        cycle_start_day=cycle_start_day,
     )
     dti_ratio = (
         float(monthly_payment_total / monthly_income)

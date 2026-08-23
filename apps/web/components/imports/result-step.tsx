@@ -8,7 +8,7 @@ import {
   fontSize,
   fontWeight,
   formatAmount,
-  formatDate,
+  formatCivilDate,
   radius,
   spacing,
 } from '@crisol/ui';
@@ -83,7 +83,7 @@ export function ResultStep({ job, onRestart }: ResultStepProps) {
           <strong style={{ fontVariantNumeric: 'tabular-nums' }}>
             {formatAmount(job.balance_anchor.balance)}
           </strong>{' '}
-          ({formatDate(job.balance_anchor.date)})
+          ({formatCivilDate(job.balance_anchor.date)})
         </div>
       ) : null}
 

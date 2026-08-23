@@ -13,12 +13,26 @@ import {
 } from 'recharts';
 
 import type { MonthlyBucket } from '@crisol/types';
-import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@crisol/ui';
+import {
+  SHORT_MONTHS_ES,
+  colors,
+  dayRangeLabel,
+  fontSize,
+  fontWeight,
+  formatAmount,
+  radius,
+  spacing,
+  cycleRangeLabel,
+} from '@crisol/ui';
+import { cycleDaysForAnchor } from '@crisol/services';
 
 import { Card, CardTitle } from '@/components/ui/card';
 import type { PeriodKey } from './stitch-period-toggle';
 
-const SHORT_MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+// Etiquetas del eje X, derivadas de la tabla compartida (`@crisol/ui`) en vez
+// de una copia propia: así el mes se escribe igual aquí, en el titular del
+// período y en el chart de móvil.
+const SHORT_MONTHS = SHORT_MONTHS_ES.map((m) => `${m.charAt(0).toUpperCase()}${m.slice(1)}`);
 
 const PERIOD_NAMES: Record<PeriodKey, string> = {
   month: 'Mes',
@@ -30,6 +44,18 @@ export interface StitchIncomeVsExpensesProps {
   data: MonthlyBucket[];
   currency: string;
   isLoading: boolean;
+  /**
+   * Día en que empieza el mes del usuario. NO cambia la etiqueta de la barra
+   * —el período se llama por el mes que lo ABRE— sino que añade el RANGO al
+   * tooltip.
+   *
+   * Existe por un caso concreto: con corte el 12, la primera barra del año es
+   * el período 12-dic → 11-ene, y para quien no tenía movimientos en diciembre
+   * contiene sólo la cola de enero. La barra se lee «Dic 25» y el usuario ve un
+   * año que nunca cargó. El dato es correcto; lo que faltaba era decir qué
+   * abarca.
+   */
+  cycleStartDay?: number | undefined;
   /**
    * AUDIT-2026-07 — período y mes ancla navegados. En `month`/`year` el chart
    * pinta los 12 meses del año y RESALTA los del período activo (atenúa el
@@ -45,6 +71,14 @@ export interface StitchIncomeVsExpensesProps {
   /** PHASE-41 — rango libre activo (`YYYY-MM-DD`): alimenta el caption del período. */
   customFrom?: string;
   customTo?: string;
+  /**
+   * C4 — Día en que empieza el mes del usuario. Con `period === 'cycle'` cada
+   * barra ES un ciclo, así que se etiqueta por su día de cobro («Ciclo del 14
+   * mar») en vez de con el nombre del mes: los buckets siguen llegando como
+   * `YYYY-MM`, pero ese `YYYY-MM` es el ANCLA del ciclo, no el mes natural.
+   * Etiquetarlas «Mar» diría que la barra es marzo entero, que es exactamente
+   * la confusión que esta feature existe para quitar.
+   */
   /**
    * Al hacer clic en un mes del chart, se invoca con su `YYYY-MM` para que el
    * caller navegue a ese mes (fija el mes ancla + período mensual). Sin este
@@ -62,23 +96,17 @@ function activeMonthsFor(period: PeriodKey, anchorMonth: string): Set<number> {
   return new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
 }
 
-/** `15 may` / con año si se pide (`15 dic 2025`) — parseo puro, sin `new Date`. */
-function fmtDay(day: string, withYear: boolean): string {
-  const [y, m, d] = day.split('-');
-  const mon = (SHORT_MONTHS[Number(m) - 1] ?? '').toLowerCase();
-  const base = `${Number(d)} ${mon}`;
-  return withYear ? `${base} ${y}` : base;
-}
-
-/** Caption del rango libre: `15 may – 15 jun 2026` (año a la izda si difiere). */
-function customRangeCaption(from: string, to: string): string {
-  const crossYear = from.slice(0, 4) !== to.slice(0, 4);
-  return `${fmtDay(from, crossYear)} – ${fmtDay(to, true)}`;
-}
+// El caption del rango libre (`15 may – 15 jun 2026`) sale de `dayRangeLabel`
+// (`@crisol/ui`), la MISMA función que pinta el subtítulo del ciclo. Estaba
+// escrita aquí como `fmtDay` + `customRangeCaption`, produciendo carácter a
+// carácter la misma cadena que la del ciclo, y las dos se pintan en esta
+// pantalla: dos copias que sólo se notan el día que alguien corrige una.
 
 interface ChartRow {
   month: string;
   monthLabel: string;
+  /** «12 dic – 11 ene», sólo con ciclo. */
+  rangeLabel: string | null;
   income: number;
   expenses: number;
   active: boolean;
@@ -93,6 +121,7 @@ export function StitchIncomeVsExpenses({
   data,
   currency,
   isLoading,
+  cycleStartDay,
   period,
   anchorMonth,
   customFrom,
@@ -110,11 +139,33 @@ export function StitchIncomeVsExpenses({
   const highlight = period === 'month' && anchorMonth != null;
   const activeMonths =
     period != null && anchorMonth != null ? activeMonthsFor(period, anchorMonth) : null;
+  /*
+   * PHASE-47 — las barras se llaman por su MES, tenga el usuario ciclo o no:
+   * su «julio» va del 12 de julio al 11 de agosto si ése es su corte, pero
+   * sigue llamándose julio. Aquí ponía «Ciclo del 12 jul», vocabulario nuevo
+   * para un concepto que el usuario ya tenía nombrado.
+   *
+   * El año se añade SÓLO cuando la serie cruza dos: con el mes del usuario, la
+   * vista anual arranca en el ciclo que abrió en diciembre del año anterior
+   * (porque contiene los días 1..D−1 de enero), así que sin esto habría dos
+   * barras «dic» indistinguibles en los extremos.
+   */
+  const years = new Set(data.map((b) => b.month.slice(0, 4)));
+  const mainYear = data.length > 0 ? data[data.length - 1]!.month.slice(0, 4) : null;
   const chartData: ChartRow[] = data.map((b) => {
     const monthNum = parseInt(b.month.slice(5, 7), 10); // 1-12
+    const short = SHORT_MONTHS[monthNum - 1] ?? b.month;
+    const year = b.month.slice(0, 4);
     return {
       month: b.month,
-      monthLabel: SHORT_MONTHS[monthNum - 1] ?? b.month,
+      monthLabel:
+        years.size > 1 && year !== mainYear ? `${short} ${year.slice(2)}` : short,
+      rangeLabel: cycleStartDay
+        ? (() => {
+            const d = cycleDaysForAnchor(cycleStartDay, b.month);
+            return cycleRangeLabel(d.fromDay, d.toDay);
+          })()
+        : null,
       income: Number(b.income),
       expenses: Number(b.expenses),
       active: activeMonths == null || activeMonths.has(monthNum),
@@ -127,7 +178,7 @@ export function StitchIncomeVsExpenses({
   // el mes resaltado; en year/omitido (con barras clicables), invita a clicar.
   const customCaption =
     isCustom && customFrom != null && customTo != null
-      ? customRangeCaption(customFrom, customTo)
+      ? dayRangeLabel(customFrom, customTo)
       : null;
   const periodCaption =
     highlight && period != null ? `Resaltado: ${PERIOD_NAMES[period]} navegado` : null;
@@ -229,6 +280,7 @@ export function StitchIncomeVsExpenses({
                 return (
                   <ComparisonTooltip
                     monthLabel={firstRow.monthLabel}
+                    rangeLabel={firstRow.rangeLabel}
                     entries={entries}
                     currency={currency}
                   />
@@ -383,11 +435,17 @@ function PeriodTotals({ income, expenses, currency }: PeriodTotalsProps) {
 
 interface ComparisonTooltipProps {
   monthLabel: string;
+  rangeLabel?: string | null;
   entries: readonly { name: string; value: number; color: string }[];
   currency: string;
 }
 
-function ComparisonTooltip({ monthLabel, entries, currency }: ComparisonTooltipProps) {
+function ComparisonTooltip({
+  monthLabel,
+  rangeLabel,
+  entries,
+  currency,
+}: ComparisonTooltipProps) {
   // PHASE-29.6: añadimos línea "Neto" debajo, separada por un
   // border-top, con color según signo. Se calcula a partir de los
   // entries (income − expenses) sin asumir un orden concreto.
@@ -405,9 +463,22 @@ function ComparisonTooltip({ monthLabel, entries, currency }: ComparisonTooltipP
         boxShadow: '0 8px 24px rgba(0, 0, 0, 0.32)',
       }}
     >
-      <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 4 }}>
+      <div
+        style={{ fontSize: 11, color: colors.textMuted, marginBottom: rangeLabel ? 0 : 4 }}
+      >
         {monthLabel}
       </div>
+      {/*
+        * Qué abarca de verdad la barra. Con corte a mitad de mes todos los
+        * períodos cruzan dos meses, y el nombre sólo dice cuál lo ABRE: sin
+        * esto, la primera barra del año se lee «Dic 25» aunque todo su dinero
+        * sea de enero.
+        */}
+      {rangeLabel ? (
+        <div style={{ fontSize: 10, color: colors.textMuted, marginBottom: 4, opacity: 0.8 }}>
+          {rangeLabel}
+        </div>
+      ) : null}
       {entries.map((entry) => (
         <div
           key={entry.name || String(entry.value)}

@@ -2,7 +2,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import type { TopExpenseItem } from '@crisol/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
-import { formatAmount, formatDate } from '@crisol/ui';
+import { formatAmount, formatCivilDate } from '@crisol/ui';
 
 export interface TopExpensesListProps {
   data: TopExpenseItem[] | undefined;
@@ -31,7 +31,7 @@ export function TopExpensesList({ data, currency, isLoading }: TopExpensesListPr
                 {item.description ?? 'Sin descripción'}
               </Text>
               <Text style={styles.meta}>
-                {(item.category_name ?? 'Sin categoría') + ' · ' + formatDate(item.occurred_at)}
+                {(item.category_name ?? 'Sin categoría') + ' · ' + formatCivilDate(item.occurred_at)}
               </Text>
             </View>
             <Text style={styles.amount}>{formatAmount(item.amount, currency)}</Text>

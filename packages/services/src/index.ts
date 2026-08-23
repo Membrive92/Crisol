@@ -7,6 +7,7 @@ export {
 } from './api/client';
 export { formatApiError } from './api/errors';
 export { authApi } from './api/endpoints/auth';
+export { usersApi } from './api/endpoints/users';
 export { passkeysApi, type PasskeyResponse } from './api/endpoints/passkeys';
 export { accountsApi, type AccountListQuery } from './api/endpoints/accounts';
 export { transfersApi } from './api/endpoints/transfers';
@@ -96,6 +97,32 @@ export {
   boundsForCustomRange,
 } from './period/debt-period';
 export type { NavigableRange } from './period/debt-period';
+export { boundsForAnchor, calendarPeriodFor } from './period/calendar-period';
+export {
+  MAX_CYCLE_START_DAY,
+  MIN_CYCLE_START_DAY,
+  canStepCycleNext,
+  canStepCyclePrev,
+  clampCycleAnchor,
+  cycleAnchorContaining,
+  cycleBoundsForAnchor,
+  cycleDaysForAnchor,
+  isValidCycleStartDay,
+  stepCycleAnchor,
+} from './period/cycle-period';
+export {
+  boundsForUserPeriod,
+  cycleDayForPeriod,
+  userYearBounds,
+  userMonthAnchorContaining,
+  userMonthIsCycle,
+} from './period/user-month';
+export {
+  currentMonthAnchor,
+  dataMaxDayStr,
+  dataMinDayStr,
+  todayDayStr,
+} from './period/day-strings';
 export {
   useTransactions,
   useTransaction,
@@ -215,3 +242,4 @@ export {
   SEARCH_MIN_LENGTH,
 } from './query/hooks/useInvestment';
 export { useDebouncedValue } from './query/hooks/useDebouncedValue';
+export { useMe, useUpdateMe } from './query/hooks/useUser';

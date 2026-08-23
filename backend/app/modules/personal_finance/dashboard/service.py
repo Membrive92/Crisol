@@ -43,6 +43,7 @@ from app.modules.personal_finance.dashboard.schemas import (
     TopExpenseItem,
 )
 from app.modules.personal_finance.transactions.models import Transaction
+from app.modules.personal_finance.user_month import user_month_bounds
 
 _UNCATEGORIZED_NAME = "Sin categoría"
 
@@ -112,9 +113,88 @@ async def list_user_currencies(
     return await repository.list_user_currencies(db, user_id)
 
 
-def _previous_period(date_from: datetime, date_to: datetime) -> tuple[datetime, datetime]:
+def resolve_cycle_start_day(profile_cycle_start_day: int | None, cycle: bool) -> int | None:
+    """C4 — El día `D` con el que cortar, o `None` para mes natural.
+
+    El día **nunca viaja del cliente**: se lee del perfil (`users.cycle_start_day`,
+    que `CurrentUser` ya trae en cada request). El query param `cycle` sólo dice
+    *qué pregunta* se está haciendo — «nómina a nómina» en vez de «el calendario»
+    —, no con qué número responderla; si el cliente pudiera mandar el día, dos
+    pantallas podrían pintar cortes distintos del mismo dato.
+
+    `cycle=true` sin ajuste configurado es un 422 y no un silencioso mes natural:
+    el llamante pidió algo que el perfil no puede responder, y devolverle otra
+    cosa con un 200 le haría creer que está viendo sus ciclos.
+
+    Recibe el día ya extraído del perfil (no el objeto `User`) para no arrastrar
+    el modelo de `users` hasta el service del dashboard.
+    """
+    if not cycle:
+        return None
+    if profile_cycle_start_day is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "No has definido el día en que empieza tu mes. "
+                "Configúralo en Ajustes antes de pedir los períodos por ciclo."
+            ),
+        )
+    return profile_cycle_start_day
+
+
+def _cycle_anchor_of(moment: datetime, cycle_start_day: int) -> tuple[int, int]:
+    """`(año, mes)` del ciclo que CONTIENE `moment` — el gemelo Python de
+    `repository.cycle_shifted_occurred_at`.
+
+    Misma aritmética: restar `D − 1` días y quedarse con el mes. Existe porque
+    rellenar los huecos de la serie es cosa de Python — la query sólo devuelve
+    los ciclos CON datos y el chart necesita también los vacíos.
+
+    Lee los campos del `datetime` tal cual, sin normalizar huso, igual que hace
+    la detección de mes/año natural de `_previous_period`. Los bordes de período
+    llegan siempre en UTC (`toISOString()` desde el navegador), que es también
+    como bucketiza el SQL, así que las dos mitades coinciden. Con `D = 1`
+    devuelve `(moment.year, moment.month)` exacto: el mes natural no cambia ni un
+    bit por pasar por aquí.
+    """
+    shifted = moment - timedelta(days=cycle_start_day - 1)
+    return shifted.year, shifted.month
+
+
+def _cycle_bounds(cycle_start_day: int, year: int, month: int) -> tuple[datetime, datetime]:
+    """Bounds `[día D de M 00:00:00, día D−1 de M+1 23:59:59]` en UTC.
+
+    El `−1` no es un adorno: el intervalo del repositorio es CERRADO en ambos
+    extremos (`>= date_from AND <= date_to`), así que emitir `date_to = D de M+1`
+    contaría el primer día del ciclo siguiente DOS veces. Misma convención que
+    `boundsForCustomRange` en el frontend.
+
+    Con `D = 1` el ciclo degenera EXACTAMENTE en el mes natural (`[1 de M,
+    último día de M]`), que es la propiedad que verifica que la aritmética está
+    bien.
+    """
+    start = datetime(year, month, cycle_start_day, 0, 0, 0, tzinfo=UTC)
+    if cycle_start_day == 1:
+        last = calendar.monthrange(year, month)[1]
+        return start, datetime(year, month, last, 23, 59, 59, tzinfo=UTC)
+    ny, nm = (year, month + 1) if month < 12 else (year + 1, 1)
+    return start, datetime(ny, nm, cycle_start_day - 1, 23, 59, 59, tzinfo=UTC)
+
+
+def _previous_period(
+    date_from: datetime,
+    date_to: datetime,
+    *,
+    cycle_start_day: int | None = None,
+) -> tuple[datetime, datetime]:
     """PHASE-41 — Período EQUIVALENTE anterior para el Δ "vs período anterior".
 
+    - CICLO completo del usuario (C4, sólo con `cycle_start_day`) → el ciclo
+      anterior EXACTO (ancla − 1), no una ventana de igual longitud. Importa
+      porque los ciclos no miden lo mismo: el del 14-jul dura 31 días y el del
+      14-feb, 28. Con la ventana, «vs período anterior» comparaba el ciclo con
+      un tramo desplazado que se comía tres días del anterior y perdía tres del
+      suyo.
     - MES natural completo (1º 00:00 … último día 23:59:59) → el mes natural
       anterior exacto.
     - AÑO natural completo (1-ene 00:00 … 31-dic 23:59:59) → el año anterior.
@@ -125,7 +205,18 @@ def _previous_period(date_from: datetime, date_to: datetime) -> tuple[datetime, 
     Antes SIEMPRE se usaba la ventana de igual longitud, lo que para meses de
     distinta duración desplazaba el "anterior" ~1 día (p.ej. mayo → [31-mar…
     30-abr] en vez de abril natural).
+
+    La rama del ciclo exige que el rango recibido SEA un ciclo entero, no sólo
+    que el ajuste exista: con el preset activo el usuario puede pedir un rango
+    libre, y ahí el comparable honesto sigue siendo la ventana de igual longitud.
+    La comprobación es por INSTANTE (`==` entre datetimes aware), así que un
+    cliente que exprese los mismos bordes en otro huso también entra.
     """
+    if cycle_start_day is not None:
+        year, month = _cycle_anchor_of(date_from, cycle_start_day)
+        if (date_from, date_to) == _cycle_bounds(cycle_start_day, year, month):
+            py, pm = (year, month - 1) if month > 1 else (year - 1, 12)
+            return _cycle_bounds(cycle_start_day, py, pm)
     tz = date_from.tzinfo
     same_year_month = date_from.year == date_to.year and date_from.month == date_to.month
     at_month_start = date_from.day == 1 and (
@@ -177,8 +268,16 @@ async def get_summary(
     target_currency: str | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
+    cycle_start_day: int | None = None,
 ) -> SummaryResponse:
-    """Balance global. Soporta legacy (`currency`) y cross-currency (`target_currency`)."""
+    """Balance global. Soporta legacy (`currency`) y cross-currency (`target_currency`).
+
+    C4 — `cycle_start_day` NO cambia qué transacciones entran (eso lo fija
+    `[date_from, date_to]`, que ya llega recortado al ciclo desde el navegador).
+    Cambia dos cosas de presentación: el comparable «vs período anterior» pasa a
+    ser el ciclo anterior EXACTO, y `available_from/to` pasan a ser anclas de
+    ciclo para que las flechas aterricen donde hay datos.
+    """
     legacy, target, displayed = _resolve_mode(currency, target_currency)
 
     if target is not None:
@@ -208,7 +307,7 @@ async def get_summary(
         # superior exclusivo, sin solape en la frontera cerrada del repositorio)
         # para custom/parcial. Antes usaba siempre la ventana, que en meses de
         # distinta duración desplazaba el "anterior" ~1 día.
-        prev_from, prev_to = _previous_period(date_from, date_to)
+        prev_from, prev_to = _previous_period(date_from, date_to, cycle_start_day=cycle_start_day)
         prev_totals = await repository.get_totals_by_kind(
             db,
             user_id,
@@ -247,7 +346,9 @@ async def get_summary(
 
     # PHASE-34 — límites globales (mes min/max con datos), independientes del
     # filtro de período, para acotar el navegador de período del Análisis.
-    available_from, available_to = await repository.get_transaction_month_bounds(db, user_id)
+    available_from, available_to = await repository.get_transaction_month_bounds(
+        db, user_id, cycle_start_day=cycle_start_day
+    )
 
     return SummaryResponse(
         income=income,
@@ -274,7 +375,9 @@ async def get_summary(
 _CASHFLOW_VERDICT_BAND = Decimal("0.05")
 
 
-async def _latest_month_bounds(db: AsyncSession, user_id: uuid.UUID) -> tuple[datetime, datetime]:
+async def _latest_month_bounds(
+    db: AsyncSession, user_id: uuid.UUID, *, cycle_start_day: int | None = None
+) -> tuple[datetime, datetime]:
     """Rango `[inicio, fin]` del ÚLTIMO mes con transacciones del usuario, o del
     mes en curso si aún no tiene datos.
 
@@ -282,13 +385,21 @@ async def _latest_month_bounds(db: AsyncSession, user_id: uuid.UUID) -> tuple[da
     importa por meses tiene el mes actual vacío hasta que lo sube, así que la
     card salía siempre a 0. El último mes con datos es la foto más reciente
     representativa. Sólo se usa como fallback cuando el caller no pasa rango."""
-    _, latest = await repository.get_transaction_month_bounds(db, user_id)
+    # PHASE-47 — los bounds vienen ya en la unidad del usuario: pedirlos con su
+    # día hace que `latest` sea el ancla de SU último período, no la del mes
+    # natural. Sin día declarado es exactamente lo de siempre.
+    _, latest = await repository.get_transaction_month_bounds(
+        db, user_id, cycle_start_day=cycle_start_day
+    )
     now = datetime.now(UTC)
     year, month = (int(latest[:4]), int(latest[5:7])) if latest else (now.year, now.month)
-    last_day = calendar.monthrange(year, month)[1]
+    # El ancla identifica el período que ABRE en ese mes; sus extremos los da la
+    # declaración única, que degenera en el mes natural sin día.
+    anchor_day = cycle_start_day if cycle_start_day else 1
+    start, end = user_month_bounds(date(year, month, anchor_day), cycle_start_day)
     return (
-        datetime(year, month, 1, tzinfo=UTC),
-        datetime(year, month, last_day, 23, 59, 59, tzinfo=UTC),
+        datetime(start.year, start.month, start.day, tzinfo=UTC),
+        datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=UTC),
     )
 
 
@@ -300,6 +411,7 @@ async def get_module_summary(
     target_currency: str | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
+    cycle_start_day: int | None = None,
 ) -> ModuleDashboardSummary:
     """PHASE-43.4 (ADR-0006) — tarjeta del módulo Finanzas Domésticas para el
     dashboard: flujo de caja del período + tasa de ahorro + veredicto.
@@ -313,7 +425,9 @@ async def get_module_summary(
     de ±5% del ingreso → `caution`; sin ingresos en el período → `neutral`.
     """
     if date_from is None or date_to is None:
-        date_from, date_to = await _latest_month_bounds(db, user_id)
+        date_from, date_to = await _latest_month_bounds(
+            db, user_id, cycle_start_day=cycle_start_day
+        )
 
     summary = await get_summary(
         db,
@@ -408,11 +522,19 @@ async def get_monthly_breakdown(
     target_currency: str | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
+    cycle_start_day: int | None = None,
 ) -> list[MonthlyBucket]:
     """12 buckets mensuales para el año, o —si se pasa `[date_from, date_to]`
     (PHASE-41, período custom)— un bucket por cada mes tocado por el rango, con
     los meses de borde PARCIALES para que las barras cuadren con los KPIs de
-    flujo del mismo rango."""
+    flujo del mismo rango.
+
+    C4 — con `cycle_start_day`, cada bucket es un CICLO del usuario y su clave
+    `YYYY-MM` es el ancla (el mes que lo abre). En la rama de rango, el relleno
+    de huecos itera **anclas de ciclo**: iterar meses naturales sobre datos ya
+    agrupados por ciclo produciría barras vacías al principio y al final del
+    rango (el ciclo del 14-ago cubre trozos de agosto y de septiembre, pero es
+    UNA barra, no dos)."""
     legacy, target, _ = _resolve_mode(currency, target_currency)
     if date_from is not None and date_to is not None:
         if target is not None:
@@ -426,6 +548,7 @@ async def get_monthly_breakdown(
             date_to=date_to,
             currency=legacy,
             target_currency=target,
+            cycle_start_day=cycle_start_day,
         )
         income_r: dict[tuple[int, int], Decimal] = {}
         expenses_r: dict[tuple[int, int], Decimal] = {}
@@ -435,8 +558,12 @@ async def get_monthly_breakdown(
             elif kind == CategoryKind.EXPENSE:
                 expenses_r[(y, m)] = total
         buckets: list[MonthlyBucket] = []
-        cy, cm = date_from.year, date_from.month
-        while (cy, cm) <= (date_to.year, date_to.month):
+        # `D = 1` degenera en el mes natural, así que la misma aritmética cubre
+        # los dos modos sin una segunda rama que pueda divergir.
+        step_day = cycle_start_day if cycle_start_day is not None else 1
+        cy, cm = _cycle_anchor_of(date_from, step_day)
+        last_y, last_m = _cycle_anchor_of(date_to, step_day)
+        while (cy, cm) <= (last_y, last_m):
             inc = income_r.get((cy, cm), Decimal("0"))
             exp = expenses_r.get((cy, cm), Decimal("0"))
             buckets.append(
@@ -450,35 +577,66 @@ async def get_monthly_breakdown(
                 cy += 1
         return buckets
     if target is not None:
-        # `by-month` cubre el año completo, así que el rango es ese.
+        # `by-month` cubre el año completo, así que el rango es ese. Con ciclo,
+        # los 12 buckets se estiran hasta `D − 1` días dentro de enero del año
+        # siguiente: el backfill de tasas cubre ese borde o el último ciclo
+        # perdería sus últimos días por falta de tasa.
         await ensure_rates_for_user_scope(
             db,
             user_id,
             target_currency=target,
             date_from=datetime(year, 1, 1),
-            date_to=datetime(year, 12, 31, 23, 59, 59),
+            date_to=datetime(year, 12, 31, 23, 59, 59) + timedelta(days=(cycle_start_day or 1) - 1),
         )
     rows = await repository.get_totals_by_month(
-        db, user_id, year=year, currency=legacy, target_currency=target
+        db,
+        user_id,
+        year=year,
+        currency=legacy,
+        target_currency=target,
+        cycle_start_day=cycle_start_day,
     )
 
-    income_per_month: dict[int, Decimal] = {m: Decimal("0") for m in range(1, 13)}
-    expenses_per_month: dict[int, Decimal] = {m: Decimal("0") for m in range(1, 13)}
+    # C4 — con el ciclo activo la serie arranca en el ciclo que abrió el día D de
+    # DICIEMBRE del año anterior, porque es el que contiene los días 1..D−1 de
+    # enero. Sin él esos movimientos no caían en ninguna barra y el histórico en
+    # ciclos no sumaba lo mismo que el natural, que es justo lo que la fase
+    # promete: el ciclo cambia cómo se reparte el dinero, no cuánto hay.
+    # PHASE-47 — DOCE buckets: los doce períodos que ABREN en el año pedido.
+    #
+    # Aquí hubo trece durante unas horas. El razonamiento era que los días 1..D−1
+    # de enero pertenecen al período que abrió en diciembre del año anterior, así
+    # que sin ese bucket extra ese dinero no salía en ninguna barra. Cierto — pero
+    # la conclusión estaba mal: lo que faltaba no era una barra, era desplazar
+    # también el AÑO. El usuario lo dijo al verlo: «si estoy viendo gastos de
+    # 2026, no debería salir ese diciembre de 2025».
+    #
+    # Con el año del usuario (12-ene → 11-ene, `userYearBounds` en el frontend)
+    # los doce períodos lo cubren entero, sin huecos ni bucket huérfano. Los días
+    # 1..D−1 de enero caen en SU año anterior, que es la misma consecuencia que
+    # ya acepta a nivel de mes.
+    serie: list[tuple[int, int]] = [(year, m) for m in range(1, 13)]
 
-    for month, kind, total in rows:
+    income_per_bucket: dict[tuple[int, int], Decimal] = {b: Decimal("0") for b in serie}
+    expenses_per_bucket: dict[tuple[int, int], Decimal] = dict.fromkeys(serie, Decimal("0"))
+
+    for row_year, month, kind, total in rows:
+        clave = (row_year, month)
+        if clave not in income_per_bucket:
+            continue
         if kind == CategoryKind.INCOME:
-            income_per_month[month] = total
+            income_per_bucket[clave] = total
         elif kind == CategoryKind.EXPENSE:
-            expenses_per_month[month] = total
+            expenses_per_bucket[clave] = total
 
     return [
         MonthlyBucket(
-            month=f"{year:04d}-{m:02d}",
-            income=income_per_month[m],
-            expenses=expenses_per_month[m],
-            balance=income_per_month[m] - expenses_per_month[m],
+            month=f"{y:04d}-{m:02d}",
+            income=income_per_bucket[(y, m)],
+            expenses=expenses_per_bucket[(y, m)],
+            balance=income_per_bucket[(y, m)] - expenses_per_bucket[(y, m)],
         )
-        for m in range(1, 13)
+        for (y, m) in serie
     ]
 
 
@@ -532,6 +690,8 @@ async def get_category_available_periods(
     db: AsyncSession,
     user_id: uuid.UUID,
     category_id: uuid.UUID,
+    *,
+    cycle_start_day: int | None = None,
 ) -> CategoryAvailablePeriodsResponse:
     """Años + meses (1-12) con transacciones activas para una categoría.
 
@@ -539,6 +699,16 @@ async def get_category_available_periods(
     categoría no existe o no pertenece al usuario — fallback a 404
     en lugar de devolver una lista vacía para no enmascarar errores
     de routing en el cliente.
+
+    C4 — con `cycle_start_day`, los `(año, mes)` son **anclas de ciclo**: los
+    chips tienen que ofrecer los mismos períodos que luego pintan datos. Si los
+    chips fueran meses naturales y las series ciclos, pulsar «febrero» podría
+    aterrizar en un ciclo vacío.
+
+    Sin ajuste, el helper devuelve `timezone('UTC', occurred_at)` — la misma
+    expresión que ya usaban `by-month` y los bounds desde AUDIT-2026-07. Esta
+    query leía `occurred_at` en crudo, así que dependía de la TZ de la sesión de
+    PostgreSQL; ahora hay UNA sola forma de preguntar «¿de qué mes es esto?».
     """
     category = await get_category_by_id(db, category_id, user_id)
     if category is None:
@@ -546,10 +716,11 @@ async def get_category_available_periods(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Categoría no encontrada.",
         )
+    occurred = repository.cycle_shifted_occurred_at(cycle_start_day)
     query = (
         select(
-            func.extract("year", Transaction.occurred_at).label("year"),
-            func.extract("month", Transaction.occurred_at).label("month"),
+            func.extract("year", occurred).label("year"),
+            func.extract("month", occurred).label("month"),
         )
         .where(Transaction.user_id == user_id)
         .where(Transaction.category_id == category_id)
@@ -579,12 +750,17 @@ async def get_category_detail(
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     months_back: int = 12,
+    cycle_start_day: int | None = None,
 ) -> CategoryDetailResponse:
     """PHASE-25 — drill-down de una categoría: KPIs (total, count,
     ticket medio) + evolución mensual (últimos `months_back` meses)
     + top tx del rango.
 
     404 si la categoría no existe / no es del usuario.
+
+    C4 — `cycle_start_day` sólo afecta a la SERIE (`by_month`), que pasa a ser de
+    ciclos. Los KPIs y el top ya se calculan sobre `[date_from, date_to]`, que
+    llega recortado al ciclo desde el navegador.
     """
     category = await get_category_by_id(db, category_id, user_id)
     if category is None:
@@ -620,6 +796,7 @@ async def get_category_detail(
         currency=legacy,
         target_currency=target,
         months_back=months_back,
+        cycle_start_day=cycle_start_day,
     )
     top = await repository.get_category_top_transactions(
         db,

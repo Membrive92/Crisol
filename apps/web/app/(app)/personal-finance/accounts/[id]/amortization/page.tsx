@@ -13,7 +13,7 @@ import {
 } from '@crisol/services';
 import { toast } from '@crisol/store';
 import type { AmortizationRow } from '@crisol/types';
-import { colors, fontSize, fontWeight, formatAmount, formatDate, layout, radius, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, formatAmount, formatCivilDate, layout, radius, spacing } from '@crisol/ui';
 import { useState } from 'react';
 
 import { AccountSwatch } from '@/components/accounts/account-swatch';
@@ -313,7 +313,7 @@ function AmortizationContent({
             }}
           >
             <span style={{ fontSize: fontSize.xs, color: colors.textMuted }}>
-              Inicio: {formatDate(`${schedule.start_date}T00:00:00Z`)} ·
+              Inicio: {formatCivilDate(`${schedule.start_date}T00:00:00Z`)} ·
               Editar o marcar como pagada no recomputa las siguientes
             </span>
             <button
@@ -390,7 +390,7 @@ function AmortizationContent({
                     }
                   >
                     <Td>{row.month}</Td>
-                    <Td>{formatDate(`${row.due_date}T00:00:00Z`)}</Td>
+                    <Td>{formatCivilDate(`${row.due_date}T00:00:00Z`)}</Td>
                     <Td align="right">{formatAmount(row.payment, currency)}</Td>
                     <Td align="right" color={colors.danger}>
                       {formatAmount(row.interest, currency)}

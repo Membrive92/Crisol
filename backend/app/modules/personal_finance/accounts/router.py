@@ -108,7 +108,15 @@ async def debt_health_endpoint(
     (snapshot today) y aplica per-tx conversion al income e
     intereses YTD. Saldos sin tasa quedan excluidos del agregado.
     """
-    return await compute_debt_health(db, user.id, target_currency=target_currency)
+    return await compute_debt_health(
+        db,
+        user.id,
+        target_currency=target_currency,
+        # PHASE-47 — el DTI divide por el ingreso medio mensual, y «mes» es el
+        # del usuario: con corte a mitad, el mes natural le mete dos nóminas en
+        # unos meses y ninguna en otros.
+        cycle_start_day=user.cycle_start_day,
+    )
 
 
 @router.get("/debt-history", response_model=DebtHistoryResponse)

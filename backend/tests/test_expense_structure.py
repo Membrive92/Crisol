@@ -759,3 +759,38 @@ async def test_seed_structural_ids_rules_1_and_2(
     assert uuid.UUID(gym["id"]) in ids  # regla 1 (fixed_expense confirmado)
     assert uuid.UUID(loan["id"]) in ids  # regla 2 (rol deuda)
     assert uuid.UUID(pending["id"]) not in ids  # pendiente → no cuenta
+
+
+async def test_el_veredicto_y_su_porque_usan_la_misma_ventana(client: AsyncClient) -> None:
+    """PHASE-47 — `expense-structure` y su `explain` no pueden divergir.
+
+    `recurrence.py` declara por escrito ser la «fuente ÚNICA de la aritmética
+    de banda, compartida por `classify_recurring_categories` (el veredicto) y
+    el endpoint `explain` (el porqué), para que no diverjan». Al migrar la
+    ventana al mes del usuario, el día se cableó en uno y no en el otro: el
+    veredicto decía «fija» y su explicación contaba los meses sobre una ventana
+    distinta.
+
+    Este test compara las dos mitades en vez de fijar un número, que es lo
+    único que caza una divergencia futura sin volver a escribir la aritmética.
+    """
+    token = await _register(client, "explainventana@example.com")
+    await client.patch("/users/me", json={"cycle_start_day": 15}, headers=_auth(token))
+
+    r_veredicto = await client.get("/analytics/expense-structure", headers=_auth(token))
+    r_porque = await client.get("/analytics/expense-structure/explain", headers=_auth(token))
+    assert r_veredicto.status_code == 200, r_veredicto.text
+    assert r_porque.status_code == 200, r_porque.text
+
+    # La ventana no viaja en la respuesta, así que se compara lo que de ella
+    # depende: qué categorías salen clasificadas como recurrentes.
+    explicadas = {
+        e["category_id"]: e["is_structural"] for e in r_porque.json() if "category_id" in e
+    }
+    for item in r_veredicto.json().get("recurring_categories", []):
+        cid = item.get("category_id")
+        if cid in explicadas:
+            assert explicadas[cid] is True, (
+                f"la categoría {cid} sale recurrente en el veredicto y NO en su "
+                "explicación: las dos mitades usan ventanas distintas"
+            )

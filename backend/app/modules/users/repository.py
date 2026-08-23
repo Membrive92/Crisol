@@ -41,3 +41,27 @@ async def create_user(db: AsyncSession, user: User) -> User:
     await db.flush()
     await db.refresh(user)
     return user
+
+
+async def update_user(
+    db: AsyncSession,
+    user: User,
+    *,
+    cycle_start_day: int | None,
+) -> User:
+    """Actualiza las preferencias del usuario ya cargado y lo devuelve fresco.
+
+    El `refresh` tras el `flush` no es cosmético: `updated_at` lleva
+    `onupdate=func.now()`, así que tras el UPDATE el valor que calcula la BD no
+    vuelve al objeto en memoria y el atributo queda *stale*. Serializarlo desde
+    Pydantic (síncrono) dispararía un lazy load sobre una sesión async y
+    reventaría con `MissingGreenlet` (lección PHASE-4.1).
+
+    No hace lookup por `user_id`: recibe el `User` que `get_current_user` ya
+    cargó en esta misma sesión, así que el aislamiento lo garantiza el token —
+    no hay forma de nombrar a otro usuario en el body.
+    """
+    user.cycle_start_day = cycle_start_day
+    await db.flush()
+    await db.refresh(user)
+    return user

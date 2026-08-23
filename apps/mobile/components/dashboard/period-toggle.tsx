@@ -1,10 +1,19 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
+import type { PeriodKey } from '@crisol/types';
+import {
+  colors,
+  fontSize,
+  fontWeight,
+  radius,
+  spacing,
+} from '@crisol/ui';
 
 // PHASE-41 — se eliminó `quarter` (sin sentido para un particular). `custom`
 // es el rango libre `from/to` que define el usuario.
-export type PeriodKey = 'month' | 'year' | 'custom';
+// C0 — `PeriodKey` (con `cycle`) vive en `@crisol/types`: estaba declarado dos
+// veces, una por app. Se reexporta aquí para no romper los imports existentes.
+export type { PeriodKey };
 
 export interface PeriodToggleProps {
   value: PeriodKey;
@@ -23,18 +32,34 @@ const DEFAULT_OPTIONS: readonly PeriodKey[] = ['month', 'year'];
 
 /**
  * Segmented Mes/Año/Rango equivalente a `StitchPeriodToggle` en
- * web pero con `Pressable` nativo. Los rangos month/year los calcula
- * `rangeForPeriod` aquí mismo; el rango libre `custom` usa
- * `boundsForCustomRange` (compartido en `@crisol/services`).
+ * web pero con `Pressable` nativo.
+ *
+ * C0 — Este módulo ya NO calcula rangos. Tenía un `rangeForPeriod` propio, en
+ * hora LOCAL y siempre sobre «ahora» (sin ancla), mientras web usaba
+ * `boundsForAnchor` en UTC con ancla: con un corte día-exacto por ciclo las dos
+ * plataformas cortarían en instantes distintos. Toda la aritmética de período
+ * —`boundsForAnchor`, `boundsForCustomRange` y la del ciclo— vive ahora en
+ * `@crisol/services`, y el ancla la trae el llamante.
  */
 export function PeriodToggle({
   value,
   onChange,
   options = DEFAULT_OPTIONS,
 }: PeriodToggleProps) {
+  /*
+   * PHASE-47 — el toggle vuelve a ser tonto: pinta las opciones que le den.
+   *
+   * Aquí vivía un filtro que escondía el chip «Mi ciclo» cuando el usuario no
+   * tenía día declarado, con la guarda POR VERDAD de la lección PHASE-47.E. El
+   * chip ya no existe —el ciclo ES el período «Mes»—, pero la lección no se ha
+   * ido de paseo: se MUDA a `userMonthIsCycle`, que es quien decide ahora si
+   * `month` corta por el ciclo o por el mes natural, y que sigue guardando por
+   * verdad porque el campo puede llegar AUSENTE mientras el perfil carga.
+   */
+  const visible = options;
   return (
     <View style={styles.row}>
-      {options.map((opt) => {
+      {visible.map((opt) => {
         const active = opt === value;
         return (
           <Pressable
@@ -50,20 +75,6 @@ export function PeriodToggle({
       })}
     </View>
   );
-}
-
-export function rangeForPeriod(
-  period: Exclude<PeriodKey, 'custom'>,
-): { dateFrom: string; dateTo: string } {
-  const now = new Date();
-  if (period === 'month') {
-    const start = new Date(now.getFullYear(), now.getMonth(), 1);
-    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
-    return { dateFrom: start.toISOString(), dateTo: end.toISOString() };
-  }
-  const start = new Date(now.getFullYear(), 0, 1);
-  const end = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
-  return { dateFrom: start.toISOString(), dateTo: end.toISOString() };
 }
 
 const styles = StyleSheet.create({

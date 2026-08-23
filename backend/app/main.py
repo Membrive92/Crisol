@@ -34,6 +34,7 @@ from app.modules.personal_finance.seed.router import router as seed_router
 from app.modules.personal_finance.seed.service import seed_recommended
 from app.modules.personal_finance.transactions.router import router as transactions_router
 from app.modules.personal_finance.transfers.router import router as transfers_router
+from app.modules.users.router import router as users_router
 
 # AUDIT-2026-05: cablea el seed de dominio como hook on-user-created, de
 # modo que `auth` no importe `personal_finance.seed` directamente. Este
@@ -126,6 +127,7 @@ async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSON
 app.include_router(ai_router)
 app.include_router(auth_router)
 app.include_router(webauthn_router)
+app.include_router(users_router)
 app.include_router(currency_router)
 app.include_router(accounts_router)
 app.include_router(analytics_router)

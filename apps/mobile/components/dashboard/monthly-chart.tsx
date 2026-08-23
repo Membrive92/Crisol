@@ -4,13 +4,22 @@ import { BarChart } from 'react-native-gifted-charts';
 
 import type { MonthlyBucket } from '@crisol/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
-import { formatAmount, formatMonthLabel } from '@crisol/ui';
+import { cycleLabel, formatAmount, formatMonthLabel } from '@crisol/ui';
 
 export interface MonthlyChartProps {
   data: MonthlyBucket[] | undefined;
   isLoading: boolean;
   /** Moneda usada para formatear los valores. Default 'EUR'. */
   currency?: string;
+  /**
+   * Día en que empieza el mes del usuario. Cuando la pantalla pide la serie con
+   * `cycle: true`, la clave `YYYY-MM` de cada bucket es el ANCLA DEL CICLO, no
+   * el mes: con D=14, `'2026-08'` cubre del 14 de agosto al 13 de septiembre.
+   * Etiquetarla «Ago 2026» diría que la barra es agosto entero cuando 17 de sus
+   * 31 días son de septiembre — literalmente la confusión que esta feature
+   * existe para quitar. Sin la prop, el chart etiqueta por mes como siempre.
+   */
+  cycleStartDay?: number | undefined;
 }
 
 /**
@@ -25,7 +34,13 @@ export function MonthlyChart({
   data,
   isLoading,
   currency = 'EUR',
+  cycleStartDay,
 }: MonthlyChartProps) {
+  // La misma función que titula el período en web y en el navegador: si la
+  // etiqueta se escribiera aquí, las dos pantallas nombrarían distinto el mismo
+  // ciclo.
+  const label = (month: string): string =>
+    cycleStartDay != null ? cycleLabel(cycleStartDay, month) : formatMonthLabel(month);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
 
   const buckets = data ?? [];
@@ -34,7 +49,12 @@ export function MonthlyChart({
   const chartData = useMemo(
     () =>
       buckets.flatMap((bucket, idx) => {
-        const shortLabel = formatMonthLabel(bucket.month).slice(0, 3);
+        // En modo ciclo el eje enseña el DÍA de cobro («14 ago»), no las tres
+        // primeras letras de «Ciclo del…», que serían iguales en todas.
+        const shortLabel =
+          cycleStartDay != null
+            ? label(bucket.month).replace('Ciclo del ', '').slice(0, 6)
+            : formatMonthLabel(bucket.month).slice(0, 3);
         const isSelected = selectedIdx === idx;
         return [
           {
@@ -58,7 +78,7 @@ export function MonthlyChart({
   // Hero: bucket seleccionado o último por defecto.
   const heroIdx = selectedIdx ?? buckets.length - 1;
   const heroBucket = heroIdx >= 0 ? buckets[heroIdx] : undefined;
-  const heroLabel = heroBucket ? formatMonthLabel(heroBucket.month) : '';
+  const heroLabel = heroBucket ? label(heroBucket.month) : '';
 
   return (
     <View style={styles.card}>

@@ -110,7 +110,8 @@ export const queryKeys = {
     detail: (id: string) => [...queryKeys.transactions.all, 'detail', id] as const,
     trash: (query: { limit?: number; offset?: number } = {}) =>
       [...queryKeys.transactions.all, 'trash', normalizeQuery(query)] as const,
-    availablePeriods: () => [...queryKeys.transactions.all, 'available-periods'] as const,
+    availablePeriods: (cycle = false) =>
+      [...queryKeys.transactions.all, 'available-periods', { cycle }] as const,
     uncategorizedSummary: () =>
       [...queryKeys.transactions.all, 'uncategorized-summary'] as const,
   },

@@ -6,7 +6,7 @@ import {
   fontSize,
   fontWeight,
   formatAmount,
-  formatDate,
+  formatCivilDate,
 } from '@crisol/ui';
 
 import { Button } from '@/components/ui/button';
@@ -68,7 +68,7 @@ export function TrashList({
       width: 110,
       render: ({ tx }) => (
         <span style={{ fontSize: fontSize.sm, color: colors.text, whiteSpace: 'nowrap' }}>
-          {formatDate(tx.occurred_at)}
+          {formatCivilDate(tx.occurred_at)}
         </span>
       ),
     },

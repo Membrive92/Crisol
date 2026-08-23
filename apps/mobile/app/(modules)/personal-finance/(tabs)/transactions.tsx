@@ -26,7 +26,7 @@ import {
   fontSize,
   fontWeight,
   formatAmount,
-  formatDate,
+  formatCivilDate,
   radius,
   spacing,
 } from '@crisol/ui';
@@ -149,7 +149,7 @@ export default function TransactionsScreen() {
             ) : null}
           </View>
           <Text style={styles.meta}>
-            {formatDate(item.occurred_at)} ·{' '}
+            {formatCivilDate(item.occurred_at)} ·{' '}
             {category?.icon ? `${category.icon} ` : ''}
             {category?.name ?? 'Sin categoría'}
           </Text>

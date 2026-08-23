@@ -832,3 +832,120 @@ async def test_list_debt_only_filters_to_debt_transactions(client: AsyncClient) 
     assert len(body["items"]) == 1
     assert body["items"][0]["category_id"] == debt_cat_id
     assert body["items"][0]["amount"] == "232.27"
+
+
+async def test_list_order_asc_devuelve_las_mas_antiguas_primero(client: AsyncClient) -> None:
+    """`order=asc` invierte el sentido por `occurred_at`; `desc` sigue siendo el default.
+
+    Lo necesita la previsualización del ciclo del usuario en Ajustes, que enseña
+    con qué EMPIEZA el mes nuevo: con el orden descendente habría que paginar
+    hasta el final de la ventana para ver las primeras filas.
+
+    Ordenar no filtra, así que `total` es el mismo en los tres casos — se afirma
+    aquí para que un día nadie confunda "ordenar" con "acotar".
+    """
+    token, cat_id, account_id = await _setup_user(client, "order@example.com")
+
+    async def _post(amount: str, when: str) -> None:
+        r = await client.post(
+            "/transactions",
+            json={
+                "account_id": account_id,
+                "category_id": cat_id,
+                "amount": amount,
+                "currency": "EUR",
+                "occurred_at": when,
+            },
+            headers=_auth(token),
+        )
+        assert r.status_code == 201, r.text
+
+    await _post("10.00", "2026-07-03T09:00:00Z")
+    await _post("20.00", "2026-07-14T09:00:00Z")
+    await _post("30.00", "2026-07-28T09:00:00Z")
+
+    default = await client.get("/transactions", headers=_auth(token))
+    assert default.status_code == 200, default.text
+    assert [i["amount"] for i in default.json()["items"]] == ["30.00", "20.00", "10.00"]
+    assert default.json()["total"] == 3
+
+    desc = await client.get("/transactions", params={"order": "desc"}, headers=_auth(token))
+    assert desc.status_code == 200, desc.text
+    assert [i["amount"] for i in desc.json()["items"]] == ["30.00", "20.00", "10.00"]
+
+    asc = await client.get("/transactions", params={"order": "asc"}, headers=_auth(token))
+    assert asc.status_code == 200, asc.text
+    assert [i["amount"] for i in asc.json()["items"]] == ["10.00", "20.00", "30.00"]
+    assert asc.json()["total"] == 3
+
+
+async def test_list_order_asc_con_limit_trae_el_principio_de_la_ventana(
+    client: AsyncClient,
+) -> None:
+    """Con `order=asc&limit=2` llegan las DOS más antiguas, no las dos últimas.
+
+    Es el uso real: la previsualización pide las primeras filas del ciclo
+    entrante con un `limit` pequeño. Si `order` se ignorase, `limit` recortaría
+    por el extremo contrario y la pantalla enseñaría lo que NO entra.
+    """
+    token, cat_id, account_id = await _setup_user(client, "order_limit@example.com")
+
+    for amount, when in (
+        ("10.00", "2026-07-03T09:00:00Z"),
+        ("20.00", "2026-07-14T09:00:00Z"),
+        ("30.00", "2026-07-28T09:00:00Z"),
+    ):
+        r = await client.post(
+            "/transactions",
+            json={
+                "account_id": account_id,
+                "category_id": cat_id,
+                "amount": amount,
+                "currency": "EUR",
+                "occurred_at": when,
+            },
+            headers=_auth(token),
+        )
+        assert r.status_code == 201, r.text
+
+    r = await client.get("/transactions", params={"order": "asc", "limit": 2}, headers=_auth(token))
+    assert r.status_code == 200, r.text
+    assert [i["amount"] for i in r.json()["items"]] == ["10.00", "20.00"]
+    # `total` cuenta la ventana entera, no la página.
+    assert r.json()["total"] == 3
+
+
+async def test_list_order_invalido_es_422(client: AsyncClient) -> None:
+    """`order` es un vocabulario cerrado (`asc | desc`), no texto libre."""
+    token, _cat, _acc = await _setup_user(client, "order_bad@example.com")
+    r = await client.get("/transactions", params={"order": "sideways"}, headers=_auth(token))
+    assert r.status_code == 422, r.text
+
+
+def test_el_orden_del_listado_es_total_y_no_solo_por_fecha() -> None:
+    """El `ORDER BY` del listado lleva DOS criterios, y el segundo es `id`.
+
+    Por qué se afirma la FORMA del orden y no el sintoma: `occurred_at` no es un
+    orden total en esta app —los extractos no traen hora, asi que todas las
+    filas de un dia quedan a medianoche— y sin desempate PostgreSQL no esta
+    obligado a resolver los empates igual en dos consultas: paginando la ventana
+    entera, una fila puede salir dos veces y otra perderse.
+
+    Se intento probarlo con datos, sembrando 3 y luego 40 movimientos del mismo
+    instante y paginandolos: con el desempate RETIRADO los dos tests seguian
+    verdes, porque el motor eligio el mismo plan en cada pagina y devolvio el
+    mismo orden. O sea que ese test decia proteger algo que no protegia. La
+    inestabilidad no se puede provocar a voluntad —depende del plan, y el plan
+    cambia con el volumen, los indices o la version—, pero el contrato que la
+    evita si se comprueba: que el orden sea total.
+    """
+    from app.modules.personal_finance.transactions.repository import list_order_by
+
+    assert [str(c) for c in list_order_by("asc")] == [
+        "transactions.occurred_at ASC",
+        "transactions.id ASC",
+    ]
+    assert [str(c) for c in list_order_by("desc")] == [
+        "transactions.occurred_at DESC",
+        "transactions.id DESC",
+    ]

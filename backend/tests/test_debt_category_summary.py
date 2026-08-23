@@ -1031,3 +1031,74 @@ async def test_los_meses_sin_datos_no_diluyen_el_ingreso_medio(
     assert body["effort_ratio_strict"] == pytest.approx(0.25)
     assert body["effort_ratio_extended"] == pytest.approx(0.35)
     assert body["effort_ratio_extended_status"] in {"healthy", "caution"}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# PHASE-47 — la serie mensual corta por el mes del USUARIO
+# ─────────────────────────────────────────────────────────────────────
+
+
+async def test_la_serie_mensual_no_pierde_el_ultimo_bucket_con_ciclo(
+    client: AsyncClient,
+) -> None:
+    """El bucket que ABRE en un mes no es el que CONTIENE su día 1.
+
+    Los buckets viajan como anclas `YYYY-MM`, o sea con día 1. Al acotar la
+    ventana se preguntaba «¿qué período contiene este día?», y con `D > 1` la
+    respuesta es el período que abrió el mes ANTERIOR: la ventana quedaba
+    desplazada un bucket entero, el ÚLTIMO salía a 0,00 € siempre y sus
+    movimientos se consultaban y se tiraban — mientras el KPI de la misma
+    pantalla sí los contaba.
+
+    **Para cazarlo hace falta sembrar en el ÚLTIMO bucket y después de su día
+    de corte**, que es el único tramo que la ventana desplazada deja fuera. La
+    primera versión de este test sembraba en un bucket intermedio y sobrevivía
+    a la rotura: verde, y sin probar nada.
+
+    El rango es fijo y pasado (2025) a propósito: derivarlo de hoy haría que
+    el test pasara o fallara según el día en que se ejecute, que es la bomba de
+    relojería de [AUDIT-2026-08].
+    """
+    token = await _register(client, "debtcycle1@example.com")
+    await client.patch("/users/me", json={"cycle_start_day": 13}, headers=_auth(token))
+    account = await _create_account(client, token, name="BBVA", type="bank", currency="EUR")
+    cat = await _create_category(client, token, "Cuota", role="DEBT_PAYMENT")
+
+    # El último bucket de 2025 es el que ABRE el 13-dic (13-dic → 12-ene-2026).
+    # Un pago del 20-dic vive dentro, pasado el corte.
+    await _post_tx(client, token, account["id"], cat, "400.00", "2025-12-20T00:00:00Z", "Cuota")
+
+    r = await client.get(
+        "/debt/category-summary",
+        params={"range": "year", "anchor": "2025-06-01"},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200, r.text
+    serie = r.json()["monthly_series"]
+    diciembre = next((p for p in serie if p["month"] == "2025-12"), None)
+    assert diciembre is not None, f"falta diciembre: {[p['month'] for p in serie]}"
+    assert Decimal(diciembre["payments"]) == Decimal("400.00"), (
+        "el pago del 20-dic pertenece al período que ABRE el 13-dic; con la "
+        "ventana acotada por el período que CONTIENE el día 1, sale 0,00"
+    )
+
+
+async def test_la_serie_mensual_sin_ciclo_no_cambia(client: AsyncClient) -> None:
+    """El contrapunto: quien no declaró día ve exactamente lo de siempre.
+
+    Sin este caso, el de arriba pasaría igual con la serie rota para todo el
+    mundo que usa el mes natural.
+    """
+    token = await _register(client, "debtcycle2@example.com")
+    account = await _create_account(client, token, name="BBVA", type="bank", currency="EUR")
+    cat = await _create_category(client, token, "Cuota", role="DEBT_PAYMENT")
+    await _post_tx(client, token, account["id"], cat, "250.00", "2026-07-20T00:00:00Z", "Cuota")
+
+    r = await client.get(
+        "/debt/category-summary",
+        params={"range": "custom", "date_from": "2026-07-01", "date_to": "2026-07-31"},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200, r.text
+    julio = next(p for p in r.json()["monthly_series"] if p["month"] == "2026-07")
+    assert Decimal(julio["payments"]) == Decimal("250.00")

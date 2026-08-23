@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-import { useTransactionAvailablePeriods } from '@crisol/services';
+import { useMe, useTransactionAvailablePeriods, userMonthIsCycle } from '@crisol/services';
 import type { Account, Category, TransactionListQuery } from '@crisol/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
@@ -35,7 +35,19 @@ export function StitchSearchToolbar({
   accounts,
 }: StitchSearchToolbarProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const { data: availablePeriods = [] } = useTransactionAvailablePeriods();
+  // El día en que empieza el mes del usuario. Sin ajuste (o mientras el perfil
+  // carga) llega `undefined` y el TimeSelector se comporta como siempre.
+  const { data: me } = useMe();
+  /*
+   * PHASE-47 — los chips se piden en la MISMA unidad en que el selector los
+   * interpreta. Con día declarado, pulsar un chip emite el ciclo que abre en
+   * ese mes; si los chips llegaran en meses naturales, un mes con movimientos
+   * sólo antes del día de corte pintaría un chip que al pulsarlo da una lista
+   * VACÍA — y esos movimientos no serían alcanzables desde la interfaz.
+   */
+  const { data: availablePeriods = [] } = useTransactionAvailablePeriods(
+    userMonthIsCycle(me?.cycle_start_day),
+  );
 
   function update<K extends keyof TransactionListQuery>(
     key: K,
@@ -94,6 +106,7 @@ export function StitchSearchToolbar({
         availablePeriods={availablePeriods}
         value={{ dateFrom: value.date_from, dateTo: value.date_to }}
         onChange={applyTimeRange}
+        cycleStartDay={me?.cycle_start_day ?? undefined}
       />
 
       {filtersOpen ? (

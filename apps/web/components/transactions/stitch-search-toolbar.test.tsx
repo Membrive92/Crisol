@@ -2,13 +2,25 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
+import type * as ServicesModule from '@crisol/services';
 import type { Account, Category, TransactionListQuery } from '@crisol/types';
 
 // El toolbar pide los periodos disponibles para el TimeSelector; lo
-// mockeamos a vacío (no es lo que probamos aquí).
-vi.mock('@crisol/services', () => ({
-  useTransactionAvailablePeriods: () => ({ data: [] }),
-}));
+// mockeamos a vacío (no es lo que probamos aquí), igual que el perfil.
+//
+// El mock parte del módulo REAL (`importOriginal` + spread) y sólo sustituye
+// los dos hooks. Un mock construido desde cero devuelve `undefined` para todo
+// lo demás, así que en cuanto el TimeSelector empezó a usar una función pura de
+// `@crisol/services` (`isValidCycleStartDay`) estos cinco tests se cayeron con
+// un error que no tenía nada que ver con lo que prueban.
+vi.mock('@crisol/services', async (importOriginal) => {
+  const actual = await importOriginal<typeof ServicesModule>();
+  return {
+    ...actual,
+    useTransactionAvailablePeriods: () => ({ data: [] }),
+    useMe: () => ({ data: undefined, isLoading: false, isError: false, error: null }),
+  };
+});
 
 import { StitchSearchToolbar } from './stitch-search-toolbar';
 

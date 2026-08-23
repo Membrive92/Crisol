@@ -14,7 +14,7 @@ import {
   fontSize,
   fontWeight,
   formatAmount,
-  formatDate,
+  formatCivilDate,
   radius,
   spacing,
 } from '@crisol/ui';
@@ -167,7 +167,7 @@ export function FixedExpenseCard({
       <View style={styles.footer}>
         <Text style={styles.footerText} numberOfLines={2}>
           Próximo cargo:{' '}
-          <Text style={styles.footerStrong}>{formatDate(item.next_due)}</Text>
+          <Text style={styles.footerStrong}>{formatCivilDate(item.next_due)}</Text>
           {' · '}
           {item.occurrence_count}{' '}
           {item.occurrence_count === 1 ? 'cargo' : 'cargos'}

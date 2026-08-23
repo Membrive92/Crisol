@@ -58,6 +58,7 @@ async def dashboard_summary_endpoint(
         target_currency=target_currency,
         date_from=date_from,
         date_to=date_to,
+        cycle_start_day=user.cycle_start_day,
     )
 
 
@@ -130,6 +131,10 @@ async def category_summary_endpoint(
         date_from=date_from,
         date_to=date_to,
         target_currency=target_currency,
+        # PHASE-47 — la serie mensual de esta pantalla era el último agregado
+        # que cortaba por calendario, y el que obligaba al aviso de «esta
+        # tarjeta cuenta el mes de siempre».
+        cycle_start_day=user.cycle_start_day,
     )
 
 

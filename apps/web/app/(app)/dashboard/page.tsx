@@ -1,15 +1,22 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
+  // C0 — `calendarPeriodFor` reemplaza al `period === 'custom' ? 'year' : period`
+  // que había inline: `PeriodKey` ya incluye `cycle` y ese ternario dejaba de
+  // tipar. Ver su docstring: es un FALLBACK de calendario, no el ciclo.
   useAccountBalances,
   useDashboardSummary,
   useDebtDashboardSummary,
   useModuleSummary,
   useMonthOutlook,
   usePositionAsOf,
+  useMe,
   usePositionHistory,
+  boundsForUserPeriod,
+  userMonthIsCycle,
+  userMonthAnchorContaining,
 } from '@crisol/services';
 import { useCurrencyStore } from '@crisol/store';
 import { colors, fontSize, fontWeight, formatAmount, layout, spacing } from '@crisol/ui';
@@ -19,8 +26,6 @@ import { KpiStrip, KpiTile, MiniSparkline } from '@/components/analysis/kpi-stri
 import { MonthOutlookCard } from '@/components/analysis/month-outlook-card';
 import { NetworthEvolutionCard } from '@/components/analysis/networth-evolution-card';
 import {
-  boundsForAnchor,
-  boundsForCustomRange,
   type PeriodKey,
 } from '@/components/analysis/stitch-period-toggle';
 import { ModuleCard } from '@/components/dashboard/module-card';
@@ -44,17 +49,54 @@ export default function DashboardPage() {
   const includeDebt = useCurrencyStore((s) => s.includeDebtInNetWorth);
   const targetCurrency = convertAll ? currency : undefined;
 
+  // C3a — el día en que empieza el mes del usuario. Sin ajuste, `undefined` y
+  // ninguna de las ramas de ciclo se activa.
+  const { data: me } = useMe();
+  const cycleStartDay = me?.cycle_start_day ?? undefined;
+
   const [period, setPeriod] = useState<PeriodKey>('year');
   const [anchorMonth, setAnchorMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
   const [customFrom, setCustomFrom] = useState<string | null>(null);
+  /*
+   * PHASE-47 — reanclar al período EN CURSO cuando llega el perfil.
+   *
+   * El ancla se siembra en el primer render con el mes de CALENDARIO, porque
+   * `useState` es síncrono y `cycleStartDay` llega de `useMe()`, que no lo es.
+   * Para quien tiene corte a mitad de mes eso apunta a un período que aún no
+   * ha empezado: con D=12, del 1 al 11 el mes de calendario `2026-08` es el
+   * que abrirá el 12 de agosto, así que la pantalla enseñaría todos los KPIs
+   * a cero bajo un titular que dice ser el período actual. Un tercio de los
+   * días del mes.
+   *
+   * Antes esto no pasaba porque el ciclo exigía pulsar un chip, y el manejador
+   * de ese chip reanclaba. Al pasar a gobernarlo el perfil, el reanclaje se
+   * fue con el manejador.
+   *
+   * Sólo corrige el ancla SEMBRADA (la del mes de calendario actual): si el
+   * usuario ya ha navegado, mandan sus flechas.
+   */
+  const semilla = useRef(anchorMonth);
+  useEffect(() => {
+    if (!userMonthIsCycle(cycleStartDay)) return;
+    if (anchorMonth !== semilla.current) return;
+    const enCurso = userMonthAnchorContaining(todayDayStr(), cycleStartDay);
+    if (enCurso !== anchorMonth) setAnchorMonth(enCurso);
+  }, [cycleStartDay, anchorMonth]);
+
   const [customTo, setCustomTo] = useState<string | null>(null);
   function handleRangeChange(next: PeriodKey): void {
     setPeriod(next);
     if (next === 'custom' && !(customFrom && customTo)) {
-      const seed = boundsForAnchor(period === 'custom' ? 'year' : period, anchorMonth);
+      // PHASE-47 — la semilla es EL PERÍODO QUE SE ESTABA VIENDO, y para quien
+      // declaró un día de corte eso es su mes, no el natural. Sembrar con el
+      // mes de calendario hacía que pulsar «Personalizado» desplazara el rango
+      // sin tocar nada — y lo cazó el gate de cableado, no una revisión.
+      const seed = boundsForUserPeriod(period === 'custom' ? 'month' : period, anchorMonth, {
+        cycleStartDay,
+      });
       const today = todayDayStr();
       const to = seed.dateTo.slice(0, 10);
       setCustomFrom(seed.dateFrom.slice(0, 10));
@@ -64,17 +106,34 @@ export default function DashboardPage() {
 
   const { dateFrom, dateTo } = useMemo(
     () =>
-      period === 'custom' && customFrom && customTo
-        ? boundsForCustomRange(customFrom, customTo)
-        : boundsForAnchor(period === 'custom' ? 'year' : period, anchorMonth),
-    [period, anchorMonth, customFrom, customTo],
+      // PHASE-47 — UNA sola declaración de qué bounds tiene el período. Aquí
+      // había un ternario de tres ramas, repetido en cinco pantallas, en el que
+      // olvidar el orden degradaba al mes NATURAL en silencio (mismo tipo,
+      // rango distinto).
+      boundsForUserPeriod(period, anchorMonth, { cycleStartDay, customFrom, customTo }),
+    [period, anchorMonth, customFrom, customTo, cycleStartDay],
   );
+
+  /*
+   * PHASE-47 — el flag que faltaba. Esta pantalla pasaba
+   * `boundsAlreadyInCycles` al navegador —afirmando que sus bounds vienen en
+   * ciclos— y sin embargo NUNCA pedía `cycle=true`, así que el servidor le
+   * devolvía `available_from`/`available_to` en meses naturales y las flechas
+   * se acotaban con la unidad equivocada. Convivía con el bug porque el ciclo
+   * exigía un clic y casi nadie llegaba aquí con el preset puesto; al pasar a
+   * gobernarlo el perfil, sería el caso normal.
+   *
+   * La guarda no es redundante con la de los bounds: si el usuario vuelve al
+   * mes natural desde otro dispositivo y `useMe()` refresca, mandar el flag sin
+   * el dato deja la pantalla entera en 422.
+   */
+  const cycleParam = userMonthIsCycle(cycleStartDay) ? { cycle: true } : {};
 
   // Metadata para acotar el navegador de período (mes min/max con datos).
   const summaryQuery = useDashboardSummary(
     convertAll
-      ? { target_currency: currency, date_from: dateFrom, date_to: dateTo }
-      : { currency, date_from: dateFrom, date_to: dateTo },
+      ? { target_currency: currency, date_from: dateFrom, date_to: dateTo, ...cycleParam }
+      : { currency, date_from: dateFrom, date_to: dateTo, ...cycleParam },
   );
   const summary = summaryQuery.data;
 
@@ -171,6 +230,10 @@ export default function DashboardPage() {
             setCustomFrom(from);
             setCustomTo(to);
           }}
+          cycleStartDay={cycleStartDay}
+          // Esta pantalla pide con `cycle=true`, así que sus bounds YA vienen
+          // como anclas de ciclo: traducirlos otra vez daría un ciclo vacío.
+          boundsAlreadyInCycles
         />
       </header>
 

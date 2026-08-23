@@ -108,6 +108,29 @@ def expense_amount_expr(amount: Any) -> ColumnElement[Decimal]:
     return case((_is_refund(), -amount), else_=amount)
 
 
+def bucketed_amount_expr(amount: Any) -> ColumnElement[Decimal]:
+    """El importe de una fila para una agregación que MEZCLA los dos cubos.
+
+    Las series por mes agrupan por `kind_label` y suman una sola columna, así
+    que la misma expresión tiene que valer para el cubo de ingreso (importe tal
+    cual) y para el de gasto (negativo si es devolución). Aplicar
+    `expense_amount_expr` en el `else_` sería inofensivo hoy pero mentiría en el
+    nombre; así la condición dice exactamente lo que hace.
+
+    Existe porque el docstring de `_is_expense` fija la regla —«todo sitio que
+    SUME bajo este predicado tiene que usar `expense_amount_expr`»— y esa regla
+    se cumplía en las cuatro agregaciones de un solo cubo y NO en las cuatro que
+    bucketizan por mes o por categoría. Con datos reales, julio de 2026 daba
+    3.213,69 € de gasto en el KPI y 3.485,79 € en la barra del chart del mismo
+    mes: 272,10 € de diferencia, que son las cuatro devoluciones de julio
+    sumadas en vez de restadas (dos veces su importe). Y el donut decía 1.267,06
+    € en una categoría donde el drill-down decía 1.704,84 € para los MISMOS 56
+    movimientos. Ninguna de las dos cifras avisaba de nada: las dos son
+    plausibles y sólo se contradicen si las miras juntas.
+    """
+    return case((_is_expense(), expense_amount_expr(amount)), else_=amount)
+
+
 def _is_internal_transfer() -> ColumnElement[bool]:
     """True sólo si la fila es una transferencia interna (excluir del cashflow).
 
@@ -152,9 +175,55 @@ async def list_user_currencies(
     return [row[0] for row in result.all()]
 
 
+def cycle_shifted_occurred_at(cycle_start_day: int | None) -> ColumnElement[Any]:
+    """C4 — El instante de la tx DESPLAZADO para que truncar a mes dé el ciclo.
+
+    El usuario declara el día `D` en que empieza su mes (`users.cycle_start_day`,
+    1-28). El ciclo con ancla `M` es el intervalo `[día D de M, día D de M+1)`, y
+    el ancla es SIEMPRE el mes que lo **abre** — no el que aporta más días. Con
+    esa convención, agrupar por ciclo es agrupar por mes de una fecha corrida:
+
+        restar (D − 1) días  →  truncar a mes  =  ancla del ciclo
+
+    Comprobado ejecutándolo contra PostgreSQL, no razonándolo: con `D = 14`, una
+    tx del **14-ago** cae en `2026-08-01` → ancla `2026-08`; una del **13-ago**
+    cae en `2026-07-31` → ancla `2026-07`. La nómina del 14, que es el caso
+    motivador de la fase, abre su ciclo. Y con `D = 28`, el 1-mar cae en el ciclo
+    que abrió el 28-feb — sin un solo clamp de fin de mes, porque `D ≤ 28`
+    garantiza que ese día existe en todos los meses.
+
+    **`D = 1` (y `None`) devuelven la expresión SIN desplazar**: es literalmente
+    el mismo objeto SQL que usaban estas queries antes de C4, así que el mes
+    natural no puede divergir del ciclo degenerado por un cambio aquí. El
+    `not cycle_start_day` cubre `None`, `0` y el `1` por la misma puerta.
+
+    **Ésta es la ÚNICA declaración de la aritmética** (lección PHASE-46: dos
+    declaraciones del mismo hecho no fallan el día que las escribes, sino el día
+    que sólo actualizas una). Todo consumidor —`extract`, `to_char`, `min/max`—
+    la recibe de aquí; ninguno resta días por su cuenta.
+
+    Se resta con `make_interval` y BIND PARAMS, nunca interpolando el día en la
+    cadena SQL.
+
+    Vive en `dashboard/repository` y sólo la consumen queries de **flujos**
+    (series de P&G, bounds y chips de períodos). Ninguna query de SALDO la toca;
+    `tests/test_user_cycle.py::test_el_ciclo_no_mueve_ni_un_centimo` lo vigila.
+    """
+    # AUDIT-2026-07 (LOW): truncar en UTC (`func.timezone`) para que el mes no
+    # dependa de la TZ de la sesión de PostgreSQL, igual que
+    # debt_history/debt_health. Sin esto, un bucket cerca de la frontera de mes
+    # podía caer en el mes contiguo según la TZ del servidor.
+    occurred_utc = func.timezone("UTC", Transaction.occurred_at)
+    if not cycle_start_day or cycle_start_day == 1:
+        return occurred_utc
+    return occurred_utc - func.make_interval(0, 0, 0, cycle_start_day - 1)
+
+
 async def get_transaction_month_bounds(
     db: AsyncSession,
     user_id: uuid.UUID,
+    *,
+    cycle_start_day: int | None = None,
 ) -> tuple[str | None, str | None]:
     """PHASE-34 — Mes mínimo y máximo (`YYYY-MM`) con transacciones activas
     del usuario, INDEPENDIENTE de cualquier filtro de período.
@@ -162,15 +231,17 @@ async def get_transaction_month_bounds(
     Lo usa el navegador de período del Análisis para acotar las flechas ◀▶ a
     los meses con datos (mismo papel que `available_from/to` en deuda).
     Devuelve `(None, None)` si el usuario aún no tiene transacciones.
+
+    C4 — con `cycle_start_day` los extremos son **anclas de ciclo**, no meses
+    naturales: las flechas tienen que aterrizar en ciclos con datos reales, y un
+    ancla fuera de datos con el ciclo activo ya no es cosmética (pinta un período
+    vacío). Sin él, mes natural exacto como siempre.
     """
+    occurred = cycle_shifted_occurred_at(cycle_start_day)
     result = await db.execute(
         select(
-            # AUDIT-2026-07 (LOW): truncar en UTC (`func.timezone`) para que el
-            # mes no dependa de la TZ de la sesión de PostgreSQL, igual que
-            # debt_history/debt_health. Sin esto, min/max cerca de frontera de
-            # mes podían caer en el mes contiguo según la TZ del servidor.
-            func.to_char(func.min(func.timezone("UTC", Transaction.occurred_at)), "YYYY-MM"),
-            func.to_char(func.max(func.timezone("UTC", Transaction.occurred_at)), "YYYY-MM"),
+            func.to_char(func.min(occurred), "YYYY-MM"),
+            func.to_char(func.max(occurred), "YYYY-MM"),
         )
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
@@ -476,13 +547,30 @@ async def get_totals_by_month(
     year: int,
     currency: str | None = None,
     target_currency: str | None = None,
-) -> list[tuple[int, CategoryKind, Decimal]]:
-    """Totales income/expense por mes para el año pedido (PHASE-34: por flow)."""
-    # AUDIT-2026-07 (LOW): extraer mes/año en UTC para no depender de la TZ de
-    # la sesión de PostgreSQL (consistente con debt_history/debt_health).
-    _occurred_utc = func.timezone("UTC", Transaction.occurred_at)
-    month_col = extract("month", _occurred_utc)
-    year_col = extract("year", _occurred_utc)
+    cycle_start_day: int | None = None,
+) -> list[tuple[int, int, CategoryKind, Decimal]]:
+    """Totales income/expense por bucket para el año pedido (PHASE-34: por flow).
+
+    C4 — con `cycle_start_day`, los buckets dejan de ser meses naturales y pasan
+    a ser **ciclos**: el bucket `08` es «el ciclo del 14 de agosto» (14-ago →
+    13-sep), no «agosto». El año también se lee del instante desplazado, o el
+    ciclo del 14-dic se partiría en dos años.
+
+    **Y por eso son TRECE y no doce.** Los días 1..D−1 de enero no pertenecen a
+    ningún ciclo que abra en este año: pertenecen al que abrió el D de diciembre
+    del año ANTERIOR. Devolver sólo los doce que abren en el año pedido los
+    dejaba fuera de la serie — medido en la base real con D=13: **30
+    movimientos, 69,62 € de entradas y 698,70 € de salidas** que no aparecían en
+    ninguna barra, y la suma del histórico en ciclos no cuadraba con la del año
+    natural. Ese cuadre es el criterio de aceptación de la fase, no un detalle:
+    el ciclo cambia CÓMO se reparte el dinero, nunca cuánto hay.
+
+    Devuelve `(año, mes, kind, total)`: con trece buckets el mes ya no basta
+    para identificarlos, porque diciembre aparece dos veces.
+    """
+    _occurred = cycle_shifted_occurred_at(cycle_start_day)
+    month_col = extract("month", _occurred)
+    year_col = extract("year", _occurred)
     amount = _amount_expr(target_currency)
     # Etiqueta income/expense por flow (fallback kind). Transferencias y
     # movimientos sin clasificar quedan en NULL y se descartan.
@@ -492,7 +580,12 @@ async def get_totals_by_month(
     )
 
     query = (
-        select(month_col, kind_label.label("kind"), func.coalesce(func.sum(amount), 0))
+        select(
+            year_col,
+            month_col,
+            kind_label.label("kind"),
+            func.coalesce(func.sum(bucketed_amount_expr(amount)), 0),
+        )
         .select_from(Transaction)
         .outerjoin(Category, Category.id == Transaction.category_id)
         .where(Transaction.user_id == user_id)
@@ -504,15 +597,25 @@ async def get_totals_by_month(
         .where(_is_internal_transfer().is_(False))
         # PHASE-47.E2 — un ciclo aplazado no salió de la cuenta ese mes.
         .where(Transaction.deferred_by_account_id.is_(None))
+        # PHASE-47 — los períodos que ABREN en el año pedido, y sólo esos.
+        #
+        # Aquí hubo una rama extra que traía además el que abre en diciembre del
+        # año anterior, para no perder los días 1..D−1 de enero. Sobra desde que
+        # el AÑO del usuario también se desplaza (12-ene → 11-ene): sus doce
+        # períodos lo cubren entero, y esos días caen en su año anterior, donde
+        # les toca.
         .where(year_col == year)
         .where(kind_label.is_not(None))
-        .group_by(month_col, kind_label)
+        .group_by(year_col, month_col, kind_label)
     )
     if currency is not None:
         query = query.where(Transaction.currency == currency)
 
     result = await db.execute(query)
-    return [(int(month), CategoryKind(kind), Decimal(total)) for month, kind, total in result.all()]
+    return [
+        (int(yr), int(month), CategoryKind(kind), Decimal(total))
+        for yr, month, kind, total in result.all()
+    ]
 
 
 async def get_totals_by_month_in_range(
@@ -523,22 +626,34 @@ async def get_totals_by_month_in_range(
     date_to: datetime,
     currency: str | None = None,
     target_currency: str | None = None,
+    cycle_start_day: int | None = None,
 ) -> list[tuple[int, int, CategoryKind, Decimal]]:
     """PHASE-41 — Totales income/expense por (año, mes) dentro de
     `[date_from, date_to]`, con los meses de borde PARCIALES (sólo las tx del
     rango). Para el período `custom`: así las barras del chart mensual cuadran
     con los KPIs de flujo del mismo rango. Misma semántica `flow` que
-    `get_totals_by_month`."""
-    _occurred_utc = func.timezone("UTC", Transaction.occurred_at)
-    month_col = extract("month", _occurred_utc)
-    year_col = extract("year", _occurred_utc)
+    `get_totals_by_month`.
+
+    C4 — con `cycle_start_day`, el `(año, mes)` que agrupa es el **ancla del
+    ciclo**. El filtro del rango sigue sobre el `occurred_at` REAL: el
+    desplazamiento decide en qué barra cae cada tx, nunca qué transacciones
+    entran en el período.
+    """
+    _occurred = cycle_shifted_occurred_at(cycle_start_day)
+    month_col = extract("month", _occurred)
+    year_col = extract("year", _occurred)
     amount = _amount_expr(target_currency)
     kind_label = case(
         (_is_income(), literal(CategoryKind.INCOME.value)),
         (_is_expense(), literal(CategoryKind.EXPENSE.value)),
     )
     query = (
-        select(year_col, month_col, kind_label.label("kind"), func.coalesce(func.sum(amount), 0))
+        select(
+            year_col,
+            month_col,
+            kind_label.label("kind"),
+            func.coalesce(func.sum(bucketed_amount_expr(amount)), 0),
+        )
         .select_from(Transaction)
         .outerjoin(Category, Category.id == Transaction.category_id)
         .where(Transaction.user_id == user_id)
@@ -617,11 +732,19 @@ async def get_category_kpis(
     date_to: datetime | None = None,
 ) -> tuple[Decimal, int]:
     """Total + count para UNA categoría en el rango pedido. Mantiene
-    las exclusiones estándar (papelera, transferencias)."""
+    las exclusiones estándar (papelera, transferencias).
+
+    Suma con `bucketed_amount_expr`, igual que el donut del que se llega aquí
+    (`get_breakdown_by_category`). Sin eso, las dos pantallas daban cifras
+    distintas para los MISMOS movimientos: en los datos reales, «Compras
+    online» decía 1.267,06 € en el donut y 1.704,84 € al pinchar, con los
+    mismos 56 movimientos — la diferencia eran cinco devoluciones de Amazon
+    sumadas en vez de restadas.
+    """
     amount = _amount_expr(target_currency)
     query = (
         select(
-            func.coalesce(func.sum(amount), Decimal("0")),
+            func.coalesce(func.sum(bucketed_amount_expr(amount)), Decimal("0")),
             func.count(Transaction.id),
         )
         .select_from(Transaction)
@@ -648,18 +771,22 @@ async def get_category_monthly_evolution(
     currency: str | None = None,
     target_currency: str | None = None,
     months_back: int = 12,
+    cycle_start_day: int | None = None,
 ) -> list[tuple[str, Decimal]]:
     """Evolución mensual de UNA categoría: últimos `months_back` meses
     cerrados + el mes en curso (inclusivo). Devuelve `(YYYY-MM, total)`
     ordenado cronológicamente. Meses sin actividad se omiten — el
-    frontend rellena gaps si lo necesita."""
-    # AUDIT-2026-07 (LOW): bucket de mes en UTC (consistente con el resto).
-    month_col = func.to_char(func.timezone("UTC", Transaction.occurred_at), "YYYY-MM").label(
-        "month"
-    )
+    frontend rellena gaps si lo necesita.
+
+    C4 — con `cycle_start_day`, cada `YYYY-MM` es el **ancla del ciclo** que
+    abre ese mes, y `months_back` recorta los últimos N ciclos. La etiqueta no
+    cambia de forma a propósito: el frontend la traduce a «Ciclo del 14 ago» con
+    la misma función que usa el navegador de período.
+    """
+    month_col = func.to_char(cycle_shifted_occurred_at(cycle_start_day), "YYYY-MM").label("month")
     amount = _amount_expr(target_currency)
     query = (
-        select(month_col, func.coalesce(func.sum(amount), Decimal("0")))
+        select(month_col, func.coalesce(func.sum(bucketed_amount_expr(amount)), Decimal("0")))
         .select_from(Transaction)
         .outerjoin(Category, Category.id == Transaction.category_id)
         .where(Transaction.category_id == category_id)

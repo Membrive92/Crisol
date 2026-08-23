@@ -14,7 +14,7 @@ import {
   fontSize,
   fontWeight,
   formatAmount,
-  formatDate,
+  formatCivilDate,
   radius,
   spacing,
 } from '@crisol/ui';
@@ -80,7 +80,7 @@ export default function TrashScreen() {
             {item.description ?? '(sin descripción)'}
           </Text>
           <Text style={styles.meta}>
-            {formatDate(item.occurred_at)} · {category?.name ?? 'Sin categoría'}
+            {formatCivilDate(item.occurred_at)} · {category?.name ?? 'Sin categoría'}
           </Text>
           <Text style={styles.deletedAt}>Borrada {relativeDeleted(item.deleted_at)}</Text>
         </View>

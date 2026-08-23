@@ -7,9 +7,8 @@ puntual y la tasa de ahorro dual.
 
 from __future__ import annotations
 
-import calendar
 import uuid
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,6 +41,10 @@ from app.modules.personal_finance.dashboard.service import ensure_rates_for_user
 from app.modules.personal_finance.debt.installments_repository import installments_by_account
 from app.modules.personal_finance.fixed_expenses.models import FixedExpenseStatus
 from app.modules.personal_finance.fixed_expenses.repository import list_fixed_expenses
+from app.modules.personal_finance.user_month import (
+    user_month_bounds,
+    user_months_back,
+)
 
 # Cuentas líquidas para el runway/colchón: efectivo y equivalentes, no
 # inversiones (brokerage/crypto) ni deuda.
@@ -57,7 +60,10 @@ def _month_floor_shift(dt: datetime, months_back: int) -> datetime:
 
 
 def _recurrence_window(
-    date_to: datetime | None, *, now: datetime | None = None
+    date_to: datetime | None,
+    *,
+    now: datetime | None = None,
+    cycle_start_day: int | None = None,
 ) -> tuple[datetime, datetime]:
     """PHASE-43.1 — ventana de `RECURRENCE_WINDOW_MONTHS` meses naturales
     COMPLETOS terminados en `min(date_to, hoy)`.
@@ -87,15 +93,35 @@ def _recurrence_window(
     now = now if now is not None else datetime.now(UTC)
     anchor = min(date_to, now) if date_to is not None else now
     anchor_date = anchor.date()
-    last_day = calendar.monthrange(anchor_date.year, anchor_date.month)[1]
-    # El mes del ancla está completo sólo si el ancla es su último día.
-    anchor_month_complete = anchor_date.day == last_day
-    months_back_to_last_complete = 0 if anchor_month_complete else 1
-    # `window_end` = último microsegundo del último mes completo.
-    window_end = _month_floor_shift(anchor, months_back_to_last_complete - 1) - timedelta(
-        microseconds=1
+
+    # PHASE-47 — «mes» es el del USUARIO. La ventana que decide qué gasto es
+    # estructural gobierna la tasa de ahorro estructural y el denominador del
+    # runway; dejarla en meses naturales mientras el resto de la pantalla corta
+    # por el ciclo produce dos verdades sobre el mismo dinero, y la que manda
+    # depende de qué tarjeta mires. Sin día declarado, `user_month_bounds`
+    # devuelve el mes natural exacto y esto es idéntico a lo de siempre.
+    _, current_end = user_month_bounds(anchor_date, cycle_start_day)
+    # El período del ancla está completo sólo si el ancla es su último día.
+    anchor_month_complete = anchor_date == current_end
+    if anchor_month_complete:
+        first_start, _ = user_month_bounds(anchor_date, cycle_start_day)
+        earlier = user_months_back(anchor_date, cycle_start_day, RECURRENCE_WINDOW_MONTHS - 1)
+        window_start_date = earlier[0][0] if earlier else first_start
+        window_end_date = current_end
+    else:
+        completos = user_months_back(anchor_date, cycle_start_day, RECURRENCE_WINDOW_MONTHS)
+        window_start_date = completos[0][0]
+        window_end_date = completos[-1][1]
+
+    window_start = datetime(
+        window_start_date.year, window_start_date.month, window_start_date.day, tzinfo=UTC
     )
-    window_start = _month_floor_shift(window_end, RECURRENCE_WINDOW_MONTHS - 1)
+    # Último microsegundo del período, misma convención que antes.
+    window_end = (
+        datetime(window_end_date.year, window_end_date.month, window_end_date.day, tzinfo=UTC)
+        + timedelta(days=1)
+        - timedelta(microseconds=1)
+    )
     return window_start, window_end
 
 
@@ -114,6 +140,7 @@ async def get_expense_structure(
     target_currency: str | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
+    cycle_start_day: int | None = None,
 ) -> ExpenseStructureResponse:
     """Calcula el desglose estructural/puntual del gasto del rango.
 
@@ -123,7 +150,7 @@ async def get_expense_structure(
     pasado usa el histórico hasta ese punto, no el actual, y ningún mes
     parcial contamina la clasificación.
     """
-    window_start, window_end = _recurrence_window(date_to)
+    window_start, window_end = _recurrence_window(date_to, cycle_start_day=cycle_start_day)
 
     if target_currency is not None:
         # Cubrir toda la ventana (no sólo el rango) para que la conversión
@@ -262,6 +289,7 @@ async def explain_expense_structure(
     target_currency: str | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
+    cycle_start_day: int | None = None,
 ) -> list[CategoryStructureExplain]:
     """PHASE-43.2 (bug D) — por qué cada categoría del desglose es Fija o
     Variable. Convierte el KPI de "número que ignoro" en "número que puedo
@@ -271,7 +299,7 @@ async def explain_expense_structure(
     (`is_structural_expr`) pero sin el nivel de transacción — ese se reporta
     aparte como `tx_overrides`. La ventana de recurrencia es la de PHASE-43.1.
     """
-    window_start, window_end = _recurrence_window(date_to)
+    window_start, window_end = _recurrence_window(date_to, cycle_start_day=cycle_start_day)
 
     if target_currency is not None:
         await ensure_rates_for_user_scope(
@@ -384,6 +412,7 @@ async def get_month_outlook(
     *,
     currency: str | None = None,
     target_currency: str | None = None,
+    cycle_start_day: int | None = None,
 ) -> MonthOutlookResponse:
     """Proyección de fin de mes + runway (PHASE-37.4).
 
@@ -394,14 +423,16 @@ async def get_month_outlook(
     líquido / gasto estructural mensual medio (37.3)."""
     now = datetime.now(UTC)
     today = now.date()
-    last_day = calendar.monthrange(today.year, today.month)[1]
-    month_start = date(today.year, today.month, 1)
-    month_end = date(today.year, today.month, last_day)
+    # PHASE-47 — «fin de mes» es el fin del mes DEL USUARIO. Es la tarjeta que
+    # más chirriaba con el ajuste puesto: anunciaba «quedan 11 días» contando
+    # hasta el 31 cuando al usuario le quedaban 24 hasta su próxima nómina, y
+    # el runway se calculaba sobre un período que él no vive.
+    month_start, month_end = user_month_bounds(today, cycle_start_day)
     days_remaining = (month_end - today).days
 
     # Ventana de recurrencia para el gasto estructural del runway: meses
     # completos hasta hoy (excluye el mes en curso parcial — PHASE-43.1).
-    window_start, window_end = _recurrence_window(None, now=now)
+    window_start, window_end = _recurrence_window(None, now=now, cycle_start_day=cycle_start_day)
 
     accounts = await list_accounts(db, user_id, include_archived=False)
     reference = (

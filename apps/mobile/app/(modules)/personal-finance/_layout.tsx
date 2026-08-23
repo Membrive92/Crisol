@@ -36,6 +36,14 @@ export default function PersonalFinanceLayout() {
         name="transfers"
         options={{ headerShown: true, title: 'Transferencias internas' }}
       />
+      {/*
+        C2 (decisión D4 del plan) — Ajustes del ciclo del usuario. Es la primera
+        pantalla de Ajustes de móvil; hoy sólo contiene «tu mes».
+      */}
+      <Stack.Screen
+        name="settings"
+        options={{ headerShown: true, title: 'Ajustes' }}
+      />
     </Stack>
   );
 }

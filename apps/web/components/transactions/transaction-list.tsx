@@ -11,7 +11,7 @@ import {
   fontSize,
   fontWeight,
   formatAmount,
-  formatDate,
+  formatCivilDate,
   radius,
   spacing,
 } from '@crisol/ui';
@@ -191,7 +191,7 @@ export function TransactionList({
             whiteSpace: 'nowrap',
           }}
         >
-          {formatDate(tx.occurred_at)}
+          {formatCivilDate(tx.occurred_at)}
         </span>
       ),
     },
@@ -391,7 +391,7 @@ export function TransactionList({
         router.push(`/personal-finance/transactions/${row.tx.id}` as never)
       }
       rowAriaLabel={({ tx }) =>
-        `Ver transacción del ${formatDate(tx.occurred_at)} por ${formatAmount(tx.amount, tx.currency)}`
+        `Ver transacción del ${formatCivilDate(tx.occurred_at)} por ${formatAmount(tx.amount, tx.currency)}`
       }
       emptyMessage="Sin transacciones con los filtros actuales."
     />

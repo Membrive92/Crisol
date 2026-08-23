@@ -1,4 +1,5 @@
 export type { User } from './models/user';
+export type { PeriodKey } from './models/period';
 export type { AppModule, ModuleId, ModuleSection } from './models/module';
 export {
   MODULES,
@@ -138,6 +139,8 @@ export type {
   RefreshRequest,
   TokenResponse,
 } from './dto/auth.dto';
+
+export type { UpdateMeRequest } from './dto/user.dto';
 
 export type {
   AccountCreateRequest,

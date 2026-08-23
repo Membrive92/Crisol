@@ -53,6 +53,7 @@ from app.modules.personal_finance.fixed_expenses.models import (
     FixedExpense,
     FixedExpenseStatus,
 )
+from app.modules.personal_finance.user_month import user_month_bounds_for_anchor
 
 _DEBT_VERDICT: dict[str, ModuleVerdict] = {
     "healthy": "healthy",
@@ -69,6 +70,7 @@ async def compute_dashboard_summary(
     target_currency: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
+    cycle_start_day: int | None = None,
 ) -> ModuleDashboardSummary:
     """PHASE-43.4 (ADR-0006) — tarjeta del módulo Deuda para el dashboard:
     deuda viva (STOCK, número grande en negativo) + tasa de esfuerzo +
@@ -81,7 +83,9 @@ async def compute_dashboard_summary(
     fin de rango). Sin rango → foto "a día de hoy" (debt-health). El VEREDICTO y
     el esfuerzo siguen de debt-health: son un indicador de salud estable, no una
     magnitud del período."""
-    health = await compute_debt_health(db, user_id, target_currency=target_currency)
+    health = await compute_debt_health(
+        db, user_id, target_currency=target_currency, cycle_start_day=cycle_start_day
+    )
     reference = target_currency or await _resolve_reference_currency(db, user_id)
 
     if date_from is not None and date_to is not None:
@@ -697,6 +701,7 @@ async def compute_category_summary(
     date_from: date | None = None,
     date_to: date | None = None,
     target_currency: str | None = None,
+    cycle_start_day: int | None = None,
 ) -> DebtCategorySummary:
     """Calcula el snapshot completo de Capa 1 para `range_`.
 
@@ -857,14 +862,17 @@ async def compute_category_summary(
         months=monthly_buckets,
         target_currency=target_currency,
         exclude_category_ids=excluded_cat_ids,
+        cycle_start_day=cycle_start_day,
     )
     monthly_series: list[MonthlyDebtPoint] = []
-    for month_start, payments, interests in series_rows:
-        month_end = date(
-            month_start.year,
-            month_start.month,
-            calendar.monthrange(month_start.year, month_start.month)[1],
-        )
+    for bucket_anchor, payments, interests in series_rows:
+        # PHASE-47 — el bucket es el período DEL USUARIO que abre en ese mes.
+        # Sin esto, la mitad transaccional del punto venía agrupada por ciclo y
+        # la del cuadro (`_sched_paid`) y la del saldo (`_outstanding_at`) por
+        # mes natural: un mismo punto del chart mezclaba dos calendarios, y una
+        # cuota conciliada antes del corte aparecía en la barra sin estar en el
+        # KPI del período.
+        month_start, month_end = user_month_bounds_for_anchor(bucket_anchor, cycle_start_day)
         m_sched_i = await _sched_paid(interest_paid_in_window, start=month_start, end=month_end)
         m_sched_p = await _sched_paid(principal_paid_in_window, start=month_start, end=month_end)
         m_interest = interests + m_sched_i
@@ -872,7 +880,8 @@ async def compute_category_summary(
         m_balance, _ = await _outstanding_at(month_end)
         monthly_series.append(
             MonthlyDebtPoint(
-                month=_format_month(month_start),
+                # La etiqueta es el ANCLA: el mes que ABRE el período.
+                month=_format_month(bucket_anchor),
                 payments=m_payments.quantize(Decimal("0.01")),
                 interests=m_interest.quantize(Decimal("0.01")),
                 capital=(m_payments - m_interest).quantize(Decimal("0.01")),

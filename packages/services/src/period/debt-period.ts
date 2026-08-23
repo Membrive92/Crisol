@@ -37,26 +37,35 @@ const PERIOD_MONTHS: Record<NavigableRange, number> = {
   year: 12,
 };
 
-interface YearMonth {
+/*
+ * C0 — Los cuatro helpers de aritmética de meses (`parseAnchor`,
+ * `formatAnchor`, `toIndex`, `fromIndex`) se EXPORTAN para que
+ * `cycle-period.ts` los reutilice en vez de duplicarlos. Son la definición
+ * única de "un ancla `YYYY-MM` es un índice absoluto de mes"; si el ciclo se
+ * escribiera su propia copia, un cambio en una no movería la otra.
+ * No se reexportan desde `src/index.ts`: son internos del módulo `period/`.
+ */
+
+export interface YearMonth {
   year: number;
   /** 1-12 */
   month: number;
 }
 
-function parseAnchor(anchor: string): YearMonth {
+export function parseAnchor(anchor: string): YearMonth {
   const [y, m] = anchor.split('-');
   return { year: Number(y), month: Number(m) };
 }
 
-function formatAnchor({ year, month }: YearMonth): string {
+export function formatAnchor({ year, month }: YearMonth): string {
   return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}`;
 }
 
-function toIndex({ year, month }: YearMonth): number {
+export function toIndex({ year, month }: YearMonth): number {
   return year * 12 + (month - 1);
 }
 
-function fromIndex(idx: number): YearMonth {
+export function fromIndex(idx: number): YearMonth {
   return { year: Math.floor(idx / 12), month: (idx % 12) + 1 };
 }
 

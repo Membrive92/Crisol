@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-import { pickPreferredAccountId, useAccounts, useCategories } from '@crisol/services';
+import { pickPreferredAccountId, useAccounts, useCategories, todayDayStr } from '@crisol/services';
 import type { Account, ReceiptConfirmRequest, ReceiptExtraction } from '@crisol/types';
 import {
   colors,
@@ -46,7 +46,7 @@ function buildInitialValues(
     account_id: defaultAccountId,
     amount: asString(ext['total']),
     currency: asString(ext['currency']) || 'EUR',
-    occurred_at: occurred ? toDateInputValue(occurred) : toDateInputValue(new Date().toISOString()),
+    occurred_at: occurred ? toDateInputValue(occurred) : todayDayStr(),
     description: asString(ext['merchant']),
     category_id: '',
   };

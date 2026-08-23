@@ -58,6 +58,7 @@ async def expense_structure_endpoint(
         target_currency=target,
         date_from=date_from,
         date_to=date_to,
+        cycle_start_day=user.cycle_start_day,
     )
 
 
@@ -79,6 +80,13 @@ async def expense_structure_explain_endpoint(
         target_currency=target,
         date_from=date_from,
         date_to=date_to,
+        # PHASE-47 — el mismo día que su gemelo `expense-structure`. Sin esto,
+        # el VEREDICTO («esta categoría es fija») y el PORQUÉ («porque aparece
+        # en 5 de los últimos 6 meses») calculaban su ventana de recurrencia
+        # sobre universos distintos, y la web los pide con los MISMOS params.
+        # Rompía la garantía que `recurrence.py` declara por escrito: fuente
+        # ÚNICA de la aritmética de banda, compartida por los dos.
+        cycle_start_day=user.cycle_start_day,
     )
 
 
@@ -91,4 +99,11 @@ async def month_outlook_endpoint(
 ) -> MonthOutlookResponse:
     """Proyección de fin de mes (cargos comprometidos) + colchón/runway."""
     cur, target = _resolve_currency_params(currency, target_currency)
-    return await get_month_outlook(db, user.id, currency=cur, target_currency=target)
+    return await get_month_outlook(
+        db,
+        user.id,
+        currency=cur,
+        target_currency=target,
+        # PHASE-47 — el mes del usuario manda, sin flag: lo declaró en Ajustes.
+        cycle_start_day=user.cycle_start_day,
+    )

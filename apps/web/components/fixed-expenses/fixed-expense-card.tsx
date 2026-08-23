@@ -6,7 +6,7 @@ import {
   fontSize,
   fontWeight,
   formatAmount,
-  formatDate,
+  formatCivilDate,
   radius,
   spacing,
 } from '@crisol/ui';
@@ -178,7 +178,7 @@ export function FixedExpenseCard({
         <div style={{ fontSize: fontSize.xs, color: colors.textMuted }}>
           Próximo cargo:{' '}
           <strong style={{ color: colors.text, fontWeight: fontWeight.medium }}>
-            {formatDate(item.next_due)}
+            {formatCivilDate(item.next_due)}
           </strong>{' '}
           · {item.occurrence_count}{' '}
           {item.occurrence_count === 1 ? 'cargo' : 'cargos'} detectados

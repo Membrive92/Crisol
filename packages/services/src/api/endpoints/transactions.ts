@@ -143,10 +143,17 @@ export const transactionsApi = {
    * orden ascendente (1-12). Vacío si el usuario aún no tiene
    * transacciones.
    */
-  async availablePeriods(): Promise<{ year: number; months: number[] }[]> {
+  async availablePeriods(cycle = false): Promise<{ year: number; months: number[] }[]> {
     const response = await apiClient.get<{
       periods: { year: number; months: number[] }[];
-    }>('/transactions/available-periods');
+    }>('/transactions/available-periods', {
+      // PHASE-47 — los chips y lo que un chip SIGNIFICA tienen que hablar del
+      // mismo período. El `TimeSelector` emite rangos de ciclo, y si los chips
+      // llegan en meses naturales, pulsar «Ago» puede dar una lista vacía y
+      // dejar esos movimientos inalcanzables desde la UI. El backend lo soporta
+      // desde C4; nadie lo pedía.
+      ...(cycle ? { params: { cycle: true } } : {}),
+    });
     return response.data.periods;
   },
 };

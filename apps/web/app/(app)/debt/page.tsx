@@ -5,19 +5,30 @@ import dynamic from 'next/dynamic';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
+  cycleAnchorContaining,
+  cycleDaysForAnchor,
   periodLabel,
   useAccountBalances,
   useDebtCategorySummary,
   useDebtHealth,
   useDebtHistory,
+  useMe,
+  boundsForUserPeriod,
+  cycleDayForPeriod,
 } from '@crisol/services';
 import { useCurrencyStore } from '@crisol/store';
-import type { DebtHealthKpis, DebtTimeRange } from '@crisol/types';
-import { colors, fontSize, fontWeight, formatAmount, layout, radius, spacing } from '@crisol/ui';
+import type { DebtHealthKpis, DebtTimeRange, PeriodKey } from '@crisol/types';
+import {
+  colors,
+  fontSize,
+  fontWeight,
+  formatAmount,
+  layout,
+  radius,
+  spacing,
+} from '@crisol/ui';
 
 import {
-  boundsForAnchor,
-  boundsForCustomRange,
 } from '@/components/analysis/stitch-period-toggle';
 import { DebtList } from '@/components/debt/debt-list';
 import { todayDayStr } from '@/components/ui/date-picker';
@@ -70,7 +81,10 @@ function formatRangeLabel(from: string | null, to: string | null): string {
 }
 
 export default function DebtPage() {
-  const [range, setRange] = useState<DebtTimeRange>('year');
+  // C3a — El estado es `PeriodKey` (vocabulario de la UI, con `cycle`). La API
+  // de deuda sólo entiende `month|year|custom`, así que el ciclo se le manda
+  // como rango libre con sus dos fechas: `apiRange`/`cycleDays`, más abajo.
+  const [range, setRange] = useState<PeriodKey>('year');
   // PHASE-30.8 — Mes ancla `YYYY-MM` del período mostrado. Por defecto
   // el mes en curso → período actual (comportamiento previo). El
   // `PeriodNavigator` lo mueve (limitado a los meses con datos).
@@ -82,6 +96,7 @@ export default function DebtPage() {
   // siembran desde el período actual al conmutar a "Personalizado" para que
   // los date-pickers no salgan vacíos.
   const [customFrom, setCustomFrom] = useState<string | null>(null);
+
   const [customTo, setCustomTo] = useState<string | null>(null);
 
   function seedCustomFromPeriod(): { from: string; to: string } {
@@ -89,20 +104,30 @@ export default function DebtPage() {
     // curso metía fechas futuras (sin datos) en el rango por defecto.
     const today = todayDayStr();
     const cap = (to: string): string => (to > today ? today : to);
-    const [y, m] = anchorMonth.split('-').map(Number);
+    const [y] = anchorMonth.split('-').map(Number);
     const yy = y ?? new Date().getFullYear();
     if (range === 'year') {
       return { from: `${yy}-01-01`, to: cap(`${yy}-12-31`) };
     }
-    const mm = m ?? 1;
-    const lastDay = new Date(Date.UTC(yy, mm, 0)).getUTCDate();
+    // PHASE-47 — la semilla es EL PERÍODO QUE SE ESTABA VIENDO, y para quien
+    // declaró un día de corte eso es su mes, no el natural. Sembrar con el mes
+    // de calendario hacía que pulsar «Personalizado» desplazara el rango sin
+    // que el usuario tocara nada: con D=14 viendo 14-jul→13-ago, los pickers
+    // salían con 1-jul→31-jul.
+    const bounds = boundsForUserPeriod('month', anchorMonth, { cycleStartDay });
     return {
-      from: `${anchorMonth}-01`,
-      to: cap(`${anchorMonth}-${String(lastDay).padStart(2, '0')}`),
+      from: bounds.dateFrom.slice(0, 10),
+      to: cap(bounds.dateTo.slice(0, 10)),
     };
   }
 
-  function handleRangeChange(next: DebtTimeRange): void {
+  function handleRangeChange(next: PeriodKey): void {
+    // Al entrar en el preset, el ancla tiene que ser la del ciclo EN CURSO, no
+    // la del mes natural: con D=14, el 5 de agosto el usuario sigue dentro del
+    // ciclo que abrió el 14 de julio. Anclar en `2026-08` pintaría el ciclo
+    // 14-ago → 13-sep, que todavía no ha empezado — todos los KPIs a cero bajo
+    // un titular que dice ser el período actual. Pasa los días 1..13 de cada
+    // mes, o sea ~13 de cada 31.
     if (next === 'custom' && !(customFrom && customTo)) {
       const seed = seedCustomFromPeriod();
       setCustomFrom(seed.from);
@@ -119,14 +144,59 @@ export default function DebtPage() {
   // como `target_currency` a los tres endpoints de deuda. Sin `convertAll`
   // (modo legacy del dashboard) volvemos al comportamiento native:
   // moneda de referencia de la primera cuenta del usuario.
+  // C3a — el día del ciclo del usuario; sin ajuste el navegador no ofrece el chip.
+  const { data: me } = useMe();
+  const cycleStartDay = me?.cycle_start_day ?? undefined;
+  /*
+   * PHASE-47 — el reanclaje al período EN CURSO vive en un EFECTO, no en el
+   * manejador, y la diferencia no es de estilo.
+   *
+   * Aquí estaba dentro de `handleRangeChange`, que el navegador invoca como
+   * `onRangeChange`… y acto seguido llama a `onAnchorChange(clampAnchor(…,
+   * anchor, …))` con el `anchor` del render ANTERIOR. Dos `setState` planas en
+   * el mismo evento: ganaba la segunda, así que el reanclaje era código muerto
+   * y del día 1 al D−1 la pantalla abría un período que aún no había empezado
+   * —todos los KPIs a cero bajo un titular que dice ser el actual—. Lo destapó
+   * una revisión adversarial; el gate lo daba por bueno porque el fichero
+   * MENCIONA `cycleAnchorContaining`.
+   *
+   * En un efecto corre después de las dos escrituras y gana. Sólo actúa al
+   * ENTRAR en el período mensual y una vez: si el usuario navega con las
+   * flechas, mandan sus flechas.
+   */
+  const rangoPrevio = useRef(range);
+  useEffect(() => {
+    const acababaDeEntrar = rangoPrevio.current !== range;
+    rangoPrevio.current = range;
+    if (!acababaDeEntrar) return;
+    const dia = cycleDayForPeriod(range, cycleStartDay);
+    if (dia === null) return;
+    const enCurso = cycleAnchorContaining(todayDayStr(), dia);
+    if (enCurso !== anchorMonth) setAnchorMonth(enCurso);
+  }, [range, cycleStartDay, anchorMonth]);
+
   const storeCurrency = useCurrencyStore((s) => s.currency);
   const convertAll = useCurrencyStore((s) => s.convertAll);
   const targetCurrency = convertAll ? storeCurrency : undefined;
 
-  const summaryQuery = useDebtCategorySummary(range, {
+  /*
+   * C3a — El ciclo viaja a la API como rango libre día-exacto, que es la
+   * fontanería que PHASE-42 dejó puesta y que el backend de deuda ya valida.
+   * NO existe `range=cycle` en ese contrato: mandarlo daría 422.
+   */
+  // PHASE-47 — el disparador es el PERFIL: «Mes» corta por el ciclo cuando el
+  // usuario declaró un día. La API de deuda sólo entiende `month|year|custom`,
+  // así que un mes con corte propio viaja como rango libre día-exacto.
+  const cycleDay = cycleDayForPeriod(range, cycleStartDay);
+  const cycleDays = cycleDay !== null ? cycleDaysForAnchor(cycleDay, anchorMonth) : null;
+  const apiRange: DebtTimeRange = cycleDay !== null ? 'custom' : range;
+  const effectiveFrom = cycleDays ? cycleDays.fromDay : customFrom;
+  const effectiveTo = cycleDays ? cycleDays.toDay : customTo;
+
+  const summaryQuery = useDebtCategorySummary(apiRange, {
     anchor: `${anchorMonth}-01`,
-    ...(customFrom ? { dateFrom: customFrom } : {}),
-    ...(customTo ? { dateTo: customTo } : {}),
+    ...(effectiveFrom ? { dateFrom: effectiveFrom } : {}),
+    ...(effectiveTo ? { dateTo: effectiveTo } : {}),
     ...(targetCurrency ? { targetCurrency } : {}),
   });
   const healthQuery = useDebtHealth(
@@ -148,10 +218,8 @@ export default function DebtPage() {
   // (misma convención mes/año/custom que Análisis/Dashboard).
   const { dateFrom: movementsFrom, dateTo: movementsTo } = useMemo(
     () =>
-      range === 'custom' && customFrom && customTo
-        ? boundsForCustomRange(customFrom, customTo)
-        : boundsForAnchor(range === 'custom' ? 'year' : range, anchorMonth),
-    [range, anchorMonth, customFrom, customTo],
+      boundsForUserPeriod(range, anchorMonth, { cycleStartDay, customFrom, customTo }),
+    [range, anchorMonth, customFrom, customTo, cycleStartDay],
   );
 
   const liabilities = useMemo(
@@ -215,6 +283,11 @@ export default function DebtPage() {
           customFrom={customFrom}
           customTo={customTo}
           onCustomRangeChange={handleCustomRangeChange}
+          cycleStartDay={cycleStartDay}
+          // El endpoint de deuda NO tiene parámetro `cycle`, así que sus
+          // `available_*` son meses naturales y hay que traducirlos. Sin esto,
+          // el ciclo que contiene el primer movimiento queda inalcanzable.
+          boundsAlreadyInCycles={false}
         />
         {summaryQuery.isError ? (
           <ErrorState
@@ -273,12 +346,22 @@ export default function DebtPage() {
             currency={referenceCurrency}
             isLoading={summaryQuery.isLoading}
           />
-          {range === 'month' ? (
+          {/*
+          * PHASE-47 — la condición mira `apiRange`, no el período de la UI. La
+          * serie DIARIA sólo la calcula el backend con `range=month`, y un mes
+          * con corte propio viaja como `custom`: preguntando por el período de
+          * pantalla, un usuario con ciclo vería el chart diario vacío en vez de
+          * la serie mensual con su aviso. Lo cazó un test, no una lectura.
+          */}
+        {apiRange === 'month' ? (
             <DebtDailyEvolution
               items={summary?.daily_series ?? []}
               currency={referenceCurrency}
               isLoading={summaryQuery.isLoading}
-              monthLabel={periodLabel(range, anchorMonth)}
+              // Esta rama sólo existe con `apiRange === 'month'`, que implica
+              // mes de calendario; `periodLabel` no acepta `custom` y el
+              // compilador no puede deducir la implicación.
+              monthLabel={periodLabel('month', anchorMonth)}
             />
           ) : (
             <DebtMonthlyEvolution

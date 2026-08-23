@@ -26,7 +26,7 @@ import {
   fontSize,
   fontWeight,
   formatAmount,
-  formatDate,
+  formatCivilDate,
   radius,
   spacing,
 } from '@crisol/ui';
@@ -250,7 +250,7 @@ function AmortizationContent({
               </Pressable>
             </View>
             <Text style={styles.tableSubtitle}>
-              Inicio: {formatDate(`${schedule.start_date}T00:00:00Z`)}
+              Inicio: {formatCivilDate(`${schedule.start_date}T00:00:00Z`)}
             </Text>
             <View style={styles.tableHeadRow}>
               <Text style={[styles.tableHeadCell, styles.colMonth]}>Mes</Text>
@@ -353,7 +353,7 @@ function Row({ row, currency }: { row: AmortizationRow; currency: string }) {
         />
       ) : (
         <Text style={[styles.tableCell, styles.colDate]} numberOfLines={1}>
-          {formatDate(`${row.due_date}T00:00:00Z`)}
+          {formatCivilDate(`${row.due_date}T00:00:00Z`)}
         </Text>
       )}
       {editing ? (

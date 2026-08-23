@@ -32,8 +32,12 @@ from app.modules.personal_finance.categories.models import Category, CategoryRol
 from app.modules.personal_finance.dashboard.conversion import (
     converted_amount_expr,
 )
+from app.modules.personal_finance.dashboard.repository import (
+    cycle_shifted_occurred_at,
+)
 from app.modules.personal_finance.debt.installments_model import LiabilityInstallment
 from app.modules.personal_finance.transactions.models import Transaction
+from app.modules.personal_finance.user_month import user_month_bounds_for_anchor
 
 DEBT_ROLES: frozenset[CategoryRole] = frozenset(
     {CategoryRole.DEBT_PAYMENT, CategoryRole.DEBT_INTEREST}
@@ -172,6 +176,7 @@ async def monthly_debt_series(
     months: list[date],
     target_currency: str | None = None,
     exclude_category_ids: set[uuid.UUID] | None = None,
+    cycle_start_day: int | None = None,
 ) -> list[tuple[date, Decimal, Decimal]]:
     """Para cada mes de `months` (primer día de cada uno) devuelve
     `(month, total_payments, interests)`.
@@ -185,11 +190,33 @@ async def monthly_debt_series(
     """
     if not months:
         return []
-    start = _month_start_utc(months[0])
-    end = _month_end_utc(months[-1])
+    # PHASE-47 — los meses son los DEL USUARIO. Era el último agregado que
+    # seguía cortando por calendario, y el que hacía que esta serie no cuadrara
+    # con los KPIs de arriba en la misma pantalla: llevaba un aviso explicándolo
+    # («esta tarjeta cuenta el mes de siempre»), que es lo mejor que se puede
+    # hacer cuando dos cifras no cuadran a propósito — pero peor que hacerlas
+    # cuadrar.
+    #
+    # Los extremos salen de la declaración única del período; el bucketing, de
+    # la expresión desplazada que ya usan las series del dashboard. Sin día
+    # declarado las dos degeneran en el mes natural y esto es idéntico a lo de
+    # siempre.
+    # `months` llega como primeros de mes: son ANCLAS, no días. Con `D > 1` el
+    # día 1 pertenece al período que abrió el mes anterior, así que preguntar
+    # «¿qué período contiene este día?» desplaza la ventana un bucket entero y
+    # deja el último a 0,00 € siempre. La pregunta correcta es «¿qué período
+    # ABRE en este mes?».
+    primer_inicio, _ = user_month_bounds_for_anchor(months[0], cycle_start_day)
+    _, ultimo_fin = user_month_bounds_for_anchor(months[-1], cycle_start_day)
+    start = datetime(primer_inicio.year, primer_inicio.month, primer_inicio.day, tzinfo=UTC)
+    end = datetime(ultimo_fin.year, ultimo_fin.month, ultimo_fin.day, 23, 59, 59, tzinfo=UTC)
 
-    year_expr = func.extract("year", Transaction.occurred_at)
-    month_expr = func.extract("month", Transaction.occurred_at)
+    # `extract` sobre un `TIMESTAMPTZ` usaría la TZ de SESIÓN de PostgreSQL;
+    # `cycle_shifted_occurred_at` la fija en UTC y además desplaza `D−1` días,
+    # que es lo que convierte «mes de calendario» en «mes del usuario».
+    occurred_utc = cycle_shifted_occurred_at(cycle_start_day)
+    year_expr = func.extract("year", occurred_utc)
+    month_expr = func.extract("month", occurred_utc)
     amount = _amount_expr(target_currency)
     interest_amount = case(
         (Category.role == CategoryRole.DEBT_INTEREST, amount),

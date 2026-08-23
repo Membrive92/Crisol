@@ -60,6 +60,16 @@ export interface TransactionListQuery {
    * que el tope de `limit` deje fuera los antiguos.
    */
   debt_only?: boolean;
+  /**
+   * C2 (ciclo definido por el usuario) — Sentido del `ORDER BY occurred_at`.
+   * El backend lo acepta desde C1 (`ListOrder`) y su default sigue siendo
+   * `desc`, así que omitirlo no cambia nada de lo que ya existía.
+   *
+   * Lo estrena la previsualización del corte del ciclo, que necesita las
+   * PRIMERAS filas del ciclo entrante: con `desc` + `limit`, «las primeras» no
+   * se pueden pedir — sólo las últimas.
+   */
+  order?: 'asc' | 'desc';
   limit?: number;
   offset?: number;
 }

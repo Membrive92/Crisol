@@ -20,7 +20,7 @@ import {
   fontSize,
   fontWeight,
   formatAmount,
-  formatDate,
+  formatCivilDate,
   layout,
   radius,
   spacing,
@@ -184,7 +184,7 @@ export default function NewImportPage() {
               `Saldo de la cuenta anclado a ${formatAmount(
                 job.balance_anchor.balance,
                 uploadValue?.currency ?? 'EUR',
-              )} (${formatDate(job.balance_anchor.date)})`,
+              )} (${formatCivilDate(job.balance_anchor.date)})`,
             );
           }
         },

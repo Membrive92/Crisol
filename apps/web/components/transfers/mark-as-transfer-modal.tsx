@@ -14,7 +14,7 @@ import {
   fontSize,
   fontWeight,
   formatAmount,
-  formatDate,
+  formatCivilDate,
   radius,
   spacing,
 } from '@crisol/ui';
@@ -285,7 +285,7 @@ export function MarkAsTransferModal({
               color: colors.textMuted,
             }}
           >
-            <span>{formatDate(transaction.occurred_at)}</span>
+            <span>{formatCivilDate(transaction.occurred_at)}</span>
             <span aria-hidden>·</span>
             <span>
               {sourceAccountIcon ? `${sourceAccountIcon} ` : ''}

@@ -225,6 +225,53 @@ export default function SettingsPage() {
               →
             </span>
           </Link>
+          <Link
+            href="/settings/cycle"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              backgroundColor: colors.surface,
+              border: `1px solid ${colors.border}`,
+              borderRadius: radius.md,
+              padding: spacing.md,
+              color: colors.text,
+              textDecoration: 'none',
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontSize: fontSize.md,
+                  fontWeight: fontWeight.semibold,
+                  color: colors.text,
+                }}
+              >
+                Tu mes
+              </div>
+              <div
+                style={{
+                  marginTop: spacing.xs,
+                  fontSize: fontSize.sm,
+                  color: colors.textMuted,
+                  lineHeight: 1.4,
+                }}
+              >
+                Si cobras el 14, tu mes va de nómina a nómina y no del 1 al 31.
+                Elige el día en que empieza y los períodos cortarán por ahí.
+              </div>
+            </div>
+            <span
+              style={{
+                fontSize: fontSize.lg,
+                color: colors.textMuted,
+                marginLeft: spacing.md,
+              }}
+              aria-hidden
+            >
+              →
+            </span>
+          </Link>
         </div>
       </section>
 

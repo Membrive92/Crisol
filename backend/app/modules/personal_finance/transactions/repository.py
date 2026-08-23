@@ -53,6 +53,38 @@ def _debt_only_condition(own_account: Any, partner_account: Any) -> Any:
 #             que ya saben qué transacción quieren).
 DeletedScope = Literal["active", "trashed", "any"]
 
+# Sentido del `ORDER BY occurred_at` del listado. `desc` es el default histórico
+# (lo más reciente arriba, que es lo que quiere la lista de transacciones);
+# `asc` existe para poder pedir las PRIMERAS filas de una ventana sin traérselas
+# todas — la previsualización del ciclo enseña «qué entra en el mes nuevo».
+ListOrder = Literal["asc", "desc"]
+
+
+def list_order_by(order: ListOrder) -> tuple[Any, Any]:
+    """Criterios del `ORDER BY` del listado. DOS, y ahí está la gracia.
+
+    `occurred_at` no es un orden total en esta app y los empates son la norma,
+    no la excepción: los extractos bancarios no traen hora, así que
+    `_parse_datetime` deja todas las filas de un día a medianoche (el docstring
+    de `_compute_hash` lo cuenta con su ejemplo: dos cafés de 3,50 € el mismo
+    día). Con un solo criterio, PostgreSQL no está obligado a resolver los
+    empates igual en dos consultas, así que quien pagina la ventana entera
+    puede ver una fila dos veces y perder otra.
+
+    Que hoy no se reproduzca no lo hace seguro: es una garantía que el SQL no
+    da, y depende del plan que elija el motor — cambia con el volumen, con los
+    índices o con una versión nueva. El desempate por `id` la convierte en
+    determinista, y acompaña al sentido del orden para que `asc` sea
+    exactamente el inverso de `desc`.
+
+    Se extrae a una función porque es lo único de esto que se puede AFIRMAR en
+    un test: la inestabilidad no se puede provocar a voluntad, pero «el orden
+    es total» sí se comprueba mirando los criterios.
+    """
+    if order == "asc":
+        return (Transaction.occurred_at.asc(), Transaction.id.asc())
+    return (Transaction.occurred_at.desc(), Transaction.id.desc())
+
 
 def _scope[Q: Select[Any] | Update | Delete](
     query: Q,
@@ -118,6 +150,7 @@ async def list_transactions(
     search: str | None = None,
     target_currency: str | None = None,
     debt_only: bool = False,
+    order: ListOrder = "desc",
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[tuple[Transaction, Decimal | None, bool]], int]:
@@ -146,6 +179,14 @@ async def list_transactions(
     Esa marca ya no dice nada sobre el saldo: desde PHASE-47.F la
     pata-activo aporta su propio signo como cualquier otra línea del
     extracto. Es una etiqueta de QUÉ es el movimiento, no de cuánto suma.
+
+    `order` invierte el sentido del `ORDER BY occurred_at` sin tocar nada más
+    (`total` es el mismo recuento: ordenar no filtra). Con `asc` las primeras
+    `limit` filas son las MÁS ANTIGUAS de la ventana, que es lo que necesita
+    quien quiere ver por dónde empieza un período y no por dónde acaba. El
+    orden es TOTAL (desempata por `id`), así que paginar la ventana entera no
+    repite ni pierde filas aunque compartan fecha — ver el comentario del
+    `order_by`.
     """
     count_query = select(func.count()).select_from(Transaction)
     if debt_only:
@@ -221,7 +262,7 @@ async def list_transactions(
         date_to=date_to,
         search=search,
     )
-    items_query = items_query.order_by(Transaction.occurred_at.desc()).limit(limit).offset(offset)
+    items_query = items_query.order_by(*list_order_by(order)).limit(limit).offset(offset)
 
     result = await db.execute(items_query)
     items: list[tuple[Transaction, Decimal | None, bool]] = []

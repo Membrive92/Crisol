@@ -9,6 +9,7 @@ import {
   useCategories,
   useCreateTransaction,
   useLinkTransfer,
+  todayDayStr,
   usePayInstallments,
 } from '@crisol/services';
 import { toast } from '@crisol/store';
@@ -22,7 +23,6 @@ import {
   fromDateInputValue,
   radius,
   spacing,
-  toDateInputValue,
 } from '@crisol/ui';
 
 import { Button } from '@/components/ui/button';
@@ -125,7 +125,7 @@ export function DebtPaymentWizard({
   const [principalAmount, setPrincipalAmount] = useState<string>('');
   const [interestAmount, setInterestAmount] = useState<string>('');
   const [categoryId, setCategoryId] = useState<string>('');
-  const [occurredAt, setOccurredAt] = useState<string>(toDateInputValue(new Date().toISOString()));
+  const [occurredAt, setOccurredAt] = useState<string>(todayDayStr());
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // El usuario marca qué campo controla: cuando edita "principal", el
@@ -213,7 +213,7 @@ export function DebtPaymentWizard({
     setPrincipalAmount('');
     setInterestAmount('');
     setCategoryId('');
-    setOccurredAt(toDateInputValue(new Date().toISOString()));
+    setOccurredAt(todayDayStr());
     setError(null);
     setLastEdited('principal');
   }

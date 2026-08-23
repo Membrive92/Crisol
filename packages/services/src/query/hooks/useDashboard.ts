@@ -103,12 +103,14 @@ export function useCategoryDetail(
  * transacciones activas. Alimenta el TimeSelector del drill-down para
  * que sólo se ofrezcan meses/años con movimientos reales.
  */
-export function useCategoryAvailablePeriods(categoryId: string | undefined) {
+export function useCategoryAvailablePeriods(categoryId: string | undefined, cycle = false) {
   return useQuery<{ year: number; months: number[] }[], Error>({
     queryKey: categoryId
-      ? queryKeys.dashboard.categoryAvailablePeriods(categoryId)
+      ? // El flag entra en la KEY: sin él, activar el ciclo serviría los chips
+        // cacheados del mes natural.
+        [...queryKeys.dashboard.categoryAvailablePeriods(categoryId), { cycle }]
       : queryKeys.dashboard.all,
-    queryFn: () => dashboardApi.categoryAvailablePeriods(categoryId as string),
+    queryFn: () => dashboardApi.categoryAvailablePeriods(categoryId as string, cycle),
     enabled: !!categoryId,
     staleTime: STALE_TIME,
   });

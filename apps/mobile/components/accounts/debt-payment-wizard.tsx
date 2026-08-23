@@ -15,6 +15,7 @@ import {
   useAmortizationSchedule,
   useCategories,
   useCreateTransaction,
+  todayDayStr,
   useLinkTransfer,
 } from '@crisol/services';
 import { toast } from '@crisol/store';
@@ -28,7 +29,6 @@ import {
   fromDateInputValue,
   radius,
   spacing,
-  toDateInputValue,
 } from '@crisol/ui';
 
 import { DateInput } from '../ui/date-input';
@@ -127,7 +127,7 @@ export function DebtPaymentWizard({
   const [interestAmount, setInterestAmount] = useState<string>('');
   const [categoryId, setCategoryId] = useState<string>('');
   const [occurredAt, setOccurredAt] = useState<string>(
-    toDateInputValue(new Date().toISOString()),
+    todayDayStr(),
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -220,7 +220,7 @@ export function DebtPaymentWizard({
     setPrincipalAmount('');
     setInterestAmount('');
     setCategoryId('');
-    setOccurredAt(toDateInputValue(new Date().toISOString()));
+    setOccurredAt(todayDayStr());
     setError(null);
     setLastEdited('principal');
   }

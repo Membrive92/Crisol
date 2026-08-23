@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { usePathname, useRouter } from 'next/navigation';
 
 import { useAuthStore } from '@crisol/store';
@@ -71,6 +72,7 @@ const MOBILE_NAV_GLOBAL_STYLES = `
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const pathname = usePathname();
   const { user, isAuthenticated, isHydrated, accessToken, setTokens, setUser, logout } =
     useAuthStore();
@@ -149,6 +151,22 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       await authApi.logout();
     } finally {
       logout();
+      /*
+       * PHASE-47 — vaciar el caché de queries al cerrar sesión.
+       *
+       * Las query keys no llevan la identidad del usuario (`['auth','me']` es
+       * literalmente estática), así que sin esto el siguiente usuario que
+       * entre en la misma pestaña hereda las respuestas del anterior mientras
+       * duren sus `staleTime`. Con el perfil eso significa heredar su día de
+       * corte: la app le pide sus datos «por ciclo» sin que él haya declarado
+       * ninguno, y el servidor responde 422 en el endpoint que gobierna la
+       * pantalla entera.
+       *
+       * Se limpia TODO y no sólo el perfil: el resto del caché son sus
+       * transacciones y sus saldos, y tampoco tienen por qué sobrevivir a un
+       * cierre de sesión.
+       */
+      queryClient.clear();
       router.replace('/login');
     }
   }

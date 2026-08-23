@@ -45,10 +45,12 @@ export function useUncategorizedSummary() {
   });
 }
 
-export function useTransactionAvailablePeriods() {
+export function useTransactionAvailablePeriods(cycle = false) {
   return useQuery<{ year: number; months: number[] }[], Error>({
-    queryKey: queryKeys.transactions.availablePeriods(),
-    queryFn: () => transactionsApi.availablePeriods(),
+    // El flag entra en la KEY: sin él, activar el ciclo serviría los chips
+    // cacheados del mes natural y el selector volvería a mentir en silencio.
+    queryKey: queryKeys.transactions.availablePeriods(cycle),
+    queryFn: () => transactionsApi.availablePeriods(cycle),
     staleTime: 1000 * 60 * 5,
   });
 }

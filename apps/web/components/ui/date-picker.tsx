@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
+import { todayDayStr } from '@crisol/services';
 import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
 import {
@@ -55,34 +56,12 @@ function formatDisplay(value: string | null): string {
   return `${d}/${m}/${y}`;
 }
 
-/** Día de HOY como `YYYY-MM-DD` en hora local. Exportado para que otros
- * controles (navegador de período, seeds de rango) usen el mismo tope y no
- * dejen elegir fechas futuras. */
-export function todayDayStr(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
-}
-
-/**
- * Último día SELECCIONABLE del rango personalizado: fin del último mes con
- * datos (`availableTo`, `YYYY-MM`), nunca posterior a hoy. Sin datos → hoy.
- * Así el calendario no deja elegir días sin datos (p. ej. el mes en curso
- * aún sin importar).
- */
-export function dataMaxDayStr(availableTo: string | null | undefined): string {
-  const today = todayDayStr();
-  if (!availableTo) return today;
-  const [y, m] = availableTo.split('-').map(Number);
-  const lastDay = new Date(Date.UTC(y ?? 1970, m ?? 1, 0)).getUTCDate();
-  const endOfMonth = `${availableTo}-${pad2(lastDay)}`;
-  return endOfMonth < today ? endOfMonth : today;
-}
-
-/** Primer día SELECCIONABLE: inicio del primer mes con datos (`availableFrom`,
- * `YYYY-MM`). Sin datos → `null` (sin tope inferior). */
-export function dataMinDayStr(availableFrom: string | null | undefined): string | null {
-  return availableFrom ? `${availableFrom}-01` : null;
-}
+// C0 — `todayDayStr`, `dataMinDayStr` y `dataMaxDayStr` viven ahora en
+// `@crisol/services` (`period/day-strings.ts`): móvil los necesita para clampar
+// el navegador de período y aquí eran inalcanzables. Se reexportan para no
+// romper los imports existentes de este módulo (`dashboard`, `analysis`,
+// `debt/page.tsx`, `debt/period-navigator.tsx`).
+export { dataMaxDayStr, dataMinDayStr, todayDayStr } from '@crisol/services';
 
 interface Cell {
   key: string;

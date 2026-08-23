@@ -31,6 +31,7 @@ from app.modules.personal_finance.budgets.schemas import (
 from app.modules.personal_finance.categories.models import CategoryKind
 from app.modules.personal_finance.categories.repository import get_category_by_id
 from app.modules.personal_finance.dashboard.service import ensure_rates_for_user_scope
+from app.modules.personal_finance.user_month import user_month_bounds
 
 WARNING_THRESHOLD = 80.0
 OVER_THRESHOLD = 100.0
@@ -43,19 +44,25 @@ def _today_utc() -> date:
     return datetime.now(UTC).date()
 
 
-def _month_bounds_utc(today: date) -> tuple[datetime, datetime]:
-    """Inicio y fin del mes calendario que contiene `today`, en UTC.
+def _month_bounds_utc(today: date, cycle_start_day: int | None = None) -> tuple[datetime, datetime]:
+    """Inicio y fin, en UTC, del mes DEL USUARIO que contiene `today`.
 
-    `month_start = YYYY-MM-01 00:00:00+00`,
-    `month_end = último-día-del-mes 23:59:59.999999+00`.
+    PHASE-47 — un presupuesto se consume en el mes del usuario, no en el del
+    calendario. Quien cobra el 14 y se marca 400 € de «Compras» los gasta entre
+    nóminas; cortar por mes natural partía ese presupuesto en dos y le enseñaba
+    dos medias barras donde había una.
+
+    Los bounds salen de `user_month.user_month_bounds`, la única declaración del
+    período en el dominio. Sin día declarado devuelve el mes natural exacto, así
+    que quien no ha configurado nada no nota ningún cambio.
     """
-    month_start = datetime(today.year, today.month, 1, tzinfo=UTC)
-    if today.month == 12:
-        next_month_start = datetime(today.year + 1, 1, 1, tzinfo=UTC)
-    else:
-        next_month_start = datetime(today.year, today.month + 1, 1, tzinfo=UTC)
-    month_end = next_month_start - timedelta(microseconds=1)
-    return month_start, month_end
+    start, end = user_month_bounds(today, cycle_start_day)
+    return (
+        datetime(start.year, start.month, start.day, tzinfo=UTC),
+        datetime(end.year, end.month, end.day, tzinfo=UTC)
+        + timedelta(days=1)
+        - timedelta(microseconds=1),
+    )
 
 
 def _classify_status(percent_used: float) -> str:
@@ -185,6 +192,7 @@ async def get_alert_for_category(
     user_id: uuid.UUID,
     *,
     category_id: uuid.UUID | None,
+    cycle_start_day: int | None = None,
 ) -> BudgetStatusItem | None:
     """Devuelve `BudgetStatusItem` para el budget activo de una
     categoría sólo si está en `warning|over`. `None` en `ok` o sin
@@ -207,7 +215,7 @@ async def get_alert_for_category(
         )
         if budget is None:
             continue
-        month_start, month_end = _month_bounds_utc(today)
+        month_start, month_end = _month_bounds_utc(today, cycle_start_day)
         # PHASE-16: si el budget tiene cross-currency on, asegura
         # que las tasas de las fechas relevantes están en BD antes
         # de hacer la SUM convertida.
@@ -246,7 +254,9 @@ async def get_alert_for_category(
     return None
 
 
-async def get_budgets_status(db: AsyncSession, user_id: uuid.UUID) -> BudgetStatusResponse:
+async def get_budgets_status(
+    db: AsyncSession, user_id: uuid.UUID, *, cycle_start_day: int | None = None
+) -> BudgetStatusResponse:
     """Para cada presupuesto activo, calcula gasto del mes y status.
 
     El "mes" es el calendario UTC actual (1 a último día). Reusa el
@@ -256,7 +266,7 @@ async def get_budgets_status(db: AsyncSession, user_id: uuid.UUID) -> BudgetStat
     esperados (< 20 categorías) cada query es ~ms.
     """
     today = _today_utc()
-    month_start, month_end = _month_bounds_utc(today)
+    month_start, month_end = _month_bounds_utc(today, cycle_start_day)
 
     budgets = await list_active_budgets(db, user_id, today=today)
     # PHASE-16: si algún budget tiene cross-currency on, backfilleamos

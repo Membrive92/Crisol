@@ -77,10 +77,14 @@ export const dashboardApi = {
 
   async categoryAvailablePeriods(
     categoryId: string,
+    cycle = false,
   ): Promise<{ year: number; months: number[] }[]> {
     const response = await apiClient.get<{
       periods: { year: number; months: number[] }[];
-    }>(`/dashboard/category/${categoryId}/available-periods`);
+    }>(`/dashboard/category/${categoryId}/available-periods`, {
+      // Los chips y lo que un chip SIGNIFICA, en la misma unidad.
+      ...(cycle ? { params: { cycle: true } } : {}),
+    });
     return response.data.periods;
   },
 };

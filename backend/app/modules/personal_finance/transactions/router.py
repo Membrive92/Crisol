@@ -17,7 +17,18 @@ from app.modules.personal_finance.budgets.service import get_alert_for_category
 from app.modules.personal_finance.categories.repository import (
     get_category_by_id,
 )
+
+# C4 — el portero del ciclo se declara UNA vez en `dashboard.service` y lo
+# consumen los dos routers que ganan `cycle`. Duplicarlo aquí dejaría dos
+# mensajes de 422 y dos formas de decidir si el ajuste está puesto.
+from app.modules.personal_finance.dashboard.service import resolve_cycle_start_day
 from app.modules.personal_finance.transactions.models import Transaction
+
+# `ListOrder` es un vocabulario (`Literal`), no lógica: se toma de donde está
+# declarado en vez de reexportarlo desde el service, que exigiría un alias
+# explícito por `no_implicit_reexport` y crearía un segundo sitio donde puede
+# divergir. Mismo patrón que el import de `categories.repository` de arriba.
+from app.modules.personal_finance.transactions.repository import ListOrder
 from app.modules.personal_finance.transactions.schemas import (
     BudgetAlertSchema,
     TransactionCreate,
@@ -154,6 +165,7 @@ async def list_endpoint(
     search: str | None = None,
     target_currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
     debt_only: bool = False,
+    order: ListOrder = "desc",
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> TransactionListResponse:
@@ -168,6 +180,11 @@ async def list_endpoint(
     Si se pasa `target_currency`, cada fila incluye `converted_amount`
     + `converted_currency` (PHASE-8.4) — la UI puede pintar el
     equivalente en moneda activa sin lanzar fetches por fecha.
+
+    `order` (`asc | desc`, default `desc`) invierte el sentido por
+    `occurred_at`. `asc` sirve para ver las PRIMERAS filas de una ventana
+    —la previsualización del ciclo del usuario en Ajustes— sin paginar hasta
+    el final. No cambia `total` ni qué filas entran: sólo su orden.
     """
     items, total = await list_transactions(
         db,
@@ -180,6 +197,7 @@ async def list_endpoint(
         search=search,
         target_currency=target_currency,
         debt_only=debt_only,
+        order=order,
         limit=limit,
         offset=offset,
     )
@@ -251,6 +269,16 @@ async def bulk_purge_trash_endpoint(
 async def available_periods_endpoint(
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
+    cycle: Annotated[
+        bool,
+        Query(
+            description=(
+                "Agrupa por el ciclo del usuario (users.cycle_start_day) en vez "
+                "de por mes natural. El día sale del perfil; sin ajuste "
+                "configurado, 422."
+            )
+        ),
+    ] = False,
 ) -> AvailablePeriodsResponse:
     """Años + meses con transacciones activas del usuario.
 
@@ -259,8 +287,14 @@ async def available_periods_endpoint(
     o forzar los 12 meses fijos. Importante: esta ruta estática debe
     declararse ANTES de `/{transaction_id}` — si no, FastAPI matchea
     "available-periods" como un UUID y devuelve 422.
+
+    C4 — con `cycle=true` los períodos son anclas de ciclo. El día lo pone el
+    perfil, nunca el cliente; `resolve_cycle_start_day` es la MISMA puerta que
+    usa el dashboard, para que los dos selectores no puedan responder distinto.
     """
-    periods = await list_available_periods(db, user.id)
+    periods = await list_available_periods(
+        db, user.id, cycle_start_day=resolve_cycle_start_day(user.cycle_start_day, cycle)
+    )
     return AvailablePeriodsResponse(
         periods=[AvailablePeriodItem(year=year, months=months) for year, months in periods]
     )
@@ -320,7 +354,12 @@ async def create_endpoint(
     """
     transaction = await create_transaction(db, user.id, body)
     await db.flush()
-    alert = await get_alert_for_category(db, user.id, category_id=transaction.category_id)
+    alert = await get_alert_for_category(
+        db,
+        user.id,
+        category_id=transaction.category_id,
+        cycle_start_day=user.cycle_start_day,
+    )
     await db.commit()
 
     payload = TransactionResponse.model_validate(transaction)

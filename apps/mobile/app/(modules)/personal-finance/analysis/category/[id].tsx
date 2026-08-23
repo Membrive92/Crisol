@@ -10,7 +10,7 @@ import {
   fontSize,
   fontWeight,
   formatAmount,
-  formatDate,
+  formatCivilDate,
   radius,
   spacing,
 } from '@crisol/ui';
@@ -200,7 +200,7 @@ export default function CategoryDetailScreen() {
                         {tx.description ?? '(sin descripción)'}
                       </Text>
                       <Text style={styles.txDate}>
-                        {formatDate(tx.occurred_at)}
+                        {formatCivilDate(tx.occurred_at)}
                       </Text>
                     </View>
                     <Text style={styles.txAmount}>

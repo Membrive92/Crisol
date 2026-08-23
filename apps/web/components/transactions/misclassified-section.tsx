@@ -14,7 +14,7 @@ import {
   fontSize,
   fontWeight,
   formatAmount,
-  formatDate,
+  formatCivilDate,
   radius,
   spacing,
 } from '@crisol/ui';
@@ -260,7 +260,7 @@ function MisclassifiedRow({
               fontWeight: fontWeight.medium,
             }}
           >
-            {formatDate(item.occurred_at)} ·{' '}
+            {formatCivilDate(item.occurred_at)} ·{' '}
             {item.description ?? '(sin descripción)'}
           </span>
           <span

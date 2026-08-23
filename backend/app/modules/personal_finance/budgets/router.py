@@ -48,7 +48,7 @@ async def status_endpoint(
     Devuelve `items[].{budget, spent_this_month, remaining,
     percent_used, status}` + `month_start`/`month_end` (UTC).
     """
-    return await get_budgets_status(db, user.id)
+    return await get_budgets_status(db, user.id, cycle_start_day=user.cycle_start_day)
 
 
 @router.get("/{budget_id}", response_model=BudgetResponse)

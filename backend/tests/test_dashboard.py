@@ -518,6 +518,46 @@ async def test_by_month_custom_range_partial_boundary_months(client: AsyncClient
     assert by_month["2026-06"]["expenses"] == "0"
 
 
+async def test_by_month_custom_range_no_inventa_meses_fuera_del_rango(
+    client: AsyncClient,
+) -> None:
+    """Un rango que empieza el día 1 devuelve exactamente sus meses, ni uno más.
+
+    Regresión de C4 (el mes que define el usuario): el relleno de huecos de la
+    rama de rango pasó a derivar el primer y el último bucket de la misma
+    aritmética que usa el ciclo — con el día 1, que degenera en el mes natural.
+    Un off-by-one de un solo día ahí retrocede el primer bucket al mes ANTERIOR y
+    la respuesta gana una barra vacía delante, sin que ningún total cambie.
+
+    El test anterior (`..._partial_boundary_months`) no lo caza: su rango empieza
+    el día 15, así que restar un día lo deja dentro del mismo mes.
+    """
+    token, account_id = await _register(client, "dash-range-edges@example.com")
+    expense = await _make_category(client, token, name="Comida", kind="expense")
+    await _make_tx(
+        client,
+        token,
+        account_id,
+        amount="10.00",
+        occurred_at="2026-07-03T10:00:00Z",
+        category_id=expense,
+    )
+    await _make_tx(
+        client,
+        token,
+        account_id,
+        amount="20.00",
+        occurred_at="2026-08-25T10:00:00Z",
+        category_id=expense,
+    )
+
+    r = await client.get(
+        "/dashboard/by-month?date_from=2026-07-01T00:00:00Z&date_to=2026-08-31T23:59:59Z",
+        headers=_auth(token),
+    )
+    assert [b["month"] for b in r.json()] == ["2026-07", "2026-08"]
+
+
 async def test_by_month_ignores_other_years(client: AsyncClient) -> None:
     token, account_id = await _register(client, "dash-year@example.com")
     cat = await _make_category(client, token, name="Salario", kind="income")

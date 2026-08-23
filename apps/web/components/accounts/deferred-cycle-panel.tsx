@@ -9,7 +9,7 @@ import {
   useDeferredCycle,
 } from '@crisol/services';
 import { toast } from '@crisol/store';
-import { colors, fontSize, fontWeight, formatAmount, formatDate, radius, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, formatAmount, formatCivilDate, radius, spacing } from '@crisol/ui';
 
 import { Button } from '@/components/ui/button';
 
@@ -162,7 +162,7 @@ export function DeferredCyclePanel({
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {formatDate(p.occurred_at)} · {p.description ?? '(sin descripción)'}
+                    {formatCivilDate(p.occurred_at)} · {p.description ?? '(sin descripción)'}
                   </span>
                   {/* Una devolución viaja en negativo: el banco liquida el neto,
                       así que forma parte del ciclo igual que una compra. */}

@@ -44,9 +44,27 @@ from app.modules.personal_finance.dashboard.service import (
     get_summary,
     get_top_expenses,
     list_user_currencies,
+    resolve_cycle_start_day,
 )
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+
+# C4 — «el histórico entero en ciclos». `cycle=true` cambia la PREGUNTA que
+# responde el endpoint: en vez de «¿qué pasó en agosto?», «¿qué pasó de nómina a
+# nómina?». Las dos siguen existiendo a propósito — sin el flag, el mes natural
+# queda intacto aunque el usuario tenga su ciclo configurado.
+#
+# El día NUNCA viaja en la query: sale de `user.cycle_start_day`, que
+# `CurrentUser` ya trae. Sin ajuste, `cycle=true` es 422 (ver
+# `resolve_cycle_start_day`).
+# El default va en cada firma (`= False`) y no aquí: FastAPI rechaza un `Query`
+# con default dentro de `Annotated`.
+_CYCLE_QUERY = Query(
+    description=(
+        "Agrupa por el ciclo del usuario (users.cycle_start_day) en vez de por "
+        "mes natural. El día sale del perfil; sin ajuste configurado, 422."
+    ),
+)
 
 _DEFAULT_CURRENCY = "USD"
 
@@ -77,8 +95,14 @@ async def summary_endpoint(
     target_currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
+    cycle: Annotated[bool, _CYCLE_QUERY] = False,
 ) -> SummaryResponse:
-    """Balance, ingresos, gastos y total de movimientos."""
+    """Balance, ingresos, gastos y total de movimientos.
+
+    Con `cycle=true`, el Δ «vs período anterior» compara con el ciclo anterior
+    EXACTO y `available_from/to` son anclas de ciclo. Los totales del período no
+    cambian: los fija `[date_from, date_to]`.
+    """
     cur, target = _resolve_currency_params(currency, target_currency)
     return await get_summary(
         db,
@@ -87,6 +111,7 @@ async def summary_endpoint(
         target_currency=target,
         date_from=date_from,
         date_to=date_to,
+        cycle_start_day=resolve_cycle_start_day(user.cycle_start_day, cycle),
     )
 
 
@@ -104,7 +129,15 @@ async def module_summary_endpoint(
     con datos."""
     cur, target = _resolve_currency_params(currency, target_currency)
     return await get_module_summary(
-        db, user.id, currency=cur, target_currency=target, date_from=date_from, date_to=date_to
+        db,
+        user.id,
+        currency=cur,
+        target_currency=target,
+        date_from=date_from,
+        date_to=date_to,
+        # PHASE-47 — sin rango, la tarjeta cae al último período CON DATOS, y
+        # ese período es el del usuario.
+        cycle_start_day=user.cycle_start_day,
     )
 
 
@@ -140,9 +173,13 @@ async def by_month_endpoint(
     target_currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
     date_from: Annotated[datetime | None, Query()] = None,
     date_to: Annotated[datetime | None, Query()] = None,
+    cycle: Annotated[bool, _CYCLE_QUERY] = False,
 ) -> list[MonthlyBucket]:
     """12 buckets mensuales para el año, o —con `date_from`+`date_to` (período
-    custom)— un bucket por mes del rango, con bordes parciales."""
+    custom)— un bucket por mes del rango, con bordes parciales.
+
+    Con `cycle=true` cada bucket es un CICLO del usuario y su clave `YYYY-MM` es
+    el mes que lo ABRE: en la vista de año, los 12 ciclos que abren en él."""
     cur, target = _resolve_currency_params(currency, target_currency)
     return await get_monthly_breakdown(
         db,
@@ -152,6 +189,7 @@ async def by_month_endpoint(
         target_currency=target,
         date_from=date_from,
         date_to=date_to,
+        cycle_start_day=resolve_cycle_start_day(user.cycle_start_day, cycle),
     )
 
 
@@ -163,6 +201,7 @@ async def category_available_periods_endpoint(
     category_id: uuid.UUID,
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
+    cycle: Annotated[bool, _CYCLE_QUERY] = False,
 ) -> CategoryAvailablePeriodsResponse:
     """Años + meses con transacciones activas para la categoría dada.
 
@@ -170,8 +209,16 @@ async def category_available_periods_endpoint(
     mostramos chips para periodos que tienen datos reales. Excluye
     papelera. Importante: ruta más específica antes que
     `/category/{category_id}` para que FastAPI no la confunda.
+
+    Con `cycle=true` los `(año, mes)` son anclas de ciclo, para que los chips
+    ofrezcan exactamente los períodos que luego pintan datos.
     """
-    return await get_category_available_periods(db, user.id, category_id)
+    return await get_category_available_periods(
+        db,
+        user.id,
+        category_id,
+        cycle_start_day=resolve_cycle_start_day(user.cycle_start_day, cycle),
+    )
 
 
 @router.get("/category/{category_id}", response_model=CategoryDetailResponse)
@@ -184,10 +231,14 @@ async def category_detail_endpoint(
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     months_back: Annotated[int, Query(ge=1, le=36)] = 12,
+    cycle: Annotated[bool, _CYCLE_QUERY] = False,
 ) -> CategoryDetailResponse:
     """PHASE-25 — Drill-down de una categoría: KPIs en el rango +
     evolución mensual + top 10 transacciones. Para la pantalla que se
-    abre al pulsar un item del 'Desglose de gastos' del dashboard."""
+    abre al pulsar un item del 'Desglose de gastos' del dashboard.
+
+    Con `cycle=true`, `by_month` es una serie de CICLOS (`months_back` recorta
+    los últimos N) y cada clave `YYYY-MM` es el mes que abre el ciclo."""
     cur, target = _resolve_currency_params(currency, target_currency)
     return await get_category_detail(
         db,
@@ -198,6 +249,7 @@ async def category_detail_endpoint(
         date_from=date_from,
         date_to=date_to,
         months_back=months_back,
+        cycle_start_day=resolve_cycle_start_day(user.cycle_start_day, cycle),
     )
 
 

@@ -1,20 +1,41 @@
+import { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
+  canStepCycleNext,
+  canStepCyclePrev,
   canStepNext,
   canStepPrev,
   clampAnchor,
+  clampCycleAnchor,
+  dataMaxDayStr,
+  dataMinDayStr,
+  isValidCycleStartDay,
   periodLabel,
   stepAnchor,
+  stepCycleAnchor,
 } from '@crisol/services';
-import type { DebtTimeRange } from '@crisol/types';
-import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
+import type { PeriodKey } from '@crisol/types';
+import {
+  colors,
+  fontSize,
+  fontWeight,
+  radius,
+  spacing,
+} from '@crisol/ui';
 
 import { DateInput } from '../ui/date-input';
 
 export interface PeriodNavigatorProps {
-  range: DebtTimeRange;
-  onRangeChange: (range: DebtTimeRange) => void;
+  /**
+   * C3a — El navegador habla en `PeriodKey` (vocabulario de la UI, con
+   * `cycle`), NO en `DebtTimeRange` (el contrato de la API de deuda, que sólo
+   * admite `month|year|custom`). Traducir el ciclo a lo que entiende el
+   * servidor —`range=custom` con las fechas del ciclo— es cosa de la pantalla,
+   * que es quien construye la query. Mandar `range=cycle` daría 422.
+   */
+  range: PeriodKey;
+  onRangeChange: (range: PeriodKey) => void;
   /** Mes ancla `YYYY-MM` del período mostrado. */
   anchor: string;
   onAnchorChange: (anchor: string) => void;
@@ -29,9 +50,30 @@ export interface PeriodNavigatorProps {
   customFrom?: string | null;
   customTo?: string | null;
   onCustomRangeChange?: (from: string, to: string) => void;
+  /**
+   * C3a — Día en que empieza el mes del usuario (1–28). Con él, el toggle
+   * ofrece «Mi ciclo» y las flechas saltan de ciclo en ciclo.
+   *
+   * Sin él (o mientras carga el perfil) el navegador es exactamente el de
+   * siempre. `| undefined` explícito por `exactOptionalPropertyTypes`.
+   */
+  cycleStartDay?: number | undefined;
+  /**
+   * ¿Los `availableFrom`/`availableTo` YA son anclas de ciclo?
+   *
+   * `true` — vienen de un endpoint pedido con `cycle=true` (dashboard,
+   * análisis): ya están bucketizados y traducirlos otra vez habilitaría un
+   * ciclo VACÍO por la izquierda. `false` (default) — son MESES NATURALES, el
+   * caso de Deuda, cuyo endpoint no tiene ese parámetro: hay que traducirlos o
+   * el ciclo que CONTIENE el primer movimiento queda inalcanzable.
+   *
+   * Default `false` a propósito: equivocarse hacia «traducir» enseña un período
+   * vacío de más; hacia «no traducir», ESCONDE movimientos.
+   */
+  boundsAlreadyInCycles?: boolean;
 }
 
-const RANGE_LABEL: Record<DebtTimeRange, string> = {
+const RANGE_LABEL: Record<PeriodKey, string> = {
   month: 'Mes',
   year: 'Año',
   custom: 'Rango',
@@ -42,6 +84,14 @@ function toDate(day: string | null | undefined): Date | undefined {
   if (!day) return undefined;
   const [y, m, d] = day.split('-').map(Number);
   return new Date(Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1));
+}
+
+/** Recorta un day-string al rango `[lo, hi]` (`lo` puede ser null = sin tope). */
+function clampDay(day: string, lo: string | null, hi: string): string {
+  let d = day;
+  if (d > hi) d = hi;
+  if (lo != null && d < lo) d = lo;
+  return d;
 }
 
 /**
@@ -61,30 +111,111 @@ export function PeriodNavigator({
   customFrom = null,
   customTo = null,
   onCustomRangeChange,
+  cycleStartDay,
+  boundsAlreadyInCycles = false,
 }: PeriodNavigatorProps) {
-  const ranges: DebtTimeRange[] = allowCustom
-    ? ['month', 'year', 'custom']
-    : ['month', 'year'];
-  // PHASE-41 — `custom` no navega; los guards estrechan a `NavigableRange`.
-  const prevEnabled = range !== 'custom' && canStepPrev(range, anchor, availableFrom);
-  const nextEnabled = range !== 'custom' && canStepNext(range, anchor, availableTo);
+  // Guarda POR VERDAD, nunca `!== null`: mientras `useMe()` carga el valor no
+  // existe, y con un backend anterior a la columna tampoco. Ofrecer el chip en
+  // ese estado lleva a un 422 del servidor (lección PHASE-47.E).
+  const cycleEnabled = isValidCycleStartDay(cycleStartDay);
+  const ranges: PeriodKey[] = [
+    'month',
+    'year',
+    ...(allowCustom ? (['custom'] as const) : []),
+  ];
+  // PHASE-41 — `custom` (rango libre) no navega: las flechas/label sólo
+  // aplican a los períodos navegables (month/year). Los guards estrechan
+  // el tipo a `NavigableRange` para los helpers puros.
+  /*
+   * C3a — Con el preset activo, las flechas saltan de CICLO en ciclo, pero el
+   * clamp que las acota es el MENSUAL llano (`canStepPrev`/`clampAnchor` con
+   * granularidad `month`), no `canStepCyclePrev`. No es un descuido:
+   *
+   * `available_from`/`available_to` llegan del backend YA como anclas de ciclo
+   * cuando se pide con `cycle=true` (los bucketea la misma expresión
+   * desplazada). Los helpers `clampCycleAnchor`/`canStepCycle*` existen para
+   * TRADUCIR meses naturales a ciclos —retroceden un mes cuando D>1, porque el
+   * ciclo que contiene el día 1 del primer mes con datos abre el mes
+   * anterior—, así que aplicarlos sobre unos bounds ya traducidos los
+   * traduciría DOS VECES y habilitaría por la izquierda un ciclo vacío.
+   *
+   * Un ciclo es exactamente un mes de ancla, así que sobre anclas ya
+   * traducidas la aritmética mensual es la correcta. Mismo contrato que el
+   * navegador de web, con su test de regresión a cada lado.
+   */
+  const navigable: 'month' | 'year' = range === 'year' ? 'year' : 'month';
+  // Qué clamp usar depende de en qué UNIDAD llegan los bounds (ver
+  // `boundsAlreadyInCycles`), no de si el preset está activo.
+  // PHASE-47 — el disparador ya no es un preset elegido, es el perfil: el
+  // período «Mes» corta por el ciclo cuando el usuario declaró un día.
+  const monthIsCycle = range === 'month' && cycleEnabled;
+  const translateBounds = monthIsCycle && !boundsAlreadyInCycles && cycleStartDay != null;
+  const prevEnabled =
+    range !== 'custom' &&
+    (translateBounds && cycleStartDay != null
+      ? canStepCyclePrev(anchor, availableFrom, cycleStartDay)
+      : canStepPrev(navigable, anchor, availableFrom));
+  const nextEnabled =
+    range !== 'custom' &&
+    (translateBounds && cycleStartDay != null
+      ? canStepCycleNext(anchor, availableTo, cycleStartDay)
+      : canStepNext(navigable, anchor, availableTo));
 
-  function handleRange(next: DebtTimeRange) {
+  // El ancla por defecto es el mes en curso, que puede caer FUERA del rango con
+  // datos (p. ej. julio vacío cuando la última tx es de junio). `clampAnchor`
+  // sólo corre al pulsar el toggle/flecha, así que sin esto te quedas en un
+  // período sin datos hasta que navegas. Aquí lo re-acotamos en cuanto llegan
+  // los límites (tras cargar): comparamos el clamp CON límites contra el clamp
+  // SIN límites (mera normalización) — si difieren, el ancla estaba fuera y la
+  // corregimos. Idempotente: una vez dentro, no vuelve a disparar.
+  // Con el ciclo esto deja de ser cosmético: un ancla fuera de datos ya no
+  // aterriza en un mes flojo, pinta un período VACÍO.
+  useEffect(() => {
+    if (range === 'custom') return;
+    if (availableFrom == null && availableTo == null) return;
+    const g: 'month' | 'year' = range === 'year' ? 'year' : 'month';
+    const clamped =
+      translateBounds && cycleStartDay != null
+        ? clampCycleAnchor(anchor, availableFrom, availableTo, cycleStartDay)
+        : clampAnchor(g, anchor, availableFrom, availableTo);
+    const normalized = clampAnchor(g, anchor, null, null);
+    if (clamped !== normalized) onAnchorChange(clamped);
+  }, [range, anchor, availableFrom, availableTo, onAnchorChange]);
+
+  // Rango personalizado acotado a los días CON DATOS: si el from/to sembrado
+  // cae fuera de `[primer día, último día]` con datos, lo recortamos. Cubre el
+  // caso del seed en modo Año, que llega hasta fin de año aunque el último dato
+  // sea de un mes anterior. Idempotente.
+  useEffect(() => {
+    if (range !== 'custom' || !customFrom || !customTo) return;
+    const lo = dataMinDayStr(availableFrom);
+    const hi = dataMaxDayStr(availableTo);
+    const f = clampDay(customFrom, lo, hi);
+    const t = clampDay(customTo, lo, hi);
+    if (f !== customFrom || t !== customTo) onCustomRangeChange?.(f, t);
+  }, [range, customFrom, customTo, availableFrom, availableTo, onCustomRangeChange]);
+
+  function handleRange(next: PeriodKey) {
     onRangeChange(next);
     if (next !== 'custom') {
-      onAnchorChange(clampAnchor(next, anchor, availableFrom, availableTo));
+      onAnchorChange(
+        clampAnchor(next === 'year' ? 'year' : 'month', anchor, availableFrom, availableTo),
+      );
     }
   }
 
   function step(direction: 1 | -1) {
     if (range === 'custom') return;
+    // Un ciclo avanza un mes de ancla, igual que el período mensual: el paso lo
+    // da la función compartida en vez de sumar aquí, para que web y móvil no
+    // puedan discrepar en el cruce de año.
+    const nextAnchor = monthIsCycle
+      ? stepCycleAnchor(anchor, direction)
+      : stepAnchor(navigable, anchor, direction);
     onAnchorChange(
-      clampAnchor(
-        range,
-        stepAnchor(range, anchor, direction),
-        availableFrom,
-        availableTo,
-      ),
+      translateBounds && cycleStartDay != null
+        ? clampCycleAnchor(nextAnchor, availableFrom, availableTo, cycleStartDay)
+        : clampAnchor(navigable, nextAnchor, availableFrom, availableTo),
     );
   }
 
@@ -135,7 +266,16 @@ export function PeriodNavigator({
               ‹
             </Text>
           </Pressable>
-          <Text style={styles.label}>{periodLabel(range, anchor)}</Text>
+          <Text style={styles.label}>
+            {/*
+              * PHASE-47 — el período se llama como el mes que lo ABRE, tenga
+              * el usuario ciclo o no: «Julio 2026» va del 12 de julio al 11 de
+              * agosto si ése es su corte. Aquí ponía «Ciclo del 12 jul 2026»,
+              * que era vocabulario nuevo para un concepto que el usuario ya
+              * tenía nombrado.
+              */}
+            {periodLabel(navigable, anchor)}
+          </Text>
           <Pressable
             onPress={() => step(1)}
             disabled={!nextEnabled}
