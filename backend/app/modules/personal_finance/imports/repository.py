@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
@@ -183,6 +184,72 @@ async def find_live_card_settlements(
         )
     )
     return [(row[0], row[1], row[2]) for row in result.all()]
+
+
+@dataclass(frozen=True)
+class RowDeclarations:
+    """Lo que el usuario había declarado sobre una fila, por `import_hash`."""
+
+    flow: TransactionFlow | None
+    flow_declared_at: datetime | None
+    amortization_source_id: uuid.UUID | None
+    deferred_by_account_id: uuid.UUID | None
+
+
+async def find_declarations_in_trash(
+    db: AsyncSession, user_id: uuid.UUID, hashes: list[str]
+) -> dict[str, RowDeclarations]:
+    """Declaraciones del usuario que quedaron en la papelera, por hash.
+
+    **Por qué.** Reimportar un extracto borra la fila vieja y crea otra, y con
+    la vieja se van sus declaraciones a nivel de fila. En julio de 2026 eso
+    movió el resultado del mes 652 € sin que nadie lo decidiera. La fila nueva
+    llega con EL MISMO `import_hash` —usuario+importe+fecha+descripción—, así
+    que la anterior es localizable y sus decisiones, recuperables.
+
+    Sólo devuelve filas que declaren ALGO. Las tres columnas que viajan son
+    declaraciones puras: `amortization_source_id` y `deferred_by_account_id`
+    no los escribe jamás el import, y el `flow` sólo viaja si lleva la firma
+    de PHASE-47 (`flow_declared_at`), sin la cual sería indistinguible de la
+    conjetura del clasificador.
+
+    Excluye los cargos espejo (`absorbed_as_mirror`): ésos los borró el
+    SISTEMA con contrapartida ya creada, no son decisión de nadie — y además
+    `find_existing_hashes` ya los cuenta como existentes, así que sus filas
+    nunca llegan a reinsertarse.
+
+    Si hubiera varias borradas con el mismo hash, gana la más reciente: es la
+    última voluntad del usuario sobre ese movimiento.
+    """
+    if not hashes:
+        return {}
+    result = await db.execute(
+        select(Transaction)
+        .where(
+            Transaction.user_id == user_id,
+            Transaction.import_hash.in_(hashes),
+            Transaction.deleted_at.is_not(None),
+            Transaction.absorbed_as_mirror.is_(False),
+            or_(
+                Transaction.flow_declared_at.is_not(None),
+                Transaction.amortization_source_id.is_not(None),
+                Transaction.deferred_by_account_id.is_not(None),
+            ),
+        )
+        .order_by(Transaction.deleted_at.asc())
+    )
+    found: dict[str, RowDeclarations] = {}
+    for tx in result.scalars().all():
+        if tx.import_hash is None:
+            continue
+        # Orden ascendente + sobrescritura ⇒ se queda la más reciente.
+        found[tx.import_hash] = RowDeclarations(
+            flow=tx.flow if tx.flow_declared_at is not None else None,
+            flow_declared_at=tx.flow_declared_at,
+            amortization_source_id=tx.amortization_source_id,
+            deferred_by_account_id=tx.deferred_by_account_id,
+        )
+    return found
 
 
 async def find_existing_hashes(db: AsyncSession, user_id: uuid.UUID, hashes: list[str]) -> set[str]:

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import io
-from datetime import datetime
+import uuid
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -506,3 +507,82 @@ def test_pick_balance_anchor_none_without_saldo() -> None:
     """Sin ninguna fila con saldo no hay ancla."""
     rows = [_row(10, None, "100.00", "IN")]
     assert _pick_balance_anchor(rows) is None
+
+
+# ── PHASE-47: una fecha de extracto es una fecha CIVIL ────────────────────
+
+
+def test_una_fecha_sin_hora_se_ancla_a_medianoche_utc() -> None:
+    """El parser NO puede devolver un naive: la zona la elegiría el driver.
+
+    asyncpg interpreta un `datetime` naive como hora local DEL PROCESO al
+    escribirlo en una columna `TIMESTAMPTZ`. Con el backend en Europe/Madrid,
+    «13/02/2026» se persistía como `2026-02-12T23:00:00Z`, así que el dato
+    dependía del ordenador que hizo el import y del horario de verano — y un
+    filtro que empieza el día 13 (construido en UTC) dejaba fuera los
+    movimientos de ese mismo día 13.
+    """
+    from app.modules.personal_finance.imports.service import _parse_datetime
+
+    for texto in ("13/02/2026", "2026-02-13", "13-02-2026", "13.02.2026"):
+        parsed = _parse_datetime(texto)
+        assert parsed.tzinfo is not None, f"{texto!r} devolvió un naive"
+        assert parsed.utcoffset() == timedelta(0), f"{texto!r} no quedó en UTC"
+        assert (parsed.year, parsed.month, parsed.day) == (2026, 2, 13)
+        assert (parsed.hour, parsed.minute, parsed.second) == (0, 0, 0)
+
+
+def test_una_fecha_con_hora_conserva_la_hora_y_solo_ancla_la_zona() -> None:
+    """Anclar no es convertir. Un naive con hora venía sin zona, así que
+    trasladarlo asumiría que era local — que es exactamente el bug."""
+    from app.modules.personal_finance.imports.service import _parse_datetime
+
+    parsed = _parse_datetime("2026-02-13T14:30:00")
+    assert parsed.utcoffset() == timedelta(0)
+    assert (parsed.hour, parsed.minute) == (14, 30)
+
+
+def test_un_iso_con_offset_se_traslada_a_utc() -> None:
+    """Lo que SÍ trae zona se convierte, para que la columna sea homogénea:
+    las 14:30 de Madrid son las 13:30 UTC, y ahí es donde deben vivir."""
+    from app.modules.personal_finance.imports.service import _parse_datetime
+
+    parsed = _parse_datetime("2026-02-13T14:30:00+01:00")
+    assert parsed.utcoffset() == timedelta(0)
+    assert (parsed.hour, parsed.minute) == (13, 30)
+    assert parsed.day == 13
+
+
+def test_el_hash_no_cambia_al_pasar_la_fecha_a_tz_aware() -> None:
+    """La identidad de una fila del extracto no puede depender de su
+    REPRESENTACIÓN.
+
+    Cuando el parser pasó a emitir tz-aware, `.isoformat()` empezó a añadir
+    `+00:00` y el hash de la misma fila del banco cambiaba de valor. Eso habría
+    matado los ~557 `import_hash` persistidos y con ellos tres cosas a la vez:
+    el dedup (reimportar duplicaría todo), la reposición de declaraciones desde
+    la papelera y el guardarraíl que avisa de un fichero importado en la cuenta
+    equivocada.
+
+    Este test es el que hace segura la migración de datos: mientras pase, no
+    hay que rehashear ni una fila.
+    """
+    from app.modules.personal_finance.imports.service import _compute_hash
+
+    uid = uuid.UUID("11111111-2222-3333-4444-555555555555")
+    kwargs = {
+        "user_id": uid,
+        "amount": Decimal("33.58"),
+        "currency": "EUR",
+        "description": "Www.amazon* sb2u90z85 Pago con tarjeta",
+    }
+    naive = _compute_hash(occurred_at=datetime(2026, 6, 29, 0, 0), **kwargs)  # type: ignore[arg-type]
+    aware = _compute_hash(occurred_at=datetime(2026, 6, 29, 0, 0, tzinfo=UTC), **kwargs)  # type: ignore[arg-type]
+    assert naive == aware, "el sufijo de zona no puede entrar en el hash"
+
+    # Y un mismo instante escrito en otra zona colapsa al mismo hash: las 14:30
+    # de Madrid son las 12:30 UTC del mismo día.
+    madrid = datetime(2026, 6, 29, 14, 30, tzinfo=timezone(timedelta(hours=2)))
+    assert _compute_hash(occurred_at=madrid, **kwargs) == _compute_hash(  # type: ignore[arg-type]
+        occurred_at=datetime(2026, 6, 29, 12, 30, tzinfo=UTC), **kwargs  # type: ignore[arg-type]
+    )

@@ -110,6 +110,23 @@ class Transaction(Base):
         Enum(TransactionFlow, name="transactionflow", native_enum=True),
         nullable=True,
     )
+    # PHASE-47 — cuándo DECLARÓ el usuario esta dirección. `NULL` = la puso
+    # el sistema (import o form por defecto). No es un booleano por gusto: la
+    # fecha dice además cuándo, y `NULL` no puede confundirse con «declarada
+    # como falso».
+    #
+    # Existe porque una reimportación BORRA la fila y crea otra: en julio de
+    # 2026 se llevó por delante cuatro adeudos que el usuario había declarado
+    # gasto (1.099,64 €) y el resultado del mes se movió 652 € sin que nadie
+    # lo decidiera. El `import_hash` de la fila nueva es idéntico al de la
+    # borrada —usuario+importe+fecha+descripción—, así que el import puede
+    # recuperar la declaración; lo que no podía es SABER cuál era declaración
+    # y cuál conjetura del clasificador. Sin esta marca habría que deducirlo
+    # comparando con lo que el clasificador diría hoy, que confunde «el
+    # usuario lo declaró» con «el clasificador cambió de opinión».
+    flow_declared_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

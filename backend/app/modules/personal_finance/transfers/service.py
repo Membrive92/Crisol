@@ -1116,6 +1116,9 @@ async def convert_to_amortization(
         )
 
     source.flow = TransactionFlow.OUT if effective else TransactionFlow.TRANSFER_OUT
+    # PHASE-47 — el usuario acaba de declarar si esto cuenta como gasto, así
+    # que la dirección lleva su firma y una reimportación la conservará.
+    source.flow_declared_at = datetime.now(UTC)
     counterpart_id: uuid.UUID | None = None
     paired = False
     if from_schedule:

@@ -17,7 +17,7 @@ import itertools
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import NamedTuple
 
@@ -70,9 +70,11 @@ from app.modules.personal_finance.imports.parser import (
     render_pdf_pages_to_png,
 )
 from app.modules.personal_finance.imports.repository import (
+    RowDeclarations,
     account_fingerprints,
     accounts_holding_hashes,
     create_job,
+    find_declarations_in_trash,
     find_existing_hashes,
     find_live_card_settlements,
     fingerprint_accounts,
@@ -1083,13 +1085,20 @@ async def _process_and_persist(
         db, user_id, account_id, pending_inserts
     )
 
-    inserted = await _flush_inserts(
+    # PHASE-47 — lo que el usuario declaró sobre estas mismas filas antes de
+    # que una reimportación se las llevara. Se consulta por `import_hash`, que
+    # es idéntico entre la fila borrada y la que va a nacer.
+    declarations = await find_declarations_in_trash(
+        db, user_id, [p.import_hash for p in pending_inserts]
+    )
+    inserted, restored_declarations = await _flush_inserts(
         db,
         pending_inserts,
         user_id=user_id,
         account_id=account_id,
         currency=currency.upper(),
         existing=existing,
+        declarations=declarations,
     )
 
     skipped_existing = len(deduped) - inserted - reconciled
@@ -1120,6 +1129,24 @@ async def _process_and_persist(
     # extracto vs. kind sin categoría hermana) al error_log para que el
     # preview las muestre. No cuentan como filas fallidas — la tx se
     # persiste igual; el usuario decide si corrige la categoría.
+    # PHASE-47 — decirlo en voz alta. Una reposición silenciosa sería tan
+    # difícil de auditar como la pérdida que arregla: el usuario tiene que
+    # poder ver que la app ha vuelto a poner algo que él decidió meses atrás.
+    if restored_declarations:
+        plural = "declaración" if restored_declarations == 1 else "declaraciones"
+        verbo = "se ha repuesto" if restored_declarations == 1 else "se han repuesto"
+        review.append(
+            {
+                "row": 0,
+                "error": (
+                    f"{verbo} {restored_declarations} {plural} tuya(s) sobre "
+                    "movimientos que ya habías importado y se borraron al "
+                    "reimportar (gasto declarado, aplazamiento o enlace con una "
+                    "deuda). Revísalas si no era lo que querías."
+                ),
+                "review": True,
+            }
+        )
     job.error_log = errors + review
     job.status = ImportJobStatus.COMPLETED
 
@@ -1259,8 +1286,14 @@ async def _flush_inserts(
     account_id: uuid.UUID,
     currency: str,
     existing: set[str],
-) -> int:
-    """Persiste las filas a insertar y devuelve cuántas se insertaron.
+    declarations: dict[str, RowDeclarations],
+) -> tuple[int, int]:
+    """Persiste las filas a insertar; devuelve (insertadas, declaraciones repuestas).
+
+    PHASE-47 — `declarations` trae lo que el usuario había declarado sobre una
+    fila con este mismo `import_hash` y que quedó en la papelera al reimportar.
+    Se repone sobre la fila nueva: sin esto, reimportar un extracto revierte en
+    silencio decisiones que nadie ha deshecho.
 
     AUDIT finding #6 — manejo defensivo de `IntegrityError`. Camino rápido:
     bulk-add + UN flush (comportamiento histórico, sin coste por fila).
@@ -1274,10 +1307,13 @@ async def _flush_inserts(
     importado en paralelo); resolución defensiva sin locks complejos.
     """
     if not rows:
-        return 0
+        return 0, 0
+
+    restored = 0
 
     def _new_tx(p: ParsedRow) -> Transaction:
-        return Transaction(
+        nonlocal restored
+        tx = Transaction(
             user_id=user_id,
             account_id=account_id,
             category_id=p.category_id,
@@ -1290,30 +1326,47 @@ async def _flush_inserts(
             flow=p.flow,
             statement_balance=p.statement_balance,
         )
+        declared = declarations.get(p.import_hash)
+        if declared is not None:
+            # El `flow` sólo se repone si llevaba FIRMA del usuario; si no,
+            # manda el clasificador de hoy, que puede haber mejorado.
+            if declared.flow is not None:
+                tx.flow = declared.flow
+                tx.flow_declared_at = declared.flow_declared_at
+            tx.amortization_source_id = declared.amortization_source_id
+            tx.deferred_by_account_id = declared.deferred_by_account_id
+            restored += 1
+        return tx
 
     # Camino rápido: añade todo y flush una vez.
     try:
         async with db.begin_nested():
             db.add_all([_new_tx(p) for p in rows])
-        return len(rows)
+        return len(rows), restored
     except IntegrityError:
         # El flush en bloque falló por una colisión. Reintentamos fila a
         # fila para aislar la(s) culpable(s) y conservar el resto.
         pass
 
     inserted = 0
+    # El camino rápido pudo contar reposiciones de filas que no llegaron a
+    # entrar: se recuenta desde cero en el fila-a-fila.
+    restored = 0
     for p in rows:
         if p.import_hash in existing:
             continue
+        before = restored
         try:
             async with db.begin_nested():
                 db.add(_new_tx(p))
             existing.add(p.import_hash)
             inserted += 1
         except IntegrityError:
+            # La fila no entró: su reposición tampoco cuenta.
+            restored = before
             existing.add(p.import_hash)
             continue
-    return inserted
+    return inserted, restored
 
 
 async def get_ai_suggestions(
@@ -1899,20 +1952,56 @@ def _parse_balance(value: str | None) -> Decimal | None:
 
 
 def _parse_datetime(value: str) -> datetime:
-    """Soporta ISO y formatos europeos comunes."""
+    """Soporta ISO y formatos europeos comunes. SIEMPRE devuelve tz-aware en UTC.
+
+    **Una fecha de extracto es una fecha CIVIL, no un instante.** «13/02/2026»
+    no tiene hora: es el día que el banco imprime. Guardarla como un instante
+    exige elegir una zona, y hasta PHASE-47 se elegía por accidente — esta
+    función devolvía un `datetime` NAIVE, y asyncpg interpreta un naive como
+    hora local DEL PROCESO al escribirlo en una columna `TIMESTAMPTZ`. Con el
+    backend corriendo en Europe/Madrid, «13/02/2026» se persistía como
+    `2026-02-12T23:00:00Z` (o 22:00 en horario de verano).
+
+    Tres consecuencias, y la tercera es la que lo destapó:
+
+    1. **El dato dependía del ordenador que hizo el import** y del horario de
+       verano. Medido en la BD real: 469 de 488 filas desplazadas un día en UTC,
+       276 a las 22:00 y 193 a las 23:00 — las dos medianoches de Madrid.
+    2. **Catorce cambiaban de mes natural**, entre ellas una transferencia de
+       4.267,47 € que contaba en marzo siendo del 1 de abril.
+    3. **Los filtros de rango se construyen en UTC** (`boundsForCustomRange` y
+       compañía emiten `T00:00:00Z`), mientras la pantalla formatea en hora
+       local. Así que un movimiento que la app muestra el día 13 vivía a las
+       `23:00Z` del día 12 y quedaba FUERA de un rango que empieza el día 13.
+       Con el ciclo del usuario en D=13 eso son 3 movimientos en febrero y 6 en
+       marzo que aparecían en el ciclo equivocado.
+
+    Emitir medianoche UTC deja la fecha civil intacta pase lo que pase con la
+    zona del proceso, y hace que el borde del rango coincida con el borde del
+    día. Para las entradas que SÍ traen hora (los formatos ISO de arriba) se
+    respeta la hora y sólo se ancla la zona: un `2026-02-13T14:30:00` sigue
+    siendo las 14:30, pero UTC y no «lo que dijera la máquina».
+    """
     cleaned = value.strip()
     if cleaned.endswith("Z"):
         cleaned = cleaned[:-1]
+    parsed: datetime | None = None
     try:
-        return datetime.fromisoformat(cleaned)
+        parsed = datetime.fromisoformat(cleaned)
     except ValueError:
-        pass
-    for fmt in DATE_FORMATS:
-        try:
-            return datetime.strptime(cleaned, fmt)
-        except ValueError:
-            continue
-    raise _RowError(f"fecha inválida: {value!r}")
+        for fmt in DATE_FORMATS:
+            try:
+                parsed = datetime.strptime(cleaned, fmt)
+                break
+            except ValueError:
+                continue
+    if parsed is None:
+        raise _RowError(f"fecha inválida: {value!r}")
+    # Un naive es una fecha civil sin zona: se ANCLA en UTC, no se convierte
+    # (convertir asumiría que venía en local, que es justo el bug). Un aware
+    # —un ISO con offset— sí se traslada a UTC para que la columna sea
+    # homogénea.
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
 
 
 def _compute_hash(
@@ -1943,11 +2032,34 @@ def _compute_hash(
     `occurrence=0` (default) reproduce el hash histórico para grupos de
     una sola fila, así que los imports previos siguen siendo idempotentes.
     """
+    # PHASE-47 — la fecha entra en el hash como fecha CIVIL, sin sufijo de zona.
+    #
+    # El hash es la identidad de una fila del extracto, así que no puede
+    # depender de cómo la representemos. Cuando `_parse_datetime` pasó a emitir
+    # tz-aware, `.isoformat()` empezó a añadir `+00:00` y el hash de una misma
+    # fila del banco cambiaba de valor: los ~557 `import_hash` persistidos
+    # habrían quedado muertos y con ellos el dedup (reimportar duplicaría
+    # todo), la reposición de declaraciones desde la papelera y el guardarraíl
+    # de dedup cruzado de PHASE-47.A, que avisa cuando un fichero entra en la
+    # cuenta equivocada.
+    #
+    # Quitar la zona ANTES de serializar reproduce byte a byte lo que producía
+    # el naive de siempre — verificado recomputando el hash de filas reales de
+    # la BD—, así que el cambio del parser es invisible aquí y no hay que
+    # rehashear nada. El `astimezone(UTC)` previo no es adorno: un ISO con
+    # offset (`...T14:30:00+01:00`) tiene que colapsar al mismo instante en UTC
+    # antes de perder la zona, o dos representaciones del mismo momento darían
+    # hashes distintos.
+    civil = (
+        occurred_at.astimezone(UTC).replace(tzinfo=None)
+        if occurred_at.tzinfo is not None
+        else occurred_at
+    )
     parts = [
         str(user_id),
         f"{amount:.2f}",
         currency,
-        occurred_at.isoformat(),
+        civil.isoformat(),
         (description or "").strip().casefold(),
     ]
     if occurrence:

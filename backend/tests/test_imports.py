@@ -921,3 +921,146 @@ async def test_import_saldo_ignored_for_liability_account(client: AsyncClient) -
     detail = await _account_detail(client, token, card_id)
     assert detail["opening_balance_date"] is None
     assert Decimal(str(detail["opening_balance"])) == Decimal("0.00")
+
+
+# ── PHASE-47: una declaración manual sobrevive a una reimportación ────────
+
+
+_ADEUDO_CSV = "Fecha,Importe,Concepto\n2026-07-08,-384.38,ADEUDO MENSUAL DE TARJETA\n"
+
+
+async def _reimport_and_get_row(
+    client: AsyncClient, token: str, account_id: str
+) -> dict[str, object]:
+    """Reimporta el mismo extracto y devuelve la fila viva resultante."""
+    await _post_csv(client, token, account_id, _ADEUDO_CSV)
+    body = (await client.get("/transactions", headers=_auth(token))).json()
+    rows = [t for t in body["items"] if "ADEUDO" in (t["description"] or "")]
+    assert len(rows) == 1, f"debe quedar una sola fila viva: {rows}"
+    return rows[0]  # type: ignore[no-any-return]
+
+
+async def test_reimport_restores_a_flow_the_user_declared(client: AsyncClient) -> None:
+    """El usuario declaró que este adeudo es GASTO; reimportar no lo revierte.
+
+    Caso real de julio de 2026: la reimportación borró cuatro adeudos que el
+    usuario había declarado gasto (1.099,64 €), renacieron neutros por obra
+    del clasificador y el resultado del mes se movió 652 € sin que nadie lo
+    decidiera.
+    """
+    token, account_id = await _setup_user(client, "reimp1@example.com")
+    await _post_csv(client, token, account_id, _ADEUDO_CSV)
+    body = (await client.get("/transactions", headers=_auth(token))).json()
+    tx = body["items"][0]
+    assert tx["flow"] == "TRANSFER_OUT", "el clasificador la deja neutra (liquidación)"
+
+    # El usuario la declara gasto, y después la fila se va en una reimportación.
+    r = await client.put(f"/transactions/{tx['id']}", json={"flow": "OUT"}, headers=_auth(token))
+    assert r.status_code == 200, r.text
+    await client.delete(f"/transactions/{tx['id']}", headers=_auth(token))
+
+    restored = await _reimport_and_get_row(client, token, account_id)
+    assert restored["id"] != tx["id"], "es una fila nueva, no la de antes"
+    assert restored["flow"] == "OUT", "la declaración del usuario sobrevive"
+
+
+async def test_reimport_does_not_inherit_a_flow_the_user_took_back(client: AsyncClient) -> None:
+    """Retirada la declaración, manda el clasificador — no el flow que quedó.
+
+    Es la mitad que hace honesta a la otra. Si se heredara cualquier `flow` de
+    la papelera, la app confundiría «el usuario lo declaró» con «así quedó», y
+    resucitaría una decisión que él mismo había deshecho.
+
+    El escenario recorre las tres fases: el usuario declara GASTO (firma), y
+    luego cambia la CATEGORÍA sin tocar la dirección — lo que la re-deriva de
+    la categoría nueva y retira la firma, porque a partir de ahí la dirección
+    la pone el sistema. La fila queda en `OUT` **sin** declaración. Al
+    reimportar debe volver a `TRANSFER_OUT`, que es lo que dice el
+    clasificador de hoy sobre una liquidación de tarjeta.
+
+    Sin este test el guardarraíl de la firma estaba SIN probar: en el
+    escenario obvio —importar, borrar, reimportar— el flow de la papelera y el
+    del clasificador coinciden, así que heredar a ciegas da el mismo verde.
+    """
+    token, account_id = await _setup_user(client, "reimp2@example.com")
+    cat = await client.post(
+        "/categories", json={"name": "Compras", "kind": "expense"}, headers=_auth(token)
+    )
+    assert cat.status_code == 201, cat.text
+    await _post_csv(client, token, account_id, _ADEUDO_CSV)
+    body = (await client.get("/transactions", headers=_auth(token))).json()
+    tx = body["items"][0]
+
+    # 1. Declara gasto (firma la dirección).
+    r = await client.put(f"/transactions/{tx['id']}", json={"flow": "OUT"}, headers=_auth(token))
+    assert r.status_code == 200, r.text
+    # 2. Cambia la categoría sin tocar la dirección: se re-deriva y pierde la firma.
+    r = await client.put(
+        f"/transactions/{tx['id']}",
+        json={"category_id": cat.json()["id"]},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["flow"] == "OUT", "la categoría de gasto deja la fila en OUT"
+
+    # 3. Se va en una reimportación.
+    await client.delete(f"/transactions/{tx['id']}", headers=_auth(token))
+    restored = await _reimport_and_get_row(client, token, account_id)
+    assert restored["flow"] == "TRANSFER_OUT", (
+        "sin declaración vigente decide el clasificador, aunque en la papelera " "quedara OUT"
+    )
+
+
+# ── PHASE-47: la fecha del extracto cae en el día que dice el extracto ────
+
+
+async def test_una_fila_del_dia_13_entra_en_un_rango_que_empieza_el_13(
+    client: AsyncClient,
+) -> None:
+    """El test que faltaba: recorre el camino REAL del importador.
+
+    Toda la suite creaba transacciones por la API con cadenas `...T00:00:00Z`
+    explícitas, o sea viviendo ya en el mundo donde la fecha está bien. Ninguna
+    prueba ejercitaba el almacenamiento que producía el importador, que es
+    donde estaba el bug: `_parse_datetime` devolvía un naive y asyncpg lo
+    interpretaba en la zona DEL PROCESO, así que «13/02/2026» se persistía como
+    `2026-02-12T23:00:00Z` con el backend en Madrid.
+
+    El efecto no era un error sino una ausencia: la pantalla formatea en hora
+    local y mostraba el día 13 correctamente, pero los filtros de rango se
+    construyen en UTC y el movimiento quedaba fuera de un rango que empieza el
+    13. Con el ciclo del usuario en D=13, tres movimientos de febrero y seis de
+    marzo aparecían en el ciclo anterior.
+
+    Este test es tz-independiente a propósito: no afirma un instante, afirma
+    que la fila cae DENTRO de su propio día. Si alguien vuelve a dejar que la
+    zona del proceso decida, falla en cualquier máquina que no esté en UTC.
+    """
+    token, account_id = await _setup_user(client, "civil@example.com")
+    await _post_csv(
+        client,
+        token,
+        account_id,
+        "Fecha,Importe,Concepto\n13/02/2026,-40.00,Compra del dia 13\n",
+        mapping={"amount": "Importe", "occurred_at": "Fecha", "description": "Concepto"},
+    )
+
+    # El rango del día 13, tal como lo construye el frontend (UTC puro).
+    dentro = await client.get(
+        "/transactions",
+        params={"date_from": "2026-02-13T00:00:00Z", "date_to": "2026-02-13T23:59:59Z"},
+        headers=_auth(token),
+    )
+    assert dentro.json()["total"] == 1, "la fila del 13 debe caer dentro del día 13"
+
+    # Y NO en el día anterior, que es donde vivía antes del arreglo.
+    fuera = await client.get(
+        "/transactions",
+        params={"date_from": "2026-02-12T00:00:00Z", "date_to": "2026-02-12T23:59:59Z"},
+        headers=_auth(token),
+    )
+    assert fuera.json()["total"] == 0, "no puede aparecer el día 12"
+
+    # El instante almacenado es la medianoche UTC de ese día civil.
+    guardada = dentro.json()["items"][0]["occurred_at"]
+    assert guardada.startswith("2026-02-13T00:00:00"), guardada

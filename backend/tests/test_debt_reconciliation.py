@@ -57,6 +57,9 @@ async def _seed_account(  # type: ignore[no-untyped-def]
     apr=None,
     term=None,
     start=None,
+    parent=None,
+    settles_from=None,
+    category_id=None,
 ) -> uuid.UUID:
     aid = uuid.uuid4()
     async with session_factory() as db:
@@ -72,6 +75,9 @@ async def _seed_account(  # type: ignore[no-untyped-def]
                 apr=apr,
                 term_months=term,
                 start_date=start,
+                parent_account_id=parent,
+                settlement_account_id=settles_from,
+                category_id=category_id,
             )
         )
         await db.commit()
@@ -491,3 +497,119 @@ async def test_installments_by_account_groups(session_factory) -> None:  # type:
     async with session_factory() as db:
         grouped = await installments_by_account(db, uid, [loan])
     assert len(grouped[loan]) == 12
+
+
+# ── PHASE-47: el cargo agregado sabe DE QUÉ tarjeta es ───────────────────
+
+
+async def _seed_two_cards_with_a_purchase_each(session_factory, uid, *, banks):  # type: ignore[no-untyped-def]
+    """Dos tarjetas, cada una con una compra a plazos colgando (PHASE-35).
+
+    `banks` es la pareja de cuentas de activo desde las que se cobra cada
+    tarjeta; pásalas iguales para que `settlement_account_id` NO desambigüe.
+    """
+    made = []
+    for i, (label, bank) in enumerate(zip(("A", "B"), banks, strict=True)):
+        card = await _seed_account(
+            session_factory,
+            uid,
+            name=f"Tarjeta {label}",
+            nature=AccountNature.LIABILITY,
+            type_=AccountType.CREDIT_CARD,
+            settles_from=bank,
+        )
+        purchase = await _seed_account(
+            session_factory,
+            uid,
+            name=f"Compra en {label}",
+            nature=AccountNature.LIABILITY,
+            type_=AccountType.CREDIT_CARD,
+            opening=Decimal("600.00") + Decimal(i),
+            apr=Decimal("0.2160"),
+            term=6,
+            start=date(2026, 1, 5),
+            parent=card,
+        )
+        async with session_factory() as db:
+            acc = await db.get(Account, purchase)
+            assert acc is not None
+            await generate_installments_for_account(db, acc)
+            await db.commit()
+        made.append((card, purchase))
+    return made
+
+
+async def test_aggregate_charge_only_advances_its_own_card(session_factory) -> None:  # type: ignore[no-untyped-def]
+    """Un cargo paga cuotas de LA tarjeta de la que sale, no de todas.
+
+    Hasta PHASE-47 el reparto recorría todas las tarjetas con cuadro, así que
+    con dos tarjetas cada cargo mensual avanzaba una cuota de AMBAS: la deuda
+    bajaba el doble de lo pagado, en silencio. La señal que lo resuelve es
+    `settlement_account_id` (PHASE-47.A) — qué cuenta de activo cobra cada
+    tarjeta—, que se creó para esto y aquí no la leía nadie.
+    """
+    uid = await _seed_user(session_factory)
+    bank_a = await _seed_account(
+        session_factory, uid, name="BBVA", nature=AccountNature.ASSET, type_=AccountType.BANK
+    )
+    bank_b = await _seed_account(
+        session_factory, uid, name="Santander", nature=AccountNature.ASSET, type_=AccountType.BANK
+    )
+    (_card_a, purchase_a), (_card_b, purchase_b) = await _seed_two_cards_with_a_purchase_each(
+        session_factory, uid, banks=(bank_a, bank_b)
+    )
+    # Un único cargo, y cae en el banco del que se cobra la tarjeta A.
+    await _seed_tx(
+        session_factory,
+        uid,
+        bank_a,
+        amount=Decimal("110.00"),
+        when=datetime(2026, 2, 4, tzinfo=UTC),
+        description="OPERACIÓN FINANCIADA CON TARJETA",
+    )
+
+    async with session_factory() as db:
+        await reconcile_debt_payments(db, uid, dry_run=False)
+        await db.commit()
+
+    async with session_factory() as db:
+        paid_a = [i for i in await list_installments(db, purchase_a, uid) if i.paid_at is not None]
+        paid_b = [i for i in await list_installments(db, purchase_b, uid) if i.paid_at is not None]
+    assert len(paid_a) == 1, "la compra de la tarjeta A avanza una cuota"
+    assert paid_b == [], "la compra de la tarjeta B no la ha pagado nadie"
+
+
+async def test_aggregate_charge_is_reported_when_the_card_is_ambiguous(session_factory) -> None:  # type: ignore[no-untyped-def]
+    """Sin señal que diga de qué tarjeta es, no se marca NADA y se dice.
+
+    No repartir es recuperable —el usuario declara la cuenta de cobro o
+    vincula la categoría y vuelve a reconciliar—; repartir a todas escribe
+    cuotas pagadas que nadie pagó, que es lo que había que arreglar.
+    """
+    uid = await _seed_user(session_factory)
+    bank = await _seed_account(
+        session_factory, uid, name="BBVA", nature=AccountNature.ASSET, type_=AccountType.BANK
+    )
+    # Las dos tarjetas se cobran de la MISMA cuenta: el settlement no decide.
+    (_ca, purchase_a), (_cb, purchase_b) = await _seed_two_cards_with_a_purchase_each(
+        session_factory, uid, banks=(bank, bank)
+    )
+    await _seed_tx(
+        session_factory,
+        uid,
+        bank,
+        amount=Decimal("110.00"),
+        when=datetime(2026, 2, 4, tzinfo=UTC),
+        description="OPERACIÓN FINANCIADA CON TARJETA",
+    )
+
+    async with session_factory() as db:
+        plan = await reconcile_debt_payments(db, uid, dry_run=False)
+        await db.commit()
+
+    async with session_factory() as db:
+        for purchase in (purchase_a, purchase_b):
+            paid = [i for i in await list_installments(db, purchase, uid) if i.paid_at is not None]
+            assert paid == [], "ambiguo: no se marca ninguna cuota"
+    skipped = " ".join(plan["skipped_payments"])  # type: ignore[index]
+    assert "varias tarjetas" in skipped, f"el motivo debe llegar al usuario: {skipped!r}"

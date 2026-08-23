@@ -354,6 +354,89 @@ def _resolve_target(
     return None
 
 
+def _owning_card_id(plan_account: Account) -> uuid.UUID | None:
+    """La tarjeta de la que cuelga un plan, o `None` si no lo declara.
+
+    El cargo que paga un plan llega a la cuenta del BANCO, así que la unidad
+    de reparto es la TARJETA y no el plan: un cargo agregado engloba varias
+    compras a plazos de la misma tarjeta (PHASE-36.1).
+
+    **`None` no es «ninguna tarjeta», es «no consta».** Una compra a plazos
+    sólo dice de qué tarjeta cuelga desde PHASE-35 (`parent_account_id`), y
+    las anteriores —o las dadas de alta sueltas— no lo declaran. Todas ellas
+    comparten un único grupo, que es exactamente el comportamiento previo a
+    esta función: se reparten entre sí. Así el acotado por tarjeta sólo
+    muerde cuando el usuario SÍ ha declarado de qué tarjeta cuelga cada
+    compra, que es cuando la app puede saberlo sin adivinar.
+
+    Limitación conocida: una tarjeta con cuadro propio y sin hijas cae en el
+    grupo «no consta» junto a las compras sueltas. No es una regresión —es
+    lo que hace hoy—, pero convertirla en su propio grupo exige distinguir
+    «tarjeta» de «compra a plazos», y ambas son `CREDIT_CARD`.
+    """
+    return plan_account.parent_account_id
+
+
+def _plans_of_charge(
+    tx: Transaction,
+    cards_with_schedule: list[Account],
+    cards_by_id: dict[uuid.UUID, Account],
+) -> list[Account] | None:
+    """Los planes que este cargo agregado puede pagar, o `None` si es ambiguo.
+
+    **Por qué existe.** Desde PHASE-36 el cargo pagaba «la siguiente cuota
+    pendiente de CADA tarjeta con cuadro». Con una tarjeta eso es correcto y
+    con dos es un doble descuento silencioso: dos cargos avanzan cuatro
+    cuotas, y la deuda baja el doble de lo que el usuario ha pagado. El texto
+    del cargo llega a la cuenta del banco y no nombra la tarjeta, así que hay
+    que resolverlo con las señales que el usuario YA ha declarado.
+
+    La cascada, de más fuerte a más débil:
+
+    1. **Una sola tarjeta con plan** — no hay nada que decidir.
+    2. **`settlement_account_id`** (PHASE-47.A): qué cuenta de activo cobra
+       cada tarjeta. Es el dato que se creó exactamente para esto y que hasta
+       aquí no leía nadie en la reconciliación.
+    3. **Vínculo por categoría** (PHASE-30.4), la misma señal que usa
+       `_resolve_target` para los préstamos.
+
+    Si tras las tres sigue habiendo más de una candidata, devuelve `None`: el
+    caller lo reporta en `skipped_payments` y no se marca ninguna cuota. No
+    repartir es recuperable —el usuario declara la señal que falta y vuelve a
+    reconciliar—; repartir a todas escribe cuotas pagadas que nadie pagó.
+    """
+    by_card: dict[uuid.UUID | None, list[Account]] = {}
+    for plan_account in cards_with_schedule:
+        by_card.setdefault(_owning_card_id(plan_account), []).append(plan_account)
+
+    if len(by_card) <= 1:
+        return list(cards_with_schedule)
+
+    # 2. ¿Qué tarjetas declaran cobrarse de la cuenta donde ha caído el cargo?
+    by_settlement = [
+        card_id
+        for card_id in by_card
+        if card_id is not None
+        and (card := cards_by_id.get(card_id)) is not None
+        and card.settlement_account_id == tx.account_id
+    ]
+    if len(by_settlement) == 1:
+        return by_card[by_settlement[0]]
+    candidates = by_settlement if len(by_settlement) > 1 else list(by_card)
+
+    # 3. ¿Algún plan de esas candidatas está vinculado a la categoría del cargo?
+    if tx.category_id is not None:
+        linked = [
+            card_id
+            for card_id in candidates
+            if any(p.category_id == tx.category_id for p in by_card[card_id])
+        ]
+        if len(linked) == 1:
+            return by_card[linked[0]]
+
+    return None
+
+
 def _excess_bucket(
     tx: Transaction,
     cards: list[Account],
@@ -497,10 +580,10 @@ async def build_reconcile_plan(db: AsyncSession, user_id: uuid.UUID) -> Reconcil
     # saldría del pool agregado y volvería al de préstamos, que es exactamente
     # la ambigüedad que este arreglo existe para evitar. Archivar una cuenta
     # dice «no me la enseñes», no «deshaz su historia».
-    card_ids = set(
+    cards = list(
         (
             await db.execute(
-                select(Account.id)
+                select(Account)
                 .where(Account.user_id == user_id)
                 .where(Account.type == AccountType.CREDIT_CARD)
             )
@@ -508,6 +591,8 @@ async def build_reconcile_plan(db: AsyncSession, user_id: uuid.UUID) -> Reconcil
         .scalars()
         .all()
     )
+    card_ids = {c.id for c in cards}
+    cards_by_id = {c.id: c for c in cards}
 
     def _hangs_off_a_card(a: Account) -> bool:
         return a.parent_account_id is not None and a.parent_account_id in card_ids
@@ -585,11 +670,20 @@ async def build_reconcile_plan(db: AsyncSession, user_id: uuid.UUID) -> Reconcil
         if not is_card_financed_op(tx.description):
             continue
 
-        # ── Tarjeta: cargo agregado → 1 cuota de CADA plan iniciado (PHASE-36.1).
+        # ── Tarjeta: cargo agregado → 1 cuota de cada plan iniciado DE ESA
+        # tarjeta (PHASE-36.1, acotado a una tarjeta más abajo).
+        charge_plans = _plans_of_charge(tx, cards_with_schedule, cards_by_id)
+        if charge_plans is None:
+            plan.skipped_payments.append(
+                f"{tx.occurred_at.date()} {tx.amount} «{(tx.description or '')[:40]}» "
+                "(hay varias tarjetas con plan y el cargo no dice de cuál es: "
+                "declara la cuenta de cobro de cada tarjeta o vincula su categoría)"
+            )
+            continue
         charge_ym = (tx.occurred_at.year, tx.occurred_at.month)
         covered = Decimal("0")
         first_matched: LiabilityPlan | None = None
-        for card in cards_with_schedule:
+        for card in charge_plans:
             start = card.start_date
             if start is None or (start.year, start.month) > charge_ym:
                 continue  # el plan aún no había arrancado en el mes del cargo
@@ -639,7 +733,7 @@ async def build_reconcile_plan(db: AsyncSession, user_id: uuid.UUID) -> Reconcil
         # Exceso del cargo agregado sobre las cuotas cubiertas = deuda previa.
         excess = tx.amount - covered
         if excess > 0:
-            bucket = _excess_bucket(tx, cards_with_schedule, plan_by_id, first_matched)
+            bucket = _excess_bucket(tx, charge_plans, plan_by_id, first_matched)
             if bucket is not None:
                 bucket.assumed_unregistered_debt += excess
             else:

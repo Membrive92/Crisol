@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from fastapi import HTTPException, status
@@ -13,8 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.personal_finance.accounts.service import ensure_account_exists
 from app.modules.personal_finance.categories.models import Category, CategoryKind
 from app.modules.personal_finance.categories.repository import get_category_by_id
+from app.modules.personal_finance.dashboard.repository import cycle_shifted_occurred_at
 from app.modules.personal_finance.dashboard.service import ensure_rates_for_user_scope
 from app.modules.personal_finance.transactions.models import Transaction, TransactionFlow
+from app.modules.personal_finance.transactions.repository import (
+    ListOrder,
+    get_transaction_by_id,
+)
 from app.modules.personal_finance.transactions.repository import (
     bulk_purge_trashed as bulk_purge_trashed_in_db,
 )
@@ -35,9 +40,6 @@ from app.modules.personal_finance.transactions.repository import (
 )
 from app.modules.personal_finance.transactions.repository import (
     create_transaction as persist_transaction,
-)
-from app.modules.personal_finance.transactions.repository import (
-    get_transaction_by_id,
 )
 from app.modules.personal_finance.transactions.repository import (
     get_uncategorized_summary as repo_uncategorized_summary,
@@ -72,6 +74,7 @@ async def list_transactions(
     search: str | None = None,
     target_currency: str | None = None,
     debt_only: bool = False,
+    order: ListOrder = "desc",
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[tuple[Transaction, Decimal | None, bool]], int]:
@@ -83,6 +86,11 @@ async def list_transactions(
 
     `uncategorized=True` filtra las tx sin categoría (atajo del banner
     "Ver y categorizar").
+
+    `order="asc"` devuelve las más antiguas primero. Lo necesita la
+    previsualización del ciclo de Ajustes, que enseña «con qué empieza el mes
+    nuevo»: sin invertir el orden habría que paginar hasta el final para ver
+    las primeras filas de la ventana.
     """
     if target_currency is not None:
         await ensure_rates_for_user_scope(
@@ -103,6 +111,7 @@ async def list_transactions(
         search=search,
         target_currency=target_currency,
         debt_only=debt_only,
+        order=order,
         limit=limit,
         offset=offset,
     )
@@ -120,7 +129,7 @@ async def list_trashed_transactions(
 
 
 async def list_available_periods(
-    db: AsyncSession, user_id: uuid.UUID
+    db: AsyncSession, user_id: uuid.UUID, *, cycle_start_day: int | None = None
 ) -> list[tuple[int, list[int]]]:
     """Devuelve los `(año, [meses])` con transacciones activas del
     usuario (excluye papelera). Años ordenados descendente; meses
@@ -129,11 +138,19 @@ async def list_available_periods(
     Alimenta el selector temporal de la UI para que sólo se muestren
     los periodos con datos reales — el usuario no puede caer en un
     mes vacío por error. Lista vacía si el usuario aún no tiene nada.
+
+    C4 — con `cycle_start_day`, los `(año, mes)` son **anclas de ciclo**: los
+    chips y las series tienen que hablar del mismo período o el usuario acaba
+    pulsando un chip que pinta vacío. El desplazamiento se toma del helper único
+    del dashboard (`cycle_shifted_occurred_at`) en vez de repetir la aritmética
+    aquí; sin ajuste devuelve `timezone('UTC', occurred_at)`, que es la forma en
+    que el resto del backend pregunta de qué mes es una transacción.
     """
+    occurred = cycle_shifted_occurred_at(cycle_start_day)
     query = (
         select(
-            func.extract("year", Transaction.occurred_at).label("year"),
-            func.extract("month", Transaction.occurred_at).label("month"),
+            func.extract("year", occurred).label("year"),
+            func.extract("month", occurred).label("month"),
         )
         .where(Transaction.user_id == user_id)
         .where(Transaction.deleted_at.is_(None))
@@ -322,6 +339,15 @@ async def update_transaction(
         await _ensure_category_owned(db, user_id, payload["category_id"])
     for field, value in payload.items():
         setattr(transaction, field, value)
+    # PHASE-47 — firmar la dirección cuando la declara el usuario. Sin firma,
+    # una reimportación no puede distinguir esta decisión de la conjetura del
+    # clasificador, y se la lleva por delante (julio de 2026: 652 € de swing en
+    # el resultado del mes). Se firma cuando el cliente manda `flow`
+    # explícitamente: abrir el form y guardar ES confirmar la dirección que se
+    # está viendo, y preservar de más se deshace con un clic mientras que
+    # perder una declaración sólo se nota al cuadrar el mes.
+    if payload.get("flow") is not None:
+        transaction.flow_declared_at = datetime.now(UTC)
     # PHASE-34 — si cambió la categoría y el cliente NO envió `flow`
     # explícito, re-derivamos el flow de la nueva categoría para no dejar
     # una dirección obsoleta (puente de transición; el form mandará flow
@@ -337,6 +363,9 @@ async def update_transaction(
             else None
         )
         transaction.flow = _flow_from_category(new_cat)
+        # La dirección vuelve a derivarse de la categoría, así que ya no
+        # consta declaración del usuario sobre ella.
+        transaction.flow_declared_at = None
     await db.flush()
     await db.refresh(transaction)
     return transaction
