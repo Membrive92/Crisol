@@ -20,14 +20,7 @@ import {
   userMonthIsCycle,
 } from '@crisol/services';
 import { useAuthStore, useCurrencyStore } from '@crisol/store';
-import {
-  NATURAL_MONTH_NOTICE,
-  colors,
-  deferredBreakdownNotice,
-  fontSize,
-  fontWeight,
-  spacing,
-} from '@crisol/ui';
+import { NATURAL_MONTH_NOTICE, colors, fontSize, fontWeight, spacing } from '@crisol/ui';
 
 import { BalancesCard } from '../../../../components/accounts/balances-card';
 import {
@@ -40,10 +33,7 @@ import { KpiCards } from '../../../../components/dashboard/kpi-cards';
 import { MonthlyChart } from '../../../../components/dashboard/monthly-chart';
 import { MonthOutlookCard } from '../../../../components/dashboard/month-outlook-card';
 import { NetworthEvolutionCard } from '../../../../components/dashboard/networth-evolution-card';
-import {
-  PeriodToggle,
-  type PeriodKey,
-} from '../../../../components/dashboard/period-toggle';
+import { PeriodToggle, type PeriodKey } from '../../../../components/dashboard/period-toggle';
 import { SavingsRateCard } from '../../../../components/dashboard/savings-rate-card';
 import { SmartInsights } from '../../../../components/dashboard/smart-insights';
 import { TopExpensesList } from '../../../../components/dashboard/top-expenses-list';
@@ -155,11 +145,11 @@ export default function AnalysisScreen() {
    * siendo UTC, como corta el backend.
    */
   /*
-    * PHASE-47 — UN solo ancla, el del mes del usuario. Antes había dos
-    * (`monthAnchor` natural y `cycleAnchor`) porque el preset convivía con el
-    * mes; ahora `month` ES su mes, así que el ancla se deriva de su día y
-    * degenera sola en el mes natural cuando no hay ninguno declarado.
-    */
+   * PHASE-47 — UN solo ancla, el del mes del usuario. Antes había dos
+   * (`monthAnchor` natural y `cycleAnchor`) porque el preset convivía con el
+   * mes; ahora `month` ES su mes, así que el ancla se deriva de su día y
+   * degenera sola en el mes natural cuando no hay ninguno declarado.
+   */
   const userAnchor = userMonthAnchorContaining(todayDayStr(), cycleStartDay);
   /*
    * Los avisos de «esta tarjeta sigue en mes natural» los dispara ahora el
@@ -170,17 +160,14 @@ export default function AnalysisScreen() {
    */
   const monthIsCycle = userMonthIsCycle(cycleStartDay);
   const { dateFrom, dateTo } = useMemo(
-    () =>
-      boundsForUserPeriod(period, userAnchor, { cycleStartDay, customFrom, customTo }),
+    () => boundsForUserPeriod(period, userAnchor, { cycleStartDay, customFrom, customTo }),
     [period, customFrom, customTo, userAnchor, cycleStartDay],
   );
   // Del MISMO ancla que el rango de arriba: leer el reloj por segunda vez
   // (`new Date().getFullYear()`) dejaba el chart pidiendo un año distinto del
   // que resumen los KPIs justo encima en la franja de cambio de año. En ciclo,
   // el ancla es la del ciclo (en enero con D>1 puede ser el año anterior).
-  const currentYear = Number(
-    userAnchor.slice(0, 4),
-  );
+  const currentYear = Number(userAnchor.slice(0, 4));
 
   /*
    * C4 — Con el preset activo, `cycle: true` hace que el BACKEND bucketee y
@@ -252,18 +239,9 @@ export default function AnalysisScreen() {
   const summaryQuery = useDashboardSummary(summaryParams);
 
   // PHASE-47.E — la diferencia entre el donut (que mantiene lo aplazado) y los
-  // KPI (que lo excluyen), dicha en voz alta. La redacción vive en
-  // `@crisol/ui` para que las dos pantallas no la cuenten distinto.
-  // Sólo cuando el donut está enseñando GASTO: el aviso habla de gasto
-  // aplazado, y pintado bajo el donut de ingresos sería un pie de foto que no
-  // describe lo que hay encima.
-  // `all` también lo enseña: el donut incluye el gasto y el aviso lo explica.
-  // El que se excluye es `income`, donde sería un pie de foto que no describe
-  // lo que hay encima.
-  const deferredNotice =
-    donutKind === 'income'
-      ? null
-      : deferredBreakdownNotice(summaryQuery.data?.deferred_expenses, currency);
+  // PHASE-47.E4 — el aviso de lo aplazado se MUDÓ a `CategoryDonut`: el
+  // filtro estructural/puntual es estado suyo, así que desde aquí el importe
+  // no podía describir lo que el usuario tiene delante.
   const monthlyQuery = useDashboardByMonth(monthlyParams);
   const byCategoryQuery = useDashboardByCategory(byCategoryParams);
   const topExpensesQuery = useDashboardTopExpenses(topExpensesParams);
@@ -374,12 +352,7 @@ export default function AnalysisScreen() {
             accessibilityRole="switch"
             accessibilityState={{ checked: convertAll }}
           >
-            <Text
-              style={[
-                styles.convertChipText,
-                convertAll && styles.convertChipTextActive,
-              ]}
-            >
+            <Text style={[styles.convertChipText, convertAll && styles.convertChipTextActive]}>
               {convertAll ? '✓ Convertir todo' : 'Convertir todo'}
             </Text>
           </Pressable>
@@ -450,25 +423,8 @@ export default function AnalysisScreen() {
           kind={donutKind}
           onKindChange={setDonutKind}
           exceptionalByCategory={structureQuery.data?.exceptional_by_category}
+          deferredExpenses={summaryQuery.data?.deferred_expenses}
         />
-        {/* PHASE-47.E — el donut MANTIENE las compras aplazadas (el gasto se
-            hizo) y los KPI de arriba las excluyen (el dinero no salió). Sin
-            este aviso, quien sume el donut se encuentra cientos de euros de
-            más que el KPI y no tiene forma de saber por qué. */}
-        {deferredNotice ? (
-          <Text
-            testID="deferred-notice"
-            style={{
-              fontSize: fontSize.xs,
-              color: colors.textMuted,
-              lineHeight: 18,
-              paddingHorizontal: spacing.md,
-              marginBottom: spacing.md,
-            }}
-          >
-            {deferredNotice}
-          </Text>
-        ) : null}
         <TopExpensesList
           data={topExpensesQuery.data}
           currency={currency}
@@ -486,10 +442,7 @@ export default function AnalysisScreen() {
             el mes del usuario. */}
       </ScrollView>
 
-      <FabLink
-        href="/(modules)/personal-finance/transaction/new"
-        ariaLabel="Añadir transacción"
-      />
+      <FabLink href="/(modules)/personal-finance/transaction/new" ariaLabel="Añadir transacción" />
     </View>
   );
 }

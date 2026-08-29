@@ -1,7 +1,16 @@
 'use client';
 
 import type { AnalyticsTxRef } from '@crisol/types';
-import { colors, fontSize, fontWeight, formatAmount, radius, spacing } from '@crisol/ui';
+import {
+  categoryRowAmount,
+  colors,
+  fontSize,
+  fontWeight,
+  formatAmount,
+  isRefundInExpenseList,
+  radius,
+  spacing,
+} from '@crisol/ui';
 
 import { iconForCategoryName } from '@/lib/category-icons';
 import { Card } from '@/components/ui/card';
@@ -45,7 +54,16 @@ export function TopMovementsCard({ items, currency, isLoading }: TopMovementsCar
           Sin gastos puntuales destacados en el periodo.
         </p>
       ) : (
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
+        <ul
+          style={{
+            listStyle: 'none',
+            margin: 0,
+            padding: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: spacing.sm,
+          }}
+        >
           {items.map((tx) => (
             <MovementRow key={tx.id} tx={tx} currency={currency} />
           ))}
@@ -58,7 +76,12 @@ export function TopMovementsCard({ items, currency, isLoading }: TopMovementsCar
 function MovementRow({ tx, currency }: { tx: AnalyticsTxRef; currency: string }) {
   const label = tx.description?.trim() || tx.category_name || 'Movimiento';
   const Icon = iconForCategoryName(tx.category_name ?? label);
-  const amount = tx.converted_amount ?? tx.amount;
+  // PHASE-47.H — esta lista es el cubo de GASTO (`_is_expense()`), que incluye
+  // las devoluciones, y ordena por el importe SIN signo: sin esto un reembolso
+  // de 79 € se presenta como el mayor gasto puntual del mes, mientras el
+  // desglose de dos tarjetas más allá lo resta de su categoría.
+  const devolucion = isRefundInExpenseList(tx.flow);
+  const amount = categoryRowAmount(tx.converted_amount ?? tx.amount, tx.flow, 'expense');
   return (
     <li style={{ display: 'flex', alignItems: 'center', gap: spacing.sm }}>
       <span
@@ -92,6 +115,7 @@ function MovementRow({ tx, currency }: { tx: AnalyticsTxRef; currency: string })
           {label}
         </div>
         <div style={{ fontSize: fontSize.xs, color: colors.textMuted }}>
+          {devolucion ? 'Devolución · ' : ''}
           {shortDay(tx.occurred_at)}
           {tx.category_name ? ` · ${tx.category_name}` : ''}
         </div>
@@ -100,7 +124,7 @@ function MovementRow({ tx, currency }: { tx: AnalyticsTxRef; currency: string })
         style={{
           fontSize: fontSize.sm,
           fontWeight: fontWeight.semibold,
-          color: colors.text,
+          color: devolucion ? colors.success : colors.text,
           fontVariantNumeric: 'tabular-nums',
           whiteSpace: 'nowrap',
         }}

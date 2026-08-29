@@ -2,7 +2,7 @@
 
 **Estado**: 🚧 pendiente prueba manual
 **Rama**: `main` (push directo)
-**Fecha**: 2026-08-15
+**Fecha**: 2026-08-15 · **E4 (el aviso dice DÓNDE)**: 2026-08-23
 **Diseño**: [`improvements/card-receipt-financing-model.md`](../improvements/card-receipt-financing-model.md)
 **Entregas**: E1 · E2 · E3 · E4 (la letra viene del diseño, que las numera así;
 no va después de 47.C — es un frente aparte que surgió a mitad de fase cuando
@@ -12,9 +12,9 @@ el usuario destapó el descuadre real)
 ## Objetivo
 
 Que financiar el recibo de una tarjeta deje de descuadrar la app, sin dejar de
-trazar el gasto. El usuario lo dijo en una frase: *«no aparecen porque se han
+trazar el gasto. El usuario lo dijo en una frase: _«no aparecen porque se han
 aplazado, pero se cuentan en categorías porque el gasto existe, lo único que
-está aplazado»*.
+está aplazado»_.
 
 ## El problema, con sus números
 
@@ -27,7 +27,7 @@ pasivo. De ahí el descuadre.
 ## La decisión
 
 Tres reglas, en lenguaje de caja doméstica (no contable de empresa — decisión
-explícita del usuario: *«el objetivo del módulo es trazar los flujos de caja»*):
+explícita del usuario: _«el objetivo del módulo es trazar los flujos de caja»_):
 
 1. **Financiar no es ingresar** — ya resuelto en [PHASE-46](phase-46-financing-is-not-income.md).
 2. **Las compras de un ciclo aplazado no son salida de caja**, pero siguen
@@ -179,6 +179,56 @@ Y un comentario que mentía: justificaba el riesgo de falso positivo del dedup
 diciendo que el usuario puede recuperar la copia «desde la papelera», cuando la
 fila descartada nunca llega a existir.
 
+## E4 — el aviso decía cuánto, no dónde (2026-08-23)
+
+Lo reportó el usuario mirando junio: _«aparece el texto especificando que hay un
+pago aplazado pero en este desglose no aparece marcado con asterisco qué gastos
+son los aplazados»_. Con nueve categorías en pantalla, saber que hay 496,67 €
+aplazados no permite señalar ni una fila.
+
+Y al medirlo apareció un segundo defecto que nadie había visto: **el aviso no
+estaba acotado al filtro**. El desglose tiene un segmentado Todo / Fijo /
+Variable, y el número venía del resumen del periodo, que no sabe nada de él.
+Ejecutado contra la base real, junio de 2026:
+
+| vista    | aplazado que hay EN PANTALLA | lo que decía el aviso |
+| -------- | ---------------------------- | --------------------- |
+| Todo     | 496,67 €                     | 496,67 € ✓            |
+| Fijo     | **245,53 €**                 | 496,67 € ✗            |
+| Variable | **251,14 €**                 | 496,67 € ✗            |
+
+Los 251,14 € que faltan bajo «Fijo» son Ropa (219,15 €) y Juegos (31,99 €),
+categorías variables que ese filtro no enseña. Es la misma familia de defecto
+que el resto de la sesión: dos cifras plausibles que sólo se contradicen si las
+miras juntas.
+
+**Qué se hizo**: `deferred_total` por categoría en los dos endpoints que
+alimentan el desglose (`/dashboard/by-category` y el `exceptional_by_category`
+de `/analytics/expense-structure` — hacen falta los dos porque el filtro se
+calcula restando el segundo del primero). La fila lleva su asterisco, con el
+importe en el hover (web) y **escrito al lado** (móvil, donde no hay hover), y
+el aviso se **deriva de las filas que se están mostrando**: así no puede
+describir otra cosa que lo que hay delante.
+
+El invariante que lo hace seguro, y que tiene test: lo aplazado repartido por
+categorías suma exactamente el `deferred_expenses` del resumen.
+
+**Ausente ≠ cero, otra vez**: el campo es opcional y su ausencia se propaga como
+tal por todo el reparto. Un backend anterior no lo manda; convertirlo en `0`
+haría que la pantalla AFIRMARA «aquí no hay nada aplazado» en vez de callar y
+caer al total del periodo, que es lo único que se sabe.
+
+**De paso, una duplicación retirada**: `deriveStructural` y `toBreakdownItem`
+vivían copiadas palabra por palabra en las dos apps. Mientras sólo repartían el
+total daba igual; repartir también lo aplazado en dos copias es exactamente
+cómo divergen dos pantallas que deben decir lo mismo. Subidas a
+`packages/ui/src/breakdown-structure.ts`, con los tests de web —que sólo
+cubrían una de las dos copias— movidos con ellas.
+
+**El aviso de móvil se mudó** de la pantalla al propio `CategoryDonut`: el
+filtro es estado del componente, así que desde fuera era imposible saber qué
+se está mostrando.
+
 ## Limitaciones conocidas
 
 - **Un extracto SIN signos no distingue un recibo de su devolución.** El
@@ -194,10 +244,10 @@ fila descartada nunca llega a existir.
   `apps/web/components/transactions/transaction-list.tsx`; en móvil no hay ni un
   consumidor de `deferredPurchaseNotice`. Tampoco lo muestra la pantalla de
   DETALLE de una transacción en ninguna de las dos.
-  *(Esta línea afirmaba lo contrario hasta que el crítico de completitud
+  _(Esta línea afirmaba lo contrario hasta que el crítico de completitud
   contrastó el documento contra el código. La corrección se deja anotada aquí
   a propósito: es la novena vez que una premisa escrita a mano caduca en este
-  repo, y la primera que la caza un revisor con ese encargo explícito.)*
+  repo, y la primera que la caza un revisor con ese encargo explícito.)_
 - La propuesta **automática** —ofrecer el aplazamiento al enlazar la
   financiación con su cuadro, que es cuando el sistema ya sabe todo lo
   necesario— queda para 47.C. Hoy hay que abrir la deuda en Ajustes → Cuentas

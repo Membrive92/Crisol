@@ -24,8 +24,10 @@ import {
   colors,
   fontSize,
   fontWeight,
+  categoryRowAmount,
   formatAmount,
   formatCivilDate,
+  isRefundRow,
   layout,
   radius,
   spacing,
@@ -33,10 +35,7 @@ import {
 
 import { Card } from '@/components/ui/card';
 import { KpiCard } from '@/components/ui/kpi-card';
-import {
-  TimeSelector,
-  type TimeSelectorRange,
-} from '@/components/ui/time-selector';
+import { TimeSelector, type TimeSelectorRange } from '@/components/ui/time-selector';
 
 /**
  * PHASE-25 — Drill-down de una categoría. Muestra KPIs (total, count,
@@ -172,8 +171,7 @@ export default function CategoryDetailPage() {
                       width: 40,
                       height: 40,
                       borderRadius: radius.md,
-                      backgroundColor:
-                        data.category_color ?? colors.surfaceMuted,
+                      backgroundColor: data.category_color ?? colors.surfaceMuted,
                       color: colors.onPrimary,
                       display: 'inline-flex',
                       alignItems: 'center',
@@ -214,8 +212,7 @@ export default function CategoryDetailPage() {
       {isError ? (
         <Card style={{ padding: spacing.lg }}>
           <p style={{ margin: 0, color: colors.danger, fontSize: fontSize.sm }}>
-            Error al cargar la categoría:{' '}
-            {error instanceof Error ? error.message : 'desconocido'}
+            Error al cargar la categoría: {error instanceof Error ? error.message : 'desconocido'}
           </p>
         </Card>
       ) : isLoading || !data ? (
@@ -234,9 +231,7 @@ export default function CategoryDetailPage() {
             <KpiCard
               label="Total del periodo"
               value={formatAmount(data.total, data.currency)}
-              valueColor={
-                data.category_kind === 'income' ? colors.income : colors.expense
-              }
+              valueColor={data.category_kind === 'income' ? colors.income : colors.expense}
             />
             <KpiCard label="Movimientos" value={String(data.count)} />
             <KpiCard
@@ -283,11 +278,7 @@ export default function CategoryDetailPage() {
                     }))}
                     margin={{ top: 8, right: 16, bottom: 0, left: 8 }}
                   >
-                    <CartesianGrid
-                      strokeDasharray="3 3"
-                      stroke={colors.border}
-                      vertical={false}
-                    />
+                    <CartesianGrid strokeDasharray="3 3" stroke={colors.border} vertical={false} />
                     <XAxis
                       dataKey="monthLabel"
                       tick={{ fill: colors.textMuted, fontSize: 11, fontWeight: 500 }}
@@ -297,9 +288,7 @@ export default function CategoryDetailPage() {
                       minTickGap={16}
                     />
                     <YAxis
-                      tickFormatter={(v: number) =>
-                        formatCompact(v, data.currency)
-                      }
+                      tickFormatter={(v: number) => formatCompact(v, data.currency)}
                       tick={{ fill: colors.textMuted, fontSize: 11 }}
                       axisLine={false}
                       tickLine={false}
@@ -308,10 +297,7 @@ export default function CategoryDetailPage() {
                     <Tooltip
                       cursor={{ stroke: colors.border, strokeDasharray: '2 2' }}
                       formatter={(v) =>
-                        formatAmount(
-                          String(Number(v ?? 0).toFixed(2)),
-                          data.currency,
-                        )
+                        formatAmount(String(Number(v ?? 0).toFixed(2)), data.currency)
                       }
                       contentStyle={{
                         backgroundColor: colors.surface,
@@ -378,37 +364,67 @@ export default function CategoryDetailPage() {
             ) : (
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ backgroundColor: colors.surfaceMuted }}>
-                    <Th>Fecha</Th>
-                    <Th>Descripción</Th>
-                    <Th align="right">Importe</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.top_transactions.map((tx) => (
-                    <tr key={tx.transaction_id}>
-                      <Td>{formatCivilDate(tx.occurred_at)}</Td>
-                      <Td style={{ overflowWrap: 'anywhere' }}>
-                        <Link
-                          href={
-                            `/personal-finance/transactions/${tx.transaction_id}` as never
-                          }
-                          style={{
-                            color: colors.text,
-                            textDecoration: 'none',
-                            borderBottom: `1px dashed ${colors.borderStrong}`,
-                          }}
-                        >
-                          {tx.description ?? '(sin descripción)'}
-                        </Link>
-                      </Td>
-                      <Td align="right">
-                        {formatAmount(tx.amount, data.currency)}
-                      </Td>
+                  <thead>
+                    <tr style={{ backgroundColor: colors.surfaceMuted }}>
+                      <Th>Fecha</Th>
+                      <Th>Descripción</Th>
+                      <Th align="right">Importe</Th>
                     </tr>
-                  ))}
-                </tbody>
+                  </thead>
+                  <tbody>
+                    {data.top_transactions.map((tx) => {
+                      // PHASE-47.H — una devolución RESTA de su categoría, así que
+                      // se pinta con su signo: la columna suma exactamente el
+                      // total que preside la pantalla.
+                      const devolucion = isRefundRow(tx.flow, data.category_kind);
+                      return (
+                        <tr key={tx.transaction_id}>
+                          <Td>{formatCivilDate(tx.occurred_at)}</Td>
+                          <Td style={{ overflowWrap: 'anywhere' }}>
+                            <Link
+                              href={`/personal-finance/transactions/${tx.transaction_id}` as never}
+                              style={{
+                                color: colors.text,
+                                textDecoration: 'none',
+                                borderBottom: `1px dashed ${colors.borderStrong}`,
+                              }}
+                            >
+                              {tx.description ?? '(sin descripción)'}
+                            </Link>
+                            {devolucion ? (
+                              <span
+                                style={{
+                                  marginLeft: spacing.xs,
+                                  padding: `2px ${spacing.xs}px`,
+                                  borderRadius: radius.sm,
+                                  backgroundColor: colors.successSoft,
+                                  color: colors.success,
+                                  fontSize: fontSize.xs,
+                                  fontWeight: fontWeight.medium,
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                Devolución
+                              </span>
+                            ) : null}
+                          </Td>
+                          <Td align="right">
+                            <span
+                              style={{
+                                color: devolucion ? colors.success : colors.text,
+                                fontVariantNumeric: 'tabular-nums',
+                              }}
+                            >
+                              {formatAmount(
+                                categoryRowAmount(tx.amount, tx.flow, data.category_kind),
+                                data.currency,
+                              )}
+                            </span>
+                          </Td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
                 </table>
               </div>
             )}
@@ -419,13 +435,7 @@ export default function CategoryDetailPage() {
   );
 }
 
-function Th({
-  children,
-  align = 'left',
-}: {
-  children: React.ReactNode;
-  align?: 'left' | 'right';
-}) {
+function Th({ children, align = 'left' }: { children: React.ReactNode; align?: 'left' | 'right' }) {
   return (
     <th
       style={{

@@ -483,13 +483,15 @@ async def get_breakdown_by_category(
         str | None,
         Decimal,
         int,
+        Decimal,
     ]
 ]:
     """Totales por categoría. Incluye bucket con `category_id=None`.
 
-    Devuelve tuplas con `(id, name, kind, color, icon, total, count)` —
-    color/icon llegan al frontend para que la UI (donut, chips,
-    breakdowns) pinte cada categoría con su personalización.
+    Devuelve tuplas con `(id, name, kind, color, icon, total, count,
+    deferred)` — color/icon llegan al frontend para que la UI (donut, chips,
+    breakdowns) pinte cada categoría con su personalización, y `deferred` es
+    la parte de `total` que quedó aplazada por un recibo financiado.
     """
     amount = _amount_expr(target_currency)
     query = (
@@ -501,6 +503,25 @@ async def get_breakdown_by_category(
             Category.icon,
             func.coalesce(func.sum(expense_amount_expr(amount)), 0),
             func.count(Transaction.id),
+            # PHASE-47.E4 — la parte APLAZADA del total de esta categoría. El
+            # aviso del desglose decía cuánto hay aplazado en el periodo pero
+            # no DÓNDE, así que no había forma de saber qué fila lo explica —
+            # y bajo el filtro Fijo/Variable el número ni siquiera describía lo
+            # que estaba en pantalla. Mismo `expense_amount_expr` que el total
+            # para que la parte no pueda ser mayor que el todo por una
+            # devolución aplazada.
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            Transaction.deferred_by_account_id.is_not(None),
+                            expense_amount_expr(amount),
+                        ),
+                        else_=Decimal("0"),
+                    )
+                ),
+                0,
+            ),
         )
         .outerjoin(Category, Category.id == Transaction.category_id)
         .group_by(
@@ -535,8 +556,17 @@ async def get_breakdown_by_category(
 
     result = await db.execute(query)
     return [
-        (cat_id, cat_name, cat_kind, cat_color, cat_icon, Decimal(total), int(count))
-        for cat_id, cat_name, cat_kind, cat_color, cat_icon, total, count in result.all()
+        (
+            cat_id,
+            cat_name,
+            cat_kind,
+            cat_color,
+            cat_icon,
+            Decimal(total),
+            int(count),
+            Decimal(deferred),
+        )
+        for cat_id, cat_name, cat_kind, cat_color, cat_icon, total, count, deferred in result.all()
     ]
 
 

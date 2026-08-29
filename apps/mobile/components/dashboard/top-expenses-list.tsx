@@ -2,7 +2,12 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import type { TopExpenseItem } from '@crisol/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
-import { formatAmount, formatCivilDate } from '@crisol/ui';
+import {
+  categoryRowAmount,
+  formatAmount,
+  formatCivilDate,
+  isRefundInExpenseList,
+} from '@crisol/ui';
 
 export interface TopExpensesListProps {
   data: TopExpenseItem[] | undefined;
@@ -21,22 +26,32 @@ export function TopExpensesList({ data, currency, isLoading }: TopExpensesListPr
       ) : items.length === 0 ? (
         <Text style={styles.placeholder}>Sin gastos en el periodo.</Text>
       ) : (
-        items.map((item, idx) => (
-          <View
-            key={item.transaction_id}
-            style={[styles.row, idx === items.length - 1 && styles.rowLast]}
-          >
-            <View style={styles.rowText}>
-              <Text style={styles.description} numberOfLines={1}>
-                {item.description ?? 'Sin descripción'}
-              </Text>
-              <Text style={styles.meta}>
-                {(item.category_name ?? 'Sin categoría') + ' · ' + formatCivilDate(item.occurred_at)}
+        items.map((item, idx) => {
+          // PHASE-47.H — este endpoint devuelve el cubo de GASTO entero, así que
+          // una entrada aquí es una devolución: resta, y se pinta restando.
+          const devolucion = isRefundInExpenseList(item.flow);
+          return (
+            <View
+              key={item.transaction_id}
+              style={[styles.row, idx === items.length - 1 && styles.rowLast]}
+            >
+              <View style={styles.rowText}>
+                <Text style={styles.description} numberOfLines={1}>
+                  {item.description ?? 'Sin descripción'}
+                </Text>
+                <Text style={styles.meta}>
+                  {(devolucion ? 'Devolución · ' : '') +
+                    (item.category_name ?? 'Sin categoría') +
+                    ' · ' +
+                    formatCivilDate(item.occurred_at)}
+                </Text>
+              </View>
+              <Text style={[styles.amount, devolucion && styles.amountRefund]}>
+                {formatAmount(categoryRowAmount(item.amount, item.flow, 'expense'), currency)}
               </Text>
             </View>
-            <Text style={styles.amount}>{formatAmount(item.amount, currency)}</Text>
-          </View>
-        ))
+          );
+        })
       )}
     </View>
   );
@@ -75,4 +90,5 @@ const styles = StyleSheet.create({
   },
   meta: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: 2 },
   amount: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.expense },
+  amountRefund: { color: colors.success },
 });

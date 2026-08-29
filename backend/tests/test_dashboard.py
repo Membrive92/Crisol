@@ -995,6 +995,96 @@ async def test_category_detail_returns_kpis_and_evolution(
     assert tops[2]["amount"] == "10.00"
 
 
+async def test_category_detail_top_transactions_exponen_su_flow(
+    client: AsyncClient,
+) -> None:
+    """PHASE-47.H — la lista de movimientos publica la DIRECCIÓN de cada fila,
+    y con ella la columna suma exactamente el total que preside la pantalla.
+
+    Sin `flow` en el item, la pantalla pintaba tres importes positivos que
+    sumaban 60,00 € bajo un total de 40,00 €: el reembolso de 10 € contado
+    una vez de más arriba y una de menos abajo, sin forma de saber cuál de
+    las tres filas explicaba la diferencia.
+    """
+    token, account_id = await _register(client, "catdetail-flow@example.com")
+    cat_id = await _make_category(client, token, name="Compras", kind="expense")
+    await _make_tx(
+        client,
+        token,
+        account_id,
+        amount="30",
+        occurred_at="2026-01-05T10:00:00Z",
+        category_id=cat_id,
+        flow="OUT",
+    )
+    await _make_tx(
+        client,
+        token,
+        account_id,
+        amount="20",
+        occurred_at="2026-01-06T10:00:00Z",
+        category_id=cat_id,
+        flow="OUT",
+    )
+    # La devolución: entra dinero en una categoría de GASTO.
+    await _make_tx(
+        client,
+        token,
+        account_id,
+        amount="10",
+        occurred_at="2026-01-07T10:00:00Z",
+        category_id=cat_id,
+        flow="IN",
+    )
+
+    r = await client.get(f"/dashboard/category/{cat_id}?currency=USD", headers=_auth(token))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == "40.00"
+
+    tops = body["top_transactions"]
+    assert [tx["flow"] for tx in tops] == ["OUT", "OUT", "IN"]
+    # El importe sigue viniendo SIN signo — es el que ordena el ranking.
+    assert [tx["amount"] for tx in tops] == ["30.00", "20.00", "10.00"]
+    # Y con el signo que dicta `flow` + el kind de la categoría, la columna
+    # cuadra con el total. Es el invariante, no la cobertura.
+    firmado = sum(
+        -Decimal(tx["amount"]) if tx["flow"] == "IN" else Decimal(tx["amount"]) for tx in tops
+    )
+    assert firmado == Decimal(body["total"])
+
+
+async def test_top_expenses_exponen_su_flow(client: AsyncClient) -> None:
+    """PHASE-47.H — el ranking global de gastos incluye las devoluciones (son
+    gasto de su categoría, con signo contrario), así que también tiene que
+    decir cuáles lo son."""
+    token, account_id = await _register(client, "topexp-flow@example.com")
+    cat_id = await _make_category(client, token, name="Compras", kind="expense")
+    await _make_tx(
+        client,
+        token,
+        account_id,
+        amount="30",
+        occurred_at="2026-01-05T10:00:00Z",
+        category_id=cat_id,
+        flow="OUT",
+    )
+    await _make_tx(
+        client,
+        token,
+        account_id,
+        amount="10",
+        occurred_at="2026-01-07T10:00:00Z",
+        category_id=cat_id,
+        flow="IN",
+    )
+
+    r = await client.get("/dashboard/top-expenses?currency=USD", headers=_auth(token))
+    assert r.status_code == 200
+    items = r.json()
+    assert [(i["amount"], i["flow"]) for i in items] == [("30.00", "OUT"), ("10.00", "IN")]
+
+
 async def test_category_detail_404_when_not_owned(client: AsyncClient) -> None:
     """Aislamiento: user B no puede consultar categoría de user A."""
     token_a, _ = await _register(client, "catdetail-a@example.com")

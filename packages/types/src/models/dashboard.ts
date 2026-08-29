@@ -1,4 +1,5 @@
 import type { CategoryKind } from './category';
+import type { TransactionFlow } from './transaction';
 
 export interface DashboardSummary {
   income: string;
@@ -57,6 +58,14 @@ export interface CategoryBreakdownItem {
   category_icon: string | null;
   total: string;
   count: number;
+  /**
+   * PHASE-47.E4 — la parte de `total` que quedó APLAZADA por un recibo
+   * financiado, para que el desglose pueda marcar QUÉ filas lo explican.
+   *
+   * **Opcional a propósito**: un backend anterior al campo no lo manda, y
+   * tratar su ausencia como `0` afirmaría «aquí no hay nada aplazado».
+   */
+  deferred_total?: string | null | undefined;
 }
 
 export interface MonthlyBucket {
@@ -74,6 +83,16 @@ export interface TopExpenseItem {
    * convertido; en legacy coincide con `original_amount`.
    */
   amount: string;
+  /**
+   * PHASE-47.H — dirección del movimiento, para que la lista pueda pintar su
+   * polaridad. Una devolución (`IN` en una categoría de gasto) RESTA de su
+   * categoría, y sin esto la columna no sumaba el total de la pantalla.
+   *
+   * **Opcional a propósito**: un backend anterior a este campo no lo manda, y
+   * el tipo tiene que describir lo que puede llegar, no lo que emite el
+   * servidor de hoy ([PHASE-44.16]).
+   */
+  flow?: TransactionFlow | null;
   occurred_at: string;
   category_id: string | null;
   category_name: string | null;

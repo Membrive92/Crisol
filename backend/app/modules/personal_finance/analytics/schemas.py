@@ -9,6 +9,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from app.modules.personal_finance.transactions.models import TransactionFlow
+
 
 class TxRef(BaseModel):
     """Referencia ligera a una transacción, para listas del análisis."""
@@ -17,6 +19,13 @@ class TxRef(BaseModel):
     description: str | None
     amount: Decimal
     converted_amount: Decimal | None = None
+    #: PHASE-47.H — la DIRECCIÓN del movimiento. Esta lista sale del cubo de
+    #: GASTO (`_is_expense()`), que INCLUYE las devoluciones: una entrada en
+    #: categoría de gasto es una compra que se deshace y RESTA de su categoría.
+    #: El importe viaja sin signo porque es el que ordena el ranking, así que
+    #: sin esto la tarjeta puede presentar un reembolso como el mayor gasto
+    #: puntual del mes — mientras el desglose de la MISMA pantalla lo resta.
+    flow: TransactionFlow | None = None
     currency: str
     occurred_at: datetime
     category_id: uuid.UUID | None
@@ -31,6 +40,11 @@ class CategoryAmount(BaseModel):
     color: str | None
     icon: str | None
     total: Decimal
+    deferred_total: Decimal = Decimal("0")
+    """PHASE-47.E4 — la parte de `total` aplazada por un recibo financiado.
+    Sin ella, el aviso del desglose («de este gasto, X están aplazados») cita
+    el periodo entero mientras la pantalla enseña sólo el gasto fijo o sólo el
+    puntual: el número no describe lo que se está mirando."""
 
 
 class ExpenseStructureResponse(BaseModel):

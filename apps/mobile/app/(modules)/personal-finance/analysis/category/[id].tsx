@@ -6,11 +6,13 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCategoryDetail } from '@crisol/services';
 import { useCurrencyStore } from '@crisol/store';
 import {
+  categoryRowAmount,
   colors,
   fontSize,
   fontWeight,
   formatAmount,
   formatCivilDate,
+  isRefundRow,
   radius,
   spacing,
 } from '@crisol/ui';
@@ -89,12 +91,7 @@ export default function CategoryDetailScreen() {
               onPress={() => setPeriod(p)}
               style={[styles.toggleBtn, period === p && styles.toggleBtnActive]}
             >
-              <Text
-                style={[
-                  styles.toggleBtnText,
-                  period === p && styles.toggleBtnTextActive,
-                ]}
-              >
+              <Text style={[styles.toggleBtnText, period === p && styles.toggleBtnTextActive]}>
                 {PERIOD_LABEL[p]}
               </Text>
             </Pressable>
@@ -115,17 +112,10 @@ export default function CategoryDetailScreen() {
               <Kpi
                 label="Total"
                 value={formatAmount(data.total, data.currency)}
-                color={
-                  data.category_kind === 'income'
-                    ? colors.income
-                    : colors.expense
-                }
+                color={data.category_kind === 'income' ? colors.income : colors.expense}
               />
               <Kpi label="Movimientos" value={String(data.count)} />
-              <Kpi
-                label="Ticket medio"
-                value={formatAmount(data.average_amount, data.currency)}
-              />
+              <Kpi label="Ticket medio" value={formatAmount(data.average_amount, data.currency)} />
             </View>
 
             <View style={styles.card}>
@@ -143,8 +133,7 @@ export default function CategoryDetailScreen() {
                         color: colors.textMuted,
                         fontSize: 10,
                       },
-                      dataPointColor:
-                        data.category_color ?? colors.primary,
+                      dataPointColor: data.category_color ?? colors.primary,
                       dataPointRadius: 4,
                     }))}
                     thickness={2}
@@ -157,10 +146,7 @@ export default function CategoryDetailScreen() {
                       fontSize: 10,
                     }}
                     yAxisTextStyle={{ color: colors.textMuted, fontSize: 10 }}
-                    spacing={Math.max(
-                      36,
-                      260 / Math.max(data.by_month.length, 1),
-                    )}
+                    spacing={Math.max(36, 260 / Math.max(data.by_month.length, 1))}
                     initialSpacing={10}
                     endSpacing={10}
                     hideRules={false}
@@ -185,29 +171,39 @@ export default function CategoryDetailScreen() {
               {data.top_transactions.length === 0 ? (
                 <Text style={styles.placeholder}>Sin movimientos.</Text>
               ) : (
-                data.top_transactions.map((tx) => (
-                  <Pressable
-                    key={tx.transaction_id}
-                    onPress={() =>
-                      router.push(
-                        `/(modules)/personal-finance/transaction/${tx.transaction_id}` as never,
-                      )
-                    }
-                    style={styles.txRow}
-                  >
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text style={styles.txDesc} numberOfLines={1}>
-                        {tx.description ?? '(sin descripción)'}
+                data.top_transactions.map((tx) => {
+                  // PHASE-47.H — una devolución RESTA de su categoría; se pinta
+                  // con su signo para que la columna sume el total de arriba.
+                  const devolucion = isRefundRow(tx.flow, data.category_kind);
+                  return (
+                    <Pressable
+                      key={tx.transaction_id}
+                      onPress={() =>
+                        router.push(
+                          `/(modules)/personal-finance/transaction/${tx.transaction_id}` as never,
+                        )
+                      }
+                      style={styles.txRow}
+                    >
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={styles.txDesc} numberOfLines={1}>
+                          {tx.description ?? '(sin descripción)'}
+                        </Text>
+                        <Text style={styles.txDate}>
+                          {devolucion
+                            ? `Devolución · ${formatCivilDate(tx.occurred_at)}`
+                            : formatCivilDate(tx.occurred_at)}
+                        </Text>
+                      </View>
+                      <Text style={[styles.txAmount, devolucion && styles.txAmountRefund]}>
+                        {formatAmount(
+                          categoryRowAmount(tx.amount, tx.flow, data.category_kind),
+                          data.currency,
+                        )}
                       </Text>
-                      <Text style={styles.txDate}>
-                        {formatCivilDate(tx.occurred_at)}
-                      </Text>
-                    </View>
-                    <Text style={styles.txAmount}>
-                      {formatAmount(tx.amount, data.currency)}
-                    </Text>
-                  </Pressable>
-                ))
+                    </Pressable>
+                  );
+                })
               )}
             </View>
           </>
@@ -217,15 +213,7 @@ export default function CategoryDetailScreen() {
   );
 }
 
-function Kpi({
-  label,
-  value,
-  color,
-}: {
-  label: string;
-  value: string;
-  color?: string;
-}) {
+function Kpi({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
     <View style={styles.kpi}>
       <Text style={styles.kpiLabel}>{label}</Text>
@@ -326,6 +314,7 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontVariant: ['tabular-nums'] as const,
   },
+  txAmountRefund: { color: colors.success },
   placeholder: {
     padding: spacing.md,
     color: colors.textMuted,

@@ -295,6 +295,85 @@ async def test_once_deferred_the_month_stops_counting_it_but_the_breakdown_does_
     assert Decimal(str((await _summary(client, token))["expenses"])) == Decimal("700.26")
 
 
+async def test_el_desglose_dice_que_categorias_estan_aplazadas(
+    client: AsyncClient, deferred_scenario  # type: ignore[no-untyped-def]
+) -> None:
+    """PHASE-47.E4 — el aviso decía CUÁNTO hay aplazado, no DÓNDE.
+
+    Con `deferred_total` por categoría, la pantalla puede marcar la fila que lo
+    explica; y como el reparto por categoría suma exactamente el total del
+    periodo, el aviso puede derivarse de lo que se está mostrando en vez de
+    citar un conjunto distinto cuando el usuario filtra.
+    """
+    token, card = deferred_scenario
+    # Una segunda categoría que NO se aplaza, para que la marca distinga. Va en
+    # la CUENTA del banco, no en la tarjeta: si entrara en el ciclo de la
+    # tarjeta, las compras dejarían de sumar el recibo al céntimo y el
+    # aplazamiento no se declararía (que es el guardarraíl de PHASE-47.E).
+    banco = await _account(client, token, "BBVA", "bank")
+    ocio = await _category(client, token, "Ocio", "expense")
+    await _tx(client, token, account_id=banco, category_id=ocio, amount="50.00", day=12)
+
+    liability = await _financed_receipt(client, token, card, "700.26")
+    applied = await client.post(
+        f"/debt/liabilities/{liability}/deferred-cycle", headers=_auth(token)
+    )
+    assert applied.status_code == 200, applied.text
+
+    r = await client.get(
+        "/dashboard/by-category", params={**JUNE, "kind": "expense"}, headers=_auth(token)
+    )
+    assert r.status_code == 200, r.text
+    por_categoria = {i["category_name"]: i for i in r.json()}
+
+    # Supermercado: todo su gasto está aplazado. Ocio: nada.
+    assert Decimal(str(por_categoria["Supermercado"]["deferred_total"])) == Decimal("700.26")
+    assert Decimal(str(por_categoria["Ocio"]["deferred_total"])) == Decimal("0")
+    assert Decimal(str(por_categoria["Ocio"]["total"])) == Decimal("50.00")
+
+    # El invariante que hace que el aviso pueda derivarse de la vista: lo
+    # aplazado repartido por categorías suma lo que dice el resumen.
+    summary = await _summary(client, token)
+    repartido = sum(
+        (Decimal(str(i["deferred_total"])) for i in r.json()),
+        Decimal(0),
+    )
+    assert repartido == Decimal(str(summary["deferred_expenses"])) == Decimal("700.26")
+
+    # Y la parte nunca es mayor que el todo.
+    for item in r.json():
+        assert Decimal(str(item["deferred_total"])) <= Decimal(str(item["total"]))
+
+
+async def test_el_gasto_puntual_por_categoria_tambien_dice_lo_aplazado(
+    client: AsyncClient, deferred_scenario  # type: ignore[no-untyped-def]
+) -> None:
+    """PHASE-47.E4 — sin esto, el filtro Fijo/Variable del desglose no puede
+    repartir lo aplazado y su aviso vuelve a citar el periodo entero.
+
+    Con datos reales, junio de 2026 decía «496,67 € aplazados» mientras la
+    vista de Fijo sólo contenía 245,53 € de ellos.
+    """
+    token, card = deferred_scenario
+    liability = await _financed_receipt(client, token, card, "700.26")
+    applied = await client.post(
+        f"/debt/liabilities/{liability}/deferred-cycle", headers=_auth(token)
+    )
+    assert applied.status_code == 200, applied.text
+
+    r = await client.get(
+        "/analytics/expense-structure",
+        params={"currency": "EUR", **JUNE},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200, r.text
+    puntual = r.json()["exceptional_by_category"]
+    assert puntual, "el escenario tiene gasto puntual"
+    # Supermercado sólo tiene actividad en un mes → puntual, y aplazado entero.
+    fila = next(i for i in puntual if i["category_name"] == "Supermercado")
+    assert Decimal(str(fila["deferred_total"])) == Decimal("700.26")
+
+
 async def test_a_liability_without_a_declared_card_says_so(
     client: AsyncClient, deferred_scenario  # type: ignore[no-untyped-def]
 ) -> None:

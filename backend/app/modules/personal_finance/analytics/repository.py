@@ -405,17 +405,32 @@ async def exceptional_by_category(
     target_currency: str | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
-) -> list[tuple[uuid.UUID | None, str | None, str | None, str | None, Decimal]]:
+) -> list[tuple[uuid.UUID | None, str | None, str | None, str | None, Decimal, Decimal]]:
     """Gasto PUNTUAL agrupado por categoría, importe desc.
 
-    Devuelve `(id, name, color, icon, total)` — incluye el bucket
-    `category_id=None` (puntuales sin categoría).
+    Devuelve `(id, name, color, icon, total, deferred)` — incluye el bucket
+    `category_id=None` (puntuales sin categoría). `deferred` es la parte de
+    `total` aplazada por un recibo financiado (PHASE-47.E4): la necesita el
+    desglose para que su aviso describa lo que hay EN PANTALLA cuando el
+    usuario filtra por Fijo o Variable, y no el periodo entero.
     """
     amount = _amount_expr(target_currency)
     is_struct = is_structural_expr(structural_category_ids)
     total_col = func.coalesce(func.sum(expense_amount_expr(amount)), Decimal("0")).label("total")
+    deferred_col = func.coalesce(
+        func.sum(
+            case(
+                (
+                    Transaction.deferred_by_account_id.is_not(None),
+                    expense_amount_expr(amount),
+                ),
+                else_=Decimal("0"),
+            )
+        ),
+        Decimal("0"),
+    ).label("deferred")
     query = (
-        select(Category.id, Category.name, Category.color, Category.icon, total_col)
+        select(Category.id, Category.name, Category.color, Category.icon, total_col, deferred_col)
         .select_from(Transaction)
         .outerjoin(Category, Category.id == Transaction.category_id)
         .where(_is_expense())
@@ -428,4 +443,7 @@ async def exceptional_by_category(
     query = query.where(_is_internal_transfer().is_(False))
     query = query.order_by(total_col.desc())
     rows = (await db.execute(query)).all()
-    return [(cid, name, color, icon, Decimal(total)) for cid, name, color, icon, total in rows]
+    return [
+        (cid, name, color, icon, Decimal(total), Decimal(deferred))
+        for cid, name, color, icon, total, deferred in rows
+    ]

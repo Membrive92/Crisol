@@ -506,8 +506,9 @@ async def get_breakdown_by_category(
             category_icon=cat_icon,
             total=total,
             count=count,
+            deferred_total=deferred,
         )
-        for cat_id, cat_name, cat_kind, cat_color, cat_icon, total, count in rows
+        for cat_id, cat_name, cat_kind, cat_color, cat_icon, total, count, deferred in rows
     ]
     items.sort(key=lambda i: i.total, reverse=True)
     return items
@@ -676,6 +677,7 @@ async def get_top_expenses(
             # `converted` viene en moneda destino cuando hay target. En
             # modo legacy es el amount original.
             amount=converted if converted is not None else tx.amount,
+            flow=tx.flow,
             occurred_at=tx.occurred_at,
             category_id=tx.category_id,
             category_name=category_name,
@@ -825,6 +827,7 @@ async def get_category_detail(
                 transaction_id=tx.id,
                 description=tx.description,
                 amount=converted if converted is not None else tx.amount,
+                flow=tx.flow,
                 occurred_at=tx.occurred_at,
                 category_id=tx.category_id,
                 category_name=cat_name,

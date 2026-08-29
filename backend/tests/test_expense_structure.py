@@ -308,6 +308,62 @@ async def test_split_recurring_vs_oneoff_and_invariant(client: AsyncClient) -> N
     assert body["exceptional_by_category"][0]["category_name"] == "Dentista"
 
 
+async def test_top_exceptional_publica_la_direccion_de_una_devolucion(
+    client: AsyncClient,
+) -> None:
+    """PHASE-47.H — «Top movimientos del periodo» sale del cubo de GASTO, que
+    INCLUYE las devoluciones, y ordena por el importe SIN signo.
+
+    Sin `flow` en el item, un reembolso de 300 € encabeza la tarjeta como el
+    mayor gasto puntual del mes — mientras el desglose de la MISMA pantalla lo
+    resta de su categoría. Dos cifras plausibles que sólo se contradicen si las
+    miras juntas, que es el defecto que esta entrega cierra.
+    """
+    token = await _register(client, "exp_refund_flow@example.com")
+    acc = await _create_account(client, token)
+    shop = await _create_category(client, token, name="Compras online")
+
+    # Una compra puntual y su devolución, ambas en junio y en la misma
+    # categoría (que no es recurrente: sólo tiene un mes de actividad).
+    await _post_tx(
+        client,
+        token,
+        account_id=acc,
+        amount="500.00",
+        flow="OUT",
+        when="2026-06-10T12:00:00Z",
+        category_id=shop["id"],
+    )
+    await _post_tx(
+        client,
+        token,
+        account_id=acc,
+        amount="300.00",
+        flow="IN",
+        when="2026-06-20T12:00:00Z",
+        category_id=shop["id"],
+    )
+
+    body = await _expense_structure(client, token)
+
+    # El bucket ya resta la devolución (PHASE-47.H, primera entrega).
+    assert Decimal(body["exceptional_total"]) == Decimal("200.00")
+    assert Decimal(body["exceptional_by_category"][0]["total"]) == Decimal("200.00")
+
+    # La devolución SÍ está en la lista, y con su dirección: quitarla de la
+    # lista escondería un movimiento; publicarla sin dirección la haría pasar
+    # por gasto.
+    filas = {Decimal(f["amount"]): f["flow"] for f in body["top_exceptional"]}
+    assert filas == {Decimal("500.00"): "OUT", Decimal("300.00"): "IN"}
+
+    # El invariante: firmada, la lista suma lo que dice el bucket.
+    firmada = sum(
+        -Decimal(f["amount"]) if f["flow"] == "IN" else Decimal(f["amount"])
+        for f in body["top_exceptional"]
+    )
+    assert firmada == Decimal(body["exceptional_total"])
+
+
 async def test_debt_category_is_structural(client: AsyncClient) -> None:
     """Una categoría con rol de deuda es estructural aunque sólo tenga
     un mes de actividad (regla 2, no depende de recurrencia)."""

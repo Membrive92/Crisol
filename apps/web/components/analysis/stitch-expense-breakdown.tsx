@@ -13,11 +13,15 @@ import type {
 import {
   colors,
   deferredBreakdownNotice,
+  deriveStructural,
+  deferredCategoryNotice,
+  deferredInView,
   fontSize,
   fontWeight,
   formatAmount,
   radius,
   spacing,
+  toBreakdownRow,
 } from '@crisol/ui';
 
 import { iconForCategoryName } from '@/lib/category-icons';
@@ -95,42 +99,8 @@ function explainTooltip(e: CategoryStructureExplain): string {
     e.reason === 'rule_3_recurrence' ||
     e.reason === 'not_recurring' ||
     e.reason === 'insufficient_history';
-  const detail = showMonths
-    ? ` (${e.months_in_band} de ${e.months_active} meses en banda)`
-    : '';
+  const detail = showMonths ? ` (${e.months_in_band} de ${e.months_active} meses en banda)` : '';
   return `${head} · ${reason}${detail}`;
-}
-
-/** Clave de emparejamiento entre datasets: id real o el bucket sin categoría. */
-function categoryKey(id: string | null): string {
-  return id ?? '_nocat_';
-}
-
-function toBreakdownItem(c: AnalyticsCategoryAmount): CategoryBreakdownItem {
-  return {
-    category_id: c.category_id,
-    category_name: c.category_name ?? 'Sin categoría',
-    category_kind: 'expense',
-    category_color: c.color,
-    category_icon: c.icon,
-    total: c.total,
-    count: 0,
-  };
-}
-
-/** Estructural por categoría = total − puntual (descarta lo que queda ~0). */
-export function deriveStructural(
-  all: CategoryBreakdownItem[],
-  exceptional: AnalyticsCategoryAmount[],
-): CategoryBreakdownItem[] {
-  const excByKey = new Map<string, number>();
-  for (const e of exceptional) excByKey.set(categoryKey(e.category_id), Number(e.total));
-  const out: CategoryBreakdownItem[] = [];
-  for (const it of all) {
-    const structural = Number(it.total) - (excByKey.get(categoryKey(it.category_id)) ?? 0);
-    if (structural > 0.005) out.push({ ...it, total: structural.toFixed(2) });
-  }
-  return out;
 }
 
 const SLICE_PALETTE = [
@@ -154,6 +124,12 @@ interface Slice {
   categoryId: string | null;
   /** PHASE-25: categorías agregadas dentro del "Otros" — null si no es Otros. */
   groupedItems: CategoryBreakdownItem[] | null;
+  /**
+   * PHASE-47.E4: la parte de `value` que quedó aplazada, o `null` si el
+   * backend no lo declara. `null` ≠ `'0'`: el primero es «no se sabe» y el
+   * segundo «no hay nada aplazado aquí».
+   */
+  deferred: string | null;
   /**
    * Id del slice del DONUT al que pertenece esta entrada de la leyenda: su
    * propio id si está en el top-N, o `'_other'` si cae en la cola agrupada.
@@ -203,7 +179,8 @@ export function StitchExpenseBreakdown({
   // PHASE-47.E2 — la diferencia entre este desglose y el resultado del mes,
   // dicha en voz alta. La redacción vive en `@crisol/ui` para que móvil no
   // acabe explicándolo con otras palabras.
-  const deferredNotice = deferredBreakdownNotice(deferredExpenses, currency);
+  // Nota: el aviso se calcula MÁS ABAJO, a partir de `sorted` — las filas que
+  // de verdad se están pintando. Ver `deferredEnVista`.
   // Paginación SÓLO de la leyenda (el donut nunca se pagina).
   const [page, setPage] = useState(0);
   // Al cambiar de filtro cambia el nº de categorías → a la primera página para
@@ -214,7 +191,7 @@ export function StitchExpenseBreakdown({
 
   const canFilter = exceptionalByCategory != null;
   const exceptionalItems = useMemo(
-    () => (exceptionalByCategory ?? []).map(toBreakdownItem),
+    () => (exceptionalByCategory ?? []).map(toBreakdownRow),
     [exceptionalByCategory],
   );
   const structuralItems = useMemo(
@@ -231,6 +208,22 @@ export function StitchExpenseBreakdown({
   const sorted = [...displayItems].sort((a, b) => Number(b.total) - Number(a.total));
   const total = sorted.reduce((acc, x) => acc + Number(x.total), 0);
   const empty = !isLoading && total === 0;
+
+  // PHASE-47.E2/E4 — la diferencia entre este desglose y el resultado del mes,
+  // dicha en voz alta. La redacción vive en `@crisol/ui` para que móvil no
+  // acabe explicándolo con otras palabras.
+  //
+  // El importe sale de las filas que se están MOSTRANDO, no del total del
+  // periodo: bajo el filtro Fijo el aviso decía «496,67 € aplazados» cuando en
+  // pantalla sólo había 245,53 € de ellos (los otros viven en categorías
+  // variables). Si el backend no manda el dato por categoría, `deferredInView`
+  // devuelve `null` y se cae al total del periodo — correcto sin filtro, y lo
+  // único que se sabe.
+  const deferredEnVista = deferredInView(sorted);
+  const deferredNotice = deferredBreakdownNotice(
+    deferredEnVista ?? (filter === 'all' ? deferredExpenses : null),
+    currency,
+  );
 
   const sliceId = (item: CategoryBreakdownItem): string =>
     item.category_id ?? `_no_cat_${item.category_name}`;
@@ -252,6 +245,7 @@ export function StitchExpenseBreakdown({
     categoryId: item.category_id,
     groupedItems: null,
     donutId: sliceId(item),
+    deferred: item.deferred_total ?? null,
   }));
   const donutSlices = allSlices;
   const legendItems = allSlices;
@@ -416,9 +410,7 @@ export function StitchExpenseBreakdown({
                   "{label} · {value} · {pct}%". Transición opacidad
                   para evitar el salto duro. */}
               <DonutCenter
-                activeSlice={
-                  activeId ? donutSlices.find((s) => s.id === activeId) ?? null : null
-                }
+                activeSlice={activeId ? (donutSlices.find((s) => s.id === activeId) ?? null) : null}
                 total={total}
                 currency={currency}
               />
@@ -518,7 +510,11 @@ function LegendPager({
         ‹
       </button>
       <span
-        style={{ fontSize: fontSize.xs, color: colors.textMuted, fontVariantNumeric: 'tabular-nums' }}
+        style={{
+          fontSize: fontSize.xs,
+          color: colors.textMuted,
+          fontVariantNumeric: 'tabular-nums',
+        }}
       >
         Página {page + 1} de {pageCount}
       </span>
@@ -622,10 +618,7 @@ function DonutCenter({
           marginTop: 2,
         }}
       >
-        {formatAmount(
-          String((showSlice ? activeSlice.value : total).toFixed(2)),
-          currency,
-        )}
+        {formatAmount(String((showSlice ? activeSlice.value : total).toFixed(2)), currency)}
       </span>
       {showSlice ? (
         <span
@@ -735,6 +728,27 @@ function LegendRow({
       >
         {slice.label}
       </span>
+      {/* PHASE-47.E4 — el asterisco que ya marca cada compra aplazada en la
+          lista de transacciones, aquí a nivel de categoría: el aviso de arriba
+          decía CUÁNTO hay aplazado pero no DÓNDE. Comprobación por VERDAD y
+          contra cero, no `!== null`: `null` es «el backend no lo manda» y `0`
+          es «esta categoría no tiene nada aplazado» — ninguno de los dos se
+          marca. */}
+      {slice.deferred && Number(slice.deferred) > 0 ? (
+        <abbr
+          data-testid="deferred-category-mark"
+          title={deferredCategoryNotice(slice.deferred, currency)}
+          style={{
+            color: colors.primary,
+            fontWeight: fontWeight.semibold,
+            cursor: 'help',
+            textDecoration: 'none',
+            flex: '0 0 auto',
+          }}
+        >
+          *
+        </abbr>
+      ) : null}
       <span
         style={{
           fontSize: fontSize.sm,
@@ -761,4 +775,3 @@ function LegendRow({
     </li>
   );
 }
-

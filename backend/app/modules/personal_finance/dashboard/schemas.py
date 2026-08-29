@@ -13,6 +13,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from app.modules.personal_finance.transactions.models import TransactionFlow
+
 # PHASE-43.4 (ADR-0006) — contrato de agregación del dashboard. Cada módulo
 # vertical expone su tarjeta como `veredicto + un número + un link`. El
 # dashboard COMPONE estas tarjetas; no recalcula (salvo el patrimonio
@@ -98,6 +100,13 @@ class CategoryBreakdownItem(BaseModel):
     category_icon: str | None = None
     total: Decimal
     count: int
+    deferred_total: Decimal = Decimal("0")
+    """PHASE-47.E4 — la parte de `total` que quedó APLAZADA por un recibo
+    financiado. El aviso del desglose ya decía cuánto hay aplazado en el
+    periodo, pero no DÓNDE: no había forma de saber qué filas lo explican, y
+    bajo el filtro Fijo/Variable el número describía un conjunto distinto del
+    que estaba en pantalla. Con esto la marca va en la fila y el aviso se
+    deriva de lo que se ve."""
 
 
 class MonthlyBucket(BaseModel):
@@ -122,6 +131,14 @@ class TopExpenseItem(BaseModel):
     transaction_id: uuid.UUID
     description: str | None
     amount: Decimal
+    #: PHASE-47.H — la DIRECCIÓN del movimiento, para que la lista pueda
+    #: pintarla. Una devolución es una entrada (`flow=IN`) en una categoría de
+    #: GASTO y RESTA de su categoría: sin este campo la lista muestra seis
+    #: importes positivos que suman 187,95 € bajo un total de 184,95 €, y el
+    #: usuario no tiene forma de saber cuál de las seis filas explica la
+    #: diferencia. El importe sigue viniendo SIN signo porque es el que ordena
+    #: el ranking; el signo lo pone la UI a partir de aquí.
+    flow: TransactionFlow | None = None
     occurred_at: datetime
     category_id: uuid.UUID | None
     category_name: str | None

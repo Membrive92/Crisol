@@ -1,11 +1,22 @@
 // PHASE-37.3 — Gasto estructural vs puntual + tasa de ahorro dual.
 
+import type { TransactionFlow } from './transaction';
+
 /** Referencia ligera a una transacción (listas del análisis). */
 export interface AnalyticsTxRef {
   id: string;
   description: string | null;
   amount: string;
   converted_amount: string | null;
+  /**
+   * PHASE-47.H — dirección del movimiento. Esta lista sale del cubo de GASTO,
+   * que INCLUYE las devoluciones: sin esto, un reembolso encabeza «Top
+   * movimientos del periodo» como si fuera el mayor gasto, mientras el
+   * desglose de la misma pantalla lo resta.
+   *
+   * **Opcional a propósito**: un backend anterior al campo no lo manda.
+   */
+  flow?: TransactionFlow | null;
   currency: string;
   occurred_at: string;
   category_id: string | null;
@@ -19,6 +30,13 @@ export interface AnalyticsCategoryAmount {
   color: string | null;
   icon: string | null;
   total: string;
+  /**
+   * PHASE-47.E4 — la parte de `total` aplazada por un recibo financiado. La
+   * necesita el desglose para derivar lo aplazado de la vista cuando el
+   * usuario filtra por Fijo o Variable: el total del periodo describe otro
+   * conjunto. **Opcional**: un backend anterior no lo manda.
+   */
+  deferred_total?: string | null | undefined;
 }
 
 export interface ExpenseStructureResponse {

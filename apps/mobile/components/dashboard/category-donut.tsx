@@ -5,7 +5,13 @@ import { PieChart } from 'react-native-gifted-charts';
 
 import type { AnalyticsCategoryAmount, CategoryBreakdownItem } from '@crisol/types';
 import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
-import { formatAmount } from '@crisol/ui';
+import {
+  deferredBreakdownNotice,
+  deferredInView,
+  deriveStructural,
+  formatAmount,
+  toBreakdownRow,
+} from '@crisol/ui';
 
 export type DonutKindFilter = 'all' | 'income' | 'expense';
 
@@ -26,37 +32,13 @@ export interface CategoryDonutProps {
   exceptionalByCategory?: AnalyticsCategoryAmount[] | undefined;
   /** Cuántas categorías mostrar como slices independientes; el resto agrupa en "Otros". */
   topN?: number;
-}
-
-function categoryKey(id: string | null): string {
-  return id ?? '_nocat_';
-}
-
-function toBreakdownItem(c: AnalyticsCategoryAmount): CategoryBreakdownItem {
-  return {
-    category_id: c.category_id,
-    category_name: c.category_name ?? 'Sin categoría',
-    category_kind: 'expense',
-    category_color: c.color,
-    category_icon: c.icon,
-    total: c.total,
-    count: 0,
-  };
-}
-
-/** Estructural por categoría = total − puntual (descarta lo que queda ~0). */
-function deriveStructural(
-  all: CategoryBreakdownItem[],
-  exceptional: AnalyticsCategoryAmount[],
-): CategoryBreakdownItem[] {
-  const excByKey = new Map<string, number>();
-  for (const e of exceptional) excByKey.set(categoryKey(e.category_id), Number(e.total));
-  const out: CategoryBreakdownItem[] = [];
-  for (const it of all) {
-    const structural = Number(it.total) - (excByKey.get(categoryKey(it.category_id)) ?? 0);
-    if (structural > 0.005) out.push({ ...it, total: structural.toFixed(2) });
-  }
-  return out;
+  /**
+   * PHASE-47.E2 — gasto APLAZADO del periodo (`summary.deferred_expenses`).
+   * Sólo se usa como respaldo cuando el backend no manda el dato por
+   * categoría: el aviso se deriva de las filas que se están mostrando, porque
+   * el total del periodo describe otro conjunto en cuanto hay filtro.
+   */
+  deferredExpenses?: string | null | undefined;
 }
 
 const PALETTE = [
@@ -77,6 +59,11 @@ interface Slice {
   isOther: boolean;
   /** PHASE-25: id real de la categoría para enlazar al drill-down. */
   categoryId: string | null;
+  /**
+   * PHASE-47.E4: la parte de `value` aplazada por un recibo financiado, o
+   * `null` si el backend no lo declara — que NO es lo mismo que `'0'`.
+   */
+  deferred: string | null;
 }
 
 /**
@@ -98,6 +85,7 @@ export function CategoryDonut({
   onKindChange,
   exceptionalByCategory,
   topN = 5,
+  deferredExpenses,
 }: CategoryDonutProps) {
   const router = useRouter();
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -111,7 +99,7 @@ export function CategoryDonut({
     !canStructure || structureFilter === 'all'
       ? baseData
       : structureFilter === 'exceptional'
-        ? (exceptionalByCategory ?? []).map(toBreakdownItem)
+        ? (exceptionalByCategory ?? []).map(toBreakdownRow)
         : deriveStructural(baseData, exceptionalByCategory ?? []);
 
   const sorted = [...displayData].sort((a, b) => Number(b.total) - Number(a.total));
@@ -128,13 +116,11 @@ export function CategoryDonut({
         ? `${item.category_icon} ${item.category_name}`
         : item.category_name,
       value: Number(item.total),
-      color:
-        item.category_color ??
-        PALETTE[idx % PALETTE.length] ??
-        colors.primary,
+      color: item.category_color ?? PALETTE[idx % PALETTE.length] ?? colors.primary,
       pct: total > 0 ? (Number(item.total) / total) * 100 : 0,
       isOther: false,
       categoryId: item.category_id,
+      deferred: item.deferred_total ?? null,
     })),
   ];
   if (rest.length > 0) {
@@ -146,8 +132,24 @@ export function CategoryDonut({
       pct: total > 0 ? (restTotal / total) * 100 : 0,
       isOther: true,
       categoryId: null,
+      // PHASE-47.E4 — «Otros» agrega también lo aplazado de las categorías que
+      // esconde; si ninguna lo declara, la ausencia se propaga como tal.
+      deferred: deferredInView(rest.map((r) => ({ deferred_total: r.deferred_total }))),
     });
   }
+
+  // PHASE-47.E2/E4 — el aviso vive AQUÍ, dentro de la tarjeta del donut, y no
+  // en la pantalla: el filtro estructural/puntual es estado de este componente,
+  // así que desde fuera no había forma de saber qué se está mostrando y el
+  // aviso citaba el periodo entero. No se pinta sobre el donut de INGRESOS,
+  // donde sería un pie de foto que no describe lo que hay encima.
+  const deferredNotice =
+    kind === 'income'
+      ? null
+      : deferredBreakdownNotice(
+          deferredInView(sorted) ?? (structureFilter === 'all' ? deferredExpenses : null),
+          currency,
+        );
 
   function handlePress(slice: Slice) {
     if (slice.isOther) {
@@ -155,9 +157,7 @@ export function CategoryDonut({
       return;
     }
     if (slice.categoryId) {
-      router.push(
-        `/(modules)/personal-finance/analysis/category/${slice.categoryId}` as never,
-      );
+      router.push(`/(modules)/personal-finance/analysis/category/${slice.categoryId}` as never);
     }
   }
 
@@ -169,16 +169,10 @@ export function CategoryDonut({
           <ToggleButton active={kind === 'all'} onPress={() => onKindChange('all')}>
             Total
           </ToggleButton>
-          <ToggleButton
-            active={kind === 'expense'}
-            onPress={() => onKindChange('expense')}
-          >
+          <ToggleButton active={kind === 'expense'} onPress={() => onKindChange('expense')}>
             Gastos
           </ToggleButton>
-          <ToggleButton
-            active={kind === 'income'}
-            onPress={() => onKindChange('income')}
-          >
+          <ToggleButton active={kind === 'income'} onPress={() => onKindChange('income')}>
             Ingresos
           </ToggleButton>
         </View>
@@ -186,7 +180,10 @@ export function CategoryDonut({
 
       {canStructure ? (
         <View style={styles.subToggle}>
-          <ToggleButton active={structureFilter === 'all'} onPress={() => setStructureFilter('all')}>
+          <ToggleButton
+            active={structureFilter === 'all'}
+            onPress={() => setStructureFilter('all')}
+          >
             Todo
           </ToggleButton>
           <ToggleButton
@@ -213,10 +210,7 @@ export function CategoryDonut({
           <PieChart
             data={slices.map((s) => ({
               value: s.value,
-              color:
-                activeId === null || activeId === s.id
-                  ? s.color
-                  : `${s.color}55`,
+              color: activeId === null || activeId === s.id ? s.color : `${s.color}55`,
             }))}
             donut
             radius={70}
@@ -236,28 +230,26 @@ export function CategoryDonut({
               <Pressable
                 key={s.id}
                 onPress={() => handlePress(s)}
-                onLongPress={() =>
-                  setActiveId((current) => (current === s.id ? null : s.id))
-                }
-                style={[
-                  styles.legendRow,
-                  activeId === s.id && styles.legendRowActive,
-                ]}
+                onLongPress={() => setActiveId((current) => (current === s.id ? null : s.id))}
+                style={[styles.legendRow, activeId === s.id && styles.legendRowActive]}
               >
                 <View style={[styles.legendDot, { backgroundColor: s.color }]} />
                 <View style={{ flex: 1 }}>
                   <Text
                     numberOfLines={1}
-                    style={[
-                      styles.legendLabel,
-                      s.isOther && { color: colors.textMuted },
-                    ]}
+                    style={[styles.legendLabel, s.isOther && { color: colors.textMuted }]}
                   >
                     {s.label}
+                    {s.deferred && Number(s.deferred) > 0 ? ' *' : ''}
                   </Text>
                   <Text style={styles.legendMeta}>
-                    {formatAmount(String(s.value.toFixed(2)), currency)} ·{' '}
-                    {s.pct.toFixed(0)}%
+                    {formatAmount(String(s.value.toFixed(2)), currency)} · {s.pct.toFixed(0)}%
+                    {/* PHASE-47.E4 — en táctil no hay hover, así que el
+                        asterisco trae su explicación en texto en vez de en un
+                        tooltip que nadie puede abrir (lección PHASE-44.15). */}
+                    {s.deferred && Number(s.deferred) > 0
+                      ? ` · ${formatAmount(s.deferred, currency)} aplazados`
+                      : ''}
                   </Text>
                 </View>
               </Pressable>
@@ -265,6 +257,11 @@ export function CategoryDonut({
           </View>
         </View>
       )}
+      {deferredNotice ? (
+        <Text testID="deferred-notice" style={styles.deferredNotice}>
+          {deferredNotice}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -279,13 +276,8 @@ function ToggleButton({
   children: React.ReactNode;
 }) {
   return (
-    <Pressable
-      onPress={onPress}
-      style={[styles.toggleButton, active && styles.toggleButtonActive]}
-    >
-      <Text style={[styles.toggleText, active && styles.toggleTextActive]}>
-        {children}
-      </Text>
+    <Pressable onPress={onPress} style={[styles.toggleButton, active && styles.toggleButtonActive]}>
+      <Text style={[styles.toggleText, active && styles.toggleTextActive]}>{children}</Text>
     </Pressable>
   );
 }
@@ -337,6 +329,12 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontVariant: ['tabular-nums'] as const,
     marginTop: 1,
+  },
+  deferredNotice: {
+    fontSize: fontSize.xs,
+    color: colors.textMuted,
+    lineHeight: 18,
+    marginTop: spacing.md,
   },
   toggle: {
     flexDirection: 'row',

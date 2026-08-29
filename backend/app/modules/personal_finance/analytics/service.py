@@ -257,6 +257,7 @@ async def get_expense_structure(
                 description=tx.description,
                 amount=tx.amount,
                 converted_amount=converted,
+                flow=tx.flow,
                 currency=tx.currency,
                 occurred_at=tx.occurred_at,
                 category_id=tx.category_id,
@@ -271,8 +272,9 @@ async def get_expense_structure(
                 color=color,
                 icon=icon,
                 total=total,
+                deferred_total=deferred,
             )
-            for cid, name, color, icon, total in by_cat_rows
+            for cid, name, color, icon, total, deferred in by_cat_rows
         ],
         window_start=window_start.date(),
         window_end=window_end.date(),
