@@ -22,6 +22,7 @@ from decimal import Decimal
 from typing import Any
 
 from app.modules.investment.enums import AccountingStd
+from app.modules.investment.fundamentals.glossary import ITEM_HELP
 
 # ── Procedencia ───────────────────────────────────────────────────────
 
@@ -213,6 +214,13 @@ class CanonicalItemDefinition:
     statement: StatementKind
     group: ItemGroup
     note: str = ""
+
+    @property
+    def help(self) -> str:
+        """Qué es esta partida, en una frase (PHASE-44.23). Ver
+        `fundamentals/glossary.py`: un test exige que estén las 49 y sólo las
+        49."""
+        return ITEM_HELP.get(self.key, "")
 
 
 _B = StatementKind.BALANCE

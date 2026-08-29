@@ -2,12 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import type {
-  AnalysisRun,
-  MetricDefinition,
-  QuestionSignal,
-  QuestionVerdict,
-} from '@crisol/types';
+import type { AnalysisRun, MetricDefinition, QuestionSignal, QuestionVerdict } from '@crisol/types';
 
 import { buildCatalogIndex } from '@crisol/ui';
 import { TabVerdict } from './tab-verdict';
@@ -214,9 +209,7 @@ describe('TabVerdict', () => {
       'no se pudo estimar el apalancamiento operativo con esta serie';
     renderVerdict(run);
     expect(screen.getByText(/Faltan escenarios/)).toBeTruthy();
-    expect(
-      screen.getByText(/no se pudo estimar el apalancamiento operativo/),
-    ).toBeTruthy();
+    expect(screen.getByText(/no se pudo estimar el apalancamiento operativo/)).toBeTruthy();
   });
 
   it('avisa de que el stress mide sobre caja libre y no sobre FFO', () => {
@@ -300,5 +293,44 @@ describe('TabVerdict con un análisis de un motor anterior', () => {
     renderVerdict(run);
     // Etiqueta del catálogo, nunca la clave cruda.
     expect(screen.getByText(/M-Score de Beneish/)).toBeTruthy();
+  });
+});
+
+/**
+ * Modo dictamen (revisión adversarial de 44.24.H).
+ *
+ * Esconder el selector de secciones con CSS de impresión lo dejaba VIVO en
+ * pantalla —pulsarlo escribía un `sub` que la página descartaba— y encima
+ * salía en el papel. Y las señales seguían siendo enlaces con `tab` forzado.
+ */
+describe('TabVerdict en modo dictamen', () => {
+  it('no renderiza el selector de secciones', () => {
+    render(
+      <TabVerdict
+        run={makeRun()}
+        catalog={buildCatalogIndex(undefined)}
+        statements={undefined}
+        items={undefined}
+        sub="dictamen"
+        onSubChange={vi.fn()}
+        printMode
+      />,
+    );
+    expect(screen.queryByRole('radiogroup', { name: 'Secciones del veredicto' })).toBeNull();
+    expect(screen.queryByText('Confianza y datos')).toBeNull();
+  });
+
+  it('fuera del modo dictamen sí está', () => {
+    render(
+      <TabVerdict
+        run={makeRun()}
+        catalog={buildCatalogIndex(undefined)}
+        statements={undefined}
+        items={undefined}
+        sub="dictamen"
+        onSubChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('Confianza y datos')).toBeTruthy();
   });
 });

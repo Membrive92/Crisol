@@ -1,6 +1,7 @@
 'use client';
 
-import { colors, fontSize, fontWeight, isRunOutdated, radius, spacing } from '@crisol/ui';
+import { Button } from '@/components/ui/button';
+import { isRunOutdated, spacing } from '@crisol/ui';
 
 import { DegradedPanel } from './degraded-panel';
 
@@ -40,26 +41,15 @@ export function StaleRunNotice({
       reason={`Se guardó con el motor ${runVersion} y ahora corre el ${engineVersion}. Un análisis es una foto: se conserva tal y como se calculó, así que las métricas que el motor no emitía entonces aparecen vacías con su motivo.`}
       consequence="Los números que sí están son válidos — se calcularon con los datos de su día. Vuelve a ejecutarlo para obtener el informe completo con los cortes y el desglose de señales actuales."
     >
-      <button
-        type="button"
+      <Button
+        variant="secondary"
         onClick={onRerun}
         disabled={rerunning}
-        style={{
-          alignSelf: 'flex-start',
-          marginTop: spacing.xs,
-          padding: `${spacing.sm}px ${spacing.md}px`,
-          borderRadius: radius.sm,
-          border: `1px solid ${colors.border}`,
-          backgroundColor: colors.surface,
-          color: colors.text,
-          fontSize: fontSize.sm,
-          fontWeight: fontWeight.medium,
-          cursor: rerunning ? 'progress' : 'pointer',
-          opacity: rerunning ? 0.6 : 1,
-        }}
+        data-print="hide"
+        style={{ alignSelf: 'flex-start', marginTop: spacing.xs }}
       >
         {rerunning ? 'Reejecutando…' : 'Volver a ejecutar el análisis'}
-      </button>
+      </Button>
     </DegradedPanel>
   );
 }

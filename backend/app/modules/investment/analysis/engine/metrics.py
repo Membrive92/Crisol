@@ -14,6 +14,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 
+from app.modules.investment.analysis.engine.glossary import METRIC_HELP
 from app.modules.investment.analysis.engine.types import (
     Amount,
     MetricResult,
@@ -75,6 +76,35 @@ class MetricDefinition:
     model_variant: str | None = None
     note: str = ""
 
+    @property
+    def help(self) -> str:
+        """Qué mide esta métrica y cómo se calcula (PHASE-44.23, 44.24).
+
+        Devuelve `what` y NO la concatenación de los tres campos: `reading` se
+        pinta en su propia línea, y unirlos rompería el tope de longitud que el
+        gate aplica a este texto — que existe porque se despliega bajo la fila
+        de una tabla y más largo tapa los números que se venían a comparar.
+
+        Se lee del glosario en vez de declararse aquí para no reescribir 64
+        constructores, pero es tan obligatoria como la etiqueta: un test exige
+        que las claves del glosario sean EXACTAMENTE las del catálogo, así que
+        una métrica sin definición no pasa la suite.
+        """
+        entry = METRIC_HELP.get(self.key)
+        return entry.what if entry is not None else ""
+
+    @property
+    def why(self) -> str:
+        """Por qué importa, con el sesgo de la tesis de dividendos (PHASE-44.24)."""
+        entry = METRIC_HELP.get(self.key)
+        return entry.why if entry is not None else ""
+
+    @property
+    def reading(self) -> str:
+        """Hacia dónde se lee y con qué matices (PHASE-44.24)."""
+        entry = METRIC_HELP.get(self.key)
+        return entry.reading if entry is not None else ""
+
     def to_threshold(self) -> ThresholdSpec | None:
         if self.direction is None:
             return None
@@ -117,7 +147,7 @@ def to_metric_result(
             value=None,
             status="not_computable",
             provenance=amount.provenance,
-            reason=amount.reason or "input ausente",
+            reason=amount.reason or "falta un dato de entrada",
         )
     spec = thresholds.get(key)
     return MetricResult(

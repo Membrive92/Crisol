@@ -726,7 +726,12 @@ def test_un_hueco_da_not_computable_con_la_partida_que_falta() -> None:
     assert metric.value is None
     assert metric.status == "not_computable"
     assert metric.reason is not None
-    assert "current_liabilities" in metric.reason
+    # PHASE-44.24.E — la razón nombra la partida con su etiqueta HUMANA, no con
+    # la clave del motor: esta frase se imprime bajo la fila del informe, y
+    # «falta la partida 'current_liabilities'» le pide al usuario que aprenda un
+    # vocabulario interno para entender por qué su empresa no tiene el número.
+    assert "Total pasivo corriente" in metric.reason
+    assert "current_liabilities" not in metric.reason
     assert metric.band is None
 
 
@@ -1081,3 +1086,90 @@ def test_el_engine_no_importa_io() -> None:
                 assert (
                     raiz not in prohibidos and prefijo is None
                 ), f"{modulo.name} importa '{nombre}': el engine debe ser puro"
+
+
+# ── Pureza de `presentation/` (PHASE-44.24.C) ─────────────────────────
+
+_PURE_DIRS = ("engine", "presentation")
+
+_CLOCK_CALLS = frozenset({"now", "utcnow", "today", "time", "perf_counter", "monotonic"})
+"""Llamadas que traen el reloj sin importar nada prohibido.
+
+El gate de arriba mira NOMBRES DE IMPORT, así que `from datetime import
+datetime; datetime.now()` lo atraviesa entero — y `datetime` no se puede
+prohibir, porque `types.py` lo usa para `StatementSeries.as_of`. O sea que la
+mitad «sin reloj» de la promesa dependía de la disciplina de quien escribiera
+el módulo, exactamente lo que un gate existe para no tener que suponer.
+"""
+
+_FORBIDDEN_IMPORTS = frozenset(
+    {
+        "sqlalchemy",
+        "httpx",
+        "requests",
+        "asyncpg",
+        "random",
+        "time",
+        "os",
+        "uuid",
+        "secrets",
+        "app.core.database",
+        "app.modules.currency",
+        "app.modules.investment.pricing",
+    }
+)
+
+
+@pytest.mark.parametrize("directory", _PURE_DIRS)
+def test_las_capas_puras_no_tocan_bd_red_ni_reloj(directory: str) -> None:
+    """Ni imports de IO, ni llamadas al reloj, ni aleatoriedad.
+
+    Se parametriza por directorio y se afirma que cada uno tiene módulos: un
+    directorio renombrado o vacío pasaría el bucle sin ejecutar una sola
+    comprobación, y ese verde es indistinguible del de un gate que protege.
+    """
+    base = Path(__file__).resolve().parents[1] / "app/modules/investment/analysis" / directory
+    modulos = sorted(base.glob("*.py"))
+    assert modulos, f"{directory}/ no tiene módulos: el gate no está comprobando nada"
+
+    for modulo in modulos:
+        arbol = ast.parse(modulo.read_text(encoding="utf-8"))
+        for nodo in ast.walk(arbol):
+            if isinstance(nodo, (ast.Import, ast.ImportFrom)):
+                nombres = (
+                    [alias.name for alias in nodo.names]
+                    if isinstance(nodo, ast.Import)
+                    else [nodo.module or ""]
+                )
+                for nombre in nombres:
+                    prefijo = next(
+                        (
+                            p
+                            for p in _FORBIDDEN_IMPORTS
+                            if nombre == p or nombre.startswith(p + ".")
+                        ),
+                        None,
+                    )
+                    assert prefijo is None, f"{directory}/{modulo.name} importa '{nombre}'"
+            elif isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Attribute):
+                assert nodo.func.attr not in _CLOCK_CALLS, (
+                    f"{directory}/{modulo.name} llama a `.{nodo.func.attr}()`: la capa es "
+                    "pura y todo lo temporal entra por parámetro"
+                )
+
+
+def test_el_engine_no_depende_de_la_capa_de_presentacion() -> None:
+    """La dependencia es en UN solo sentido.
+
+    Al revés se crearía el ciclo `catalog → base_ratios → metrics → glossary →
+    presentation → catalog`, con `catalog` a medio inicializar y un
+    `ImportError` que no se parece en nada a su causa. Y además invertiría las
+    capas: el motor calcula, la presentación lee.
+    """
+    engine_dir = Path(__file__).resolve().parents[1] / "app/modules/investment/analysis/engine"
+    culpables = [
+        modulo.name
+        for modulo in sorted(engine_dir.glob("*.py"))
+        if "analysis.presentation" in modulo.read_text(encoding="utf-8")
+    ]
+    assert culpables == [], f"el engine importa la capa de presentación: {culpables}"

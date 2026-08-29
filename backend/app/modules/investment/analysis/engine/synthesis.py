@@ -577,7 +577,7 @@ def compute(
         _question_accounting(base, evolution, forensic, dividend, flag_severity, evaluations, year),
         _question_cash(base, evolution, forensic, dividend, year),
         _question_dividend(dividend, flag_severity, evaluations, year),
-        _question_resilience(base, forensic, stress, year),
+        _question_resilience(base, forensic, stress, year, series.security),
     )
     # Los portantes se resuelven contra TODAS las señales del run: en una
     # financiera, la pregunta de la contabilidad se audita con Q1, que se pinta
@@ -690,7 +690,11 @@ def _question_dividend(
 
 
 def _question_resilience(
-    base: BaseRatiosResult, forensic: ForensicResult, stress: StressResult, year: int
+    base: BaseRatiosResult,
+    forensic: ForensicResult,
+    stress: StressResult,
+    year: int,
+    security: SecuritySnapshot,
 ) -> QuestionVerdict:
     """¿Aguanta un golpe? ← ST1-ST3 + Z'' + FZ + L4 + S2/S4/S5/S6."""
     signals = [
@@ -701,7 +705,7 @@ def _question_resilience(
         _band_signal("S4", base.get("S4", year)),
         _band_signal("S5", base.get("S5", year)),
         _band_signal("S6", base.get("S6", year)),
-        _stress_signal(stress),
+        _stress_signal(stress, security),
     ]
     return _aggregate("¿Aguanta un golpe?", "resilience", signals)
 
@@ -726,14 +730,31 @@ def _fcf_trend_signal(evolution: EvolutionResult) -> QuestionSignal:
     )
 
 
-def _stress_signal(stress: StressResult) -> QuestionSignal:
+def _stress_signal(stress: StressResult, security: SecuritySnapshot) -> QuestionSignal:
     """Los escenarios de stress (ST1-ST3): si algún shock razonable deja de
     cubrir el dividendo, la resiliencia está comprometida.
 
     - Cobertura tras un shock < 1,0 → roja (deja de cubrir).
     - Cobertura tras un shock entre 1,0 y 1,15 → ámbar (queda al límite).
     - Poco margen de caída antes del breakeven (ST3 < 15%) → ámbar.
+
+    **En una financiera no puntúa** (PHASE-44.24.M). El motor declara esta
+    pregunta permanentemente NO AUDITABLE en banca —la resiliencia de una
+    entidad financiera es capital regulatorio y no está en un 10-K— y sin
+    embargo seguía calculando el escenario y podía pintarlo ROJO dentro de esa
+    misma pregunta. El resultado era una contradicción en la propia pantalla: un
+    chip gris de «no auditada» con una señal roja debajo. Sale como no
+    comprobada, con el motivo, y así no puede llegar ni a la tabla de señales ni
+    a lo que la pantalla proponga vigilar.
     """
+    if _profile_key(security) == "financials":
+        return _derived_signal(
+            "stress",
+            "Escenario de stress",
+            None,
+            NOT_AUDITABLE["financials"]["resilience"],
+            "unchecked",
+        )
     worst: Band | None = None
     for scenario in stress.scenarios:
         coverage = scenario.coverage_after

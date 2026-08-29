@@ -213,8 +213,10 @@ export {
 export {
   useAnalysisRun,
   useAnalysisRuns,
+  useRunComparison,
   useApplyCorporateAction,
   useCanonicalItems,
+  useHelpCatalog,
   useCorporateActions,
   useCreateDividend,
   useCreateLot,

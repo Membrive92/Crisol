@@ -15,8 +15,7 @@
  */
 
 const isReactNative =
-  typeof navigator !== 'undefined' &&
-  (navigator as { product?: string }).product === 'ReactNative';
+  typeof navigator !== 'undefined' && (navigator as { product?: string }).product === 'ReactNative';
 
 function color(varName: string, fallback: string): string {
   return isReactNative ? fallback : `var(--color-${varName}, ${fallback})`;
@@ -79,6 +78,16 @@ export const radius = {
 export const layout = {
   pageWide: 2400,
   pageNarrow: 720,
+  /**
+   * Ancho máximo de un bloque de PROSA dentro de una card (PHASE-44.24).
+   *
+   * Una card puede ocupar 2.300 px en un monitor grande; un párrafo no debe:
+   * por encima de ~90 caracteres por línea el ojo pierde el renglón. Deuda y
+   * Análisis ya lo acotaban a mano (480-520); Inversión pintaba las líneas de
+   * borde a borde. Un solo número para que las cards de todos los módulos
+   * midan lo mismo.
+   */
+  prose: 640,
 } as const;
 
 // PHASE-37 — la UI web se veía pequeña en pantallas grandes (2.5K+): con el

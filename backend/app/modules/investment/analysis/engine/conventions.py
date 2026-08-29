@@ -24,6 +24,7 @@ from app.modules.investment.analysis.engine.types import (
     Amount,
     StatementSeries,
     combine_amounts,
+    item_label,
 )
 from app.modules.investment.fundamentals.canonical import (
     CANONICAL_BALANCE_ITEM_SET,
@@ -74,7 +75,12 @@ def derived(value: Decimal | None, *inputs: Amount, missing: str | None = None) 
             provenance=provenance,
             status="not_computable",
             missing=missing,
-            reason=reason or (f"falta '{missing}'" if missing else "input ausente"),
+            reason=reason
+            or (
+                f"el filing no publica {item_label(missing)}"
+                if missing
+                else "falta un dato de entrada"
+            ),
         )
     return Amount(value=value, provenance=provenance, status=status, reason=reason)
 
@@ -185,8 +191,9 @@ def avg_balance(series: StatementSeries, item: str, fiscal_year: int) -> Amount:
             provenance=current_amount.provenance,
             status="approximation",
             reason=(
-                f"sin ejercicio {fiscal_year - 1} en la serie: se usa el saldo final "
-                f"de '{item}' en vez de la media (t, t−1)"
+                f"sin ejercicio {fiscal_year - 1} en la serie: se usa el saldo "
+                f"final de {item_label(item)} en vez de la media entre los dos "
+                "ejercicios"
             ),
         )
     previous_amount = sourced(previous, item)
@@ -197,8 +204,9 @@ def avg_balance(series: StatementSeries, item: str, fiscal_year: int) -> Amount:
             provenance=current_amount.provenance,
             status="approximation",
             reason=(
-                f"falta '{item}' en {fiscal_year - 1}: se usa el saldo final "
-                f"en vez de la media (t, t−1)"
+                f"el filing de {fiscal_year - 1} no publica {item_label(item)}: "
+                "se usa el saldo final en vez de la media entre los dos "
+                "ejercicios"
             ),
         )
     assert current_amount.value is not None and previous_amount.value is not None

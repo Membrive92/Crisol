@@ -8,6 +8,7 @@ import { colors, fontSize, fontWeight, formatAmount, layout, radius, spacing } f
 
 import { AddLotForm } from '@/components/investment/add-lot-form';
 import { Card, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 
 export default function PortfolioPage() {
   const summary = usePortfolioSummary();
@@ -36,18 +37,17 @@ export default function PortfolioPage() {
           Cartera
         </h1>
         <div style={{ display: 'flex', gap: spacing.sm }}>
-          <button type="button" onClick={() => setShowForm((v) => !v)} style={secondaryBtn}>
+          <Button variant="secondary" onClick={() => setShowForm((v) => !v)}>
             {showForm ? 'Cerrar' : 'Añadir compra'}
-          </button>
+          </Button>
           {data?.pricing_enabled ? (
-            <button
-              type="button"
+            <Button
+              variant="secondary"
               onClick={() => void refresh.mutateAsync({})}
               disabled={refresh.isPending}
-              style={secondaryBtn}
             >
               {refresh.isPending ? 'Actualizando…' : 'Actualizar precios'}
-            </button>
+            </Button>
           ) : null}
         </div>
       </div>
@@ -221,13 +221,3 @@ function Kpi({ label, value }: { label: string; value: string }) {
 const th: React.CSSProperties = { padding: `${spacing.sm}px ${spacing.md}px`, fontWeight: 600, textAlign: 'right' };
 const td: React.CSSProperties = { padding: `${spacing.sm}px ${spacing.md}px` };
 const num: React.CSSProperties = { ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: colors.text };
-const secondaryBtn: React.CSSProperties = {
-  backgroundColor: colors.surfaceMuted,
-  color: colors.text,
-  border: `1px solid ${colors.border}`,
-  borderRadius: radius.md,
-  padding: `${spacing.sm}px ${spacing.md}px`,
-  fontSize: fontSize.sm,
-  fontWeight: 600,
-  cursor: 'pointer',
-};

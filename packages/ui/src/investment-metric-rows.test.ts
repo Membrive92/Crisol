@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { MetricDefinition, MetricResult, ThresholdSpec } from '@crisol/types';
 
 import { buildCatalogIndex } from './investment-metric-index';
+import { helpParagraphs } from './investment-matrix';
 import { metricGapLegend, metricRow } from './investment-metric-rows';
 import type { MetricIndex } from './investment-metric-index';
 
@@ -44,7 +45,11 @@ function indexWith(series: (MetricResult | undefined)[]): MetricIndex {
 }
 
 function options(series: (MetricResult | undefined)[]) {
-  return { index: indexWith(series), catalog: buildCatalogIndex(CATALOG), thresholdsUsed: undefined };
+  return {
+    index: indexWith(series),
+    catalog: buildCatalogIndex(CATALOG),
+    thresholdsUsed: undefined,
+  };
 }
 
 const NOT_COMPUTABLE: MetricResult = {
@@ -251,7 +256,10 @@ describe('el corte efectivo llega entero al cliente', () => {
 
   it('una empresa normal sigue viendo su corte', () => {
     const row = metricRow('S7', {
-      index: indexWith([{ ...S7, band: 'healthy' }, { ...S7, band: 'healthy' }]),
+      index: indexWith([
+        { ...S7, band: 'healthy' },
+        { ...S7, band: 'healthy' },
+      ]),
       catalog: buildCatalogIndex(CATALOG),
       thresholdsUsed: thresholdFor({}),
     });
@@ -260,11 +268,74 @@ describe('el corte efectivo llega entero al cliente', () => {
 
   it('unas cuentas IFRS declaran que los cortes son US-GAAP sin recalibrar', () => {
     const row = metricRow('S7', {
-      index: indexWith([{ ...S7, band: 'healthy' }, { ...S7, band: 'healthy' }]),
+      index: indexWith([
+        { ...S7, band: 'healthy' },
+        { ...S7, band: 'healthy' },
+      ]),
       catalog: buildCatalogIndex(CATALOG),
       thresholdsUsed: thresholdFor({ model_variant: 'uncalibrated' }),
     });
     expect(row.cells[0]?.mark).toContain('≠');
     expect(row.cells[0]?.title).toMatch(/se aplican sin recalibrar/);
+  });
+});
+
+/**
+ * PHASE-44.24.A.1 — la ficha de una fila viaja en TRES campos.
+ *
+ * El riesgo que cubren estos tests no es que el texto sea feo: es que un
+ * backend intermedio mande `help` y no los otros dos —la fase que los añade es
+ * posterior a la del glosario— y la pantalla pinte un rótulo «Por qué importa:»
+ * seguido de nada. La convención del repo desde PHASE-44.16 es que ausente y
+ * vacío no son lo mismo, así que la clave se OMITE y el tramo no existe.
+ */
+describe('helpParagraphs', () => {
+  it('devuelve los tres tramos en orden de lectura, y sólo el primero sin rótulo', () => {
+    const parts = helpParagraphs({ help: 'qué mide', helpWhy: 'por qué', helpReading: 'cómo' });
+    expect(parts.map((p) => p.text)).toEqual(['qué mide', 'por qué', 'cómo']);
+    expect(parts[0]?.label).toBeUndefined();
+    expect(parts[1]?.label).toBe('Por qué importa');
+    expect(parts[2]?.label).toBe('Cómo se lee');
+  });
+
+  it('con sólo el «qué mide» no deja ningún rótulo huérfano', () => {
+    // Es el caso de las 49 partidas canónicas: su glosario es de un campo.
+    expect(helpParagraphs({ help: 'una partida del balance' })).toEqual([
+      { text: 'una partida del balance' },
+    ]);
+  });
+
+  it('sin ficha no devuelve nada, en vez de un tramo vacío', () => {
+    expect(helpParagraphs({})).toEqual([]);
+  });
+});
+
+describe('metricRow transporta la ficha completa', () => {
+  const CON_FICHA: MetricDefinition[] = [
+    { ...(CATALOG[0] as MetricDefinition), help: 'qué mide', why: 'por qué', reading: 'cómo' },
+  ];
+  const SOLO_HELP: MetricDefinition[] = [{ ...(CATALOG[0] as MetricDefinition), help: 'qué mide' }];
+
+  it('lleva los tres campos cuando el catálogo los trae', () => {
+    const row = metricRow('S7', {
+      index: indexWith([NOT_COMPUTABLE, NOT_COMPUTABLE]),
+      catalog: buildCatalogIndex(CON_FICHA),
+      thresholdsUsed: undefined,
+    });
+    expect(helpParagraphs(row)).toHaveLength(3);
+  });
+
+  it('OMITE las claves que el backend no manda, no las pone vacías', () => {
+    const row = metricRow('S7', {
+      index: indexWith([NOT_COMPUTABLE, NOT_COMPUTABLE]),
+      catalog: buildCatalogIndex(SOLO_HELP),
+      thresholdsUsed: undefined,
+    });
+    // `in` y no `=== undefined`: con `exactOptionalPropertyTypes` la diferencia
+    // entre ausente y presente-con-undefined es real, y es la que hace que la
+    // pantalla no pinte un rótulo sin texto detrás.
+    expect('helpWhy' in row).toBe(false);
+    expect('helpReading' in row).toBe(false);
+    expect(helpParagraphs(row)).toHaveLength(1);
   });
 });

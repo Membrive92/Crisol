@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, type CSSProperties, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
 
 import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 
@@ -41,6 +41,22 @@ export interface TabsProps {
  */
 export function Tabs({ items, value, onChange, label, idPrefix }: TabsProps) {
   const listRef = useRef<HTMLDivElement>(null);
+  // Si la barra scrollea, se dice: a 390 px la séptima pestaña —Veredicto, la
+  // de aterrizaje— quedaba fuera sin ninguna señal de que existía.
+  const [moreRight, setMoreRight] = useState(false);
+  useEffect(() => {
+    const node = listRef.current;
+    if (!node) return;
+    const update = () =>
+      setMoreRight(node.scrollWidth - node.clientWidth - node.scrollLeft > 4);
+    update();
+    node.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    return () => {
+      node.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+    };
+  }, [items.length]);
 
   function focusTab(index: number) {
     const target = items[index];
@@ -71,6 +87,21 @@ export function Tabs({ items, value, onChange, label, idPrefix }: TabsProps) {
   }
 
   return (
+    <div style={{ position: 'relative' }}>
+      {moreRight ? (
+        <div
+          aria-hidden
+          style={{
+            position: 'absolute',
+            top: 0,
+            right: 0,
+            bottom: 1,
+            width: 48,
+            pointerEvents: 'none',
+            background: `linear-gradient(to right, transparent, ${colors.background})`,
+          }}
+        />
+      ) : null}
     <div
       ref={listRef}
       role="tablist"
@@ -117,6 +148,7 @@ export function Tabs({ items, value, onChange, label, idPrefix }: TabsProps) {
           </button>
         );
       })}
+    </div>
     </div>
   );
 }

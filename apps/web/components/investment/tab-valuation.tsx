@@ -1,5 +1,6 @@
 'use client';
 
+import { Button } from '@/components/ui/button';
 import { useState } from 'react';
 
 import { useValuation } from '@crisol/services';
@@ -30,6 +31,8 @@ import type { CatalogIndex } from '@crisol/ui';
 // exactamente los mismos múltiplos (PHASE-44.8).
 import { VALUATION_COMPANIONS as COMPANIONS, VALUATION_ORDER as ORDER } from '@crisol/ui';
 
+import { HelpButton, helpTextStyle } from './help-toggle';
+
 export interface TabValuationProps {
   securityId: string;
   security: Security | undefined;
@@ -53,10 +56,13 @@ export function TabValuation({ securityId, security, catalog }: TabValuationProp
       <Card>
         <CardTitle size="sm">Precio de referencia</CardTitle>
         <p style={note}>
-          Los múltiplos cruzan la cotización con el último ejercicio cerrado. Puedes
-          simular otro precio de entrada sin que afecte al análisis forense.
+          Los múltiplos cruzan la cotización con el último ejercicio cerrado. Puedes simular otro
+          precio de entrada sin que afecte al análisis forense.
         </p>
-        <form onSubmit={applyOverride} style={{ display: 'flex', gap: spacing.sm, marginTop: spacing.md, flexWrap: 'wrap' }}>
+        <form
+          onSubmit={applyOverride}
+          style={{ display: 'flex', gap: spacing.sm, marginTop: spacing.md, flexWrap: 'wrap' }}
+        >
           <input
             type="text"
             inputMode="decimal"
@@ -66,20 +72,21 @@ export function TabValuation({ securityId, security, catalog }: TabValuationProp
             aria-label="Precio a simular"
             style={input}
           />
-          <button type="submit" style={button}>
+          <Button type="submit" variant="ghost">
             Calcular
-          </button>
+          </Button>
           {override !== undefined ? (
-            <button
+            <Button
               type="button"
+              variant="ghost"
               onClick={() => {
                 setDraft('');
                 setOverride(undefined);
               }}
-              style={{ ...button, background: 'transparent', color: colors.textMuted }}
+              style={{ color: colors.textMuted }}
             >
               Volver al precio de mercado
-            </button>
+            </Button>
           ) : null}
         </form>
 
@@ -109,9 +116,9 @@ export function TabValuation({ securityId, security, catalog }: TabValuationProp
           <Card>
             <CardTitle size="sm">Por acción y rentabilidad</CardTitle>
             <p style={note}>
-              Estos dos se emiten aunque salgan negativos: ahí el signo informa en vez de
-              engañar. Un valor contable por acción negativo dice algo cierto sobre la
-              estructura de capital; un precio/valor contable negativo, no.
+              Estos dos se emiten aunque salgan negativos: ahí el signo informa en vez de engañar.
+              Un valor contable por acción negativo dice algo cierto sobre la estructura de capital;
+              un precio/valor contable negativo, no.
             </p>
             <MetricTable
               data={data}
@@ -126,7 +133,14 @@ export function TabValuation({ securityId, security, catalog }: TabValuationProp
       {data?.notes.length ? (
         <Card>
           <CardTitle size="sm">Advertencias</CardTitle>
-          <ul style={{ margin: 0, paddingLeft: spacing.lg, color: colors.textMuted, fontSize: fontSize.sm }}>
+          <ul
+            style={{
+              margin: 0,
+              paddingLeft: spacing.lg,
+              color: colors.textMuted,
+              fontSize: fontSize.sm,
+            }}
+          >
             {data.notes.map((n) => (
               <li key={n} style={{ marginBottom: spacing.xs }}>
                 {n}
@@ -138,28 +152,35 @@ export function TabValuation({ securityId, security, catalog }: TabValuationProp
 
       <Card>
         <CardTitle size="sm">Qué NO dice esta pestaña</CardTitle>
-        <ul style={{ margin: 0, paddingLeft: spacing.lg, color: colors.textMuted, fontSize: fontSize.sm }}>
+        <ul
+          style={{
+            margin: 0,
+            paddingLeft: spacing.lg,
+            color: colors.textMuted,
+            fontSize: fontSize.sm,
+          }}
+        >
           <li style={{ marginBottom: spacing.xs }}>
-            <strong>No hay semáforos.</strong> Un PER de 25× es caro en una eléctrica y
-            barato en software. Sin comparables de sector —y no hay fuente gratuita— una
-            banda sería una opinión disfrazada de dato.
+            <strong>No hay semáforos.</strong> Un PER de 25× es caro en una eléctrica y barato en
+            software. Sin comparables de sector —y no hay fuente gratuita— una banda sería una
+            opinión disfrazada de dato.
           </li>
           <li style={{ marginBottom: spacing.xs }}>
-            <strong>No entra en el veredicto.</strong> El dictamen forense es book-based
-            para poder reejecutarse dando lo mismo. Estos números se mueven con el
-            precio, así que se calculan al vuelo y no se guardan.
+            <strong>No entra en el veredicto.</strong> El dictamen forense es book-based para poder
+            reejecutarse dando lo mismo. Estos números se mueven con el precio, así que se calculan
+            al vuelo y no se guardan.
           </li>
           <li>
-            <strong>Sin descuento de dividendos.</strong> El modelo de Gordon necesita
-            beta y prima de riesgo, y no hay fuente verificada de ninguna de las dos.
+            <strong>Sin descuento de dividendos.</strong> El modelo de Gordon necesita beta y prima
+            de riesgo, y no hay fuente verificada de ninguna de las dos.
           </li>
         </ul>
       </Card>
 
       {security?.is_financial ? (
         <InlineNotice>
-          En una financiera, «ventas» es margen por intereses y comisiones: el
-          precio/ventas no es comparable con el de una empresa industrial.
+          En una financiera, «ventas» es margen por intereses y comisiones: el precio/ventas no es
+          comparable con el de una empresa industrial.
         </InlineNotice>
       ) : null}
     </div>
@@ -240,7 +261,9 @@ function PriceSummary({ data }: { data: Valuation }) {
   }
 
   return (
-    <div style={{ marginTop: spacing.md, display: 'flex', flexDirection: 'column', gap: spacing.xs }}>
+    <div
+      style={{ marginTop: spacing.md, display: 'flex', flexDirection: 'column', gap: spacing.xs }}
+    >
       {data.price_is_override ? (
         <Badge tone={colors.warning}>Precio introducido a mano, no de mercado</Badge>
       ) : null}
@@ -254,11 +277,25 @@ function PriceSummary({ data }: { data: Valuation }) {
             : 'Las cuentas tienen más de nueve meses'}
         </Badge>
       ) : null}
-      <dl style={{ margin: `${spacing.sm}px 0 0`, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: `${spacing.xs}px ${spacing.md}px` }}>
+      <dl
+        style={{
+          margin: `${spacing.sm}px 0 0`,
+          display: 'grid',
+          gridTemplateColumns: 'auto 1fr',
+          gap: `${spacing.xs}px ${spacing.md}px`,
+        }}
+      >
         {rows.map(([label, value]) => (
           <div key={label} style={{ display: 'contents' }}>
             <dt style={{ color: colors.textMuted, fontSize: fontSize.sm }}>{label}</dt>
-            <dd style={{ margin: 0, color: colors.text, fontSize: fontSize.sm, fontVariantNumeric: 'tabular-nums' }}>
+            <dd
+              style={{
+                margin: 0,
+                color: colors.text,
+                fontSize: fontSize.sm,
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
               {value}
             </dd>
           </div>
@@ -280,8 +317,19 @@ function MetricTable({
   currency: string | null;
 }) {
   const byKey = new Map(data.metrics.map((m) => [m.key, m]));
+  // PHASE-44.23 — la «i» de cada múltiplo. Esta tabla no es la matriz (un
+  // múltiplo no tiene serie: se calcula contra la cotización de hoy), así que
+  // se cablea aparte con el mismo afordance.
+  const [openHelp, setOpenHelp] = useState<string | null>(null);
   return (
-    <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: spacing.md, fontSize: fontSize.sm }}>
+    <table
+      style={{
+        width: '100%',
+        borderCollapse: 'collapse',
+        marginTop: spacing.md,
+        fontSize: fontSize.sm,
+      }}
+    >
       <tbody>
         {keys.map((key) => {
           const metric = byKey.get(key);
@@ -291,7 +339,17 @@ function MetricTable({
           return (
             <tr key={key} style={{ borderTop: `1px solid ${colors.border}` }}>
               <td style={{ padding: `${spacing.sm}px 0`, color: colors.text }}>
-                {definition?.label ?? key}
+                <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4 }}>
+                  <span>{definition?.label ?? key}</span>
+                  {definition?.help ? (
+                    <HelpButton
+                      label={definition.label}
+                      help={definition.help}
+                      open={openHelp === key}
+                      onToggle={() => setOpenHelp((current) => (current === key ? null : key))}
+                    />
+                  ) : null}
+                </span>
                 {definition?.note ? (
                   <div style={{ color: colors.textSubtle, fontSize: fontSize.xs, marginTop: 2 }}>
                     {definition.note}
@@ -321,11 +379,29 @@ function MetricTable({
           );
         })}
         {keys.map((key) => {
+          const definition = catalog.definition(key);
+          if (openHelp !== key || !definition?.help) return null;
+          return (
+            <tr key={`${key}-help`}>
+              <td colSpan={2} style={helpTextStyle}>
+                {definition.help}
+              </td>
+            </tr>
+          );
+        })}
+        {keys.map((key) => {
           const metric = byKey.get(key);
           if (!metric?.reason) return null;
           return (
             <tr key={`${key}-reason`}>
-              <td colSpan={2} style={{ padding: `0 0 ${spacing.sm}px`, color: colors.textMuted, fontSize: fontSize.xs }}>
+              <td
+                colSpan={2}
+                style={{
+                  padding: `0 0 ${spacing.sm}px`,
+                  color: colors.textMuted,
+                  fontSize: fontSize.xs,
+                }}
+              >
                 {metric.reason}
               </td>
             </tr>
@@ -381,14 +457,4 @@ const input: React.CSSProperties = {
   background: colors.surface,
   color: colors.text,
   fontSize: fontSize.sm,
-};
-
-const button: React.CSSProperties = {
-  padding: `${spacing.xs}px ${spacing.md}px`,
-  borderRadius: radius.sm,
-  border: `1px solid ${colors.border}`,
-  background: colors.surface,
-  color: colors.text,
-  fontSize: fontSize.sm,
-  cursor: 'pointer',
 };

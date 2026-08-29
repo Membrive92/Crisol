@@ -53,7 +53,7 @@ from app.modules.investment.analysis.engine.flag_rules import (
     FIN_WORKING_CAPITAL_REASON,
     NO_INVENTORY_REASON,
 )
-from app.modules.investment.analysis.engine.types import ThresholdSpec
+from app.modules.investment.analysis.engine.types import ThresholdOrigin, ThresholdSpec
 from app.modules.investment.enums import AccountingStd, SectorInternal, ThresholdDirection
 
 UNCALIBRATED = "uncalibrated"
@@ -462,6 +462,41 @@ def _resolvable_specs(profile: SectorProfile) -> dict[str, ThresholdSpec]:
     return specs
 
 
+def threshold_origin_for(
+    key: str, sector: SectorInternal, *, is_financial: bool = False
+) -> ThresholdOrigin:
+    """Qué perfil aporta el corte de una métrica (PHASE-44.24.M).
+
+    El perfil financiero se fusiona ENCIMA del sectorial, así que se comprueba
+    primero: para un holding clasificado en INDUSTRIALS pero marcado como
+    entidad financiera, S3 sale de la banca y no de la industria, y decir
+    «sectorial» ahí sería señalar un perfil que no ha intervenido.
+
+    Sólo mira quién APORTA algo (un corte, una exención o una variante). Una
+    métrica que el perfil no toca se queda con la vara genérica, que es lo que
+    `generic` dice.
+    """
+    financial = SECTOR_PROFILES[SectorInternal.FINANCIALS]
+    if (is_financial or sector is SectorInternal.FINANCIALS) and _contributes(financial, key):
+        return "financial"
+    own = SECTOR_PROFILES.get(sector, SectorProfile())
+    return "sector" if _contributes(own, key) else "generic"
+
+
+def _contributes(profile: SectorProfile, key: str) -> bool:
+    """Si un perfil aporta algo a esta métrica, directamente o por derivación.
+
+    Las derivadas cuentan: `RELATIVE_CUTS` construye el corte de una métrica a
+    partir del de otra del mismo perfil, así que su procedencia es la de su
+    fuente — decir `generic` de un corte calculado desde un delta sectorial
+    sería falso.
+    """
+    if key in profile.overrides or key in profile.not_applicable or key in profile.variants:
+        return True
+    source = RELATIVE_CUTS.get(key)
+    return source is not None and source in profile.overrides
+
+
 def resolve_thresholds(
     sector: SectorInternal,
     accounting_std: AccountingStd,
@@ -495,5 +530,9 @@ def resolve_thresholds(
             spec = replace(spec, model_variant=variant)
         if accounting_std is not AccountingStd.GAAP and spec.model_variant is None:
             spec = replace(spec, model_variant=UNCALIBRATED)
+        # PHASE-44.24.M — la procedencia se fija AQUÍ, donde se sabe qué perfil
+        # ha intervenido. Reconstruirla luego comparando cortes es lo que no
+        # puede distinguir una recalibración genérica de un delta sectorial.
+        spec = replace(spec, origin=threshold_origin_for(key, sector, is_financial=is_financial))
         resolved[key] = spec
     return resolved

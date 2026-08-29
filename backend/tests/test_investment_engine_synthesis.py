@@ -31,6 +31,7 @@ from app.modules.investment.analysis.engine import (
     stress as stress_layer,
 )
 from app.modules.investment.analysis.engine.stress import StressParams
+from app.modules.investment.analysis.engine.synthesis import NOT_AUDITABLE
 from app.modules.investment.analysis.engine.types import (
     FlagEvaluation,
     SecuritySnapshot,
@@ -550,7 +551,11 @@ def test_una_regla_que_no_se_pudo_ejecutar_no_dice_que_no_se_ha_encendido() -> N
     assert c3.outcome == "unchecked"
     assert c3.reason is not None
     assert "no se ha encendido" not in c3.reason
-    assert "cogs" in c3.reason, "el motivo tiene que nombrar la partida que falta"
+    # La partida se nombra con su etiqueta HUMANA (PHASE-44.24.E): este motivo
+    # se imprime en el informe, y «cogs» no significa nada fuera del motor. Lo
+    # que el test ata es que la NOMBRE, no cómo se llame la clave.
+    assert "Coste de ventas" in c3.reason, "el motivo tiene que nombrar la partida que falta"
+    assert "cogs" not in c3.reason
 
 
 def test_una_regla_comprobada_y_limpia_se_distingue_de_una_que_no_se_pudo() -> None:
@@ -622,7 +627,9 @@ def test_el_motivo_distingue_el_cero_imputado_del_dato_que_falta() -> None:
     siguiente = _healthy_year(2024, revenue=1300, dividends=78)
 
     falta = evolution_layer.growth_of("cogs", siguiente, replace(base, cogs=None))
-    assert falta.reason is not None and "falta la partida 'cogs'" in falta.reason
+    assert falta.reason is not None
+    assert "no publica Coste de ventas" in falta.reason
+    assert "cogs" not in falta.reason
 
     cero_real = evolution_layer.growth_of("inventory", siguiente, replace(base, inventory=dec(0)))
     assert cero_real.reason is not None and "valía cero" in cero_real.reason
@@ -835,3 +842,55 @@ def test_la_sintesis_recopila_las_flags_de_todas_las_capas() -> None:
     keys = {f.key for f in result.flags}
     # La empresa dudosa dispara al menos el dividendo financiado con deuda (B4).
     assert "B4_dividend_funded_externally" in keys
+
+
+# ── PHASE-44.24.M — el stress de una financiera no puntúa ─────────────
+
+
+def test_en_una_financiera_el_escenario_de_stress_no_puntua_en_rojo() -> None:
+    """La contradicción que el motor tenía consigo mismo.
+
+    `NOT_AUDITABLE` declara «¿aguanta un golpe?» permanentemente no auditable en
+    banca —la resiliencia de una entidad financiera es capital regulatorio y no
+    está en un 10-K— y aun así se seguía calculando el escenario y podía salir
+    ROJO dentro de esa misma pregunta. En pantalla: un chip gris de «no
+    auditada» con una señal roja debajo, y en cuanto la narrativa proponga qué
+    vigilar, ese rojo sería el titular.
+    """
+    financiera = replace(
+        _stress_series(),
+        security=SecuritySnapshot(
+            ticker="BANK",
+            sector=SectorInternal.FINANCIALS,
+            accounting_std=AccountingStd.GAAP,
+            is_financial=True,
+        ),
+    )
+    resultado = _synthesize(financiera)
+    resiliencia = resultado.question("resilience")
+    assert resiliencia is not None
+
+    stress_signal = next(s for s in resiliencia.signals if s.key == "stress")
+    assert stress_signal.outcome == "unchecked", "no se ha comprobado, no es que esté limpia"
+    assert stress_signal.band is None, "una señal de una pregunta no auditable no puede colorear"
+    assert not stress_signal.counted
+    assert stress_signal.reason and "capital regulatorio" in stress_signal.reason
+
+    # Y la pregunta sigue siendo la que era: no auditada, no verde por silencio.
+    assert resiliencia.audited is False
+
+
+def test_en_una_no_financiera_el_escenario_de_stress_sigue_puntuando() -> None:
+    """El otro lado del umbral: la guarda no puede apagar el escenario de todos.
+
+    Sin este caso, sustituir la señal por un `unchecked` incondicional pasaría
+    el test de arriba y nadie se enteraría de que el motor ha dejado de mirar
+    los escenarios en TODAS las empresas.
+    """
+    resultado = _synthesize(_stress_series())
+    resiliencia = resultado.question("resilience")
+    assert resiliencia is not None
+    stress_signal = next(s for s in resiliencia.signals if s.key == "stress")
+    assert stress_signal.outcome != "unchecked" or stress_signal.reason != (
+        NOT_AUDITABLE["financials"]["resilience"]
+    ), "la guarda de financieras se está aplicando a una empresa que no lo es"

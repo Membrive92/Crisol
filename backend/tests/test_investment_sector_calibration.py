@@ -331,3 +331,59 @@ def test_golden_la_regla_de_inventario_no_se_comprueba_donde_no_hay_inventario()
     c3 = next(s for q in resultado.questions for s in q.signals if s.key == "C3_inventory_vs_cogs")
     assert c3.outcome == "informational"
     assert c3.reason is not None and "sin inventario material" in c3.reason
+
+
+# ── PHASE-44.24.M — la procedencia del corte viaja en el run ──────────
+
+
+def test_la_procedencia_dice_que_perfil_puso_cada_corte() -> None:
+    """Dos casos: un sector con delta y una métrica que el perfil no toca.
+
+    Sin este campo la pantalla tenía que INFERIR la procedencia comparando los
+    cortes guardados con el catálogo de hoy, y esa inferencia no puede
+    distinguir un delta sectorial de una recalibración genérica posterior al
+    run: cualquier empresa analizada antes de recalibrar acabaría diciendo
+    «banda sectorial» de una vara que era la genérica de entonces.
+    """
+    utility = resolve_thresholds(SectorInternal.UTILITIES, AccountingStd.GAAP)
+    assert utility["S4"].origin == "sector", "la eléctrica lleva el delta de su sector"
+
+    # Sin delta para esa métrica, la vara es la del catálogo y lo dice.
+    assert utility["L3"].origin == "generic"
+
+
+def test_un_holding_financiero_fuera_del_sector_declara_procedencia_financiera() -> None:
+    """El caso que la inferencia por sector no puede ver.
+
+    `profile_for` fusiona el perfil financiero ENCIMA del sectorial cuando el
+    VALOR es una entidad financiera, aunque esté clasificado en otro sitio. Una
+    etiqueta compuesta con `security.sector` diría «industriales» de un corte
+    que puso la banca — y por el prefijo SIC 67 ése es el estado normal de las
+    socimis del catálogo, no un caso de laboratorio.
+    """
+    holding = resolve_thresholds(SectorInternal.INDUSTRIALS, AccountingStd.GAAP, is_financial=True)
+    financial_keys = [key for key, spec in holding.items() if spec.origin == "financial"]
+    assert financial_keys, "ningún corte se atribuye al perfil financiero"
+    # S3 es el proxy de capital que el perfil financiero re-bandea (PHASE-44.21).
+    assert holding["S3"].origin == "financial"
+
+
+def test_una_metrica_derivada_hereda_la_procedencia_de_su_fuente() -> None:
+    """`RELATIVE_CUTS` construye el corte de L2 desde el de L1 del mismo perfil.
+
+    Decir `generic` de un corte calculado a partir de un delta sectorial sería
+    falso: el número no es el del catálogo.
+    """
+    retail = resolve_thresholds(SectorInternal.CONSUMER_STAPLES, AccountingStd.GAAP)
+    # Sin este `assert` previo el test pasaría en vacío el día que el perfil
+    # dejara de mover L1: la afirmación que importa quedaría sin ejecutar y el
+    # verde no significaría nada.
+    assert (
+        retail["L1"].origin == "sector"
+    ), "el perfil ya no mueve L1: el caso derivado no se prueba"
+    assert retail["L2"].origin == "sector", "L2 se deriva de L1 y comparte su procedencia"
+
+    # Y el otro par derivado, en un sector que sí mueve su fuente.
+    tech = resolve_thresholds(SectorInternal.TECHNOLOGY, AccountingStd.GAAP)
+    assert tech["S2"].origin == "sector"
+    assert tech["S6"].origin == "sector", "S6 se deriva de S2"

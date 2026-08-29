@@ -1,0 +1,172 @@
+{
+  "_doc": [
+    "Casos de evidencia de una pregunta, leídos por vitest Y por pytest.",
+    "La regla vive dos veces —packages/ui/investment-run-version.ts y",
+    "backend/.../presentation/evidence.py— porque las frases se componen en el",
+    "servidor y el color en la pantalla. Este fichero es lo que impide que",
+    "cuenten historias distintas sobre la misma empresa.",
+    "",
+    "Un caso 'not-recorded' OMITE las claves; NUNCA las pone a null. Los runs",
+    "persistidos no llevan null ahí: los viejos no tienen la clave y los nuevos",
+    "serializan [] o 0. Con null, Python (que pregunta con `in`) y TypeScript",
+    "(que compara con undefined) toman ramas distintas, y el fixture que debía",
+    "atarlos no ataría nada."
+  ],
+  "cases": [
+    {
+      "name": "motor < 1.1.0: no registraba el desglose",
+      "question": { "key": "accounting", "verdict": "stressed", "red_signals": ["M-Score"] },
+      "expected": "not-recorded",
+      "outcomes_recorded": false
+    },
+    {
+      "name": "motor < 1.1.0 sin nada en rojo tampoco puede presumir de verde",
+      "question": { "key": "cash", "verdict": "healthy", "red_signals": [], "amber_signals": [] },
+      "expected": "not-recorded",
+      "outcomes_recorded": false
+    },
+    {
+      "name": "1.1.0-1.4.0: hay desglose pero no desenlaces por señal",
+      "question": {
+        "key": "cash",
+        "verdict": "healthy",
+        "signals": [{ "key": "Q1", "counted": true, "band": "healthy" }],
+        "evaluated_count": 1,
+        "unavailable_count": 0
+      },
+      "expected": "evaluated",
+      "outcomes_recorded": false
+    },
+    {
+      "name": "1.5.0+: desenlaces registrados",
+      "question": {
+        "key": "cash",
+        "verdict": "healthy",
+        "signals": [{ "key": "Q1", "counted": true, "band": "healthy" }],
+        "evaluated_count": 1,
+        "unavailable_count": 0,
+        "clear_count": 0,
+        "unchecked_count": 0
+      },
+      "expected": "evaluated",
+      "outcomes_recorded": true
+    },
+    {
+      "name": "verde por ausencia de prueba: candidatas sin ninguna evaluada",
+      "question": {
+        "key": "accounting",
+        "verdict": "healthy",
+        "signals": [{ "key": "m_score", "counted": false, "band": null }],
+        "evaluated_count": 0,
+        "unavailable_count": 1,
+        "clear_count": 0,
+        "unchecked_count": 1
+      },
+      "expected": "no-evidence",
+      "outcomes_recorded": true
+    },
+    {
+      "name": "sin ninguna señal candidata NO es 'sin evidencia'",
+      "question": {
+        "key": "dividend",
+        "verdict": "healthy",
+        "signals": [],
+        "evaluated_count": 0,
+        "unavailable_count": 0,
+        "clear_count": 0,
+        "unchecked_count": 0
+      },
+      "expected": "evaluated",
+      "outcomes_recorded": true
+    },
+    {
+      "name": "1.6.0+: falta un portante, así que no está auditada",
+      "question": {
+        "key": "resilience",
+        "verdict": "healthy",
+        "signals": [{ "key": "z_score", "counted": false, "band": null }],
+        "evaluated_count": 3,
+        "unavailable_count": 1,
+        "clear_count": 0,
+        "unchecked_count": 1,
+        "audited": false,
+        "unaudited_reasons": ["Z''-Score: no se pudo calcular"]
+      },
+      "expected": "not-audited",
+      "outcomes_recorded": true
+    },
+    {
+      "name": "no auditada MANDA sobre sin evidencia",
+      "question": {
+        "key": "resilience",
+        "verdict": "healthy",
+        "signals": [{ "key": "z_score", "counted": false, "band": null }],
+        "evaluated_count": 0,
+        "unavailable_count": 1,
+        "clear_count": 0,
+        "unchecked_count": 1,
+        "audited": false,
+        "unaudited_reasons": ["Z''-Score: no se pudo calcular"]
+      },
+      "expected": "not-audited",
+      "outcomes_recorded": true
+    },
+    {
+      "name": "auditada explícitamente: `audited` true no degrada nada",
+      "question": {
+        "key": "accounting",
+        "verdict": "caution",
+        "signals": [{ "key": "accruals", "counted": true, "band": "caution" }],
+        "evaluated_count": 2,
+        "unavailable_count": 0,
+        "clear_count": 1,
+        "unchecked_count": 0,
+        "audited": true
+      },
+      "expected": "evaluated",
+      "outcomes_recorded": true
+    },
+    {
+      "name": "`audited` AUSENTE no es `false`: un run de 1.5.0 no lo registraba",
+      "question": {
+        "key": "accounting",
+        "verdict": "healthy",
+        "signals": [{ "key": "m_score", "counted": true, "band": "healthy" }],
+        "evaluated_count": 2,
+        "unavailable_count": 0,
+        "clear_count": 1,
+        "unchecked_count": 0
+      },
+      "expected": "evaluated",
+      "outcomes_recorded": true
+    },
+    {
+      "name": "sólo `clear_count` no basta: el desglose son los DOS contadores",
+      "question": {
+        "key": "cash",
+        "verdict": "healthy",
+        "signals": [{ "key": "Q1", "counted": true, "band": "healthy" }],
+        "evaluated_count": 1,
+        "unavailable_count": 0,
+        "clear_count": 1
+      },
+      "expected": "evaluated",
+      "outcomes_recorded": false
+    },
+    {
+      "name": "un run rojo y auditado se lee tal cual",
+      "question": {
+        "key": "dividend",
+        "verdict": "stressed",
+        "signals": [{ "key": "D2", "counted": true, "band": "stressed" }],
+        "evaluated_count": 4,
+        "unavailable_count": 2,
+        "clear_count": 2,
+        "unchecked_count": 0,
+        "audited": true
+      },
+      "expected": "evaluated",
+      "outcomes_recorded": true
+    }
+  ]
+}

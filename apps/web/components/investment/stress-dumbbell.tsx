@@ -43,12 +43,18 @@ export function StressDumbbell({ scenarios }: { scenarios: StressScenario[] }) {
 
   return (
     <div style={{ overflowX: 'auto' }}>
+      {/* Ancho FIJO y scroll en el contenedor, como la heatmap. La primera
+          corrección escalaba el dibujo con `viewBox`, y con él escalaban los
+          rótulos: a 390 px quedaban a 5-6 px, ilegibles. Antes de eso,
+          `maxWidth:'100%'` sin `viewBox` encogía la caja pero no el dibujo y
+          recortaba la línea del 1,0. Un dibujo de 560 px que se desplaza es
+          la única versión que se lee en todas las pantallas. */}
       <svg
         width={width}
         height={height}
         role="img"
         aria-label="Cobertura del dividendo antes y después de cada escenario"
-        style={{ maxWidth: '100%' }}
+        style={{ display: 'block', minWidth: width }}
       >
         {/* La línea del 1,0: por debajo, el escenario deja de cubrir. */}
         <line

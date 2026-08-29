@@ -1,20 +1,18 @@
 // @types/jest expone los globals (describe/it/expect) — sin import.
-import { render } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
+
+import { fireEvent, render } from '@testing-library/react-native';
 
 import {
   buildCatalogIndex,
   buildMetricIndex,
+  colors,
   DUPONT_SECTIONS,
   RATIO_FAMILIES,
 } from '@crisol/ui';
-import type {
-  AnalysisRun,
-  MetricDefinition,
-  MetricResult,
-  QuestionSignal,
-} from '@crisol/types';
+import type { AnalysisRun, MetricDefinition, MetricResult, QuestionSignal } from '@crisol/types';
 
-import { TabRatios, TabVerdict, type TabContext } from './report-tabs';
+import { TabEvolution, TabRatios, TabVerdict, type TabContext } from './report-tabs';
 
 /**
  * Regresión de la brecha que cerró PHASE-44.8.
@@ -74,7 +72,10 @@ function makeRun(signals: QuestionSignal[]): AnalysisRun {
     dividend_analysis: { metrics: [], flags: [] },
     dividend_verdict: 'sustainable',
     scores_detail: {
-      base_ratios: { metrics: [metric('R4', 2024, '0.42'), metric('R4', 2025, '0.44')], dupont: [] },
+      base_ratios: {
+        metrics: [metric('R4', 2024, '0.42'), metric('R4', 2025, '0.44')],
+        dupont: [],
+      },
       forensic: { metrics: [], breakdowns: [] },
     },
     verdict: {
@@ -209,5 +210,132 @@ describe('TabRatios (móvil)', () => {
     for (const section of DUPONT_SECTIONS) {
       expect(getByText(section.label)).toBeTruthy();
     }
+  });
+});
+
+/**
+ * Las señales del veredicto NAVEGAN (PHASE-44.24, auditoría UX).
+ *
+ * En móvil tocar «Deuda neta / EBITDA» no hacía nada; web llevaba a Ratios con
+ * la fila resaltada. Mismo registro de destinos (`locateMetric`): una métrica
+ * con fila navega, una bandera no — y no se pinta como algo que se pueda tocar.
+ */
+describe('TabVerdict (móvil): las señales navegan', () => {
+  const metrica: QuestionSignal = {
+    key: 'S2',
+    label: 'Cobertura de intereses',
+    kind: 'metric',
+    value: '3.2',
+    band: 'caution',
+    counted: true,
+    reason: null,
+  } as QuestionSignal;
+  const bandera: QuestionSignal = {
+    key: 'B4_dividend_funded_externally',
+    label: 'El dividendo se financia con deuda',
+    kind: 'flag',
+    value: null,
+    band: 'stressed',
+    counted: true,
+    reason: null,
+  } as QuestionSignal;
+
+  it('tocar una métrica lleva a su pestaña con la fila resaltada', () => {
+    const goTo = jest.fn();
+    const { getByText } = render(<TabVerdict ctx={{ ...makeCtx(makeRun([metrica])), goTo }} />);
+    fireEvent.press(getByText(/Cobertura de intereses/));
+    expect(goTo).toHaveBeenCalledWith('ratios', 'S2');
+  });
+
+  /**
+   * El `Pressable` que envuelve la fila, subiendo desde el texto.
+   *
+   * Lo que se comprueba es que esté DESHABILITADO, no que `goTo` no se llame:
+   * con una bandera `goTo` no se llama de todas formas (no tiene destino), así
+   * que una fila tocable-que-no-hace-nada —el defecto exacto que se arregla—
+   * pasaría un test que sólo mirara la llamada.
+   */
+  // El tipo del nodo que devuelve `getByText`, sin importar
+  // `react-test-renderer` (no tiene declaraciones instaladas).
+  type Instance = ReturnType<ReturnType<typeof render>['getByText']>;
+
+  function fila(node: Instance): Instance | null {
+    let actual: Instance | null = node;
+    for (let i = 0; i < 6 && actual; i += 1) {
+      if (actual.props.accessibilityState !== undefined || actual.props.onPress !== undefined) {
+        return actual;
+      }
+      actual = actual.parent;
+    }
+    return null;
+  }
+
+  it('tocar una bandera no hace nada, y la fila está DESHABILITADA', () => {
+    const goTo = jest.fn();
+    const { getByText, queryByRole } = render(
+      <TabVerdict ctx={{ ...makeCtx(makeRun([bandera])), goTo }} />,
+    );
+    const texto = getByText(/El dividendo se financia con deuda/);
+    fireEvent.press(texto);
+    expect(goTo).not.toHaveBeenCalled();
+    expect(queryByRole('button', { name: /El dividendo se financia/ })).toBeNull();
+    const presionable = fila(texto);
+    expect(presionable).not.toBeNull();
+    expect((presionable!.props.accessibilityState as { disabled?: boolean }).disabled).toBe(true);
+  });
+
+  it('una métrica con destino está HABILITADA', () => {
+    const { getByText } = render(
+      <TabVerdict ctx={{ ...makeCtx(makeRun([metrica])), goTo: jest.fn() }} />,
+    );
+    const presionable = fila(getByText(/Cobertura de intereses/));
+    expect(presionable).not.toBeNull();
+    expect(
+      (presionable!.props.accessibilityState as { disabled?: boolean } | undefined)?.disabled,
+    ).not.toBe(true);
+  });
+
+  it('sin `goTo` (una pantalla que no navega) nada es tocable', () => {
+    const { queryByRole } = render(<TabVerdict ctx={makeCtx(makeRun([metrica]))} />);
+    expect(queryByRole('button', { name: /Cobertura de intereses/ })).toBeNull();
+  });
+});
+
+/**
+ * Evolución con un run de motor anterior (móvil, paridad con web).
+ *
+ * `horizontal` AUSENTE es «ese motor no la producía», no «no hay magnitudes».
+ * Se escribe OMITIENDO la clave: con `[]` el test pasaría por otra razón.
+ */
+describe('TabEvolution (móvil) con un run viejo', () => {
+  it('dice que la sección no existe en ese motor', () => {
+    const base = makeRun([]);
+    const run = {
+      ...base,
+      engine_version: '1.0.0',
+      evolution: { metrics: [], vertical: [], flags: [] },
+    } as unknown as AnalysisRun;
+    const { getByText, queryByText } = render(<TabEvolution ctx={{ ...makeCtx(base), run }} />);
+    expect(getByText(/no tiene serie de evolución/)).toBeTruthy();
+    expect(getByText(/motor 1\.0\.0/)).toBeTruthy();
+    expect(queryByText('Magnitud')).toBeNull();
+  });
+});
+
+/**
+ * El CABLEADO de `highlightKey` hasta una pestaña real (revisión adversarial).
+ *
+ * `YearMatrix` aislada ya se probaba; lo que nadie miraba es que la pestaña
+ * pase el valor del contexto a sus matrices. Diez llamadas, ninguna con test.
+ */
+describe('las pestañas móviles resaltan la fila del contexto', () => {
+  it('Ratios marca la fila de `highlightKey`', () => {
+    const ctx = { ...makeCtx(makeRun([])), highlightKey: 'L1' };
+    const label = ctx.catalog.definition('L1')?.label ?? 'L1';
+    const { getAllByText } = render(<TabRatios ctx={ctx} />);
+    const marcadas = getAllByText(label).filter(
+      (node) => StyleSheet.flatten(node.props.style).color === colors.primary,
+    );
+    expect(marcadas.length).toBeGreaterThan(0);
   });
 });

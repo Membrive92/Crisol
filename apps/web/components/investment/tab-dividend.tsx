@@ -1,6 +1,6 @@
 'use client';
 
-import { colors, fontSize, fontWeight, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, REPORT_LEGEND, spacing } from '@crisol/ui';
 import { DIVIDEND_BLOCKS as BLOCKS } from '@crisol/ui';
 import type { AnalysisRun, Security } from '@crisol/types';
 
@@ -22,9 +22,11 @@ export interface TabDividendProps {
   index: MetricIndex;
   catalog: CatalogIndex;
   security: Security | undefined;
+  /** Fila a la que se ha llegado desde el veredicto (PHASE-44.24.C.4). */
+  highlightKey?: string | undefined;
 }
 
-export function TabDividend({ run, index, catalog, security }: TabDividendProps) {
+export function TabDividend({ run, index, catalog, security, highlightKey }: TabDividendProps) {
   const dividend = run.dividend_analysis;
   const years = run.years_covered;
   const verdictYear = years[years.length - 1];
@@ -65,6 +67,8 @@ export function TabDividend({ run, index, catalog, security }: TabDividendProps)
             <div style={{ marginTop: spacing.md, display: 'grid', gap: spacing.md }}>
               <InlineNotice>{quality.note}</InlineNotice>
               <YearMatrix
+                marksLegend={REPORT_LEGEND}
+                highlightKey={highlightKey}
                 years={years}
                 rows={[...quality.metrics].map((key) => metricRow(key, options))}
                 verdictYear={verdictYear}
@@ -81,10 +85,10 @@ export function TabDividend({ run, index, catalog, security }: TabDividendProps)
     <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg }}>
       {isFinancial ? (
         <InlineNotice>
-          Esta empresa es una <strong>financiera</strong>. Las ratios que dividen por caja libre
-          (D2 a D5 y el margen de seguridad) salen sin calcular a propósito: en un banco esa caja
-          libre no significa lo que significa en una industrial. El payout sobre beneficio, la
-          calidad de la caja y la trayectoria del dividendo sí son válidos y se muestran.
+          Esta empresa es una <strong>financiera</strong>. Las ratios que dividen por caja libre (D2
+          a D5 y el margen de seguridad) salen sin calcular a propósito: en un banco esa caja libre
+          no significa lo que significa en una industrial. El payout sobre beneficio, la calidad de
+          la caja y la trayectoria del dividendo sí son válidos y se muestran.
         </InlineNotice>
       ) : null}
       {BLOCKS.map((block) => (
@@ -93,6 +97,8 @@ export function TabDividend({ run, index, catalog, security }: TabDividendProps)
           <div style={{ marginTop: spacing.md, display: 'grid', gap: spacing.md }}>
             <InlineNotice>{block.note}</InlineNotice>
             <YearMatrix
+              marksLegend={REPORT_LEGEND}
+              highlightKey={highlightKey}
               years={years}
               rows={[...block.metrics].map((key) => metricRow(key, options))}
               verdictYear={verdictYear}
@@ -118,6 +124,8 @@ export function TabDividend({ run, index, catalog, security }: TabDividendProps)
             />
           </div>
           <YearMatrix
+            marksLegend={REPORT_LEGEND}
+            highlightKey={highlightKey}
             years={years}
             rows={[dpsRow(run), metricRow('T2', options), metricRow('T3', options)]}
             firstColumnLabel="Concepto"
@@ -155,9 +163,7 @@ function Stat({ label, value, hint }: { label: string; value: string; hint: stri
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxWidth: 320 }}>
       <span style={{ color: colors.textMuted, fontSize: fontSize.xs }}>{label}</span>
-      <span
-        style={{ color: colors.text, fontSize: fontSize.lg, fontWeight: fontWeight.bold }}
-      >
+      <span style={{ color: colors.text, fontSize: fontSize.lg, fontWeight: fontWeight.bold }}>
         {value}
       </span>
       <span style={{ color: colors.textSubtle, fontSize: fontSize.xs, lineHeight: 1.5 }}>

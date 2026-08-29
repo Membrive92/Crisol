@@ -37,6 +37,9 @@ class CanonicalItemResponse(BaseModel):
     statement: StatementKind
     group: ItemGroup
     note: str
+    help: str = ""
+    """PHASE-44.23 — qué es la partida, si la publica la empresa o la deduce la
+    app, y su convención de signo. Ver `fundamentals/glossary.py`."""
 
 
 class CanonicalItemCatalogResponse(BaseModel):

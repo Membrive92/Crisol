@@ -2,6 +2,10 @@ import { fireEvent, render } from '@testing-library/react-native';
 
 import type { MatrixRow } from '@crisol/ui';
 
+import { StyleSheet } from 'react-native';
+
+import { colors } from '@crisol/ui';
+
 import { YearMatrix } from './year-matrix';
 
 /**
@@ -66,5 +70,84 @@ describe('YearMatrix (móvil)', () => {
 
     fireEvent.press(getByText(/2,0/));
     expect(queryByText(/Ratio corriente · 2024/)).toBeNull();
+  });
+
+  /*
+   * PHASE-44.23 — la definición de la FILA («qué es esta métrica»), que se abre
+   * tocando la etiqueta. Comparte panel con el motivo de la celda a propósito:
+   * en una pantalla de móvil no caben dos sitios donde mirar.
+   */
+  it('la definición de la fila se lee al tocar su etiqueta', () => {
+    const conAyuda: MatrixRow[] = [
+      { ...rows[0]!, help: 'Modelo de Beneish: indicios de maquillaje contable.' },
+    ];
+    const { getByText, queryByText } = render(<YearMatrix years={[2025, 2026]} rows={conAyuda} />);
+
+    expect(queryByText('Modelo de Beneish: indicios de maquillaje contable.')).toBeNull();
+    fireEvent.press(getByText('M-Score de Beneish ⓘ'));
+    expect(getByText('Modelo de Beneish: indicios de maquillaje contable.')).toBeTruthy();
+  });
+
+  it('volver a tocar la etiqueta cierra la definición', () => {
+    // El mismo gesto la abre y la cierra: sin esto, el panel se queda abierto y
+    // hay que buscar otra fila que pulsar para quitarlo de en medio.
+    const conAyuda: MatrixRow[] = [{ ...rows[0]!, help: 'Modelo de Beneish.' }];
+    const { getByText, queryByText } = render(<YearMatrix years={[2025, 2026]} rows={conAyuda} />);
+
+    fireEvent.press(getByText('M-Score de Beneish ⓘ'));
+    expect(getByText('Modelo de Beneish.')).toBeTruthy();
+    fireEvent.press(getByText('M-Score de Beneish ⓘ'));
+    expect(queryByText('Modelo de Beneish.')).toBeNull();
+  });
+
+  it('una fila sin definición no ofrece la ⓘ ni es pulsable', () => {
+    // Un ⓘ que abre un panel vacío es peor que no tener ⓘ.
+    const { getByText, queryByText } = render(<YearMatrix years={[2025, 2026]} rows={rows} />);
+    expect(queryByText('M-Score de Beneish ⓘ')).toBeNull();
+    expect(getByText('M-Score de Beneish')).toBeTruthy();
+  });
+
+  it('abrir la definición cierra el motivo de una celda, y al revés', () => {
+    // Es el mismo panel: si los dos pudieran estar abiertos, el segundo pisaría
+    // al primero sin que se notara cuál se está leyendo.
+    const conAyuda: MatrixRow[] = [{ ...rows[0]!, help: 'Modelo de Beneish.' }];
+    const { getByText, queryByText, getAllByText } = render(
+      <YearMatrix years={[2025, 2026]} rows={conAyuda} />,
+    );
+
+    fireEvent.press(getAllByText(/—/)[0]!);
+    expect(getByText('no hay ejercicio anterior con el que comparar')).toBeTruthy();
+
+    fireEvent.press(getByText('M-Score de Beneish ⓘ'));
+    expect(getByText('Modelo de Beneish.')).toBeTruthy();
+    expect(queryByText('no hay ejercicio anterior con el que comparar')).toBeNull();
+  });
+});
+
+/**
+ * La fila a la que se llega desde una señal se ve (PHASE-44.24, auditoría UX).
+ *
+ * Se comprueba el estilo APLICADO al texto de la etiqueta, no la prop: un
+ * `highlightKey` que llega y no pinta nada es exactamente el defecto.
+ */
+describe('YearMatrix (móvil): la fila resaltada', () => {
+  const dos: MatrixRow[] = [
+    { key: 'L1', label: 'Ratio corriente', cells: [{ text: '1,4' }, { text: '1,5' }] },
+    { key: 'L2', label: 'Prueba ácida', cells: [{ text: '0,9' }, { text: '1,0' }] },
+  ];
+
+  it('marca sólo la fila de destino', () => {
+    const { getByText } = render(<YearMatrix years={[2024, 2025]} rows={dos} highlightKey="L2" />);
+    const marcada = StyleSheet.flatten(getByText('Prueba ácida').props.style);
+    const otra = StyleSheet.flatten(getByText('Ratio corriente').props.style);
+    expect(marcada.color).toBe(colors.primary);
+    expect(otra.color).not.toBe(colors.primary);
+  });
+
+  it('sin destino no marca ninguna', () => {
+    const { getByText } = render(<YearMatrix years={[2024, 2025]} rows={dos} />);
+    expect(StyleSheet.flatten(getByText('Prueba ácida').props.style).color).not.toBe(
+      colors.primary,
+    );
   });
 });

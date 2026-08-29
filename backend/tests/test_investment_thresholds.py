@@ -283,3 +283,43 @@ async def test_una_recalibracion_llega_a_una_base_que_ya_existia(db: AsyncSessio
     corregida = await repo.get_one(db, SectorInternal.UTILITIES, AccountingStd.GAAP, key)
     assert corregida is not None
     assert corregida.high_ok == Decimal("4")
+
+
+# ── PHASE-44.24.M — una fila recalibrada a mano se declara ────────────
+
+
+async def test_una_fila_igual_al_motor_no_se_declara_recalibrada(db: AsyncSession) -> None:
+    """El seed es un ESPEJO de lo que el motor resuelve.
+
+    Y sus filas llevan los cortes con la escala de la columna —`Numeric(12, 6)`,
+    o sea `Decimal('0.600000')`— donde el motor tiene `Decimal('0.6')`. Iguales
+    como número y distintas como cadena: comparar el texto marcaría TODA fila
+    sembrada como recalibrada a mano, que es exactamente lo contrario de lo que
+    el campo quiere decir.
+    """
+    await sync_thresholds(db)
+    await db.commit()
+
+    resolved = await load_thresholds(db, SectorInternal.UTILITIES, AccountingStd.GAAP)
+    recalibradas = [key for key, spec in resolved.items() if spec.origin == "table"]
+    assert recalibradas == [], f"filas sembradas marcadas como recalibradas: {recalibradas}"
+    # Y la procedencia del perfil sobrevive al paso por la tabla.
+    assert resolved["S4"].origin == "sector"
+
+
+async def test_una_fila_que_difiere_del_motor_se_declara_recalibrada(db: AsyncSession) -> None:
+    """Para lo que la tabla existe: recalibrar de forma auditable sin tocar el
+    motor. Hasta ahora era indistinguible de un delta del perfil."""
+    await sync_thresholds(db)
+    await db.commit()
+    row = await repo.get_one(db, SectorInternal.UTILITIES, AccountingStd.GAAP, "S4")
+    assert row is not None
+    row.high_ok = Decimal("7.5")
+    await db.flush()
+
+    resolved = await load_thresholds(db, SectorInternal.UTILITIES, AccountingStd.GAAP)
+
+    assert resolved["S4"].origin == "table"
+    assert resolved["S4"].high_ok == Decimal("7.5")
+    # Sólo la tocada: el resto conserva la suya.
+    assert resolved["L3"].origin == "generic"

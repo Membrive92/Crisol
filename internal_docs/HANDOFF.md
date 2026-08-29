@@ -1,4 +1,4 @@
-# Dónde estamos — 2026-08-23
+# Dónde estamos — 2026-08-27
 
 Punto de continuación tras las sesiones del 20-23 de agosto. Se lee de arriba
 abajo; lo que hay que decidir está al final.
@@ -7,15 +7,31 @@ abajo; lo que hay que decidir está al final.
 
 ## Lo primero al retomar
 
-**Hay tres entregas commiteadas y verdes esperando tu prueba manual**, y las
-tres tocan cómo se reparte el dinero por períodos. Nada se ha probado contra la
-app en marcha.
+**Hay siete entregas verdes esperando tu prueba manual, y sólo tres están
+commiteadas.** Commiteadas: 47.I, 47.J y 48 (`a6bd7aa`, `c49ba05`, `9b09c0f`).
+**Sin commitear, en el árbol de trabajo**: 47.H-2ª, 47.E4, 44.23 y **PHASE-44.24
+entera** (siete entregas: A · M · C · B · D · E · F · G). Nada se ha probado
+contra la app en marcha.
 
-| Entrega | Qué |
-|---|---|
-| [47.I](phases/phase-47.I-declarations-survive-reimport.md) | Una declaración manual sobrevive a una reimportación · el cargo de tarjeta sabe de cuál viene |
-| [47.J](phases/phase-47.J-a-statement-date-is-a-civil-date.md) | Una fecha de extracto es una fecha CIVIL (469 de 491 filas estaban desplazadas un día) |
-| [48](phases/phase-48-the-user-defines-the-month.md) | El día en que cobras REDEFINE qué es un mes en toda la app |
+> **44.24 toca sólo el módulo de Inversión** salvo dos cosas: `item_label()` en
+> el engine y una regla `@media print` en `globals.css` (que no existía y por
+> tanto no puede regresar nada). Las finanzas domésticas no se tocan.
+
+| Entrega                                                          | Qué                                                                                                                                 |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| [47.I](phases/phase-47.I-declarations-survive-reimport.md)       | Una declaración manual sobrevive a una reimportación · el cargo de tarjeta sabe de cuál viene                                       |
+| [47.J](phases/phase-47.J-a-statement-date-is-a-civil-date.md)    | Una fecha de extracto es una fecha CIVIL (469 de 491 filas estaban desplazadas un día)                                              |
+| [48](phases/phase-48-the-user-defines-the-month.md)              | El día en que cobras REDEFINE qué es un mes en toda la app                                                                          |
+| [47.H · 2ª entrega](phases/phase-47.H-a-refund-is-not-income.md) | El signo de una devolución llega a la pantalla: la lista de movimientos ya no suma distinto que su total                            |
+| [47.E4](phases/phase-47.E-deferred-receipt.md)                   | El desglose dice QUÉ categorías están aplazadas (asterisco por fila) y su aviso describe lo que hay en pantalla, también con filtro |
+| [44.23](phases/phase-44.23-report-glossary.md)                   | **Inversión**: una «i» por fila en todo el informe — 113 definiciones escritas contra la fórmula del motor                          |
+| **[44.24](improvements/phase-44.24-report-legibility-implementation-plan.md)** | **Inversión**: el informe deja de demostrar sin explicar. Motor **1.7.0**. Ver abajo                                  |
+
+> La 2ª entrega de 47.H pasó por revisión adversarial (**4/4 lentes vivas**, 26
+> hallazgos brutos, 8 confirmados). Encontró un TERCER emisor del cubo de gasto
+> que se me había escapado y que su gate no podía ver, y demostró —ejecutándolas—
+> cuatro formas normales de reintroducir el defecto con el gate en verde. Todo
+> arreglado; el detalle está en la phase doc.
 
 ### Cómo probarlo
 
@@ -27,6 +43,22 @@ app en marcha.
    cuadran entre sí la proyección de fin de mes (los días restantes cuentan
    hasta TU corte), los presupuestos, el DTI de Deuda y el chart.
 4. Transacciones: pulsa un chip de mes — debe darte tu período, no del 1 al 31.
+5. Análisis → pincha una categoría con devoluciones (p. ej. «Suscripciones» en
+   tu período de julio): el reembolso de 1,50 € sale en verde, marcado
+   «Devolución» y **con su signo**, y ahora la columna suma los 184,95 € del
+   total de arriba en vez de 187,95 €.
+   La misma marca aparece ahora en «Top movimientos del periodo» de Análisis,
+   que salía sin ella: esa tarjeta también lista el cubo de gasto, y una
+   devolución tuya se quedó a **dos euros** de encabezarla en junio.
+6. Análisis → junio, «Desglose de gastos»: las categorías con gasto aplazado
+   llevan ahora un **asterisco** (pasa el ratón por encima para ver cuánto).
+   Y el aviso de arriba cambia al pulsar Fijo o Variable, porque describe lo
+   que hay en pantalla: 496,67 € en «Todo», 245,53 € en «Fijo», 251,14 € en
+   «Variable». Antes decía 496,67 € en las tres.
+7. Inversión → Análisis → cualquier pestaña: cada fila lleva un `ⓘ` que
+   despliega qué es esa métrica o esa partida. Empieza por Estados → Balance,
+   que es donde más falta hacía: 49 filas de las que varias son deducidas por
+   la app y no vienen del filing, y ahora lo dicen.
 
 ### Lo que ya sabemos que verás distinto
 
@@ -35,6 +67,10 @@ app en marcha.
 - **Un solo aviso** en Análisis de móvil, bajo la evolución de patrimonio: es la
   única tarjeta que sigue en meses naturales (su serie son 12 meses fijos).
 - El tooltip de cada barra dice el rango exacto («12 dic – 11 ene»).
+- Un reembolso sale con **signos distintos** en dos sitios, y es a propósito: en
+  Transacciones con `+` (ese dinero entró en la cuenta, y así cuenta al saldo) y
+  en el desglose de su categoría con `−` (deshace una compra). Las dos salen del
+  mismo `flow`; lo que cambia es la pregunta.
 
 ### Lo que sigue pendiente de antes
 
@@ -57,6 +93,55 @@ sesión— devolviendo un resultado indistinguible de una revisión limpia; el
 script ahora reporta cuántas lentes trajeron resultado, para que «cero
 hallazgos» y «cero ejecuciones» no se confundan.
 
+
+### PHASE-44.24 — qué mirar cuando la pruebes
+
+Abre un valor analizado (MCD es el que tiene un run **viejo**, de motor 1.0.0:
+sirve para ver que el informe tolera lo que no trae).
+
+1. **Las fichas.** Pulsa la `ⓘ` de una fila cualquiera: debe abrir «qué mide»,
+   «por qué importa» y «cómo se lee», en tres tramos. En móvil se abre **tocando
+   la etiqueta**, que es el único afordance sin ratón.
+2. **La distancia al corte.** En el Veredicto, cada señal dice a cuánto está de
+   su umbral y **con qué vara** se mide (genérica, del sector, de financiera…).
+   Las rojas van primero.
+3. **La tendencia.** Cada matriz tiene una columna nueva a la derecha. Una serie
+   de menos de tres ejercicios debe decir «serie corta», no quedarse en blanco.
+4. **El desglose de scores.** En Forense, cada score enseña sus variables con
+   cuánto se han movido desde el ejercicio anterior. **En móvil esto es nuevo
+   entero**: antes no había ningún desglose.
+5. **«Cómo leer este informe».** Enlace en el hero (web) / hoja modal (móvil).
+6. **Qué ha cambiado.** Veredicto → tercera sub-pestaña. Con un solo análisis
+   debe decir que todavía no hay con qué comparar; con dos, la lista de cambios,
+   y si se hicieron con motores distintos **no debe listar ni un cambio de la
+   empresa** — sólo qué cambió del método.
+7. **El dictamen imprimible.** Botón en el hero → `?print=1` → Ctrl+P. Sin barra
+   lateral, sin pestañas, fondo blanco, y con las tres versiones en la cabecera.
+
+> **Seis defectos ya corregidos por una revisión adversarial** cuyos
+> verificadores murieron por límite de sesión (devolvió `confirmados: 0`, que es
+> lo mismo que devuelve una revisión limpia — los verifiqué a mano y los seis
+> eran reales). Los que más te tocan al probar: elegir un análisis del histórico
+> ya no dice «todavía no se ha ejecutado ninguno», el dictamen imprimible
+> conserva el análisis que estás mirando, y cuando no se puede comparar te dice
+> POR QUÉ en vez de una frase fija. Detalle en la phase doc.
+
+> **Tu primera pasada ya encontró cosas** —«enlaces que no llevan a ningún
+> sitio, cards que no se ajustan»— y salió de ahí una auditoría con **33
+> defectos reales** corregidos:
+> [PHASE-44.24.H](phases/phase-44.24.H-ux-audit-fixes.md). Lo que debería
+> haber cambiado a la vista: las banderas del veredicto **ya no son enlaces**
+> (no llevaban a ninguna parte), las señales navegan sin recargar la página,
+> la prosa de las cards mide lo mismo que en Deuda, el buscador de Análisis va
+> a ancho completo, la guía tiene «← Volver al informe», y el dictamen
+> imprimible **abre el diálogo de impresión solo** sin arrastrar el sidebar.
+> En móvil: la pestaña activa siempre a la vista, elegir un análisis del
+> histórico ya no hace desaparecer la pantalla, y las señales se tocan.
+
+Lo que más me interesa que mires: **si alguna frase del informe suena a jerga
+del motor**. La pasada de copy tradujo lo que encontré, pero el catálogo de
+razones es largo y sólo se ve con datos reales delante.
+
 ---
 
 ## (anterior) Lo primero al retomar
@@ -68,8 +153,8 @@ está en [`phases/phase-47.E-deferred-receipt.md`](phases/phase-47.E-deferred-re
 
 ### 47.E, en una frase
 
-Tu regla, tal cual la dijiste: *«no aparecen porque se han aplazado, pero se
-cuentan en categorías porque el gasto existe, lo único que está aplazado»*. El
+Tu regla, tal cual la dijiste: _«no aparecen porque se han aplazado, pero se
+cuentan en categorías porque el gasto existe, lo único que está aplazado»_. El
 resultado del mes mide **caja** y excluye las compras aplazadas; el desglose por
 categorías mide **gasto** y las mantiene; y la pantalla dice la diferencia,
 porque a partir de aquí las dos cifras no cuadran a propósito.
@@ -121,6 +206,7 @@ Tres cosas y un ADR:
    caso de julio pasaba en silencio. Lo destapó una revisión adversarial, no la
    suite. Está corregido (la cabecera real viaja aparte desde el parser) y con
    los dos tests que faltaban.
+
 4. **[ADR-0011](decisions/0011-system-initiated-debt-event-translation.md)**: la
    traducción movimiento→evento la INICIA el sistema; la declaración sigue
    siendo tuya.
@@ -170,8 +256,8 @@ vez**. Desde la cabecera es indistinguible del error de julio.
 **Todo verde**, con el intérprete del proyecto (`.venv`, el mismo que CI):
 
 - Backend: suite completa · `ruff` · `black` · `mypy` · `alembic
-  upgrade`/`downgrade` reversibles, cabeza única (`j6f39e1a4b2d85`), `alembic
-  check` sin drift.
+upgrade`/`downgrade` reversibles, cabeza única (`j6f39e1a4b2d85`), `alembic
+check` sin drift.
 - Frontend: `typecheck` · `lint` · `knip` · tests de web, móvil, services, ui y
   store.
 - `python scripts/check_docs.py` sin podredumbre.
@@ -229,11 +315,11 @@ el portero avisaría antes de que volviera a pasar.
 
 ## Decisiones abiertas
 
-| # | Decisión | Recomendación |
-|---|---|---|
-| 1 | **¿Se adopta algún umbral del cuaderno?** Ver [`investment-threshold-divergences.md`](investment-threshold-divergences.md) | Revisarlo con la calibración v1 delante |
-| 2 | **Los cortes de C2 y C6** (inversión) | Esperar a tener más empresas: con dos no se distingue «el corte es bueno» de «no hay casos» |
-| 3 | **Las dos verdades del saldo de deuda** (MUX cuadro-vs-movimientos de PHASE-36) | No se responde aquí. PHASE-48 §48.1 propone nombrarlas en vez de reducirlas: `outstanding_principal` para el patrimonio, `pending_total` como informativo |
+| #   | Decisión                                                                                                                   | Recomendación                                                                                                                                             |
+| --- | -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **¿Se adopta algún umbral del cuaderno?** Ver [`investment-threshold-divergences.md`](investment-threshold-divergences.md) | Revisarlo con la calibración v1 delante                                                                                                                   |
+| 2   | **Los cortes de C2 y C6** (inversión)                                                                                      | Esperar a tener más empresas: con dos no se distingue «el corte es bueno» de «no hay casos»                                                               |
+| 3   | **Las dos verdades del saldo de deuda** (MUX cuadro-vs-movimientos de PHASE-36)                                            | No se responde aquí. PHASE-48 §48.1 propone nombrarlas en vez de reducirlas: `outstanding_principal` para el patrimonio, `pending_total` como informativo |
 
 ---
 

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
@@ -21,6 +22,7 @@ import {
   EVIDENCE_LABEL,
   EVOLUTION_METRICS,
   evidenceBreakdown,
+  locateMetric,
   metricGapLegend,
   metricRow,
   QUALITY_LABEL,
@@ -36,6 +38,14 @@ import {
   type MatrixRow,
   type MetricIndex,
   type MetricRowOptions,
+  type ScoreHelpIndex,
+  scoreBreakdownRows,
+  coreItemCoverage,
+  REPORT_LEGEND,
+  REPORT_SCOPE,
+  SAFETY,
+  safetyRules,
+  type SafetyChecklist,
 } from '@crisol/ui';
 import type {
   AnalysisRun,
@@ -70,6 +80,23 @@ export interface TabContext {
   index: MetricIndex;
   catalog: CatalogIndex;
   security: Security | undefined;
+  /**
+   * Fichas del engine: qué es cada score y cómo se llama cada una de sus
+   * variables (PHASE-44.24.A). Opcional: el catálogo llega por su propia query
+   * y hasta que carga la tarjeta pinta la clave cruda diciéndolo.
+   */
+  help?: ScoreHelpIndex | undefined;
+  /**
+   * La fila a la que se ha llegado desde una señal del veredicto
+   * (PHASE-44.24). En web viaja en la URL; aquí, en el estado de la pantalla.
+   */
+  highlightKey?: string | null | undefined;
+  /**
+   * Ir a una pestaña resaltando una fila. Lo llama la lista de señales del
+   * veredicto: tocar «Deuda neta / EBITDA» debe llevar a Ratios con esa fila
+   * marcada, como en web — antes tocarla no hacía nada.
+   */
+  goTo?: ((tab: string, highlight: string | null) => void) | undefined;
 }
 
 function options(ctx: TabContext): MetricRowOptions {
@@ -82,7 +109,15 @@ function legendOf(sentences: string[]): string | undefined {
   return sentences.length === 0 ? undefined : sentences.join('\n');
 }
 
-function Block({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) {
+function Block({
+  title,
+  note,
+  children,
+}: {
+  title: string;
+  note?: string;
+  children: React.ReactNode;
+}) {
   return (
     <View style={styles.card}>
       <Text style={styles.cardTitle}>{title}</Text>
@@ -176,6 +211,8 @@ export function TabStatements({
         {...(VIEW_NOTE[view] ? { note: VIEW_NOTE[view] } : {})}
       >
         <YearMatrix
+          marksLegend={REPORT_LEGEND}
+          highlightKey={ctx.highlightKey}
           years={years}
           rows={rows}
           verdictYear={verdictYear}
@@ -245,6 +282,8 @@ export function TabRatios({ ctx }: { ctx: TabContext }) {
       {RATIO_FAMILIES.map((family) => (
         <Block key={family.key} title={family.label} note={family.note}>
           <YearMatrix
+            marksLegend={REPORT_LEGEND}
+            highlightKey={ctx.highlightKey}
             years={years}
             rows={family.metrics.map((key) => metricRow(key, opts))}
             verdictYear={verdictYear}
@@ -263,6 +302,8 @@ export function TabRatios({ ctx }: { ctx: TabContext }) {
             </Text>
           ) : (
             <YearMatrix
+              marksLegend={REPORT_LEGEND}
+              highlightKey={ctx.highlightKey}
               years={dupont.map((point) => point.fiscal_year)}
               rows={[
                 ...section.metrics.map((key) => metricRow(key, opts)),
@@ -282,7 +323,17 @@ export function TabRatios({ ctx }: { ctx: TabContext }) {
 export function TabEvolution({ ctx }: { ctx: TabContext }) {
   const { run } = ctx;
   const years = run.years_covered;
-  const series = run.evolution.horizontal ?? [];
+  // Mismo criterio que web: `horizontal` AUSENTE (motor 1.0.0) no es una
+  // serie vacía, es una sección que ese motor no producía.
+  if (run.evolution.horizontal === undefined) {
+    return (
+      <Degraded
+        title="Este análisis no tiene serie de evolución"
+        reason={`Lo calculó el motor ${run.engine_version}, que no emitía las variaciones año a año. No es un hueco en las cuentas de la empresa. Vuelve a analizar el valor para verla con el motor actual.`}
+      />
+    );
+  }
+  const series = run.evolution.horizontal;
 
   if (series.length === 0) {
     return (
@@ -317,10 +368,22 @@ export function TabEvolution({ ctx }: { ctx: TabContext }) {
   return (
     <View style={{ gap: spacing.md }}>
       <Block title="Serie" note="Lo que el cuaderno pide mirar «año contra año», ya calculado.">
-        <YearMatrix years={years} rows={seriesRows} firstColumnLabel="Partida" />
+        <YearMatrix
+          marksLegend={REPORT_LEGEND}
+          highlightKey={ctx.highlightKey}
+          years={years}
+          rows={seriesRows}
+          firstColumnLabel="Partida"
+        />
       </Block>
       <Block title="Variación anual">
-        <YearMatrix years={years} rows={deltaRows} firstColumnLabel="Partida" />
+        <YearMatrix
+          marksLegend={REPORT_LEGEND}
+          highlightKey={ctx.highlightKey}
+          years={years}
+          rows={deltaRows}
+          firstColumnLabel="Partida"
+        />
       </Block>
       {/* E3 y E4 son las dos métricas CON BANDA de esta capa, y móvil no pintaba
           ninguna: la pestaña enseñaba series y variaciones, pero ni la
@@ -328,6 +391,8 @@ export function TabEvolution({ ctx }: { ctx: TabContext }) {
       {EVOLUTION_METRICS.map((section) => (
         <Block key={section.key} title={section.label} note={section.note}>
           <YearMatrix
+            marksLegend={REPORT_LEGEND}
+            highlightKey={ctx.highlightKey}
             years={years}
             rows={section.metrics.map((key) => metricRow(key, options(ctx)))}
             firstColumnLabel="Métrica"
@@ -355,21 +420,142 @@ export function TabForensic({ ctx }: { ctx: TabContext }) {
   }
 
   return (
-    <Block
-      title={`Los ocho scores (hasta ${verdictYear})`}
-      note="Todos book-based: se calculan sólo con las cuentas publicadas, nunca con la cotización. Es lo que hace que reejecutar un análisis antiguo devuelva el mismo resultado."
-    >
-      <YearMatrix
-        years={years}
-        rows={FORENSIC_KEYS.map((key) => metricRow(key, options(ctx)))}
-        verdictYear={verdictYear}
-        firstColumnLabel="Score"
-        // Derivada del run, igual que en web (PHASE-44.17): qué scores faltan y
-        // por qué. La leyenda que había en web estaba escrita a mano y era falsa
-        // en McDonald's; una copia a mano aquí lo habría sido en otro sitio.
-        legend={legendOf(metricGapLegend(FORENSIC_KEYS, options(ctx)))}
-      />
-    </Block>
+    <View style={{ gap: spacing.md }}>
+      <Block
+        title={`El desglose en ${verdictYear}`}
+        note="Un score es un agregado: lo que dice el modelo está en sus variables. Al lado de cada una, cuánto se ha movido desde el ejercicio anterior — un nivel suelto no significa nada."
+      >
+        <View style={{ gap: spacing.md }}>
+          {FORENSIC_KEYS.map((key) => (
+            <ScoreCard key={key} metricKey={key} ctx={ctx} year={verdictYear} />
+          ))}
+        </View>
+      </Block>
+
+      <Block
+        title={`Los ocho scores (hasta ${verdictYear})`}
+        note="Todos book-based: se calculan sólo con las cuentas publicadas, nunca con la cotización. Es lo que hace que reejecutar un análisis antiguo devuelva el mismo resultado."
+      >
+        <YearMatrix
+          marksLegend={REPORT_LEGEND}
+          highlightKey={ctx.highlightKey}
+          years={years}
+          rows={FORENSIC_KEYS.map((key) => metricRow(key, options(ctx)))}
+          verdictYear={verdictYear}
+          firstColumnLabel="Score"
+          // Derivada del run, igual que en web (PHASE-44.17): qué scores faltan y
+          // por qué. La leyenda que había en web estaba escrita a mano y era falsa
+          // en McDonald's; una copia a mano aquí lo habría sido en otro sitio.
+          legend={legendOf(metricGapLegend(FORENSIC_KEYS, options(ctx)))}
+        />
+      </Block>
+    </View>
+  );
+}
+
+/**
+ * Las cuatro claves forenses que NUNCA emiten desglose, por diseño.
+ *
+ * Misma lista que en web, y por el mismo motivo: distinguir «no tiene desglose»
+ * de «este año no se pudo calcular».
+ */
+const NO_BREAKDOWN_BY_DESIGN = new Set(['accruals', 'F5', 'F6', 'FZ']);
+
+/**
+ * El desglose de un score forense en RN (PHASE-44.24.D).
+ *
+ * Móvil no tenía NINGUNO: los ocho scores salían como un número por año y las
+ * 27 variables que los componen no se veían por ningún sitio. Las filas las
+ * arma `scoreBreakdownRows` de `@crisol/ui`, la misma función que usa web, así
+ * que la delta y el orden no pueden discrepar entre las dos apps.
+ */
+function ScoreCard({
+  metricKey,
+  ctx,
+  year,
+}: {
+  metricKey: string;
+  ctx: TabContext;
+  year: number | undefined;
+}) {
+  const [open, setOpen] = useState(false);
+  const ficha = ctx.help?.score(metricKey);
+  const base = ctx.catalog.definition(metricKey);
+  const definition = effectiveThreshold(metricKey, ctx.run.thresholds_used, base);
+  const metric = year === undefined ? undefined : ctx.index.get(metricKey, year);
+  const notComputable = !metric || metric.status === 'not_computable';
+  const view = scoreBreakdownRows(
+    metricKey,
+    ctx.run.scores_detail.forensic.breakdowns,
+    year,
+    ctx.index,
+    definition?.unit,
+    ctx.help,
+  );
+
+  return (
+    <View style={styles.scoreCard}>
+      <View style={styles.scoreHead}>
+        <Pressable
+          disabled={!ficha}
+          accessibilityRole={ficha ? 'button' : undefined}
+          accessibilityLabel={ficha ? `Qué es «${base?.label ?? metricKey}»` : undefined}
+          onPress={() => setOpen((v) => !v)}
+          style={{ flex: 1 }}
+        >
+          <Text style={styles.scoreLabel}>
+            {base?.label ?? metricKey}
+            {metricKey === 'z_score' && ctx.run.z_variant ? ` ${ctx.run.z_variant}` : ''}
+            {ficha ? ' ⓘ' : ''}
+          </Text>
+        </Pressable>
+        <Text style={[styles.scoreValue, { color: bandColors(metric?.band ?? null).fg }]}>
+          {notComputable ? '—' : formatMetricValue(metric.value, definition?.unit)}
+        </Text>
+      </View>
+
+      {formatThreshold(definition) ? (
+        <Text style={styles.scoreThreshold}>{formatThreshold(definition)}</Text>
+      ) : null}
+
+      {/* Los tres campos separados, igual que en web: «qué mide» se lee
+          siempre, «cómo se lee» es lo que se vuelve a consultar. */}
+      {open && ficha ? (
+        <View style={{ gap: 4, marginTop: 4 }}>
+          <Text style={styles.scoreHelp}>{ficha.what}</Text>
+          <Text style={styles.scoreHelp}>Por qué importa: {ficha.why}</Text>
+          <Text style={styles.scoreHelp}>Cómo se lee: {ficha.reading}</Text>
+        </View>
+      ) : null}
+
+      {notComputable ? (
+        <Text style={styles.scoreNote}>{metric?.reason ?? 'no se calculó en este ejercicio'}</Text>
+      ) : null}
+
+      {view.rows.map((row) => (
+        <View key={row.key} style={styles.scoreRow}>
+          <Text style={styles.scoreRowLabel} numberOfLines={2}>
+            {row.kind === 'check' ? (row.passed ? '✓ ' : '✕ ') : ''}
+            {row.label}
+          </Text>
+          <Text style={styles.scoreRowValue}>
+            {row.kind === 'check' ? '' : row.value}
+            {/* `null` es «no se puede comparar», no «no ha cambiado»: no se
+                pinta nada, porque un «=» ahí afirmaría una comparación que no
+                se ha hecho. */}
+            {row.delta === null ? '' : ` ${row.delta}`}
+          </Text>
+        </View>
+      ))}
+
+      {view.rows.length === 0 && !notComputable ? (
+        <Text style={styles.scoreNote}>
+          {NO_BREAKDOWN_BY_DESIGN.has(metricKey)
+            ? 'Este score no tiene desglose por diseño: es un ratio único, no un agregado de componentes.'
+            : 'Sin desglose para este ejercicio.'}
+        </Text>
+      ) : null}
+    </View>
   );
 }
 
@@ -398,6 +584,8 @@ export function TabDividend({ ctx }: { ctx: TabContext }) {
         {quality ? (
           <Block title={quality.label} note={quality.note}>
             <YearMatrix
+              marksLegend={REPORT_LEGEND}
+              highlightKey={ctx.highlightKey}
               years={years}
               rows={quality.metrics.map((key) => metricRow(key, options(ctx)))}
               verdictYear={verdictYear}
@@ -415,13 +603,15 @@ export function TabDividend({ ctx }: { ctx: TabContext }) {
       {security?.is_financial ? (
         <Text style={styles.note}>
           Es una financiera: las ratios que dividen por caja libre salen sin calcular a propósito
-          —en un banco esa caja libre no significa lo mismo—. El payout sobre beneficio, la
-          calidad de la caja y la trayectoria sí son válidos.
+          —en un banco esa caja libre no significa lo mismo—. El payout sobre beneficio, la calidad
+          de la caja y la trayectoria sí son válidos.
         </Text>
       ) : null}
       {DIVIDEND_BLOCKS.map((block) => (
         <Block key={block.key} title={block.label} note={block.note}>
           <YearMatrix
+            marksLegend={REPORT_LEGEND}
+            highlightKey={ctx.highlightKey}
             years={years}
             rows={block.metrics.map((key) => metricRow(key, options(ctx)))}
             verdictYear={verdictYear}
@@ -440,6 +630,8 @@ export function TabDividend({ ctx }: { ctx: TabContext }) {
             : ''}
         </Text>
         <YearMatrix
+          marksLegend={REPORT_LEGEND}
+          highlightKey={ctx.highlightKey}
           years={years}
           rows={[
             {
@@ -474,7 +666,13 @@ export function TabDividend({ ctx }: { ctx: TabContext }) {
  * semáforos, porque sin comparables de sector un color sería una opinión
  * disfrazada de dato.
  */
-export function TabValuation({ securityId, catalog }: { securityId: string; catalog: CatalogIndex }) {
+export function TabValuation({
+  securityId,
+  catalog,
+}: {
+  securityId: string;
+  catalog: CatalogIndex;
+}) {
   const query = useValuation(securityId);
   const data = query.data;
 
@@ -543,12 +741,64 @@ export function TabValuation({ securityId, catalog }: { securityId: string; cata
 
 // ── Veredicto ─────────────────────────────────────────────────────────
 
-export function TabVerdict({ ctx }: { ctx: TabContext }) {
+export function TabVerdict({
+  ctx,
+  statements,
+  items,
+}: {
+  ctx: TabContext;
+  /** Para la sección de confianza. Van como props y NO en `TabContext`: sólo
+   *  esta pestaña los necesita, y meterlos en el contexto obligaría a las siete
+   *  a cargarlos. */
+  statements?: FinancialStatement[] | undefined;
+  items?: CanonicalItemDefinition[] | undefined;
+}) {
   const { run, catalog } = ctx;
   const { verdict } = run;
+  const profile = verdict.safety_profile;
+  const safety = SAFETY[profile.label];
+  // Las mismas reglas que web, del mismo view-model: si el motor añade una
+  // condición, las dos pantallas la ganan a la vez (PHASE-44.24.E).
+  const checklist = safetyRules(profile);
+  // Las frases las compone el SERVIDOR (PHASE-44.24.B): deterministas y con
+  // goldens, para que el dictamen de las dos apps no pueda discrepar.
+  const sentenceOf = (key: string) => run.report?.questions?.find((q) => q.key === key)?.sentence;
 
   return (
     <View style={{ gap: spacing.md }}>
+      <View style={styles.card}>
+        <View style={styles.profileHead}>
+          <Text style={styles.cardTitle}>Perfil de seguridad</Text>
+          <Text style={[styles.profileBadge, { color: safety.fg, backgroundColor: safety.bg }]}>
+            {safety.label}
+          </Text>
+        </View>
+        <Text style={styles.note}>
+          El perfil no es una nota media: sale de reglas booleanas sobre los scores forenses. Estas
+          son, con lo que ha pasado en este análisis.
+        </Text>
+        <RuleChecklist block={checklist.avoid} />
+        <RuleChecklist block={checklist.conservative} />
+        {checklist.blocking.length > 0 ? (
+          <Text style={styles.blocking}>
+            {checklist.blockingLabel}
+            {checklist.blocking.join('; ')}.
+          </Text>
+        ) : null}
+      </View>
+
+      {run.report?.next_checks?.length ? (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Qué miraría a continuación</Text>
+          {run.report.next_checks.map((check) => (
+            <Text key={check.key} style={styles.note}>
+              {'· '}
+              {check.text}
+            </Text>
+          ))}
+        </View>
+      ) : null}
+
       {verdict.questions.map((question) => {
         // Mismo tri-estado que la web, de la misma función: un verde por
         // ausencia de prueba —y un run viejo que ni siquiera registró qué se
@@ -556,11 +806,17 @@ export function TabVerdict({ ctx }: { ctx: TabContext }) {
         const evidence = questionEvidence(question);
         const band = bandColors(evidence === 'evaluated' ? question.verdict : null);
         return (
-          <View key={question.key} style={[styles.card, { borderLeftWidth: 3, borderLeftColor: band.fg }]}>
+          <View
+            key={question.key}
+            style={[styles.card, { borderLeftWidth: 3, borderLeftColor: band.fg }]}
+          >
             <Text style={styles.question}>{question.question}</Text>
             <Text style={[styles.bandText, { color: band.fg }]}>
               {evidence === 'evaluated' ? bandLabel(question.verdict) : EVIDENCE_LABEL[evidence]}
             </Text>
+            {sentenceOf(question.key) ? (
+              <Text style={styles.sentence}>{sentenceOf(question.key)}</Text>
+            ) : null}
             {evidence === 'not-recorded' ? (
               <LegacySignals question={question} catalog={catalog} />
             ) : (
@@ -587,13 +843,189 @@ export function TabVerdict({ ctx }: { ctx: TabContext }) {
                   signals={question.signals ?? []}
                   catalog={catalog}
                   thresholdsUsed={run.thresholds_used}
+                  goTo={ctx.goTo}
                 />
               </>
             )}
           </View>
         );
       })}
-      <FlagList flags={run.flags ?? []} />
+      <FlagList flags={run.flags ?? []} help={ctx.help} />
+
+      <StressCard run={run} />
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Alcance: lo que este informe NO cubre</Text>
+        {/* El texto vive en `@crisol/ui`: lo pintan también web y el dictamen
+            imprimible, y una copia por sitio es cómo divergen. */}
+        {REPORT_SCOPE.map((entry) => (
+          <Text key={entry.term} style={styles.note}>
+            <Text style={styles.scopeTerm}>{entry.term}.</Text> {entry.meaning}
+          </Text>
+        ))}
+      </View>
+
+      <ConfidenceSection run={run} statements={statements} items={items} />
+
+      <Text style={styles.footer}>
+        Motor {run.engine_version} {'·'} umbrales {run.thresholds_version} {'·'} ejercicios{' '}
+        {run.years_covered.join(', ')} {'·'} análisis del{' '}
+        {new Date(run.run_date).toLocaleDateString('es-ES')}
+      </Text>
+    </View>
+  );
+}
+
+/** Una de las dos listas de reglas del perfil, con su marca por condición. */
+function RuleChecklist({
+  block,
+}: {
+  block: SafetyChecklist['avoid'] | SafetyChecklist['conservative'];
+}) {
+  return (
+    <View style={{ gap: 2, marginTop: spacing.xs }}>
+      <Text style={styles.ruleTitle}>{block.title}</Text>
+      {block.rules.map((rule) => {
+        // En la lista de «Evitar», cumplir una regla es la MALA noticia: el
+        // color no puede salir de `met` a secas.
+        const malo = block.metIsBad ? rule.met : !rule.met;
+        return (
+          <Text
+            key={rule.text}
+            style={[styles.rule, { color: malo ? colors.danger : colors.textMuted }]}
+          >
+            {rule.met ? '✓' : '✕'} {rule.text}
+          </Text>
+        );
+      })}
+    </View>
+  );
+}
+
+/**
+ * Los escenarios de stress, en RN (PHASE-44.24.E).
+ *
+ * Sin el dumbbell, que sigue siendo sólo web (backlog 44.22): aquí van las
+ * frases del motor, `breakeven_fcf_drop` y el motivo cuando no se pudo calcular
+ * — que es justo lo que móvil no enseñaba, así que un escenario en rojo era
+ * invisible en el teléfono.
+ */
+function StressCard({ run }: { run: AnalysisRun }) {
+  const stress = run.verdict.stress;
+  const scenarios = stress?.scenarios ?? [];
+  return (
+    <View style={styles.card}>
+      <Text style={styles.cardTitle}>Escenarios de stress</Text>
+      <Text style={styles.note}>
+        La cobertura se mide sobre caja libre (flujo de explotación − inversión), no sobre el FFO.
+        En una socimi puede no coincidir con la cobertura de la pestaña Dividendo.
+      </Text>
+      {stress?.not_computable_reason ? (
+        <Text style={styles.note}>Faltan escenarios: {stress.not_computable_reason}.</Text>
+      ) : null}
+      {scenarios.length === 0 ? (
+        <Text style={styles.note}>No se ha podido calcular ningún escenario para este valor.</Text>
+      ) : (
+        scenarios.map((scenario) => (
+          <View key={scenario.key} style={{ gap: 2, marginTop: spacing.xs }}>
+            <Text style={styles.stressLabel}>
+              [{scenario.label}] {scenario.parameter}
+            </Text>
+            <Text style={styles.note}>{scenario.sentence}</Text>
+          </View>
+        ))
+      )}
+      {stress?.breakeven_fcf_drop ? (
+        <Text style={styles.note}>
+          Margen de caída de la caja libre antes de dejar de cubrir el dividendo:{' '}
+          {(Number(stress.breakeven_fcf_drop) * 100).toLocaleString('es-ES', {
+            maximumFractionDigits: 0,
+          })}{' '}
+          %.
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * De qué se compone la confianza.
+ *
+ * Móvil enseñaba el porcentaje sin decir de dónde salía, que es un número sin
+ * forma de auditarlo.
+ */
+function ConfidenceSection({
+  run,
+  statements,
+  items,
+}: {
+  run: AnalysisRun;
+  statements?: FinancialStatement[] | undefined;
+  items?: CanonicalItemDefinition[] | undefined;
+}) {
+  const dc = run.data_completeness;
+  const pct = (value: string) => Math.round(Number(value) * 100);
+  // El mismo view-model que web (PHASE-44.24.E): qué partidas núcleo publicó
+  // el filing en cada ejercicio, y si los ejercicios en pantalla son los que
+  // el análisis juzgó.
+  const coverage = coreItemCoverage(statements, items, run.years_covered);
+
+  return (
+    <View style={styles.card}>
+      <Text style={styles.cardTitle}>Cómo se calcula la confianza</Text>
+      <Text style={styles.note}>
+        {pct(dc.value)} % = completitud {pct(dc.completeness_core)} % × frescura{' '}
+        {Number(dc.staleness_factor).toLocaleString('es-ES', {
+          minimumFractionDigits: 1,
+          maximumFractionDigits: 1,
+        })}
+        .
+      </Text>
+      <Text style={styles.note}>
+        {'· '}Completitud: fracción de las 10 partidas núcleo publicadas por el filing en cada
+        ejercicio. Una partida imputada a cero no cuenta como publicada
+        {dc.imputed_core_count > 0 ? ` — aquí hay ${dc.imputed_core_count} imputadas.` : '.'}
+      </Text>
+      <Text style={styles.note}>
+        {'· '}Frescura: 1,0 si el último cierre tiene menos de 9 meses; 0,7 hasta 18 meses; 0,4 a
+        partir de ahí.
+        {dc.days_stale !== null
+          ? ` El último cierre (${dc.latest_fiscal_year_end ?? '—'}) tiene ${dc.days_stale} días.`
+          : ''}
+      </Text>
+      <Text style={styles.note}>
+        Para datos anuales, una confianza alta con un cierre de hace meses es normal: el último 10-K
+        es lo más reciente que existe.
+      </Text>
+      {coverage.mismatch ? (
+        <Text style={styles.blocking}>
+          Ojo: los estados en pantalla cubren {coverage.years.join(', ')} y el análisis juzgó{' '}
+          {run.years_covered.join(', ')}. Vuelve a ejecutar el análisis para que coincidan.
+        </Text>
+      ) : null}
+
+      {coverage.rows.length > 0 ? (
+        <View style={{ gap: 2, marginTop: spacing.xs }}>
+          <Text style={styles.ruleTitle}>
+            Partidas núcleo por ejercicio ({coverage.years.join(' · ')})
+          </Text>
+          <Text style={styles.note}>
+            Sale de los estados ingeridos, no del análisis. Un hueco aquí puede ser estructural: un
+            balance no clasificado no publica activo ni pasivo corriente, y una empresa que no
+            reparte no «omite» el dividendo — vale cero.
+          </Text>
+          {coverage.rows.map((row) => (
+            <View key={row.key} style={styles.coverageRow}>
+              <Text style={styles.coverageLabel} numberOfLines={1}>
+                {row.label}
+              </Text>
+              <Text style={styles.coverageMarks}>
+                {row.present.map((yes) => (yes ? '✓' : '—')).join(' ')}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -622,12 +1054,14 @@ function LegacySignals({
   return (
     <View style={{ gap: spacing.xs, marginTop: spacing.xs }}>
       <Text style={styles.note}>
-        Este análisis lo produjo un motor anterior, que no registraba qué señales se evaluaron.
-        El veredicto no es auditable: vuelve a ejecutarlo para ver el desglose.
+        Este análisis lo produjo un motor anterior, que no registraba qué señales se evaluaron. El
+        veredicto no es auditable: vuelve a ejecutarlo para ver el desglose.
       </Text>
       {groups.map((group) => (
         <Text key={group.name} style={styles.note}>
-          <Text style={{ color: group.color, fontWeight: fontWeight.semibold }}>{group.name}: </Text>
+          <Text style={{ color: group.color, fontWeight: fontWeight.semibold }}>
+            {group.name}:{' '}
+          </Text>
           {group.keys.map(label).join(' · ')}
         </Text>
       ))}
@@ -647,10 +1081,12 @@ function SignalList({
   signals,
   catalog,
   thresholdsUsed,
+  goTo,
 }: {
   signals: QuestionSignal[];
   catalog: CatalogIndex;
   thresholdsUsed: AnalysisRun['thresholds_used'];
+  goTo?: ((tab: string, highlight: string | null) => void) | undefined;
 }) {
   if (signals.length === 0) {
     // Lista VACÍA, no ausente: el motor sí publicó el desglose y esta pregunta
@@ -668,11 +1104,26 @@ function SignalList({
         );
         const threshold = formatThreshold(definition);
         const band = bandColors(signal.band);
+        // Mismo registro que web: una señal con fila en otra pestaña se toca y
+        // lleva allí; una bandera o un ancla, no (aquí no hay scroll a una
+        // card). Sin destino, texto plano — no un toque que no hace nada.
+        const target = goTo ? locateMetric(signal.key) : null;
+        const navegable = Boolean(target && !target.anchor);
         return (
-          <View key={signal.key} style={styles.signalRow}>
+          <Pressable
+            key={signal.key}
+            style={styles.signalRow}
+            disabled={!navegable}
+            accessibilityRole={navegable ? 'button' : undefined}
+            accessibilityHint={navegable ? 'Ir a la fila que la explica' : undefined}
+            onPress={() =>
+              target && goTo ? goTo(target.tab, target.highlight ?? signal.key) : undefined
+            }
+          >
             <View style={{ flex: 1 }}>
               <Text style={[styles.signalLabel, !signal.counted && styles.muted]}>
                 {signal.label}
+                {navegable ? ' ›' : ''}
               </Text>
               {threshold ? <Text style={styles.signalHint}>{threshold}</Text> : null}
               {!signal.counted ? (
@@ -685,7 +1136,7 @@ function SignalList({
             <Text style={[styles.chip, { color: band.fg, backgroundColor: band.bg }]}>
               {bandLabel(signal.band)}
             </Text>
-          </View>
+          </Pressable>
         );
       })}
     </View>
@@ -699,38 +1150,118 @@ function SignalList({
  * idénticas: el motor las emite por ejercicio y la síntesis las concatena. En
  * una pantalla de móvil eso es la diferencia entre leerlo y no leerlo.
  */
-function FlagList({ flags }: { flags: EngineFlag[] }) {
+function FlagList({ flags, help }: { flags: EngineFlag[]; help?: ScoreHelpIndex | undefined }) {
   const grouped = groupFlags(flags);
   if (grouped.length === 0) return null;
   return (
     <Block title={`Banderas (${grouped.length})`}>
       <View style={{ gap: spacing.sm }}>
-        {grouped.map((flag) => {
-          const tone =
-            flag.severity === 'red'
-              ? { fg: colors.danger, bg: colors.dangerSoft }
-              : flag.severity === 'amber'
-                ? { fg: colors.warning, bg: colors.warningSoft }
-                : { fg: colors.textMuted, bg: colors.surfaceMuted };
-          return (
-            <View key={flag.key} style={{ gap: 2 }}>
-              <Text style={[styles.chip, { color: tone.fg, backgroundColor: tone.bg, alignSelf: 'flex-start' }]}>
-                {FLAG_SEVERITY_LABEL[flag.severity]}
-              </Text>
-              {flag.messages.map((message) => (
-                <Text key={message} style={styles.flagText}>
-                  {message}
-                </Text>
-              ))}
-            </View>
-          );
-        })}
+        {grouped.map((flag) => (
+          <FlagCard key={flag.key} flag={flag} ficha={help?.flag(flag.key)} />
+        ))}
       </View>
     </Block>
   );
 }
 
+/**
+ * Una bandera con su ficha (PHASE-44.24.A), que móvil no enseñaba.
+ *
+ * Web despliega qué es, por qué importa, cómo se lee y DÓNDE comprobarlo en las
+ * cuentas; aquí sólo salía el chip y el mensaje. Se abre tocando, que es el
+ * único afordance sin ratón.
+ */
+function FlagCard({
+  flag,
+  ficha,
+}: {
+  flag: ReturnType<typeof groupFlags>[number];
+  ficha: ReturnType<ScoreHelpIndex['flag']>;
+}) {
+  const [open, setOpen] = useState(false);
+  const tone =
+    flag.severity === 'red'
+      ? { fg: colors.danger, bg: colors.dangerSoft }
+      : flag.severity === 'amber'
+        ? { fg: colors.warning, bg: colors.warningSoft }
+        : { fg: colors.textMuted, bg: colors.surfaceMuted };
+  return (
+    <Pressable
+      style={{ gap: 2 }}
+      disabled={!ficha}
+      accessibilityRole={ficha ? 'button' : undefined}
+      accessibilityLabel={ficha ? `Qué significa esta bandera` : undefined}
+      onPress={() => setOpen((v) => !v)}
+    >
+      <Text
+        style={[styles.chip, { color: tone.fg, backgroundColor: tone.bg, alignSelf: 'flex-start' }]}
+      >
+        {FLAG_SEVERITY_LABEL[flag.severity]}
+        {ficha ? ' ⓘ' : ''}
+      </Text>
+      {flag.messages.map((message) => (
+        <Text key={message} style={styles.flagText}>
+          {message}
+        </Text>
+      ))}
+      {open && ficha ? (
+        <View style={{ gap: 4, marginTop: 4 }}>
+          <Text style={styles.scoreHelp}>{ficha.what}</Text>
+          <Text style={styles.scoreHelp}>Por qué importa: {ficha.why}</Text>
+          <Text style={styles.scoreHelp}>Cómo se lee: {ficha.reading}</Text>
+          <Text style={styles.scoreHelp}>Dónde comprobarlo: {ficha.how_to_verify}</Text>
+        </View>
+      ) : null}
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
+  profileHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  profileBadge: {
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    overflow: 'hidden',
+  },
+  ruleTitle: {
+    color: colors.textSubtle,
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.semibold,
+    marginTop: 2,
+  },
+  rule: { fontSize: fontSize.xs, lineHeight: 17 },
+  blocking: { color: colors.warning, fontSize: fontSize.xs, lineHeight: 17, marginTop: spacing.xs },
+  sentence: { color: colors.text, fontSize: fontSize.sm, lineHeight: 20, marginTop: 2 },
+  scopeTerm: { color: colors.text, fontWeight: fontWeight.semibold },
+  stressLabel: { color: colors.textSubtle, fontSize: fontSize.xs },
+  footer: { color: colors.textSubtle, fontSize: 10, lineHeight: 15 },
+  coverageRow: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.sm },
+  coverageLabel: { flex: 1, color: colors.textMuted, fontSize: fontSize.xs },
+  coverageMarks: { color: colors.text, fontSize: fontSize.xs, letterSpacing: 2 },
+  scoreCard: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    gap: 2,
+  },
+  scoreHead: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.sm },
+  scoreLabel: { color: colors.text, fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
+  scoreValue: { fontSize: fontSize.md, fontWeight: fontWeight.bold },
+  scoreThreshold: { color: colors.textSubtle, fontSize: fontSize.xs },
+  scoreHelp: { color: colors.textMuted, fontSize: fontSize.xs, lineHeight: 18, marginTop: 4 },
+  scoreNote: { color: colors.textMuted, fontSize: fontSize.xs, lineHeight: 18 },
+  scoreRow: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.sm },
+  scoreRowLabel: { flex: 1, color: colors.textMuted, fontSize: fontSize.xs },
+  scoreRowValue: { color: colors.text, fontSize: fontSize.xs, fontWeight: fontWeight.semibold },
   card: {
     backgroundColor: colors.surface,
     borderRadius: radius.md,

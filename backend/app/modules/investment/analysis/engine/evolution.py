@@ -59,6 +59,7 @@ from app.modules.investment.analysis.engine.types import (
     Severity,
     StatementSeries,
     ThresholdSpec,
+    item_label,
 )
 from app.modules.investment.enums import ThresholdDirection
 from app.modules.investment.fundamentals.canonical import (
@@ -207,18 +208,19 @@ def growth_of(item: str, current: CanonicalStatement, previous: CanonicalStateme
     before = previous.get(item)
     if now is None or before is None:
         year = previous.fiscal_year if before is None else current.fiscal_year
-        return _Growth(None, f"falta la partida '{item}' en {year}")
+        return _Growth(None, f"el filing de {year} no publica {item_label(item)}")
     if before == ZERO:
         if previous.provenance_of(item) is Provenance.IMPUTED_ZERO:
             return _Growth(
                 None,
-                f"el filing de {previous.fiscal_year} no publica '{item}' y la ingesta lo "
-                "supone cero: no hay variación que medir sobre un dato que no existe",
+                f"el filing de {previous.fiscal_year} no publica "
+                f"{item_label(item)} y la ingesta lo supone cero: no hay "
+                "variación que medir sobre un dato que no existe",
             )
         return _Growth(
             None,
-            f"'{item}' valía cero en {previous.fiscal_year}: no hay variación relativa "
-            "que medir sobre cero",
+            f"{item_label(item)} valía cero en {previous.fiscal_year}: no hay "
+            "variación relativa que medir sobre cero",
         )
     return _Growth((now - before) / abs(before))
 

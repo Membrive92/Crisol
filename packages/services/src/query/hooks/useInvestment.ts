@@ -139,6 +139,26 @@ export function useAnalysisRuns(securityId: string | null) {
   });
 }
 
+/**
+ * La comparación de dos análisis del mismo valor (PHASE-44.24.F).
+ *
+ * Con `base`/`target` a `null` compara los dos últimos. Devuelve 404 cuando no
+ * hay dos, que NO es un error: es «todavía no hay con qué comparar».
+ */
+export function useRunComparison(
+  securityId: string | null,
+  base: string | null = null,
+  target: string | null = null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: queryKeys.investment.compare(securityId ?? '', base, target),
+    queryFn: () => investmentApi.compareRuns(securityId as string, base, target),
+    enabled: Boolean(securityId) && enabled,
+    retry: false,
+  });
+}
+
 export function useAnalysisRun(runId: string | null) {
   return useQuery({
     queryKey: queryKeys.investment.run(runId ?? ''),
@@ -200,6 +220,21 @@ export function useMetricCatalog() {
   return useQuery({
     queryKey: queryKeys.investment.metricCatalog(),
     queryFn: () => investmentApi.getMetricCatalog(),
+    staleTime: 60 * 60_000,
+  });
+}
+
+/**
+ * Las fichas de los scores forenses y los nombres de sus variables.
+ *
+ * Mismo trato que los otros dos catálogos: es definición del engine, no datos
+ * del usuario, así que cuelga de la raíz hermana y no se vuelve a pedir cuando
+ * se invalida el módulo.
+ */
+export function useHelpCatalog() {
+  return useQuery({
+    queryKey: queryKeys.investment.helpCatalog(),
+    queryFn: () => investmentApi.getHelpCatalog(),
     staleTime: 60 * 60_000,
   });
 }

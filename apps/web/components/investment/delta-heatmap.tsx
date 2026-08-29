@@ -1,5 +1,6 @@
 'use client';
 
+import type { CSSProperties } from 'react';
 import { colors, deltaLegend, deltaStep, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
 import type { HorizontalSeries } from '@crisol/types';
 
@@ -58,7 +59,7 @@ export function DeltaHeatmap({
           </caption>
           <thead>
             <tr>
-              <th scope="col" style={{ ...headerCell, textAlign: 'left' }}>
+              <th scope="col" style={{ ...headerCell, ...stickyLabel }}>
                 Magnitud
               </th>
               {years.slice(1).map((year) => (
@@ -71,7 +72,7 @@ export function DeltaHeatmap({
           <tbody>
             {withData.map((row) => (
               <tr key={row.key}>
-                <th scope="row" style={{ ...headerCell, textAlign: 'left', whiteSpace: 'nowrap' }}>
+                <th scope="row" style={{ ...headerCell, ...stickyLabel, whiteSpace: 'nowrap' }}>
                   {row.label}
                 </th>
                 {years.slice(1).map((year) => {
@@ -142,6 +143,20 @@ function formatDelta(yoy: number | null): string {
   });
   return yoy > 0 ? `+${pct}%` : `${pct}%`;
 }
+
+/**
+ * La columna de magnitudes, fija al hacer scroll (igual que en la matriz).
+ * Sin esto, en móvil se perdía la etiqueta de la fila en cuanto se movía la
+ * tabla y los colores quedaban sin nombre.
+ */
+const stickyLabel: CSSProperties = {
+  textAlign: 'left',
+  position: 'sticky',
+  left: 0,
+  backgroundColor: colors.surface,
+  zIndex: 1,
+  borderRight: `1px solid ${colors.border}`,
+};
 
 const headerCell: React.CSSProperties = {
   color: colors.textMuted,

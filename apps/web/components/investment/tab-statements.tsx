@@ -1,6 +1,6 @@
 'use client';
 
-import { spacing } from '@crisol/ui';
+import { REPORT_LEGEND, spacing } from '@crisol/ui';
 import type {
   AnalysisRun,
   CanonicalItemDefinition,
@@ -110,8 +110,8 @@ export function TabStatements({
       ) : null}
       {view === 'weight' && kind === 'income' ? (
         <InlineNotice>
-          El porcentaje común de la cuenta de resultados cubre 12 de las 16 partidas: quedan
-          fuera el resultado antes de impuestos y los tres recuentos de acciones.
+          El porcentaje común de la cuenta de resultados cubre 12 de las 16 partidas: quedan fuera
+          el resultado antes de impuestos y los tres recuentos de acciones.
         </InlineNotice>
       ) : null}
 
@@ -125,23 +125,16 @@ export function TabStatements({
         </CardTitle>
         <div style={{ marginTop: spacing.md }}>
           <YearMatrix
+            marksLegend={REPORT_LEGEND}
             years={years}
             rows={rows}
             verdictYear={verdictYear}
             firstColumnLabel="Partida"
             legend={
-              <>
-                <div>
-                  <strong>—</strong> hueco: el filing no publica el concepto. No es un cero.
-                </div>
-                <div>
-                  <strong>·</strong> cero imputado · <strong>†</strong> derivada de otras
-                  partidas · <strong>≈</strong> proxy estimado
-                </div>
-                <div>
-                  <strong>•</strong> ejercicio que alimenta el dictamen
-                </div>
-              </>
+              <div>
+                Un hueco en un estado es <strong>ausencia</strong> en el filing, no un cero: si el
+                emisor no publica el concepto, la app no se lo inventa.
+              </div>
             }
           />
         </div>

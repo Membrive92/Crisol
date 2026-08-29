@@ -1,7 +1,9 @@
 import type {
   AnalysisRun,
   AnalysisRunListResponse,
+  RunDiff,
   CanonicalItemCatalogResponse,
+  HelpCatalogResponse,
   CanonicalItemDefinition,
   CorporateAction,
   CorporateActionCreateRequest,
@@ -114,6 +116,26 @@ export const investmentApi = {
     return response.data;
   },
 
+  /**
+   * Qué ha cambiado entre dos análisis (PHASE-44.24.F).
+   *
+   * Sin ids, el servidor compara los dos últimos: es la pregunta por defecto.
+   */
+  async compareRuns(
+    securityId: string,
+    base?: string | null,
+    target?: string | null,
+  ): Promise<RunDiff> {
+    const params = new URLSearchParams();
+    if (base) params.set('base', base);
+    if (target) params.set('target', target);
+    const query = params.toString();
+    const response = await apiClient.get<RunDiff>(
+      `/investment/analysis/${securityId}/runs/compare${query ? `?${query}` : ''}`,
+    );
+    return response.data;
+  },
+
   async getRun(runId: string): Promise<AnalysisRun> {
     const response = await apiClient.get<AnalysisRun>(`/investment/analysis/runs/${runId}`);
     return response.data;
@@ -148,6 +170,15 @@ export const investmentApi = {
   /** El catálogo de las 52 métricas del engine. Estático: se cachea largo. */
   async getMetricCatalog(): Promise<MetricCatalogResponse> {
     const response = await apiClient.get<MetricCatalogResponse>('/investment/analysis/metrics');
+    return response.data;
+  },
+
+  /**
+   * Los textos de ayuda que el catálogo de métricas no lleva: hoy, la ficha de
+   * cada score forense y el nombre de cada una de sus variables. Estático.
+   */
+  async getHelpCatalog(): Promise<HelpCatalogResponse> {
+    const response = await apiClient.get<HelpCatalogResponse>('/investment/analysis/help');
     return response.data;
   },
 

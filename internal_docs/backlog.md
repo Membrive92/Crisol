@@ -414,6 +414,22 @@ Playbook paso a paso en
 
 ---
 
+### Inversión — follow-ups de la auditoría UX (PHASE-44.24.H)
+
+- **Tablas de inversión → `DataTable`**: la de cartera es plana y migrable; la
+  matriz y la tabla de señales tienen columna fija y filas agrupadas que
+  `DataTable` no modela. Migrar sólo una dejaría dos patrones en el módulo.
+- **Ir de una posición de la cartera a su análisis**: hoy hay que pasar por el
+  buscador. Es navegación nueva (un enlace por fila a
+  `/investments/analysis/<id>`), no un enlace roto.
+- **Tarjeta del módulo Inversión en el dashboard**: sólo hay Finanzas y Deuda.
+  Exige un `ModuleSummary` del backend (veredicto + número + link), que no
+  existe para inversión.
+- **Elegir la BASE de la comparación en móvil**: se compara contra el anterior
+  y se dice; dos selectores no caben.
+- **`security-search.tsx`**: sus dos botones siguen a mano; van con la revisión
+  del buscador.
+
 ## Backend y dominio
 
 ### Auth

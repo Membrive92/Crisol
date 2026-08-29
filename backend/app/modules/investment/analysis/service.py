@@ -12,6 +12,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +29,7 @@ from app.modules.investment.analysis.engine import (
     synthesis,
 )
 from app.modules.investment.analysis.engine.catalog import definition_for
+from app.modules.investment.analysis.engine.sector_profiles import resolve_thresholds
 from app.modules.investment.analysis.engine.stress import StressParams
 from app.modules.investment.analysis.engine.types import (
     MetricResult,
@@ -41,6 +43,13 @@ from app.modules.investment.analysis.engine.valuation import (
 )
 from app.modules.investment.analysis.engine.version import ENGINE_VERSION
 from app.modules.investment.analysis.models import AnalysisRun
+from app.modules.investment.analysis.presentation import (
+    ReportLayer,
+    RunDiff,
+    build_report,
+    diff_runs,
+    profile_of,
+)
 from app.modules.investment.analysis.serialization import to_json_safe
 from app.modules.investment.catalog.capabilities import capabilities_for
 from app.modules.investment.catalog.models import Security
@@ -379,3 +388,122 @@ async def compute_security_valuation(
         price_is_override=False,
         provider_status=quoted.provider_status,
     )
+
+
+# ── La capa de lectura, adjuntada al servir (PHASE-44.24.C) ───────────
+
+
+async def build_report_layer(db: AsyncSession, run: AnalysisRun) -> ReportLayer:
+    """La capa de lectura de un run: distancia, orden y procedencia.
+
+    Vive AQUÍ y no en el router porque necesita cargar el `Security` y resolver
+    los umbrales de hoy — dos cosas impuras que la capa de presentación no puede
+    hacer por sí misma, y que por eso recibe por parámetro.
+
+    La resolución de hoy sólo se usa para DERIVAR la procedencia de los runs que
+    no la registran (motor < 1.7.0). Los posteriores la traen dentro y no se
+    infiere nada.
+    """
+    security = await get_security(db, run.security_id)
+    profile = profile_of(
+        security.sector, is_financial=security.is_financial, is_reit=security.is_reit
+    )
+    return build_report(
+        verdict=run.verdict or {},
+        thresholds_used=run.thresholds_used,
+        profile=profile,
+        profile_thresholds=resolve_thresholds(
+            security.sector, security.accounting_std, is_financial=security.is_financial
+        ),
+    )
+
+
+async def compare_runs(
+    db: AsyncSession,
+    security_id: uuid.UUID,
+    user_id: uuid.UUID,
+    base_id: uuid.UUID | None,
+    target_id: uuid.UUID | None,
+) -> RunDiff:
+    """Compara dos análisis del mismo valor.
+
+    Sin ids, compara los dos ÚLTIMOS: es la pregunta por defecto («¿qué ha
+    cambiado desde la última vez?»). 404 si no hay dos.
+
+    Las reexpresiones se acotan a la ventana ENTRE las dos fechas: una
+    reexpresión anterior al primer análisis ya está dentro de los dos y no
+    explica nada de lo que se mueve.
+    """
+    runs = sorted(await repo.list_runs(db, security_id, user_id), key=lambda r: r.run_date)
+    if len(runs) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Hacen falta dos análisis de este valor para poder compararlos.",
+        )
+    by_id = {r.id: r for r in runs}
+
+    def _own(run_id: uuid.UUID) -> AnalysisRun:
+        run = by_id.get(run_id)
+        if run is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Ese análisis no pertenece a este valor.",
+            )
+        return run
+
+    # Las CUATRO combinaciones, explícitas. La versión anterior sólo distinguía
+    # «los dos ids» de «ninguno», así que una selección parcial —que es lo que
+    # manda móvil, y web mientras no se elija base— caía en «los dos últimos» y
+    # devolvía la comparación de OTROS dos runs, con sus fechas en la cabecera.
+    if target_id is not None and base_id is not None:
+        base, target = _own(base_id), _own(target_id)
+    elif target_id is not None:
+        target = _own(target_id)
+        anteriores = [r for r in runs if r.run_date < target.run_date]
+        if not anteriores:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Ese análisis es el más antiguo: no hay ninguno anterior con el que compararlo.",
+            )
+        base = anteriores[-1]
+    elif base_id is not None:
+        base = _own(base_id)
+        target = runs[-1]
+    else:
+        base, target = runs[-2], runs[-1]
+
+    # La guarda va DESPUÉS de resolver las cuatro ramas, no dentro de una.
+    # Estaba sólo en la de `base` suelto, así que pedir el mismo id como base y
+    # como target devolvía un diff vacío — y la pantalla lo anuncia como «nada
+    # se ha movido», que es cierto y engañoso a la vez.
+    if base.id == target.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No se puede comparar un análisis consigo mismo.",
+        )
+
+    # Base es SIEMPRE el más antiguo, elija el usuario el orden que elija: un
+    # diff al revés diría que un score «mejoró» cuando empeoró.
+    if base.run_date > target.run_date:
+        base, target = target, base
+
+    restatements = await repo.list_restatements_between(
+        db, security_id, base.run_date, target.run_date
+    )
+    return diff_runs(_run_payload(base), _run_payload(target), restatements)
+
+
+def _run_payload(run: AnalysisRun) -> dict[str, Any]:
+    """El run como diccionario plano, que es lo que la capa PURA sabe leer."""
+    return {
+        "id": run.id,
+        "run_date": run.run_date,
+        "engine_version": run.engine_version,
+        "thresholds_version": run.thresholds_version,
+        "years_covered": list(run.years_covered),
+        "scores_detail": run.scores_detail,
+        "evolution": run.evolution,
+        "dividend_analysis": run.dividend_analysis,
+        "flags": run.flags,
+        "verdict": run.verdict,
+    }

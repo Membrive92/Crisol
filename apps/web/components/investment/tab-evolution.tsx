@@ -1,13 +1,13 @@
 'use client';
 
-import { colors, fontSize, spacing } from '@crisol/ui';
+import { colors, fontSize, REPORT_LEGEND, spacing } from '@crisol/ui';
 import type { AnalysisRun } from '@crisol/types';
 
 import { Card, CardTitle } from '@/components/ui/card';
 
 import { CommonSizeDrift } from './common-size-drift';
 import { DeltaHeatmap } from './delta-heatmap';
-import { InlineNotice } from './degraded-panel';
+import { DegradedPanel, InlineNotice } from './degraded-panel';
 import { FlagList } from './flag-list';
 import { formatMetricValue, formatPercentDelta } from '@crisol/ui';
 import { metricRow, type MetricRowOptions } from '@crisol/ui';
@@ -18,6 +18,8 @@ export interface TabEvolutionProps {
   run: AnalysisRun;
   index: MetricIndex;
   catalog: CatalogIndex;
+  /** Fila a la que se ha llegado desde el veredicto (PHASE-44.24.C.4). */
+  highlightKey?: string | undefined;
 }
 
 /**
@@ -26,11 +28,25 @@ export interface TabEvolutionProps {
  * Inventarios contra ventas, ventas planas, dilución… el cuaderno los enuncia
  * como cosas a mirar; el motor los tiene como cruces (C1-C8) que saltan solos.
  */
-export function TabEvolution({ run, index, catalog }: TabEvolutionProps) {
+export function TabEvolution({ run, index, catalog, highlightKey }: TabEvolutionProps) {
   const evolution = run.evolution;
   const series = evolution.horizontal ?? [];
   const years = run.years_covered;
   const options: MetricRowOptions = { index, catalog, thresholdsUsed: run.thresholds_used };
+
+  // Un run de motor anterior (el de MCD es de 1.0.0) no trae la serie
+  // horizontal: `horizontal` es AUSENTE, no vacío. Antes se pintaba una tabla
+  // con cabecera de años y cero filas, sin decir por qué — y se leía como
+  // «esta empresa no tiene evolución».
+  if (evolution.horizontal === undefined) {
+    return (
+      <DegradedPanel
+        title="Este análisis no tiene serie de evolución"
+        reason={`Lo calculó el motor ${run.engine_version}, que no emitía las variaciones año a año. No es un hueco en las cuentas de la empresa: es una sección que ese motor no producía.`}
+        consequence="Vuelve a analizar el valor para ver la evolución con el motor actual."
+      />
+    );
+  }
 
   const seriesRows: MatrixRow[] = series.map((serie) => ({
     key: serie.key,
@@ -48,7 +64,6 @@ export function TabEvolution({ run, index, catalog }: TabEvolutionProps) {
     }),
   }));
 
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg }}>
       <Card>
@@ -57,12 +72,18 @@ export function TabEvolution({ run, index, catalog }: TabEvolutionProps) {
           <InlineNotice>
             La <strong>caja libre de mantenimiento</strong> descuenta sólo la inversión de
             reposición (el mínimo entre el capex y la amortización), no el capex entero: es la que
-            tu cuaderno marca como recomendada frente a la puritana, porque no castiga a una
-            empresa por invertir en crecer. Al ser una estimación —el desglose no se publica— va
-            marcada como tal. El <strong>circulante operativo</strong> es tu working capital:
-            existencias más cobros menos pagos, sin efectivo.
+            tu cuaderno marca como recomendada frente a la puritana, porque no castiga a una empresa
+            por invertir en crecer. Al ser una estimación —el desglose no se publica— va marcada
+            como tal. El <strong>circulante operativo</strong> es tu working capital: existencias
+            más cobros menos pagos, sin efectivo.
           </InlineNotice>
-          <YearMatrix years={years} rows={seriesRows} firstColumnLabel="Magnitud" />
+          <YearMatrix
+            marksLegend={REPORT_LEGEND}
+            highlightKey={highlightKey}
+            years={years}
+            rows={seriesRows}
+            firstColumnLabel="Magnitud"
+          />
         </div>
       </Card>
 
@@ -93,10 +114,12 @@ export function TabEvolution({ run, index, catalog }: TabEvolutionProps) {
           <InlineNotice>
             La estabilidad del margen mide predictibilidad, y la predictibilidad ES seguridad: un
             margen errático convierte cualquier cobertura de dividendo en una lotería. El
-            crecimiento sostenible es lo que la empresa puede crecer autofinanciándose; si el
-            real lo supera de forma sostenida, el crecimiento se está pagando fuera.
+            crecimiento sostenible es lo que la empresa puede crecer autofinanciándose; si el real
+            lo supera de forma sostenida, el crecimiento se está pagando fuera.
           </InlineNotice>
           <YearMatrix
+            marksLegend={REPORT_LEGEND}
+            highlightKey={highlightKey}
             years={years}
             rows={[metricRow('E3', options), metricRow('E4', options)]}
             firstColumnLabel="Métrica"
@@ -107,12 +130,10 @@ export function TabEvolution({ run, index, catalog }: TabEvolutionProps) {
       <Card>
         <CardTitle size="sm">Cruces detectados</CardTitle>
         <div style={{ marginTop: spacing.md, display: 'grid', gap: spacing.md }}>
-          <p
-            style={{ margin: 0, color: colors.textMuted, fontSize: fontSize.sm, lineHeight: 1.6 }}
-          >
+          <p style={{ margin: 0, color: colors.textMuted, fontSize: fontSize.sm, lineHeight: 1.6 }}>
             Aquí es donde viven los «Vigilar» de tu cuaderno: cobros creciendo por encima de las
-            ventas, inventario que se acumula, dilución sostenida, retorno al accionista pagado
-            con deuda.
+            ventas, inventario que se acumula, dilución sostenida, retorno al accionista pagado con
+            deuda.
           </p>
           <FlagList
             flags={evolution.flags ?? []}

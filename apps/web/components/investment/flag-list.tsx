@@ -3,8 +3,10 @@
 import { useState } from 'react';
 
 import { colors, fontSize, fontWeight, groupFlags, radius, spacing } from '@crisol/ui';
-import type { EngineFlag, FlagSeverity } from '@crisol/types';
-import type { GroupedFlag } from '@crisol/ui';
+import type { EngineFlag, FlagHelp, FlagSeverity } from '@crisol/types';
+import type { GroupedFlag, ScoreHelpIndex } from '@crisol/ui';
+
+import { HelpButton, helpTextStyle } from './help-toggle';
 
 const SEVERITY: Record<FlagSeverity, { label: string; fg: string; bg: string }> = {
   red: { label: 'Grave', fg: colors.danger, bg: colors.dangerSoft },
@@ -16,10 +18,20 @@ export interface FlagListProps {
   flags: EngineFlag[];
   /** Qué decir cuando no hay ninguna. */
   emptyLabel?: string;
+  /**
+   * Fichas del motor. Sin ellas la tarjeta enseña el mensaje de la bandera y
+   * nada más: el usuario sabe QUÉ ha saltado y no por qué le importa ni dónde
+   * comprobarlo (PHASE-44.24.A.2).
+   */
+  help?: ScoreHelpIndex | undefined;
 }
 
 /** Las banderas del motor, con su mensaje en español y su evidencia desplegable. */
-export function FlagList({ flags, emptyLabel = 'Ninguna bandera encendida.' }: FlagListProps) {
+export function FlagList({
+  flags,
+  emptyLabel = 'Ninguna bandera encendida.',
+  help,
+}: FlagListProps) {
   const grouped = groupFlags(flags);
   if (grouped.length === 0) {
     return (
@@ -29,14 +41,15 @@ export function FlagList({ flags, emptyLabel = 'Ninguna bandera encendida.' }: F
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
       {grouped.map((flag) => (
-        <FlagCard key={flag.key} flag={flag} />
+        <FlagCard key={flag.key} flag={flag} ficha={help?.flag(flag.key)} />
       ))}
     </div>
   );
 }
 
-function FlagCard({ flag }: { flag: GroupedFlag }) {
+function FlagCard({ flag, ficha }: { flag: GroupedFlag; ficha?: FlagHelp | undefined }) {
   const [open, setOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const severity = SEVERITY[flag.severity];
   const occurrences = flag.evidence.length;
 
@@ -72,6 +85,17 @@ function FlagCard({ flag }: { flag: GroupedFlag }) {
         >
           {severity.label}
           {flag.severity === 'info' ? ' · no puntúa en el veredicto' : ''}
+          {ficha ? (
+            <>
+              {' '}
+              <HelpButton
+                label={ficha.label}
+                help={ficha.what}
+                open={helpOpen}
+                onToggle={() => setHelpOpen((v) => !v)}
+              />
+            </>
+          ) : null}
         </span>
         {occurrences > 1 ? (
           <span style={{ color: colors.textMuted, fontSize: fontSize.xs }}>
@@ -84,6 +108,26 @@ function FlagCard({ flag }: { flag: GroupedFlag }) {
           {message}
         </p>
       ))}
+      {/* Los tres campos separados: «por qué importa» se lee una vez y «dónde
+          comprobarlo» es lo que se vuelve a consultar con las cuentas delante. */}
+      {helpOpen && ficha ? (
+        <div style={{ ...helpTextStyle, borderRadius: radius.sm, borderBottom: 'none' }}>
+          <p style={{ margin: 0 }}>{ficha.what}</p>
+          <p style={{ margin: `${spacing.xs}px 0 0` }}>
+            <strong style={{ color: colors.text }}>Por qué importa: </strong>
+            {ficha.why}
+          </p>
+          <p style={{ margin: `${spacing.xs}px 0 0` }}>
+            <strong style={{ color: colors.text }}>Cómo se lee: </strong>
+            {ficha.reading}
+          </p>
+          <p style={{ margin: `${spacing.xs}px 0 0` }}>
+            <strong style={{ color: colors.text }}>Dónde comprobarlo: </strong>
+            {ficha.how_to_verify}
+          </p>
+        </div>
+      ) : null}
+
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

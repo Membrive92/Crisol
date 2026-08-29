@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react';
 
-import { colors, fontSize, fontWeight, radius, spacing } from '@crisol/ui';
+import { colors, fontSize, fontWeight, radius, spacing, layout } from '@crisol/ui';
 
 export interface DegradedPanelProps {
   title: string;
@@ -46,11 +46,27 @@ export function DegradedPanel({ title, reason, consequence, children }: Degraded
       >
         {title}
       </p>
-      <p style={{ margin: 0, color: colors.textMuted, fontSize: fontSize.sm, lineHeight: 1.5 }}>
+      <p
+        style={{
+          margin: 0,
+          maxWidth: layout.prose,
+          color: colors.textMuted,
+          fontSize: fontSize.sm,
+          lineHeight: 1.5,
+        }}
+      >
         {reason}
       </p>
       {consequence ? (
-        <p style={{ margin: 0, color: colors.textSubtle, fontSize: fontSize.xs, lineHeight: 1.5 }}>
+        <p
+          style={{
+            margin: 0,
+            maxWidth: layout.prose,
+            color: colors.textSubtle,
+            fontSize: fontSize.xs,
+            lineHeight: 1.5,
+          }}
+        >
           {consequence}
         </p>
       ) : null}
@@ -59,12 +75,20 @@ export function DegradedPanel({ title, reason, consequence, children }: Degraded
   );
 }
 
-/** Aviso en línea, para cabeceras de sección (avisos de cuadre, convenciones). */
+/**
+ * Aviso en línea, para cabeceras de sección (avisos de cuadre, convenciones).
+ *
+ * Acotado a `layout.prose` y alineado al inicio: es el bloque de prosa que
+ * encabeza CADA pestaña del informe, y sin el límite era una banda gris de
+ * borde a borde con dos líneas de 2.000 px.
+ */
 export function InlineNotice({ children }: { children: ReactNode }) {
   return (
     <p
       style={{
         margin: 0,
+        maxWidth: layout.prose,
+        alignSelf: 'flex-start',
         color: colors.textMuted,
         fontSize: fontSize.xs,
         lineHeight: 1.5,

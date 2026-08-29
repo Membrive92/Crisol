@@ -126,3 +126,27 @@ describe('TabRatios · DuPont de un análisis de un motor anterior', () => {
     expect(screen.getAllByText('no verificable').length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * El CABLEADO de `highlightKey` hasta una pestaña real (revisión adversarial):
+ * `YearMatrix` aislada ya se probaba; que la pestaña pase el valor a sus
+ * matrices, no.
+ */
+describe('TabRatios · la fila a la que se ha llegado', () => {
+  it('marca la fila de `highlightKey` en la familia abierta', () => {
+    const run = makeRun([]);
+    const { container } = render(
+      <TabRatios
+        run={run}
+        index={buildMetricIndex([], run.years_covered)}
+        catalog={buildCatalogIndex([])}
+        sub="liquidez"
+        onSubChange={vi.fn()}
+        highlightKey="L1"
+      />,
+    );
+    const marcada = container.querySelector('[aria-current="true"]');
+    expect(marcada).not.toBeNull();
+    expect(marcada?.textContent).toContain('L1');
+  });
+});

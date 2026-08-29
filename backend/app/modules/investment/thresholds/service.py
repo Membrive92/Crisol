@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -69,8 +69,37 @@ async def load_thresholds(
         # del sector financiero, cuya fila de sector no sabe que es un banco).
         if spec.applies and not current.applies:
             continue
+        # PHASE-44.24.M — el seed es un ESPEJO de lo que el motor resuelve, así
+        # que una fila que coincide no aporta nada y conserva la procedencia del
+        # perfil. Una que difiere es una recalibración hecha a mano —para lo que
+        # la tabla existe— y hasta ahora era indistinguible del resto.
+        #
+        # La comparación es NUMÉRICA (`Decimal`), no textual: la columna es
+        # `Numeric(12, 6)`, así que la fila trae `Decimal('0.600000')` donde el
+        # motor tiene `Decimal('0.6')` — iguales como número y distintas como
+        # cadena. Compararlas como texto marcaría TODA fila sembrada como
+        # recalibrada.
+        spec = replace(spec, origin="table" if _differs(spec, current) else current.origin)
         resolved[row.metric_key] = spec
     return resolved
+
+
+def _differs(row: ThresholdSpec, resolved: ThresholdSpec) -> bool:
+    """Si una fila de la tabla dice algo distinto de lo que el motor resuelve.
+
+    Compara los cuatro cortes como NÚMERO —`Decimal('0.600000') == Decimal('0.6')`
+    es cierto, y como cadena no lo sería— más la dirección, la variante y la
+    aplicabilidad, que son las otras tres formas de recalibrar sin mover un corte.
+    """
+    return (
+        row.direction != resolved.direction
+        or row.low_alarm != resolved.low_alarm
+        or row.low_ok != resolved.low_ok
+        or row.high_ok != resolved.high_ok
+        or row.high_alarm != resolved.high_alarm
+        or row.model_variant != resolved.model_variant
+        or row.applies != resolved.applies
+    )
 
 
 def _fmt(value: Decimal | None) -> str | None:

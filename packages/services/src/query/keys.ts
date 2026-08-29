@@ -210,6 +210,11 @@ export const queryKeys = {
     job: (id: string) => [...queryKeys.investment.all, 'job', id] as const,
     runs: (securityId: string) => [...queryKeys.investment.all, 'runs', securityId] as const,
     run: (id: string) => [...queryKeys.investment.all, 'run', id] as const,
+    /** La comparación de dos análisis (PHASE-44.24.F). Bajo `investment.all`
+     *  para que `useRunAnalysis` la invalide al reejecutar: si no, el
+     *  comparador seguiría enseñando el diff de antes del rerun. */
+    compare: (securityId: string, base: string | null, target: string | null) =>
+      [...queryKeys.investment.all, 'compare', securityId, base ?? '', target ?? ''] as const,
     latestRun: (securityId: string) =>
       [...queryKeys.investment.all, 'run', 'latest', securityId] as const,
     // El precio entra en la key: cambiar el precio simulado es OTRA consulta,
@@ -222,6 +227,7 @@ export const queryKeys = {
     // que una invalidación del módulo no debe volver a pedirlos.
     metricCatalog: () => ['investment-catalog', 'metrics'] as const,
     canonicalItems: () => ['investment-catalog', 'items'] as const,
+    helpCatalog: () => ['investment-catalog', 'help'] as const,
     lots: (securityId?: string) =>
       [...queryKeys.investment.all, 'lots', securityId ?? 'all'] as const,
     sales: () => [...queryKeys.investment.all, 'sales'] as const,

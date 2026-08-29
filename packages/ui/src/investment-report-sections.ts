@@ -158,17 +158,114 @@ export const VALUATION_COMPANIONS: readonly string[] = ['V6', 'V7'];
  * que móvil, que renderiza estrictamente desde aquí, no las pintaba nunca
  * (PHASE-44.20).
  */
+/** La clave de sub-sección de la pestaña DuPont, que no es una familia. */
+export const RATIOS_SUB_DUPONT = 'dupont';
+
+/** Dónde se pinta un bloque de métricas: pestaña y, si la tiene, sub-sección. */
+export interface SectionPlacement {
+  metrics: readonly string[];
+  tab: string;
+  sub: string | null;
+}
+
+/**
+ * El registro ÚNICO de dónde vive cada métrica (PHASE-44.24.C.4).
+ *
+ * De aquí se derivan las dos cosas que antes se enumeraban por separado: qué
+ * claves puede pintar la pantalla (`allScreenMetricKeys`) y en qué pestaña está
+ * cada una (`locateMetric`). Con dos enumeraciones, quitar una métrica de una
+ * lista la quitaría también del dominio del test que la comprueba, y el test
+ * seguiría verde sin haber preguntado por ella — el defecto exacto que una
+ * revisión adversarial encontró en el plan de esta fase.
+ *
+ * El orden importa: la primera coincidencia gana. `R4`, `A4` y `DUPONT_EM`
+ * están a la vez en una familia de ratios y en las descomposiciones DuPont, y
+ * el destino correcto es la familia, que es donde está su serie completa.
+ */
+/**
+ * El `id` de la card de escenarios de stress en el veredicto.
+ *
+ * Declarado aquí y no en la card, porque quien lo consume es el registro de
+ * destinos: la señal «Escenario de stress» no es una fila, es esa card.
+ */
+export const STRESS_ANCHOR = 'stress-scenarios';
+
+export const SECTION_PLACEMENT: readonly SectionPlacement[] = [
+  ...RATIO_FAMILIES.map((family) => ({ metrics: family.metrics, tab: 'ratios', sub: family.key })),
+  ...EVOLUTION_METRICS.map((section) => ({
+    metrics: section.metrics,
+    tab: 'evolucion',
+    sub: null,
+  })),
+  { metrics: FORENSIC_KEYS, tab: 'forense', sub: null },
+  ...DIVIDEND_BLOCKS.map((block) => ({
+    metrics: block.metrics,
+    tab: 'dividendo',
+    sub: block.key,
+  })),
+  { metrics: TRAJECTORY_SECTION.metrics, tab: 'dividendo', sub: TRAJECTORY_SECTION.key },
+  ...DUPONT_SECTIONS.map((section) => ({
+    metrics: section.metrics,
+    tab: 'ratios',
+    sub: RATIOS_SUB_DUPONT,
+  })),
+  { metrics: VALUATION_ORDER, tab: 'valoracion', sub: null },
+  { metrics: VALUATION_COMPANIONS, tab: 'valoracion', sub: null },
+];
+
+/** Dónde vive una señal del veredicto, para enlazarla. */
+export interface MetricPlacement {
+  tab: string;
+  sub: string | null;
+  /**
+   * La fila que hay que resaltar al llegar, cuando NO es la propia clave.
+   *
+   * Una señal derivada («tendencia de la caja libre») no es una fila de
+   * ninguna matriz: la fila que la explica es la serie de la que sale.
+   */
+  highlight?: string;
+  /**
+   * Un ancla dentro de la pestaña, para las señales que no son una fila sino
+   * una CARD (los escenarios de stress). Se llega con `#ancla`, sin recargar.
+   */
+  anchor?: string;
+}
+
+/**
+ * Las señales que la síntesis COMPONE y que no son métricas del catálogo.
+ *
+ * El gate del backend no las ve —no están en `ALL_METRIC_KEYS`— así que si se
+ * quedaran sin sitio nadie lo diría, y el enlace del veredicto llevaría a
+ * ninguna parte. Cada una dice ADÓNDE exactamente: la primera versión mandaba
+ * `fcf_trend` a Evolución «a secas», y el usuario aterrizaba arriba de la
+ * pestaña sin ninguna fila marcada.
+ */
+const DERIVED_PLACEMENT: Readonly<Record<string, MetricPlacement>> = {
+  fcf_trend: { tab: 'evolucion', sub: null, highlight: 'fcf_cfo' },
+  stress: { tab: 'veredicto', sub: 'dictamen', anchor: STRESS_ANCHOR },
+};
+
+/**
+ * En qué pestaña vive una señal, o `null` si no vive en ninguna.
+ *
+ * Las banderas no son métricas ni filas: su sitio es la lista de banderas del
+ * propio veredicto, donde el usuario ya está. La versión anterior las mandaba
+ * «al veredicto» y eso producía un enlace a la MISMA pestaña que recargaba la
+ * página, cerraba el desglose que se estaba leyendo y no resaltaba nada —
+ * veintiuna señales que parecían enlaces y no llevaban a ningún sitio. Sin
+ * destino no hay enlace: la fila se pinta como texto.
+ */
+export function locateMetric(key: string): MetricPlacement | null {
+  const derived = DERIVED_PLACEMENT[key];
+  if (derived) return derived;
+  const placement = SECTION_PLACEMENT.find((section) => section.metrics.includes(key));
+  if (placement) return { tab: placement.tab, sub: placement.sub };
+  return null;
+}
+
 export function allScreenMetricKeys(): ReadonlySet<string> {
   const keys = new Set<string>();
-  const add = (section: ReportSection) => section.metrics.forEach((k) => keys.add(k));
-  RATIO_FAMILIES.forEach(add);
-  DIVIDEND_BLOCKS.forEach(add);
-  DUPONT_SECTIONS.forEach(add);
-  EVOLUTION_METRICS.forEach(add);
-  add(TRAJECTORY_SECTION);
-  FORENSIC_KEYS.forEach((k) => keys.add(k));
-  VALUATION_ORDER.forEach((k) => keys.add(k));
-  VALUATION_COMPANIONS.forEach((k) => keys.add(k));
+  SECTION_PLACEMENT.forEach((section) => section.metrics.forEach((k) => keys.add(k)));
   return keys;
 }
 

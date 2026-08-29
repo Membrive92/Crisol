@@ -1,6 +1,6 @@
 'use client';
 
-import { colors, fontSize, FORENSIC_KEYS, spacing } from '@crisol/ui';
+import { colors, fontSize, FORENSIC_KEYS, REPORT_LEGEND, spacing } from '@crisol/ui';
 import type { AnalysisRun, Security } from '@crisol/types';
 
 import { Card, CardTitle } from '@/components/ui/card';
@@ -8,7 +8,7 @@ import { Card, CardTitle } from '@/components/ui/card';
 import { DegradedPanel, InlineNotice } from './degraded-panel';
 import { FlagList } from './flag-list';
 import { metricGapLegend, metricRow, type MetricRowOptions } from '@crisol/ui';
-import type { CatalogIndex, MetricIndex } from '@crisol/ui';
+import type { CatalogIndex, MetricIndex, ScoreHelpIndex } from '@crisol/ui';
 import { ScoreBreakdownCard } from './score-breakdown-card';
 import { YearMatrix } from './year-matrix';
 
@@ -17,6 +17,10 @@ export interface TabForensicProps {
   index: MetricIndex;
   catalog: CatalogIndex;
   security: Security | undefined;
+  /** Fichas de los scores y nombres de sus variables (PHASE-44.24.A). */
+  help?: ScoreHelpIndex | undefined;
+  /** Fila a la que se ha llegado desde el veredicto (PHASE-44.24.C.4). */
+  highlightKey?: string | undefined;
 }
 
 /**
@@ -24,7 +28,14 @@ export interface TabForensicProps {
  * de manipulación contable y de riesgo de quiebra, todos *book-based* (ninguno
  * depende de la cotización, para que un análisis viejo se pueda reejecutar).
  */
-export function TabForensic({ run, index, catalog, security }: TabForensicProps) {
+export function TabForensic({
+  run,
+  index,
+  catalog,
+  security,
+  help,
+  highlightKey,
+}: TabForensicProps) {
   const forensic = run.scores_detail.forensic;
   const years = run.years_covered;
   const verdictYear = years[years.length - 1];
@@ -39,11 +50,6 @@ export function TabForensic({ run, index, catalog, security }: TabForensicProps)
       />
     );
   }
-
-  const breakdownFor = (key: string) =>
-    (forensic.breakdowns ?? []).find(
-      (b) => b.key === key && b.fiscal_year === verdictYear,
-    );
 
   // Derivada del run, no escrita a mano. La leyenda anterior afirmaba que sólo
   // el primer ejercicio se queda sin M-Score ni F-Score «porque comparan contra
@@ -75,10 +81,13 @@ export function TabForensic({ run, index, catalog, security }: TabForensicProps)
               key={key}
               metricKey={key}
               metric={verdictYear === undefined ? undefined : index.get(key, verdictYear)}
-              breakdown={breakdownFor(key)}
+              breakdowns={forensic.breakdowns}
+              year={verdictYear}
+              index={index}
               catalog={catalog}
               thresholdsUsed={run.thresholds_used}
               variant={key === 'z_score' ? run.z_variant : undefined}
+              help={help}
             />
           ))}
         </div>
@@ -88,6 +97,8 @@ export function TabForensic({ run, index, catalog, security }: TabForensicProps)
         <CardTitle size="sm">Evolución de los scores</CardTitle>
         <div style={{ marginTop: spacing.md }}>
           <YearMatrix
+            marksLegend={REPORT_LEGEND}
+            highlightKey={highlightKey}
             years={years}
             rows={FORENSIC_KEYS.map((key) => metricRow(key, options))}
             verdictYear={verdictYear}
@@ -115,10 +126,7 @@ export function TabForensic({ run, index, catalog, security }: TabForensicProps)
       <Card>
         <CardTitle size="sm">Banderas forenses</CardTitle>
         <div style={{ marginTop: spacing.md }}>
-          <FlagList
-            flags={forensic.flags ?? []}
-            emptyLabel="Ninguna bandera forense encendida."
-          />
+          <FlagList flags={forensic.flags ?? []} emptyLabel="Ninguna bandera forense encendida." />
         </div>
       </Card>
     </div>

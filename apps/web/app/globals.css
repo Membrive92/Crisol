@@ -36,7 +36,7 @@
   color-scheme: light;
 }
 
-[data-theme="dark"] {
+[data-theme='dark'] {
   /* Paleta dark refinada: bg azulado oscuro (no negro puro); superficies
      escalonadas; texto a 90/60/40% para jerarquía clara; primario más
      profundo (no neón) para que los CTA filled lleven texto blanco con
@@ -144,18 +144,70 @@ select:focus {
 }
 
 /* Scrollbar dark — la barra blanca sobre fondo oscuro canta (WebKit/Chromium). */
-[data-theme="dark"] ::-webkit-scrollbar {
+[data-theme='dark'] ::-webkit-scrollbar {
   width: 12px;
   height: 12px;
 }
-[data-theme="dark"] ::-webkit-scrollbar-track {
+[data-theme='dark'] ::-webkit-scrollbar-track {
   background: var(--color-background);
 }
-[data-theme="dark"] ::-webkit-scrollbar-thumb {
+[data-theme='dark'] ::-webkit-scrollbar-thumb {
   background: var(--color-border-strong);
   border-radius: 6px;
   border: 3px solid var(--color-background);
 }
-[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+[data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
   background: var(--color-text-subtle);
+}
+
+/* ── Dictamen imprimible (PHASE-44.24.G) ──────────────────────────────
+ *
+ * El informe se lee en pantalla, pero un dictamen se comparte y se archiva. No
+ * había NINGUNA regla de impresión en la app: imprimir sacaba la barra lateral,
+ * las pestañas y los botones, y el contenido con fondo oscuro.
+ *
+ * `data-print="hide"` lo marca el propio componente; nada aquí depende de la
+ * estructura del layout, que cambiaría sin avisar. */
+@media print {
+  /* Fondo blanco y texto negro pase lo que pase con el tema: un dictamen
+     impreso en modo oscuro gasta tinta y no se lee. */
+  :root,
+  [data-theme='dark'] {
+    --color-background: #ffffff;
+    --color-surface: #ffffff;
+    --color-text: #000000;
+    --color-text-muted: #333333;
+    --color-text-subtle: #555555;
+    --color-border: #cccccc;
+  }
+
+  [data-print='hide'] {
+    display: none !important;
+  }
+
+  /* El shell de la app —sidebar, cabecera con las secciones— no es parte del
+     dictamen. Sin esto se imprimían los dos, y el contenido salía desplazado
+     240 px a la derecha por el padding que deja sitio a la sidebar. */
+  [data-app-sidebar],
+  [data-app-header],
+  [data-mobile-backdrop] {
+    display: none !important;
+  }
+  [data-app-main] {
+    padding: 0 !important;
+    min-height: 0 !important;
+  }
+
+  /* Una tarjeta partida entre dos hojas pierde su título. */
+  [data-print='block'] {
+    break-inside: avoid;
+  }
+
+  a[href]::after {
+    content: '';
+  }
+
+  body {
+    background: #ffffff;
+  }
 }

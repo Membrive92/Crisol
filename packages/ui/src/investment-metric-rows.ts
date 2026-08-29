@@ -5,6 +5,7 @@ import type {
   ThresholdSpec,
 } from '@crisol/types';
 
+import { MARK, provenanceMarkOf } from './investment-marks';
 import { bandColors } from './investment-matrix';
 import { colors } from './tokens';
 import { formatMetricValue, formatThreshold } from './investment-metric-format';
@@ -36,28 +37,16 @@ import type { MatrixCell, MatrixRow } from './investment-matrix';
  *    resultado del muro de vencimientos.
  */
 
-/** Marca de procedencia. Una partida `sourced` no lleva marca: es lo normal. */
-const PROVENANCE_MARK: Record<string, string> = {
-  derived: '†',
-  imputed_zero: '·',
-  estimated: '≈',
-};
-
 /** `model_variant` con el que el seed marca los cortes US-GAAP aplicados a otra norma. */
 export const UNCALIBRATED = 'uncalibrated';
 
-export const UNCALIBRATED_TITLE =
-  'los cortes son US-GAAP y estas cuentas no lo son: se aplican sin recalibrar';
+// El título vive en el registro de marcas (PHASE-44.24.E). Se reexporta para
+// no romper a sus consumidores.
+export const UNCALIBRATED_TITLE = MARK.uncalibrated.title;
 
 export const NOT_CALIBRATED_TITLE =
   'sin semáforo: los cortes no están calibrados para este tipo de empresa, ' +
   'así que el número se enseña pero no se juzga';
-
-const PROVENANCE_TITLE: Record<string, string> = {
-  derived: 'derivada de otras partidas con una identidad contable',
-  imputed_zero: 'cero imputado: el filing no publica el concepto',
-  estimated: 'proxy estimado, no un dato publicado',
-};
 
 /** El porqué de que una vara no aplique, con las palabras del motor si las hay. */
 function notCalibratedTitle(
@@ -94,14 +83,15 @@ export function metricCell(
   const marks: string[] = [];
   const titles: string[] = [];
   if (metric.status === 'approximation') {
-    marks.push('*');
-    titles.push(metric.reason ?? 'calculada con un input degradado');
+    marks.push(MARK.approximation.glyph);
+    // La razón concreta del motor gana sobre la genérica de la leyenda: dice
+    // QUÉ input se degradó, que es lo que hace falta para juzgar el número.
+    titles.push(metric.reason ?? MARK.approximation.title);
   }
-  const provenanceMark = PROVENANCE_MARK[metric.provenance];
-  if (provenanceMark) {
-    marks.push(provenanceMark);
-    const title = PROVENANCE_TITLE[metric.provenance];
-    if (title) titles.push(title);
+  const provenance = provenanceMarkOf(metric.provenance);
+  if (provenance) {
+    marks.push(provenance.glyph);
+    titles.push(provenance.title);
   }
   // Por qué este número sale SIN color. Sin esto, «la vara no sirve para este
   // sector» y «no se pudo colorear» se ven exactamente igual (PHASE-44.18).
@@ -109,8 +99,8 @@ export function metricCell(
     titles.push(notCalibratedTitle(definition));
   }
   if (definition?.model_variant === UNCALIBRATED) {
-    marks.push('≠');
-    titles.push(UNCALIBRATED_TITLE);
+    marks.push(MARK.uncalibrated.glyph);
+    titles.push(MARK.uncalibrated.title);
   }
   return {
     text: formatMetricValue(metric.value, definition?.unit),
@@ -209,7 +199,9 @@ export function metricGapLegend(
     const label = catalog.definition(key)?.label ?? key;
     const reason = gapSentence(key, index);
     const years = formatYears(gaps.map((gap) => gap.year));
-    sentences.push(reason ? `${label}: sin dato en ${years} — ${reason}` : `${label}: sin dato en ${years}`);
+    sentences.push(
+      reason ? `${label}: sin dato en ${years} — ${reason}` : `${label}: sin dato en ${years}`,
+    );
   }
   return sentences;
 }
@@ -235,6 +227,7 @@ export function metricRow(metricKey: string, options: MetricRowOptions): MatrixR
       base?.label ?? metricKey,
       'no existía en la versión del motor que produjo este análisis: vuelve a ejecutarlo',
       index.years,
+      base?.help,
     );
   }
 
@@ -261,6 +254,14 @@ export function metricRow(metricKey: string, options: MetricRowOptions): MatrixR
     key: metricKey,
     label: base?.label ?? metricKey,
     hint,
+    // PHASE-44.23 — la definición sale del catálogo del engine, la misma fuente
+    // que la etiqueta y la unidad. Si el backend es anterior al glosario llega
+    // ausente y la fila simplemente no ofrece la «i».
+    ...(base?.help ? { help: base.help } : {}),
+    // PHASE-44.24 — los otros dos tercios, cada uno con su propia guarda: un
+    // backend intermedio puede mandar `help` y no éstos.
+    ...(base?.why ? { helpWhy: base.why } : {}),
+    ...(base?.reading ? { helpReading: base.reading } : {}),
     cells: series.map((metric) => metricCell(metric, definition)),
   };
 }
@@ -276,11 +277,18 @@ export function groupRow(key: string, label: string): MatrixRow {
  * Se lista en gris con el motivo en vez de omitirse: un hueco silencioso se lee
  * como «no aplica», y lo que pasa es que no existe.
  */
-export function missingRow(key: string, label: string, reason: string, years: number[]): MatrixRow {
+export function missingRow(
+  key: string,
+  label: string,
+  reason: string,
+  years: number[],
+  help?: string | undefined,
+): MatrixRow {
   return {
     key,
     label,
     hint: reason,
+    ...(help ? { help } : {}),
     cells: years.map(() => ({ text: '—', title: reason })),
   };
 }

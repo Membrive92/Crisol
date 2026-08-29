@@ -1,5 +1,6 @@
 'use client';
 
+import { Button } from '@/components/ui/button';
 import { useState } from 'react';
 
 import { formatApiError, useCreateLot } from '@crisol/services';
@@ -83,24 +84,13 @@ export function AddLotForm({ onDone }: { onDone: () => void }) {
           onChange={(e) => setTradeDate(e.target.value)}
           style={inputStyle}
         />
-        <button
-          type="button"
+        <Button
+          variant="primary"
           onClick={() => void submit()}
           disabled={!securityId || !quantity || !price || createLot.isPending}
-          style={{
-            backgroundColor: colors.primary,
-            color: colors.onPrimary,
-            border: 'none',
-            borderRadius: radius.md,
-            padding: `${spacing.sm}px ${spacing.lg}px`,
-            fontSize: fontSize.sm,
-            fontWeight: 600,
-            cursor: 'pointer',
-            opacity: !securityId || !quantity || !price ? 0.6 : 1,
-          }}
         >
           {createLot.isPending ? 'Añadiendo…' : 'Añadir compra'}
-        </button>
+        </Button>
       </div>
       {createLot.isError ? (
         <span style={{ color: colors.danger, fontSize: fontSize.sm }}>

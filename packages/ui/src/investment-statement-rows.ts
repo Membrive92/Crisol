@@ -6,8 +6,13 @@ import type {
   StatementKind,
 } from '@crisol/types';
 
-import { formatPercentDelta, formatStatementAmount, formatWeight } from './investment-metric-format';
+import {
+  formatPercentDelta,
+  formatStatementAmount,
+  formatWeight,
+} from './investment-metric-format';
 import type { MatrixCell, MatrixRow } from './investment-matrix';
+import { provenanceMarkOf } from './investment-marks';
 
 /**
  * Construcción de las filas de los estados financieros — capa PURA compartida
@@ -108,6 +113,11 @@ export function buildStatementRows({
         key: item.key,
         label: item.label,
         hint: item.note || undefined,
+        // PHASE-44.23 — la definición viene del catálogo de partidas del
+        // backend, igual que la etiqueta. `note` es otra cosa: una advertencia
+        // sobre ESTE dato (cuándo falta, cómo se dedujo); `help` es qué es la
+        // partida, y no cambia.
+        ...(item.help ? { help: item.help } : {}),
         emphasis: TOTAL_ITEMS.has(item.key),
         cells: statements.map((statement) => statementCell(item, statement, view, run)),
       });
@@ -135,7 +145,7 @@ export function statementCell(
   }
 
   if (view === 'delta') {
-    const series = run.evolution.horizontal.find((s) => s.key === item.key);
+    const series = run.evolution.horizontal?.find((s) => s.key === item.key);
     const point = series?.points.find((p) => p.fiscal_year === statement.fiscal_year);
     if (point) return { text: formatPercentDelta(point.yoy) };
     return { text: '—', title: 'sin serie interanual para esta partida' };
@@ -161,18 +171,14 @@ function provenanceOf(statement: FinancialStatement, key: string): string | null
   return typeof provenance === 'string' ? provenance : null;
 }
 
+// PHASE-44.24.E — glifo y título salen del registro único. Estas dos existían
+// como copia y sus títulos YA divergían de los de las métricas.
 export function provenanceMark(provenance: string | null): string | undefined {
-  if (provenance === 'imputed_zero') return '·';
-  if (provenance === 'derived') return '†';
-  if (provenance === 'estimated') return '≈';
-  return undefined;
+  return provenanceMarkOf(provenance)?.glyph;
 }
 
 export function provenanceTitle(provenance: string | null): string | undefined {
-  if (provenance === 'imputed_zero') return 'cero imputado: el filing no etiqueta el concepto';
-  if (provenance === 'derived') return 'derivada por identidad contable, no publicada';
-  if (provenance === 'estimated') return 'proxy estimado';
-  return undefined;
+  return provenanceMarkOf(provenance)?.title;
 }
 
 export function collectQualityFlags(

@@ -21,10 +21,29 @@ from typing import Any, ClassVar, Literal
 
 from app.modules.investment.enums import AccountingStd, SectorInternal, ThresholdDirection
 from app.modules.investment.fundamentals.canonical import (
+    CANONICAL_ITEM_DEFINITIONS,
     CanonicalStatement,
     Provenance,
     combine_provenance,
 )
+
+_ITEM_LABELS: dict[str, str] = {d.key: d.label for d in CANONICAL_ITEM_DEFINITIONS}
+
+
+def item_label(key: str) -> str:
+    """El nombre humano de una partida canónica, para las razones del motor.
+
+    Estas razones acaban IMPRESAS en el informe. Interpolar la clave del motor
+    —«falta la partida 'ltd_current_portion'»— le pide al usuario que aprenda
+    un vocabulario interno para entender por qué su empresa no tiene un número.
+    La etiqueta sale del mismo sitio que las 49 claves, así que renombrar una
+    partida no puede dejar la frase mintiendo.
+
+    Cae a la clave cuando no la encuentra: es feo a propósito, y mejor que
+    inventar un nombre. Un gate del backend exige que las 49 tengan etiqueta.
+    """
+    return _ITEM_LABELS.get(key, key)
+
 
 MetricStatus = Literal["ok", "not_computable", "approximation", "not_applicable"]
 """`approximation` = calculada, pero con un input degradado (típicamente el
@@ -36,6 +55,25 @@ lo trajo: el muro de vencimientos (L4) de una empresa sin deuda venciendo a doce
 meses salía «denominador cero», indistinguible de un dato que falta — cuando es
 el mejor resultado posible de esa métrica. Un `not_applicable` puede llevar
 banda; un `not_computable` nunca, porque no se ha comprobado nada."""
+
+ThresholdOrigin = Literal["generic", "sector", "financial", "table"]
+"""De dónde salió el corte con el que se juzgó una métrica (PHASE-44.24.M).
+
+Se persiste en `AnalysisRun.thresholds_used` porque **no se puede reconstruir
+después**: derivarlo comparando los cortes guardados con los del catálogo de HOY
+etiqueta como «sectorial» cualquier recalibración genérica posterior al run, y
+no distingue en absoluto un ajuste manual de la tabla. Un run es un documento
+que se lee meses más tarde; lo que no viaja dentro, se pierde.
+
+- `generic` — la vara del catálogo del motor, sin delta.
+- `sector` — el perfil del sector la sobrescribió.
+- `financial` — la sobrescribió el perfil financiero, que se fusiona ENCIMA del
+  sectorial cuando el valor es una entidad financiera aunque esté clasificado en
+  otro sector.
+- `table` — una fila de `scoring_thresholds` difiere de lo que el motor
+  resuelve, es decir alguien recalibró a mano. Es para lo que existe la tabla, y
+  hasta ahora era indistinguible de todo lo demás.
+"""
 
 Band = Literal["healthy", "caution", "stressed"]
 Severity = Literal["info", "amber", "red"]
@@ -122,7 +160,8 @@ class Amount:
     Existe para que un hueco (`value=None`) viaje con el NOMBRE de lo que falta
     (`missing`) desde la partida hasta el `MetricResult` final. Sin esto, la
     razón de un `not_computable` sería "falta algún input", que no es
-    accionable; con esto es "falta la partida 'inventory'".
+    accionable; con esto es "el filing no publica Existencias" — la etiqueta
+    humana, no la clave del motor (PHASE-44.24.E).
     """
 
     value: Decimal | None
@@ -141,7 +180,7 @@ class Amount:
             value=None,
             status="not_computable",
             missing=missing,
-            reason=reason or f"falta la partida '{missing}'",
+            reason=reason or f"el filing no publica {item_label(missing)}",
         )
 
 
@@ -155,8 +194,16 @@ def combine_amounts(*amounts: Amount) -> tuple[Provenance, MetricStatus, str | N
     provenance = combine_provenance(*(a.provenance for a in amounts))
     missing = [a for a in amounts if a.is_missing]
     if missing:
-        reasons = [a.reason or f"falta '{a.missing}'" for a in missing if a.reason or a.missing]
-        return provenance, "not_computable", "; ".join(dict.fromkeys(reasons)) or "input ausente"
+        reasons = [
+            a.reason or f"el filing no publica {item_label(a.missing or '')}"
+            for a in missing
+            if a.reason or a.missing
+        ]
+        return (
+            provenance,
+            "not_computable",
+            "; ".join(dict.fromkeys(reasons)) or "falta un dato de entrada",
+        )
     approximated = [a for a in amounts if a.status == "approximation"]
     if approximated:
         reasons = [a.reason for a in approximated if a.reason]
@@ -190,6 +237,11 @@ class ThresholdSpec:
     high_alarm: Decimal | None = None
     model_variant: str | None = None
     applies: bool = True
+    origin: ThresholdOrigin = "generic"
+    """De dónde salió este corte. El default es el perfil genérico: lo fija quien
+    resuelve —`resolve_thresholds` para los deltas de perfil, `load_thresholds`
+    para las filas recalibradas a mano— y viaja al run para que la pantalla no
+    tenga que inferirlo."""
     not_applicable_reason: str | None = None
     """Por qué la vara no aplica a este (sector × norma), en español
     (PHASE-44.21). Viaja al run y de ahí a la pantalla: un número gris sin

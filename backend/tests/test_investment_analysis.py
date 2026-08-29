@@ -7,6 +7,7 @@ BD→engine, serialización a JSONB, persistencia y scoping).
 
 from __future__ import annotations
 
+import uuid
 from collections import Counter
 from datetime import date
 from decimal import Decimal
@@ -287,6 +288,59 @@ async def test_el_catalogo_desmiente_las_tres_etiquetas_que_mentian(client: Asyn
     assert por_clave["D8"] == "Margen de seguridad"
 
 
+async def test_el_catalogo_de_ayuda_sirve_las_fichas_de_los_scores(client: AsyncClient) -> None:
+    """Los ocho scores forenses con su ficha y sus variables (PHASE-44.24.A).
+
+    Sin este endpoint, la tarjeta de desglose imprimía la CLAVE del motor y el
+    usuario leía `DSRI` y `P4_cfo_supera_beneficio` en pantalla — el mismo
+    defecto que PHASE-44.9 cerró para las señales del veredicto.
+
+    Los recuentos NO se fijan a literales: se comparan contra el catálogo del
+    engine, que es la fuente única, para que añadir un score no obligue a tocar
+    el test — sólo a escribir su ficha.
+    """
+    from app.modules.investment.analysis.engine.forensic import METRIC_KEYS as FORENSIC_KEYS
+
+    token = await _register(client, "help1@example.com")
+    r = await client.get("/investment/analysis/help", headers=_auth(token))
+    assert r.status_code == 200, r.text
+    data = r.json()
+
+    assert {s["key"] for s in data["scores"]} == set(FORENSIC_KEYS)
+    assert data["engine_version"] == ENGINE_VERSION
+
+    por_clave = {s["key"]: s for s in data["scores"]}
+    for score in data["scores"]:
+        for campo in ("what", "why", "reading"):
+            assert score[campo].strip(), f"{score['key']}.{campo} vacío"
+
+    # Los cuatro que sí publican desglose lo traen con etiqueta legible; los
+    # otros cuatro llegan con la lista VACÍA, que es el dato: son un ratio
+    # único, no un agregado, y la pantalla lo dice en vez de dejar al usuario
+    # buscando un desplegable que no existe.
+    assert len(por_clave["m_score"]["components"]) == 8
+    assert len(por_clave["z_score"]["components"]) == 4
+    assert len(por_clave["f_score"]["components"]) == 9
+    assert len(por_clave["F7"]["components"]) == 6
+    for sin_desglose in ("accruals", "F5", "F6", "FZ"):
+        assert por_clave[sin_desglose]["components"] == []
+
+    etiquetas = {c["key"]: c["label"] for c in por_clave["m_score"]["components"]}
+    assert "DSRI" in etiquetas, "la clave sigue siendo la del motor, para poder cruzarla"
+    assert etiquetas["DSRI"] != "DSRI", "la etiqueta NO puede ser la clave cruda"
+    assert "cobros" in etiquetas["DSRI"].lower()
+
+    # Las banderas, con el campo que las distingue de las demás fichas: dónde
+    # comprobarlas. Sin él el usuario sabe QUÉ ha saltado y no qué hacer con ello.
+    from app.modules.investment.analysis.engine.flag_catalog import FLAG_LABELS
+
+    assert {f["key"] for f in data["flags"]} == set(FLAG_LABELS)
+    for bandera in data["flags"]:
+        assert bandera["label"] == FLAG_LABELS[bandera["key"]], "la etiqueta tiene una sola fuente"
+        for campo in ("what", "why", "reading", "how_to_verify"):
+            assert bandera[campo].strip(), f"{bandera['key']}.{campo} vacío"
+
+
 async def test_catalogo_de_partidas_sirve_las_49_agrupadas(client: AsyncClient) -> None:
     token = await _register(client, "cat3@example.com")
     r = await client.get("/investment/fundamentals/items", headers=_auth(token))
@@ -389,3 +443,311 @@ async def test_runs_latest_devuelve_lo_mismo_que_el_run_por_id(client: AsyncClie
     otro = await _register(client, "last2@example.com")
     ajeno = await client.get(f"/investment/analysis/{security_id}/runs/latest", headers=_auth(otro))
     assert ajeno.status_code == 404, "los runs son de quien los lanzó"
+
+
+async def test_el_run_llega_con_su_capa_de_lectura(client: AsyncClient) -> None:
+    """PHASE-44.24.C — distancia, orden y procedencia, calculados al SERVIR.
+
+    Sin este test los doce anteriores seguirían en verde con `report` en `None`:
+    el campo es opcional para que un cliente viejo no se rompa, así que su
+    ausencia no falla por sí sola. Ése es exactamente el verde que no prueba
+    nada.
+    """
+    token = await _register(client, "rep1@example.com")
+    _override()
+    security_id = await _resolve_and_ingest(client, token)
+    run = await client.post(
+        f"/investment/analysis/{security_id}/run", json={}, headers=_auth(token)
+    )
+    assert run.status_code == 200, run.text
+    report = run.json()["report"]
+    assert report is not None, "el run se sirve sin su capa de lectura"
+
+    # El perfil lo emite el SERVIDOR, con lo que lo determina: componerlo en la
+    # pantalla con `security.sector` miente en toda entidad financiera
+    # clasificada en otro sector.
+    perfil = report["threshold_profile"]
+    assert perfil["effective"] and perfil["sector"]
+    assert "is_financial" in perfil and "is_reit" in perfil
+
+    preguntas = {q["key"]: q for q in report["questions"]}
+    assert preguntas, "la capa no trae ninguna pregunta"
+
+    # El orden es total y empieza en cero.
+    #
+    # OJO: esto SOLO comprueba que los rangos son consecutivos, y eso es cierto
+    # por construcción de `enumerate` aunque nadie ordene nada — lo destapó una
+    # sonda que quitó el `sort` y dejó el test en verde. Lo que prueba el orden
+    # es la comprobación de abajo, sobre las bandas.
+    for pregunta in preguntas.values():
+        rangos = [s["severity_rank"] for s in pregunta["signals"]]
+        assert rangos == list(range(len(rangos))), f"{pregunta['key']}: los rangos no son densos"
+
+    # Lo que SÍ prueba que están ordenadas: ninguna señal puede ir por delante
+    # de otra de banda peor. Se cruza con el veredicto persistido, que es donde
+    # vive la banda de cada señal.
+    bandas_por_pregunta = {
+        q["key"]: {s["key"]: s.get("band") for s in (q.get("signals") or [])}
+        for q in run.json()["verdict"]["questions"]
+    }
+    peso = {"stressed": 0, "caution": 1, "healthy": 2, None: 3}
+    desordenadas = []
+    for clave, pregunta in preguntas.items():
+        bandas = bandas_por_pregunta.get(clave, {})
+        secuencia = [peso[bandas.get(s["key"])] for s in pregunta["signals"]]
+        if secuencia != sorted(secuencia):
+            desordenadas.append((clave, secuencia))
+    assert desordenadas == [], f"señales fuera de orden de severidad: {desordenadas}"
+
+    # Y alguna señal tiene que traer distancia de verdad: si ninguna la trajera,
+    # el barrido de arriba pasaría con el cálculo entero desconectado.
+    con_distancia = [
+        s
+        for pregunta in preguntas.values()
+        for s in pregunta["signals"]
+        if s["distance"] is not None
+    ]
+    assert con_distancia, "ninguna señal trae distancia: el cálculo no está conectado"
+    assert all(s["threshold_origin"] for s in con_distancia)
+
+
+async def test_un_run_recien_ejecutado_declara_la_procedencia_que_registro(
+    client: AsyncClient,
+) -> None:
+    """Con el motor ≥ 1.7.0 la procedencia se LEE del run, no se infiere.
+
+    Y ninguna señal con vara aplicable puede salir como `not_recorded`: eso
+    significaría que el run no guardó el corte con el que se midió.
+    """
+    token = await _register(client, "rep2@example.com")
+    _override()
+    security_id = await _resolve_and_ingest(client, token)
+    run = await client.post(
+        f"/investment/analysis/{security_id}/run", json={}, headers=_auth(token)
+    )
+    report = run.json()["report"]
+    used = run.json()["thresholds_used"]
+
+    origenes = {
+        s["threshold_origin"] for q in report["questions"] for s in q["signals"] if s["key"] in used
+    }
+    assert origenes, "ninguna señal cruza con los umbrales guardados"
+    assert "not_recorded" not in origenes, "un run nuevo no puede tener cortes sin registrar"
+    assert "earlier_calibration" not in origenes, (
+        "un run recién ejecutado no puede venir de una calibración anterior: "
+        "si sale esto, la procedencia se está DERIVANDO en vez de leerse"
+    )
+
+
+# ── El comparador de runs (PHASE-44.24.F) ─────────────────────────────
+
+
+async def test_comparar_sin_dos_analisis_es_un_404_con_motivo(client: AsyncClient) -> None:
+    token = await _register(client, "cmp0@example.com")
+    _override()
+    security_id = await _resolve_and_ingest(client, token)
+
+    vacio = await client.get(
+        f"/investment/analysis/{security_id}/runs/compare", headers=_auth(token)
+    )
+    assert vacio.status_code == 404
+    assert "dos análisis" in vacio.json()["detail"]
+
+    await client.post(f"/investment/analysis/{security_id}/run", json={}, headers=_auth(token))
+    uno = await client.get(f"/investment/analysis/{security_id}/runs/compare", headers=_auth(token))
+    assert uno.status_code == 404, "con UN análisis tampoco hay comparación"
+
+
+async def test_comparar_los_dos_ultimos_es_el_caso_por_defecto(client: AsyncClient) -> None:
+    """Dos análisis del mismo motor y los mismos datos: nada se ha movido.
+
+    Que salgan CERO cambios no es un test trivial: es la prueba de que el diff
+    no inventa diferencias por ejecutarse dos veces (el run es reproducible).
+    """
+    token = await _register(client, "cmp1@example.com")
+    _override()
+    security_id = await _resolve_and_ingest(client, token)
+    primero = await client.post(
+        f"/investment/analysis/{security_id}/run", json={}, headers=_auth(token)
+    )
+    segundo = await client.post(
+        f"/investment/analysis/{security_id}/run", json={}, headers=_auth(token)
+    )
+
+    diff = await client.get(
+        f"/investment/analysis/{security_id}/runs/compare", headers=_auth(token)
+    )
+    assert diff.status_code == 200
+    payload = diff.json()
+    assert payload["comparable"] is True
+    assert payload["base_id"] == primero.json()["id"]
+    assert payload["target_id"] == segundo.json()["id"]
+    assert payload["method_changes"] == []
+    assert (payload["bands"], payload["scores"], payload["flags"], payload["questions"]) == (
+        [],
+        [],
+        [],
+        [],
+    )
+
+
+async def test_elegir_solo_el_target_compara_contra_su_anterior(client: AsyncClient) -> None:
+    """La selección parcial es lo que manda móvil, y web mientras no elijas base.
+
+    La primera versión sólo distinguía «los dos ids» de «ninguno», así que esto
+    caía a «los dos últimos» y devolvía la comparación de OTROS dos análisis con
+    sus fechas en la cabecera — un resultado plausible y equivocado.
+    """
+    token = await _register(client, "cmp2@example.com")
+    _override()
+    security_id = await _resolve_and_ingest(client, token)
+    ids = [
+        (
+            await client.post(
+                f"/investment/analysis/{security_id}/run", json={}, headers=_auth(token)
+            )
+        ).json()["id"]
+        for _ in range(3)
+    ]
+
+    diff = await client.get(
+        f"/investment/analysis/{security_id}/runs/compare?target={ids[1]}", headers=_auth(token)
+    )
+    assert diff.status_code == 200
+    assert diff.json()["target_id"] == ids[1]
+    assert diff.json()["base_id"] == ids[0], "el anterior, no el último"
+
+    mas_antiguo = await client.get(
+        f"/investment/analysis/{security_id}/runs/compare?target={ids[0]}", headers=_auth(token)
+    )
+    assert mas_antiguo.status_code == 404, "el más antiguo no tiene contra qué compararse"
+    assert "más antiguo" in mas_antiguo.json()["detail"]
+
+
+async def test_el_orden_de_los_ids_no_invierte_la_comparacion(client: AsyncClient) -> None:
+    """`base` es SIEMPRE el más antiguo, elija el usuario el orden que elija.
+
+    Un diff al revés diría que un score «mejoró» cuando empeoró — el peor modo
+    de fallo posible en una pantalla que existe para responder «¿va peor?».
+    """
+    token = await _register(client, "cmp3@example.com")
+    _override()
+    security_id = await _resolve_and_ingest(client, token)
+    ids = [
+        (
+            await client.post(
+                f"/investment/analysis/{security_id}/run", json={}, headers=_auth(token)
+            )
+        ).json()["id"]
+        for _ in range(2)
+    ]
+
+    al_reves = await client.get(
+        f"/investment/analysis/{security_id}/runs/compare?base={ids[1]}&target={ids[0]}",
+        headers=_auth(token),
+    )
+    assert al_reves.status_code == 200
+    assert al_reves.json()["base_id"] == ids[0]
+    assert al_reves.json()["target_id"] == ids[1]
+
+
+async def test_un_run_de_otro_usuario_no_se_puede_comparar(client: AsyncClient) -> None:
+    token = await _register(client, "cmp4@example.com")
+    _override()
+    security_id = await _resolve_and_ingest(client, token)
+    ajeno = (
+        await client.post(f"/investment/analysis/{security_id}/run", json={}, headers=_auth(token))
+    ).json()["id"]
+    await client.post(f"/investment/analysis/{security_id}/run", json={}, headers=_auth(token))
+
+    otro = await _register(client, "cmp5@example.com")
+    fuera = await client.get(
+        f"/investment/analysis/{security_id}/runs/compare?target={ajeno}", headers=_auth(otro)
+    )
+    assert fuera.status_code == 404, "los runs son de quien los lanzó"
+
+
+async def test_el_resumen_del_historico_trae_thresholds_version(client: AsyncClient) -> None:
+    """Sin él, el selector no puede decir si dos análisis son comparables sin
+    pedirlos enteros — y una etiqueta que no se puede calcular no se pinta."""
+    token = await _register(client, "cmp6@example.com")
+    _override()
+    security_id = await _resolve_and_ingest(client, token)
+    await client.post(f"/investment/analysis/{security_id}/run", json={}, headers=_auth(token))
+
+    listado = await client.get(f"/investment/analysis/{security_id}/runs", headers=_auth(token))
+    assert listado.status_code == 200
+    item = listado.json()["items"][0]
+    assert item["thresholds_version"], "el resumen debe traer la calibración con la que se midió"
+
+
+async def test_comparar_un_analisis_consigo_mismo_es_un_404(client: AsyncClient) -> None:
+    """Un diff vacío se presenta como «nada se ha movido», que es cierto y engañoso.
+
+    La guarda existía SÓLO en la rama de `base` suelto: pedir el mismo id como
+    base y como target caía en la otra rama y devolvía la comparación vacía.
+    """
+    token = await _register(client, "cmp7@example.com")
+    _override()
+    security_id = await _resolve_and_ingest(client, token)
+    uno = (
+        await client.post(f"/investment/analysis/{security_id}/run", json={}, headers=_auth(token))
+    ).json()["id"]
+    await client.post(f"/investment/analysis/{security_id}/run", json={}, headers=_auth(token))
+
+    # Las DOS formas de pedirlo: con los dos ids, y con `base` suelto apuntando
+    # al último (que es el `target` por defecto).
+    ambos = await client.get(
+        f"/investment/analysis/{security_id}/runs/compare?base={uno}&target={uno}",
+        headers=_auth(token),
+    )
+    assert ambos.status_code == 404
+    assert "consigo mismo" in ambos.json()["detail"]
+
+    ultimo = (
+        await client.get(f"/investment/analysis/{security_id}/runs", headers=_auth(token))
+    ).json()["items"][0]["id"]
+    suelto = await client.get(
+        f"/investment/analysis/{security_id}/runs/compare?base={ultimo}", headers=_auth(token)
+    )
+    assert suelto.status_code == 404
+    assert "consigo mismo" in suelto.json()["detail"]
+
+
+async def test_cada_motivo_de_404_es_distinguible_por_su_detail(client: AsyncClient) -> None:
+    """La pantalla los pinta tal cual; si el servidor no los distingue, no puede.
+
+    Antes la UI colapsaba los cuatro en «hace falta más de un análisis», que en
+    tres de los cuatro casos es FALSO.
+    """
+    token = await _register(client, "cmp8@example.com")
+    _override()
+    security_id = await _resolve_and_ingest(client, token)
+    primero = (
+        await client.post(f"/investment/analysis/{security_id}/run", json={}, headers=_auth(token))
+    ).json()["id"]
+
+    solo_uno = await client.get(
+        f"/investment/analysis/{security_id}/runs/compare", headers=_auth(token)
+    )
+    await client.post(f"/investment/analysis/{security_id}/run", json={}, headers=_auth(token))
+    mas_antiguo = await client.get(
+        f"/investment/analysis/{security_id}/runs/compare?target={primero}", headers=_auth(token)
+    )
+    ajeno = await client.get(
+        f"/investment/analysis/{security_id}/runs/compare?target={uuid.uuid4()}",
+        headers=_auth(token),
+    )
+    consigo = await client.get(
+        f"/investment/analysis/{security_id}/runs/compare?base={primero}&target={primero}",
+        headers=_auth(token),
+    )
+
+    motivos = [
+        solo_uno.json()["detail"],
+        mas_antiguo.json()["detail"],
+        ajeno.json()["detail"],
+        consigo.json()["detail"],
+    ]
+    assert all(r.status_code == 404 for r in (solo_uno, mas_antiguo, ajeno, consigo))
+    assert len(set(motivos)) == 4, f"dos motivos indistinguibles: {motivos}"

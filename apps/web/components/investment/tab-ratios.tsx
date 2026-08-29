@@ -7,6 +7,7 @@ import {
   fontSize,
   RATIO_FAMILIES,
   spacing,
+  REPORT_LEGEND,
 } from '@crisol/ui';
 import type { AnalysisRun, DuPontDecomposition, MetricResult } from '@crisol/types';
 
@@ -37,9 +38,11 @@ export interface TabRatiosProps {
   catalog: CatalogIndex;
   sub: string;
   onSubChange: (key: string) => void;
+  /** Fila a la que se ha llegado desde el veredicto (PHASE-44.24.C.4). */
+  highlightKey?: string | undefined;
 }
 
-export function TabRatios({ run, index, catalog, sub, onSubChange }: TabRatiosProps) {
+export function TabRatios({ run, index, catalog, sub, onSubChange, highlightKey }: TabRatiosProps) {
   const years = run.years_covered;
   const verdictYear = years[years.length - 1];
   const options: MetricRowOptions = {
@@ -73,13 +76,15 @@ export function TabRatios({ run, index, catalog, sub, onSubChange }: TabRatiosPr
       />
 
       {family.key === 'dupont' ? (
-        <DuPontSection run={run} catalog={catalog} />
+        <DuPontSection run={run} catalog={catalog} highlightKey={highlightKey} />
       ) : (
         <Card>
           <CardTitle size="sm">{family.label}</CardTitle>
           <div style={{ marginTop: spacing.md, display: 'grid', gap: spacing.md }}>
             <InlineNotice>{family.note}</InlineNotice>
             <YearMatrix
+              marksLegend={REPORT_LEGEND}
+              highlightKey={highlightKey}
               years={years}
               rows={buildFamilyRows(family.key, [...family.metrics], options, years)}
               verdictYear={verdictYear}
@@ -87,15 +92,8 @@ export function TabRatios({ run, index, catalog, sub, onSubChange }: TabRatiosPr
               legend={
                 <>
                   <div>
-                    <strong>—</strong> no calculable: bajo la etiqueta se explica por qué
-                  </div>
-                  <div>
-                    <strong>*</strong> calculada con un input degradado (normalmente el primer
-                    ejercicio, sin año anterior con el que promediar)
-                  </div>
-                  <div>
-                    Una celda <strong>gris</strong> es un valor sin banda: el motor no tiene un
-                    corte absoluto que aplicar. No significa que esté sano.
+                    Cada corte sale del catálogo de umbrales del motor, calibrado por sector: el
+                    mismo número puede ser verde en una eléctrica y rojo en una tecnológica.
                   </div>
                 </>
               }
@@ -123,7 +121,15 @@ function buildFamilyRows(
   ];
 }
 
-function DuPontSection({ run, catalog }: { run: AnalysisRun; catalog: CatalogIndex }) {
+function DuPontSection({
+  run,
+  catalog,
+  highlightKey,
+}: {
+  run: AnalysisRun;
+  catalog: CatalogIndex;
+  highlightKey?: string | undefined;
+}) {
   const dupont = run.scores_detail.base_ratios.dupont ?? [];
   if (dupont.length === 0) {
     return (
@@ -194,6 +200,8 @@ function DuPontSection({ run, catalog }: { run: AnalysisRun; catalog: CatalogInd
               {section.note}
             </p>
             <YearMatrix
+              marksLegend={REPORT_LEGEND}
+              highlightKey={highlightKey}
               years={years}
               rows={[
                 ...section.metrics.map((key) => metricRow(key, options)),
@@ -207,4 +215,3 @@ function DuPontSection({ run, catalog }: { run: AnalysisRun; catalog: CatalogInd
     </div>
   );
 }
-

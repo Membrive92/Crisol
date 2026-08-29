@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import type { QuestionVerdict } from '@crisol/types';
@@ -97,9 +99,9 @@ describe('questionEvidence', () => {
     // El cuarto estado (PHASE-44.21). McDonald's salía verde confiado con 3
     // señales de 10 y las dos que responden la pregunta —M-Score y accruals—
     // muertas: lo que decide no es cuántas, es cuáles.
-    expect(
-      questionEvidence(question({ evaluated_count: 3, signals: [], audited: false })),
-    ).toBe('not-audited');
+    expect(questionEvidence(question({ evaluated_count: 3, signals: [], audited: false }))).toBe(
+      'not-audited',
+    );
   });
 
   it('un run anterior a 1.6.0 no se declara no auditado: ausente no es false', () => {
@@ -133,5 +135,45 @@ describe('evidenceBreakdown', () => {
     const legacy = question();
     delete legacy.evaluated_count;
     expect(evidenceBreakdown(legacy)).toBe('');
+  });
+});
+
+/**
+ * El fixture COMPARTIDO con el backend (PHASE-44.24.B).
+ *
+ * La regla del tri-estado vive dos veces: aquí y en
+ * `presentation/evidence.py`, porque las frases del veredicto se componen en el
+ * servidor y el color en la pantalla. Dos implementaciones de una regla son una
+ * divergencia esperando el momento; esto es lo que las ata.
+ */
+describe('fixture compartido de evidencia', () => {
+  const fixture = JSON.parse(
+    readFileSync(new URL('./__fixtures__/question-evidence.json', import.meta.url), 'utf-8'),
+  ) as { cases: { name: string; question: QuestionVerdict; expected: string }[] };
+
+  it('cubre los cuatro estados y no ha encogido', () => {
+    // Un fixture que se queda con dos casos pasa las dos suites y no ata nada.
+    expect(fixture.cases.length).toBeGreaterThanOrEqual(12);
+    const estados = new Set(fixture.cases.map((c) => c.expected));
+    expect([...estados].sort()).toEqual([
+      'evaluated',
+      'no-evidence',
+      'not-audited',
+      'not-recorded',
+    ]);
+  });
+
+  it('ningún caso usa `null` donde la clave debe faltar', () => {
+    // Con `null`, Python (que pregunta con `in`) y TS (que compara con
+    // `undefined`) toman ramas distintas y el fixture no ataría nada.
+    for (const caso of fixture.cases) {
+      const q = caso.question as unknown as Record<string, unknown>;
+      for (const key of ['signals', 'evaluated_count', 'clear_count', 'unchecked_count', 'audited'])
+        expect(q[key], `${caso.name}: ${key} es null`).not.toBeNull();
+    }
+  });
+
+  it.each(fixture.cases.map((c) => [c.name, c] as const))('%s', (_name, caso) => {
+    expect(questionEvidence(caso.question)).toBe(caso.expected);
   });
 });

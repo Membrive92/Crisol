@@ -22,15 +22,8 @@ export {
   LIABILITY_ACCOUNT_TYPES,
   SELECTABLE_ACCOUNT_TYPES,
 } from './models/account';
-export type {
-  AccountBalance,
-  AccountBalancesResponse,
-} from './models/account-balance';
-export type {
-  PositionAsOf,
-  PositionHistoryResponse,
-  PositionPoint,
-} from './models/position';
+export type { AccountBalance, AccountBalancesResponse } from './models/account-balance';
+export type { PositionAsOf, PositionHistoryResponse, PositionPoint } from './models/position';
 export type {
   AnalyticsCategoryAmount,
   AnalyticsTxRef,
@@ -69,12 +62,7 @@ export type {
   ReclassifyBulkResponse,
   TransferPair,
 } from './models/transfer';
-export type {
-  Category,
-  CategoryKind,
-  CategoryRole,
-  ExpenseNature,
-} from './models/category';
+export type { Category, CategoryKind, CategoryRole, ExpenseNature } from './models/category';
 export type {
   CategoryRule,
   CategoryRuleCreateRequest,
@@ -114,38 +102,20 @@ export type {
   ImportWarning,
   ImportWarningKey,
 } from './models/import';
-export type {
-  Receipt,
-  ReceiptExtraction,
-  ReceiptLineItem,
-  ReceiptStatus,
-} from './models/receipt';
+export type { Receipt, ReceiptExtraction, ReceiptLineItem, ReceiptStatus } from './models/receipt';
 export type { Toast, ToastAction, ToastInput, ToastKind } from './models/toast';
-export type {
-  Budget,
-  BudgetStatus,
-  BudgetStatusItem,
-  BudgetStatusResponse,
-} from './models/budget';
+export type { Budget, BudgetStatus, BudgetStatusItem, BudgetStatusResponse } from './models/budget';
 export type {
   FixedExpense,
   FixedExpenseStatus,
   FixedExpenseScanResponse,
 } from './models/fixed-expense';
 
-export type {
-  LoginRequest,
-  RegisterRequest,
-  RefreshRequest,
-  TokenResponse,
-} from './dto/auth.dto';
+export type { LoginRequest, RegisterRequest, RefreshRequest, TokenResponse } from './dto/auth.dto';
 
 export type { UpdateMeRequest } from './dto/user.dto';
 
-export type {
-  AccountCreateRequest,
-  AccountUpdateRequest,
-} from './dto/account.dto';
+export type { AccountCreateRequest, AccountUpdateRequest } from './dto/account.dto';
 
 export type {
   AmortizationRequest,
@@ -155,10 +125,7 @@ export type {
   TransferLinkRequest,
 } from './dto/transfer.dto';
 
-export type {
-  CategoryCreateRequest,
-  CategoryUpdateRequest,
-} from './dto/category.dto';
+export type { CategoryCreateRequest, CategoryUpdateRequest } from './dto/category.dto';
 
 export type {
   TransactionCreateRequest,
@@ -208,8 +175,10 @@ export type {
   EngineFlag,
   EvolutionBlock,
   FinancialStatement,
+  FlagHelp,
   FlagSeverity,
   ForensicBlock,
+  HelpCatalogResponse,
   HorizontalPoint,
   HorizontalSeries,
   IngestionJob,
@@ -224,18 +193,31 @@ export type {
   MetricResult,
   MetricStatus,
   MetricUnit,
+  NextCheck,
   PortfolioSummary,
   Position,
   PositionSummary,
   Provenance,
   QuestionSignal,
   QuestionVerdict,
+  ReportLayer,
+  ReportQuestion,
+  ReportSignal,
+  BandChange,
+  FlagChange,
+  QuestionChange,
   RestatementFlag,
   RestatementListResponse,
+  RestatementNote,
+  RunDiff,
   SafetyLabel,
+  ScoreChange,
+  SignalDistance,
   SafetyProfile,
   Sale,
   ScoreBreakdown,
+  ScoreComponentHelp,
+  ScoreHelp,
   SectorInternal,
   Security,
   SecurityAdoptRequest,
@@ -248,6 +230,8 @@ export type {
   StressBlock,
   StressScenario,
   ThresholdDirection,
+  ThresholdOrigin,
+  ThresholdProfile,
   ThresholdSpec,
   VerdictBlock,
   VerticalPoint,

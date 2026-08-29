@@ -10,14 +10,23 @@ import {
   fontWeight,
   questionEvidence,
   radius,
+  coreItemCoverage,
+  REPORT_SCOPE,
+  reportSignalsOf,
+  SAFETY,
+  safetyRules,
   spacing,
+  STRESS_ANCHOR,
+  type SafetyRule,
+  layout,
 } from '@crisol/ui';
 import type {
   AnalysisRun,
   CanonicalItemDefinition,
   FinancialStatement,
+  QuestionSignal,
   QuestionVerdict,
-  SafetyLabel,
+  ReportSignal,
 } from '@crisol/types';
 
 import { Card, CardTitle } from '@/components/ui/card';
@@ -28,52 +37,39 @@ import { DegradedPanel, InlineNotice } from './degraded-panel';
 import { FlagList } from './flag-list';
 import { SignalTable } from './signal-table';
 import { StressDumbbell } from './stress-dumbbell';
-import type { CatalogIndex } from '@crisol/ui';
+import type { CatalogIndex, ScoreHelpIndex } from '@crisol/ui';
 
-const SAFETY: Record<SafetyLabel, { label: string; fg: string; bg: string }> = {
-  conservative: { label: 'Conservador', fg: colors.success, bg: colors.successSoft },
-  watch: { label: 'Vigilar', fg: colors.warning, bg: colors.warningSoft },
-  avoid: { label: 'Evitar', fg: colors.danger, bg: colors.dangerSoft },
-};
+// PHASE-44.24.E — `SAFETY` y las dos listas de reglas viven en `@crisol/ui`:
+// estaban duplicadas aquí y en el hero, y copiarlas a móvil habría hecho cuatro
+// copias de lo que decide `_safety_profile` en el motor.
 
-/** Las cinco condiciones que exige el perfil Conservador, tal y como las
- *  evalúa `_safety_profile` en el motor. Se imprimen SIEMPRE, cumplidas o no:
- *  un sello sin sus reglas no es auditable. */
-const CONSERVATIVE_RULES = [
-  'M-Score en verde',
-  "Z''-Score en verde",
-  'X-Score en verde',
-  'F-Score ≥ 7',
-  'Accruals en verde',
-] as const;
-
-/** Las cuatro condiciones que fuerzan «Evitar». */
-const AVOID_RULES = [
-  'M-Score y accruals ambos en rojo (manipulación probable)',
-  "Z''-Score en rojo (riesgo de insolvencia)",
-  'X-Score en rojo (riesgo de quiebra)',
-  'dividendo financiado con deuda o emisión',
-] as const;
-
-/** Las 10 partidas núcleo con las que el motor calcula la completitud. */
-const CORE_ITEMS = [
-  'revenue',
-  'ebit',
-  'net_income',
-  'cfo',
-  'capex',
-  'dividends_paid',
-  'total_assets',
-  'equity',
-  'current_assets',
-  'current_liabilities',
-] as const;
+// PHASE-44.24.E — `CORE_ITEMS` y la cobertura por ejercicio viven en
+// `@crisol/ui`: móvil enseña lo mismo, y una copia por app haría que una dijera
+// «9 de 10» y la otra «10 de 10» sobre el mismo análisis.
 
 export interface TabVerdictProps {
+  /**
+   * La sección «Qué ha cambiado», ya montada por la página.
+   *
+   * Llega como nodo y no como datos porque necesita el hook de comparación, que
+   * a su vez lee la URL: montarlo aquí dentro haría que los tests que renderizan
+   * esta pestaña sin router se cayeran (PHASE-44.24.F).
+   */
+  history?: React.ReactNode;
+  /**
+   * Modo dictamen (PHASE-44.24.G): sin selector de secciones. Esconderlo con
+   * CSS de impresión lo dejaba VIVO en pantalla —pulsarlo escribía un `sub`
+   * que la página descartaba— y además salía en el papel.
+   */
+  printMode?: boolean | undefined;
   run: AnalysisRun;
   catalog: CatalogIndex;
   statements: FinancialStatement[] | undefined;
   items: CanonicalItemDefinition[] | undefined;
+  /** Fichas de scores y banderas del motor (PHASE-44.24.A). */
+  help?: ScoreHelpIndex | undefined;
+  /** A dónde lleva cada señal. Lo compone la página (PHASE-44.24.C.4). */
+  hrefFor?: ((signal: QuestionSignal) => string | null) | undefined;
   sub: string;
   onSubChange: (key: string) => void;
 }
@@ -83,24 +79,36 @@ export function TabVerdict({
   catalog,
   statements,
   items,
+  help,
+  hrefFor,
   sub,
   onSubChange,
+  history,
+  printMode = false,
 }: TabVerdictProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg }}>
-      <Segmented
-        label="Secciones del veredicto"
-        value={sub}
-        onChange={onSubChange}
-        options={[
-          { key: 'dictamen', label: 'Dictamen' },
-          { key: 'datos', label: 'Confianza y datos' },
-        ]}
-      />
+      {printMode ? null : (
+        <Segmented
+          label="Secciones del veredicto"
+          value={sub}
+          onChange={onSubChange}
+          options={[
+            { key: 'dictamen', label: 'Dictamen' },
+            { key: 'datos', label: 'Confianza y datos' },
+            { key: 'historia', label: 'Qué ha cambiado' },
+          ]}
+        />
+      )}
       {sub === 'datos' ? (
         <ConfidenceSection run={run} statements={statements} items={items} />
+      ) : sub === 'historia' ? (
+        // La comparación con un análisis anterior (PHASE-44.24.F). Vive bajo el
+        // veredicto y no en su propia pestaña porque responde a la misma
+        // pregunta —«¿es seguro?»— con el eje del tiempo.
+        history
       ) : (
-        <DictamenSection run={run} catalog={catalog} />
+        <DictamenSection run={run} catalog={catalog} help={help} hrefFor={hrefFor} />
       )}
     </div>
   );
@@ -108,10 +116,22 @@ export function TabVerdict({
 
 // ── Dictamen ──────────────────────────────────────────────────────────
 
-function DictamenSection({ run, catalog }: { run: AnalysisRun; catalog: CatalogIndex }) {
+function DictamenSection({
+  run,
+  catalog,
+  help,
+  hrefFor,
+}: {
+  run: AnalysisRun;
+  catalog: CatalogIndex;
+  help?: ScoreHelpIndex | undefined;
+  hrefFor?: ((signal: QuestionSignal) => string | null) | undefined;
+}) {
   const profile = run.verdict.safety_profile;
   const safety = SAFETY[profile.label];
-  const blocking = profile.blocking_reasons;
+  // Las dos listas de reglas y su evaluación salen de `@crisol/ui`: móvil pinta
+  // exactamente las mismas (PHASE-44.24.E).
+  const checklist = safetyRules(profile);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg }}>
@@ -140,45 +160,61 @@ function DictamenSection({ run, catalog }: { run: AnalysisRun; catalog: CatalogI
           </span>
         </div>
 
-        <p style={{ margin: 0, color: colors.textMuted, fontSize: fontSize.sm, lineHeight: 1.5 }}>
-          El perfil no es una nota media: sale de reglas booleanas sobre los scores forenses.
-          Estas son, con lo que ha pasado en este análisis.
+        <p
+          style={{
+            margin: 0,
+            maxWidth: layout.prose,
+            color: colors.textMuted,
+            fontSize: fontSize.sm,
+            lineHeight: 1.5,
+          }}
+        >
+          El perfil no es una nota media: sale de reglas booleanas sobre los scores forenses. Estas
+          son, con lo que ha pasado en este análisis.
         </p>
 
         <RuleChecklist
-          title="Se evita si se cumple CUALQUIERA de estas"
-          rules={AVOID_RULES.map((rule) => ({
-            text: rule,
-            met: blocking.includes(rule),
-          }))}
-          metIsBad
+          title={checklist.avoid.title}
+          rules={checklist.avoid.rules}
+          metIsBad={checklist.avoid.metIsBad}
         />
 
-        <RuleChecklist
-          title="Es conservador sólo si se cumplen LAS CINCO"
-          rules={CONSERVATIVE_RULES.map((rule) => ({
-            text: rule,
-            // `blocking_reasons` de un perfil «watch» lista lo que NO se cumple,
-            // con el texto en negativo («M-Score no está en verde»).
-            met: profile.label === 'conservative' ? true : !blocking.some((r) => isNegationOf(r, rule)),
-          }))}
-        />
+        <RuleChecklist title={checklist.conservative.title} rules={checklist.conservative.rules} />
 
-        {blocking.length > 0 ? (
+        {checklist.blocking.length > 0 ? (
           <InlineNotice>
-            <strong>{profile.label === 'avoid' ? 'Motivos: ' : 'Falta para Conservador: '}</strong>
-            {blocking.join('; ')}.
+            <strong>{checklist.blockingLabel}</strong>
+            {checklist.blocking.join('; ')}.
           </InlineNotice>
         ) : null}
       </Card>
 
+      {run.report?.next_checks?.length ? (
+        <Card style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
+          <CardTitle size="sm">Qué miraría a continuación</CardTitle>
+          <ul
+            style={{
+              margin: 0,
+              maxWidth: layout.prose,
+              paddingLeft: spacing.lg,
+              color: colors.textMuted,
+              fontSize: fontSize.sm,
+              lineHeight: 1.6,
+            }}
+          >
+            {run.report.next_checks.map((check) => (
+              <li key={check.key}>{check.text}</li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
+
       <Card style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
         <CardTitle>Las cuatro preguntas</CardTitle>
         <InlineNotice>
-          Regla del semáforo: <strong>rojo</strong> si hay ≥1 señal roja · <strong>ámbar</strong>{' '}
-          si hay ≥2 ámbar · <strong>verde</strong> en el resto. Una señal sin banda o no
-          calculable no cuenta ni a favor ni en contra — por eso cada pregunta declara cuántas
-          pudo evaluar.
+          Regla del semáforo: <strong>rojo</strong> si hay ≥1 señal roja · <strong>ámbar</strong> si
+          hay ≥2 ámbar · <strong>verde</strong> en el resto. Una señal sin banda o no calculable no
+          cuenta ni a favor ni en contra — por eso cada pregunta declara cuántas pudo evaluar.
         </InlineNotice>
         {run.verdict.questions.map((question) => (
           <QuestionBlock
@@ -186,6 +222,10 @@ function DictamenSection({ run, catalog }: { run: AnalysisRun; catalog: CatalogI
             question={question}
             catalog={catalog}
             thresholdsUsed={run.thresholds_used}
+            report={reportSignalsOf(run.report, question.key)}
+            profile={run.report?.threshold_profile.effective.replace(/_/g, ' ')}
+            hrefFor={hrefFor}
+            sentence={run.report?.questions.find((q) => q.key === question.key)?.sentence}
           />
         ))}
       </Card>
@@ -194,7 +234,11 @@ function DictamenSection({ run, catalog }: { run: AnalysisRun; catalog: CatalogI
 
       <Card style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
         <CardTitle>Banderas</CardTitle>
-        <FlagList flags={run.flags} emptyLabel="El motor no ha encendido ninguna bandera." />
+        <FlagList
+          flags={run.flags}
+          emptyLabel="El motor no ha encendido ninguna bandera."
+          help={help}
+        />
       </Card>
 
       <Card style={{ display: 'flex', flexDirection: 'column', gap: spacing.sm }}>
@@ -202,34 +246,33 @@ function DictamenSection({ run, catalog }: { run: AnalysisRun; catalog: CatalogI
         <ul
           style={{
             margin: 0,
+            maxWidth: layout.prose,
             paddingLeft: spacing.lg,
             color: colors.textMuted,
             fontSize: fontSize.sm,
             lineHeight: 1.6,
           }}
         >
-          <li>
-            <strong>Valoración.</strong> Ni PER, ni precio/ventas, ni precio/valor contable, ni
-            precio/caja libre, ni EV/EBITDA, ni descuento de dividendos. Todos necesitan precio
-            de mercado, y el motor no lo recibe a propósito: un score que se mueve con la
-            cotización no sería reproducible al reejecutar un análisis antiguo.
-          </li>
-          <li>
-            <strong>Comparación con el sector.</strong> El sector sólo elige umbrales; no hay
-            fuente de múltiplos de comparables.
-          </li>
-          <li>
-            <strong>Reexpresiones.</strong> Se detectan y se listan aparte, pero todavía no
-            entran en el dictamen.
-          </li>
-          <li>
-            <strong>Retribución de directivos y calendario de vencimientos.</strong> Viven en el
-            proxy statement y en las notas, no en el 10-K estructurado que se ingiere.
-          </li>
+          {/* El texto vive en `@crisol/ui` (PHASE-44.24.E): lo pintan también
+              el veredicto de móvil y el dictamen imprimible, y una copia por
+              sitio es cómo la versión impresa acaba prometiendo otro alcance. */}
+          {REPORT_SCOPE.map((entry) => (
+            <li key={entry.term}>
+              <strong>{entry.term}.</strong> {entry.meaning}
+            </li>
+          ))}
         </ul>
       </Card>
 
-      <p style={{ margin: 0, color: colors.textSubtle, fontSize: fontSize.xs, lineHeight: 1.6 }}>
+      <p
+        style={{
+          margin: 0,
+          maxWidth: layout.prose,
+          color: colors.textSubtle,
+          fontSize: fontSize.xs,
+          lineHeight: 1.6,
+        }}
+      >
         Motor {run.engine_version} · umbrales {run.thresholds_version} · ejercicios{' '}
         {run.years_covered.join(', ')} · análisis del{' '}
         {new Date(run.run_date).toLocaleString('es-ES')}
@@ -240,18 +283,13 @@ function DictamenSection({ run, catalog }: { run: AnalysisRun; catalog: CatalogI
 
 /** ¿El motivo bloqueante es la negación de esta regla? El motor los escribe en
  *  negativo («M-Score no está en verde») y la regla está en positivo. */
-function isNegationOf(reason: string, rule: string): boolean {
-  const head = rule.split(' ')[0] ?? '';
-  return head.length > 0 && reason.startsWith(head);
-}
-
 function RuleChecklist({
   title,
   rules,
   metIsBad = false,
 }: {
   title: string;
-  rules: { text: string; met: boolean }[];
+  rules: SafetyRule[];
   metIsBad?: boolean;
 }) {
   return (
@@ -320,9 +358,9 @@ function LegacySignals({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.xs }}>
       <span style={{ color: colors.textMuted, fontSize: fontSize.xs, lineHeight: 1.5 }}>
-        Este análisis lo produjo un motor anterior, que no registraba qué señales se evaluaron.
-        El veredicto de abajo <strong>no es auditable</strong>: vuelve a ejecutar el análisis
-        para ver el desglose.
+        Este análisis lo produjo un motor anterior, que no registraba qué señales se evaluaron. El
+        veredicto de abajo <strong>no es auditable</strong>: vuelve a ejecutar el análisis para ver
+        el desglose.
       </span>
       {groups.map((group) => (
         <span key={group.name} style={{ color: colors.textMuted, fontSize: fontSize.xs }}>
@@ -343,10 +381,18 @@ function QuestionBlock({
   question,
   catalog,
   thresholdsUsed,
+  report,
+  profile,
+  hrefFor,
+  sentence,
 }: {
   question: QuestionVerdict;
   catalog: CatalogIndex;
   thresholdsUsed: AnalysisRun['thresholds_used'];
+  report?: Map<string, ReportSignal> | undefined;
+  profile?: string | undefined;
+  hrefFor?: ((signal: QuestionSignal) => string | null) | undefined;
+  sentence?: string | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const { fg, bg } = bandColors(question.verdict);
@@ -368,7 +414,10 @@ function QuestionBlock({
     </span>
   );
   const chip = (
-    <BandChip band={muted ? null : question.verdict} label={EVIDENCE_LABEL[evidence] || undefined} />
+    <BandChip
+      band={muted ? null : question.verdict}
+      label={EVIDENCE_LABEL[evidence] || undefined}
+    />
   );
   const headerLayout = {
     display: 'flex',
@@ -414,6 +463,23 @@ function QuestionBlock({
         </div>
       )}
 
+      {/* La frase la compone el SERVIDOR (PHASE-44.24.B): determinista, con
+          plantillas versionadas y goldens. Aquí no se redacta nada, para que la
+          pantalla y el dictamen impreso no puedan decir cosas distintas. */}
+      {sentence ? (
+        <p
+          style={{
+            margin: 0,
+            maxWidth: layout.prose,
+            color: colors.text,
+            fontSize: fontSize.sm,
+            lineHeight: 1.5,
+          }}
+        >
+          {sentence}
+        </p>
+      ) : null}
+
       {evidence === 'not-recorded' ? (
         <LegacySignals question={question} catalog={catalog} />
       ) : (
@@ -432,6 +498,7 @@ function QuestionBlock({
         <ul
           style={{
             margin: 0,
+            maxWidth: layout.prose,
             paddingLeft: spacing.lg,
             color: colors.textMuted,
             fontSize: fontSize.xs,
@@ -450,7 +517,14 @@ function QuestionBlock({
       ))}
 
       {open && signals ? (
-        <SignalTable signals={signals} catalog={catalog} thresholdsUsed={thresholdsUsed} />
+        <SignalTable
+          signals={signals}
+          catalog={catalog}
+          thresholdsUsed={thresholdsUsed}
+          report={report}
+          profile={profile}
+          hrefFor={hrefFor}
+        />
       ) : null}
     </div>
   );
@@ -461,56 +535,76 @@ function StressCard({ run }: { run: AnalysisRun }) {
   const scenarios = stress?.scenarios ?? [];
 
   return (
-    <Card style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
+    // El `id` es el destino de la señal «Escenario de stress» del veredicto
+    // (`STRESS_ANCHOR`): no es una fila, es esta card. `scrollMarginTop` deja
+    // sitio a la cabecera fija de la app, que si no tapa el título al llegar.
+    <Card
+      id={STRESS_ANCHOR}
+      style={{ display: 'flex', flexDirection: 'column', gap: spacing.md, scrollMarginTop: 120 }}
+    >
       <CardTitle>Escenarios de stress</CardTitle>
       <InlineNotice>
         La cobertura de estos escenarios se mide sobre <strong>caja libre</strong> (flujo de
-        explotación − inversión), no sobre el FFO. En una socimi puede no coincidir con la
-        cobertura de la pestaña Dividendo, que sí usa FFO.
+        explotación − inversión), no sobre el FFO. En una socimi puede no coincidir con la cobertura
+        de la pestaña Dividendo, que sí usa FFO.
       </InlineNotice>
 
       {stress?.not_computable_reason ? (
-        <InlineNotice>
-          Faltan escenarios: {stress.not_computable_reason}.
-        </InlineNotice>
+        <InlineNotice>Faltan escenarios: {stress.not_computable_reason}.</InlineNotice>
       ) : null}
 
       {scenarios.length === 0 ? (
-        <p style={{ margin: 0, color: colors.textMuted, fontSize: fontSize.sm }}>
+        <p
+          style={{
+            margin: 0,
+            maxWidth: layout.prose,
+            color: colors.textMuted,
+            fontSize: fontSize.sm,
+          }}
+        >
           No se ha podido calcular ningún escenario para este valor.
         </p>
       ) : (
         <>
-        {/* El dibujo primero y las frases debajo: el dumbbell contesta «¿cuánto
+          {/* El dibujo primero y las frases debajo: el dumbbell contesta «¿cuánto
             se mueve y sigue cubriendo?» de un vistazo, y la frase del motor
             explica el escenario. Ninguno sustituye al otro. */}
-        <StressDumbbell scenarios={scenarios} />
-        <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: spacing.sm }}>
-          {scenarios.map((scenario) => (
-            <li
-              key={scenario.key}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 2,
-                paddingBottom: spacing.sm,
-                borderBottom: `1px solid ${colors.border}`,
-              }}
-            >
-              <span style={{ color: colors.textSubtle, fontSize: fontSize.xs }}>
-                [{scenario.label}] {scenario.parameter}
-              </span>
-              <span style={{ color: colors.text, fontSize: fontSize.sm, lineHeight: 1.5 }}>
-                {scenario.sentence}
-              </span>
-            </li>
-          ))}
-        </ul>
+          <StressDumbbell scenarios={scenarios} />
+          <ul
+            style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: spacing.sm }}
+          >
+            {scenarios.map((scenario) => (
+              <li
+                key={scenario.key}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                  paddingBottom: spacing.sm,
+                  borderBottom: `1px solid ${colors.border}`,
+                }}
+              >
+                <span style={{ color: colors.textSubtle, fontSize: fontSize.xs }}>
+                  [{scenario.label}] {scenario.parameter}
+                </span>
+                <span style={{ color: colors.text, fontSize: fontSize.sm, lineHeight: 1.5 }}>
+                  {scenario.sentence}
+                </span>
+              </li>
+            ))}
+          </ul>
         </>
       )}
 
       {stress?.breakeven_fcf_drop ? (
-        <p style={{ margin: 0, color: colors.textMuted, fontSize: fontSize.sm }}>
+        <p
+          style={{
+            margin: 0,
+            maxWidth: layout.prose,
+            color: colors.textMuted,
+            fontSize: fontSize.sm,
+          }}
+        >
           Margen de caída de la caja libre antes de dejar de cubrir el dividendo:{' '}
           <strong style={{ color: colors.text }}>
             {(Number(stress.breakeven_fcf_drop) * 100).toLocaleString('es-ES', {
@@ -538,28 +632,33 @@ function ConfidenceSection({
 }) {
   const dc = run.data_completeness;
   const pct = (value: string) => Math.round(Number(value) * 100);
-  const labelOf = (key: string) => items?.find((i) => i.key === key)?.label ?? key;
-
-  const statementYears = (statements ?? []).map((s) => s.fiscal_year);
-  const mismatch =
-    statementYears.length > 0 &&
-    statementYears.join(',') !== [...run.years_covered].sort((a, b) => a - b).join(',');
+  const coverage = coreItemCoverage(statements, items, run.years_covered);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg }}>
       <Card style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
         <CardTitle>Cómo se calcula la confianza</CardTitle>
-        <p style={{ margin: 0, color: colors.textMuted, fontSize: fontSize.sm, lineHeight: 1.6 }}>
+        <p
+          style={{
+            margin: 0,
+            maxWidth: layout.prose,
+            color: colors.textMuted,
+            fontSize: fontSize.sm,
+            lineHeight: 1.6,
+          }}
+        >
           <strong style={{ color: colors.text }}>{pct(dc.value)} %</strong> = completitud{' '}
-          {pct(dc.completeness_core)} % × frescura {Number(dc.staleness_factor).toLocaleString(
-            'es-ES',
-            { minimumFractionDigits: 1, maximumFractionDigits: 1 },
-          )}
+          {pct(dc.completeness_core)} % × frescura{' '}
+          {Number(dc.staleness_factor).toLocaleString('es-ES', {
+            minimumFractionDigits: 1,
+            maximumFractionDigits: 1,
+          })}
           .
         </p>
         <ul
           style={{
             margin: 0,
+            maxWidth: layout.prose,
             paddingLeft: spacing.lg,
             color: colors.textMuted,
             fontSize: fontSize.sm,
@@ -569,13 +668,11 @@ function ConfidenceSection({
           <li>
             <strong>Completitud</strong>: fracción de las 10 partidas núcleo publicadas por el
             filing en cada ejercicio. Una partida imputada a cero no cuenta como publicada
-            {dc.imputed_core_count > 0
-              ? ` — aquí hay ${dc.imputed_core_count} imputadas.`
-              : '.'}
+            {dc.imputed_core_count > 0 ? ` — aquí hay ${dc.imputed_core_count} imputadas.` : '.'}
           </li>
           <li>
-            <strong>Frescura</strong>: 1,0 si el último cierre tiene menos de 9 meses; 0,7 hasta
-            18 meses; 0,4 a partir de ahí.
+            <strong>Frescura</strong>: 1,0 si el último cierre tiene menos de 9 meses; 0,7 hasta 18
+            meses; 0,4 a partir de ahí.
             {dc.days_stale !== null
               ? ` El último cierre (${dc.latest_fiscal_year_end ?? '—'}) tiene ${dc.days_stale} días.`
               : ''}
@@ -589,42 +686,48 @@ function ConfidenceSection({
 
       <Card style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
         <CardTitle>Partidas núcleo por ejercicio</CardTitle>
-        <p style={{ margin: 0, color: colors.textMuted, fontSize: fontSize.xs, lineHeight: 1.5 }}>
+        <p
+          style={{
+            margin: 0,
+            maxWidth: layout.prose,
+            color: colors.textMuted,
+            fontSize: fontSize.xs,
+            lineHeight: 1.5,
+          }}
+        >
           Sale de los estados financieros ingeridos, no del análisis. Un hueco aquí puede ser
-          estructural y no reparable: un balance no clasificado (bancos, muchas socimis) no
-          publica activo ni pasivo corriente, y una empresa que no reparte no «omite» el
-          dividendo — vale cero.
+          estructural y no reparable: un balance no clasificado (bancos, muchas socimis) no publica
+          activo ni pasivo corriente, y una empresa que no reparte no «omite» el dividendo — vale
+          cero.
         </p>
-        {mismatch ? (
+        {coverage.mismatch ? (
           <InlineNotice>
-            Ojo: los estados en pantalla cubren {statementYears.join(', ')} y el análisis juzgó{' '}
-            {run.years_covered.join(', ')}. Se ha reingerido después de analizar; vuelve a
-            ejecutar el análisis para que coincidan.
+            Ojo: los estados en pantalla cubren {coverage.years.join(', ')} y el análisis juzgó{' '}
+            {run.years_covered.join(', ')}. Se ha reingerido después de analizar; vuelve a ejecutar
+            el análisis para que coincidan.
           </InlineNotice>
         ) : null}
         {statements && statements.length > 0 ? (
           <div style={{ overflowX: 'auto' }}>
-            <table
-              style={{ width: '100%', borderCollapse: 'collapse', fontSize: fontSize.xs }}
-            >
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: fontSize.xs }}>
               <thead>
                 <tr>
                   <th style={{ textAlign: 'left', padding: spacing.xs, color: colors.textMuted }}>
                     Partida
                   </th>
-                  {statements.map((s) => (
+                  {coverage.years.map((year) => (
                     <th
-                      key={s.fiscal_year}
+                      key={year}
                       style={{ textAlign: 'right', padding: spacing.xs, color: colors.textMuted }}
                     >
-                      {s.fiscal_year}
+                      {year}
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {CORE_ITEMS.map((key) => (
-                  <tr key={key}>
+                {coverage.rows.map((row) => (
+                  <tr key={row.key}>
                     <th
                       scope="row"
                       style={{
@@ -635,25 +738,22 @@ function ConfidenceSection({
                         borderBottom: `1px solid ${colors.border}`,
                       }}
                     >
-                      {labelOf(key)}
+                      {row.label}
                     </th>
-                    {statements.map((statement) => {
-                      const present = statement[key] !== null;
-                      return (
-                        <td
-                          key={`${key}-${statement.fiscal_year}`}
-                          style={{
-                            textAlign: 'right',
-                            padding: spacing.xs,
-                            borderBottom: `1px solid ${colors.border}`,
-                            color: present ? colors.success : colors.textSubtle,
-                          }}
-                          title={present ? 'publicada' : 'ausente en el filing'}
-                        >
-                          {present ? '✓' : '—'}
-                        </td>
-                      );
-                    })}
+                    {row.present.map((present, index) => (
+                      <td
+                        key={`${row.key}-${coverage.years[index]}`}
+                        style={{
+                          textAlign: 'right',
+                          padding: spacing.xs,
+                          borderBottom: `1px solid ${colors.border}`,
+                          color: present ? colors.success : colors.textSubtle,
+                        }}
+                        title={present ? 'publicada' : 'ausente en el filing'}
+                      >
+                        {present ? '✓' : '—'}
+                      </td>
+                    ))}
                   </tr>
                 ))}
               </tbody>

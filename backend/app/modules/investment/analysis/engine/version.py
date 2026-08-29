@@ -128,8 +128,43 @@ Historial:
   y uno en `ThresholdSpec`) y porque el veredicto de la misma empresa puede
   cambiar. Los `thresholds_version` de los runs futuros también cambian, que es
   lo correcto: la calibración es otra.
+- 1.7.0 — PHASE-44.24.M: **la procedencia del corte se persiste** y el escenario
+  de stress deja de puntuar en financieras.
+
+  1. `ThresholdSpec.origin` (`generic` | `sector` | `financial` | `table`) viaja
+     a `thresholds_used` de cada run. No se puede reconstruir después:
+     compararlo con el catálogo de HOY etiqueta como «sectorial» cualquier
+     recalibración genérica posterior al run, y no distingue en absoluto un
+     ajuste manual de la tabla — que es justo para lo que la tabla existe. Lo
+     fija quien resuelve: el perfil en `resolve_thresholds`, y la fila
+     recalibrada en `load_thresholds`, comparando como NÚMERO y no como cadena
+     (la columna es `Numeric(12, 6)` y el motor tiene `Decimal('0.6')`).
+
+  2. En una financiera, la señal de stress sale **no comprobada** con el motivo
+     de `NOT_AUDITABLE`. El motor ya declaraba «¿aguanta un golpe?»
+     permanentemente no auditable en banca —la resiliencia de una entidad
+     financiera es capital regulatorio, no está en un 10-K— y sin embargo
+     seguía calculando el escenario y podía pintarlo ROJO dentro de esa misma
+     pregunta: un chip gris de «no auditada» con una señal roja debajo, en la
+     misma pantalla.
+
+  Ninguna métrica cambia de valor. La huella del contrato SÍ se mueve —campo y
+  `Literal` nuevos— y por eso sube la versión.
+
+  El `thresholds_version`, en cambio, **NO cambia**, y es deliberado:
+  `thresholds_hash` no incluye `origin`. La procedencia es metadato derivado de
+  los mismos `(sector × norma × is_financial)` que ya determinan los cortes, así
+  que meterla en el hash movería la versión de umbrales de TODOS los runs
+  futuros sin que la calibración se haya movido un céntimo — y ese hash existe
+  precisamente para responder «¿se midió a estas dos empresas con la misma
+  vara?». El único caso en que la procedencia cambia sin que cambien los cortes
+  es imposible por construcción: `table` sólo se marca cuando la fila DIFIERE, y
+  entonces los cortes ya son otros y el hash ya se mueve.
+
+  Los runs guardados conservan su `thresholds_version` y no traen `origin`, así
+  que la pantalla lo deriva para ellos y lo declara como derivado.
 """
 
 from __future__ import annotations
 
-ENGINE_VERSION = "1.6.0"
+ENGINE_VERSION = "1.7.0"

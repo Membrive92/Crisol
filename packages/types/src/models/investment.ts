@@ -301,6 +301,21 @@ export interface ThresholdSpec {
    * pasa es que la métrica no describe ese negocio.
    */
   not_applicable_reason?: string | null;
+  /**
+   * De dónde salió este corte (motor ≥ 1.7.0): `'generic'` la vara del
+   * catálogo · `'sector'` el perfil del sector · `'financial'` el perfil
+   * financiero, que se fusiona encima cuando el VALOR es una entidad
+   * financiera aunque esté clasificado en otro sector · `'table'` una fila
+   * recalibrada a mano.
+   *
+   * **Ausente en los runs anteriores a 1.7.0**, y ausente no es `'generic'`:
+   * allí la procedencia no se registraba, así que la pantalla la deriva
+   * comparando con la calibración de hoy y declara que es una derivación.
+   * Deliberadamente `string` y no una unión cerrada, como `analysis_status`:
+   * el conjunto puede crecer y un valor que el frontend aún no conozca no debe
+   * romper el tipado.
+   */
+  origin?: string | undefined;
 }
 
 /**
@@ -323,10 +338,78 @@ export interface MetricDefinition {
   high_alarm: string | null;
   model_variant: string | null;
   note: string;
+  /**
+   * PHASE-44.23 — qué mide y cómo se calcula, en una frase, para la «i» del
+   * informe. Vive en el engine junto a la fórmula: una definición escrita en la
+   * pantalla no la contrasta nadie.
+   *
+   * **Opcional**: un backend anterior al glosario no lo manda.
+   */
+  help?: string | undefined;
+  /**
+   * PHASE-44.24 — por qué le importa a quien vive de los dividendos de esta
+   * empresa. **Opcional**: un backend anterior no lo manda, y su ausencia se
+   * lee como «no hay porqué escrito», no como cadena vacía que pintar.
+   */
+  why?: string | undefined;
+  /**
+   * PHASE-44.24 — hacia dónde se lee y con qué matices (medias de dos
+   * ejercicios, no aplica a financieras, primer año degradado). **Opcional**
+   * por el mismo motivo.
+   */
+  reading?: string | undefined;
 }
 
 export interface MetricCatalogResponse {
   items: MetricDefinition[];
+  engine_version: string;
+}
+
+/**
+ * Una variable de un score forense, con su nombre legible (PHASE-44.24.A).
+ *
+ * Existe porque la tarjeta de desglose imprimía la CLAVE del motor: en pantalla
+ * se leía `DSRI`, `TATA`, `P4_cfo_supera_beneficio`. Mismo defecto que las
+ * señales en crudo que cerró PHASE-44.9, mismo arreglo: la etiqueta sale del
+ * engine, junto a la fórmula.
+ */
+export interface ScoreComponentHelp {
+  key: string;
+  label: string;
+  what: string;
+}
+
+/** La ficha de un score forense: qué mide, por qué importa y cómo se lee. */
+export interface ScoreHelp {
+  key: string;
+  what: string;
+  why: string;
+  reading: string;
+  /**
+   * Vacío en los cuatro scores que no publican desglose por diseño (`accruals`,
+   * `F5`, `F6`, `FZ`): son un ratio único. La lista vacía ES el dato.
+   */
+  components: ScoreComponentHelp[];
+}
+
+/**
+ * La ficha de una bandera del motor (PHASE-44.24.A.2).
+ *
+ * `how_to_verify` es lo que la distingue: dice DÓNDE mirar en las cuentas para
+ * confirmarla o descartarla. Sin él una bandera es un oráculo.
+ */
+export interface FlagHelp {
+  key: string;
+  label: string;
+  what: string;
+  why: string;
+  reading: string;
+  how_to_verify: string;
+}
+
+export interface HelpCatalogResponse {
+  scores: ScoreHelp[];
+  flags: FlagHelp[];
   engine_version: string;
 }
 
@@ -357,6 +440,13 @@ export interface CanonicalItemDefinition {
   statement: StatementKind;
   group: ItemGroup;
   note: string;
+  /**
+   * PHASE-44.23 — qué es la partida, en una frase, para la «i» del informe.
+   *
+   * **Opcional**: un backend anterior al glosario no lo manda. Su ausencia se
+   * lee como «no hay definición», no como cadena vacía que pintar.
+   */
+  help?: string | undefined;
 }
 
 export interface CanonicalItemCatalogResponse {
@@ -580,8 +670,15 @@ export interface VerticalPoint {
 }
 
 export interface EvolutionBlock {
+  /**
+   * Ausente en un run de motor 1.0.0 (la fixture real de MCD trae
+   * `evolution: {}`). Opcional por la regla de PHASE-44.16: un `AnalysisRun`
+   * es JSONB de todas las versiones, y declararlo obligatorio apaga al
+   * compilador justo donde hace falta — la pantalla pintaba una tabla con
+   * cabecera de años y cero filas sin poder avisar.
+   */
   metrics: MetricResult[];
-  horizontal: HorizontalSeries[];
+  horizontal?: HorizontalSeries[];
   vertical: VerticalPoint[];
   flags: EngineFlag[];
 }
@@ -633,12 +730,131 @@ export interface AnalysisRun {
   flags: EngineFlag[];
   verdict: VerdictBlock;
   data_completeness: Confidence;
+  /**
+   * PHASE-44.24.C — distancia al corte, orden por severidad y procedencia.
+   * **Opcional**: un backend anterior no la manda, y su ausencia se lee como
+   * «esta versión del servidor no la calcula», no como capa vacía.
+   */
+  report?: ReportLayer | undefined;
+}
+
+/**
+ * A qué distancia está una señal del corte que decide su banda (PHASE-44.24.C).
+ *
+ * El TEXTO no viene hecho: «a 3 pp del verde» para un margen y «2,1× dentro del
+ * rojo» para una cobertura son la misma información dicha por unidad, y quien
+ * sabe formatear por unidad es `@crisol/ui` — que además lo hace igual en las
+ * dos apps.
+ */
+export interface SignalDistance {
+  cut: string | null;
+  absolute: string | null;
+  /**
+   * `null` con el corte en cero y en las métricas de puntuación, donde no
+   * significa nada: los cortes del X-Score están en −1,04 y −0,25, así que la
+   * misma distancia da relativas de 0,2 y 0,8 sin que ninguna informe.
+   */
+  relative: string | null;
+  side: 'inside' | 'outside';
+  /** Con cortes iguales NUNCA es `caution`: esa región es vacía. */
+  next_band: 'caution' | 'stressed';
+  /** Por qué no hay corte hacia donde medir (S7 por debajo de su banda). */
+  missing_reason?: string | null;
+}
+
+/**
+ * De dónde salió la vara con la que se midió una señal.
+ *
+ * `not_recorded` es «el run no registró el corte de ESTA métrica», que no es la
+ * genérica: un run de motor 1.3.0 tiene `thresholds_used` y no tiene S7 ni S8.
+ * `earlier_calibration` sólo aparece en runs anteriores al motor 1.7.0, donde
+ * la procedencia se deriva en vez de leerse.
+ */
+export type ThresholdOrigin =
+  | 'generic'
+  | 'sector'
+  | 'financial'
+  | 'table'
+  | 'earlier_calibration'
+  | 'uncalibrated'
+  | 'not_applicable'
+  | 'not_recorded';
+
+export interface ReportSignal {
+  key: string;
+  /** Para imprimir la marca de aproximación junto al valor (regla 3). */
+  status?: MetricStatus | null;
+  /** 0 = la peor. Resuelto en el servidor: las dos apps no pueden discrepar. */
+  severity_rank: number;
+  distance?: SignalDistance | null;
+  threshold_origin: ThresholdOrigin;
+}
+
+export interface ReportQuestion {
+  key: string;
+  /**
+   * El estado en que se puede leer el veredicto. Sólo `evaluated` permite
+   * nombrar el color; los otros tres son el motivo por el que no.
+   */
+  evidence?: 'evaluated' | 'no-evidence' | 'not-recorded' | 'not-audited';
+  /** Si el run distingue «comprobada y limpia» de «no se pudo comprobar». */
+  outcomes_recorded?: boolean;
+  /** La frase determinista de esta pregunta (PHASE-44.24.B). */
+  sentence?: string;
+  signals: ReportSignal[];
+}
+
+export interface NextCheck {
+  key: string;
+  text: string;
+}
+
+/**
+ * Qué perfil de umbrales gobierna a este valor HOY.
+ *
+ * Lo emite el servidor entero: componerlo en la pantalla con `security.sector`
+ * es falso para toda entidad financiera clasificada en otro sector, porque el
+ * perfil financiero se fusiona por encima del sectorial.
+ */
+export interface ThresholdProfile {
+  effective: string;
+  sector: SectorInternal;
+  is_financial: boolean;
+  is_reit: boolean;
+}
+
+/**
+ * La capa de LECTURA de un run (PHASE-44.24.C): no se persiste, se calcula al
+ * servirlo. Así un run de un motor anterior la recibe hoy sin reejecutar nada.
+ *
+ * **Opcional**: un backend anterior no la manda.
+ */
+export interface ReportLayer {
+  threshold_profile: ThresholdProfile;
+  questions: ReportQuestion[];
+  /**
+   * La versión de los TEXTOS, distinta de la del motor: reescribir una frase no
+   * cambia ningún número, así que no marca como caducado ningún análisis.
+   */
+  narrative_version?: string;
+  /** Perfil de seguridad y dividendo, en una frase. */
+  headline?: string;
+  /** Hasta tres cosas que mirar, las peores primero. */
+  next_checks?: NextCheck[];
 }
 
 export interface AnalysisRunSummary {
   id: string;
   run_date: string;
   engine_version: string;
+  /**
+   * Para etiquetar «comparable» en el selector SIN pedir los runs enteros.
+   *
+   * Opcional porque un backend anterior a PHASE-44.24.F no lo manda, y
+   * `campo !== undefined` sobre una clave ausente es cómo se pinta una marca
+   * en todas las filas.
+   */
+  thresholds_version?: string;
   years_covered: number[];
   m_score: string | null;
   z_score: string | null;
@@ -649,6 +865,77 @@ export interface AnalysisRunSummary {
 
 export interface AnalysisRunListResponse {
   items: AnalysisRunSummary[];
+}
+
+// ── Comparador de runs (PHASE-44.24.F) ────────────────────────────────
+
+export interface ScoreChange {
+  key: string;
+  before: string | null;
+  after: string | null;
+  band_before: MetricBand | null;
+  band_after: MetricBand | null;
+}
+
+export interface BandChange {
+  key: string;
+  band_before: MetricBand | null;
+  band_after: MetricBand | null;
+  value_before: string | null;
+  value_after: string | null;
+}
+
+export interface FlagChange {
+  key: string;
+  label: string | null;
+  severity: string | null;
+  /** `true` si la bandera ha APARECIDO; `false` si se ha apagado. */
+  appeared: boolean;
+}
+
+export interface QuestionChange {
+  key: string;
+  verdict_before: MetricBand | null;
+  verdict_after: MetricBand | null;
+  /** El estado de evidencia, no el color: se puede perder respaldo sin
+   *  cambiar de banda, y eso también es una noticia. */
+  evidence_before: string;
+  evidence_after: string;
+}
+
+export interface RestatementNote {
+  fiscal_year: number;
+  filing_a: string;
+  filing_b: string;
+  item_count: number;
+}
+
+/**
+ * Qué ha cambiado entre dos análisis de la misma empresa.
+ *
+ * `comparable === false` significa que cambió el MÉTODO (motor o calibración):
+ * entonces las listas de cambios de empresa vienen VACÍAS por construcción,
+ * porque un cambio de banda podría ser el corte y no el negocio.
+ */
+export interface RunDiff {
+  comparable: boolean;
+  base_id: string;
+  target_id: string;
+  base_date: string | null;
+  target_date: string | null;
+  method_changes: string[];
+  years_added: number[];
+  years_removed: number[];
+  safety_before: SafetyLabel | null;
+  safety_after: SafetyLabel | null;
+  dividend_before: DividendVerdict | null;
+  dividend_after: DividendVerdict | null;
+  questions: QuestionChange[];
+  scores: ScoreChange[];
+  bands: BandChange[];
+  flags: FlagChange[];
+  restatements: RestatementNote[];
+  caveat: string | null;
 }
 
 // ── Cartera ───────────────────────────────────────────────────────────
