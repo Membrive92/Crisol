@@ -2179,6 +2179,59 @@ ambas dan lo mismo, es que llevaban años siendo la misma por accidente.
 
 ## Ejemplos de referencia (no son lecciones reales)
 
+### [PHASE-44.25] Una pantalla que no puede afirmar algo lo DICE; inferirlo de un texto no es frágil, es que AFIRMA comprobaciones que nadie hizo
+
+**Error:** la checklist del veredicto derivaba el estado de cada condición del
+sello comparando cadenas contra `blocking_reasons` (`includes()` para las de
+«Evitar», la primera palabra para las de «Conservador»). Bajo un perfil
+«Evitar» esa lista contiene los motivos de EVITAR, no las negaciones de
+Conservador — y el motor, además, **retornaba antes de evaluarlas**. Resultado:
+«F-Score ≥ 7 ✓» salía **siempre** en un perfil «Evitar», y unos accruals en
+rojo mostraban «Accruals en verde ✓», justo debajo del badge rojo. La pantalla
+que existe para auditar el sello afirmaba lo contrario de los datos.
+**Causa:** dos defectos que se necesitan mutuamente. El motor tiraba la
+causalidad al serializar —`blocking_reasons` es prosa sin claves, aunque
+`_safety_profile` evalúa las bandas con el `MetricResult` en la mano— y la
+pantalla, sin dato que pintar, **rellenaba el hueco infiriendo**. El problema no
+era la fragilidad del emparejamiento por texto (que también): era que la
+ausencia de dato se convertía en una afirmación positiva.
+**Solución:** mover la fuente de verdad (lección [PHASE-34]: a la segunda vez de
+parchear la misma raíz, mueve la fuente). El motor evalúa las DIEZ condiciones
+siempre y las persiste con sus señales y un `met` **tri-estado** —`None` es «no
+se pudo comprobar»—, y la pantalla pinta el dato. Donde no hay dato (un run de
+un motor anterior) se dice «sin registro en este análisis», que es la verdad, y
+no se compone contrafactual: reconstruirlo con la regla de HOY afirmaría sobre
+aquel análisis algo que su motor no comprobó.
+**Regla:** cuando una pantalla necesite un dato que el backend no emite, la
+respuesta no es inferirlo de otro que sí llega — es emitirlo. Y antes de aceptar
+una inferencia, pregúntate qué AFIRMA cuando se equivoca: si el modo de fallo es
+un ✓ sobre algo que nadie ha comprobado, no es una aproximación, es una mentira
+con forma de dato. Corolario de diseño, que costó tres defectos: un glifo cuyo
+significado se invierte entre dos listas (✕ = «se cumple» arriba, ✕ = «no se
+cumple» abajo) no se arregla con una leyenda — la bimodalidad ES el defecto.
+Palabras.
+
+### [PHASE-44.25] Un contador que sólo mira una familia de señales produce ceros ESTRUCTURALES, y la frase que los cita se lee como una noticia
+
+**Error:** la frase de cada pregunta decía «Se evaluaron 8 señales, **0** se
+comprobaron y salieron limpias y **0** no se pudieron comprobar». Se lee como
+«las 8 salieron mal». En realidad 6 de las 8 estaban en verde: `clear_count` y
+`unchecked_count` sólo cuentan BANDERAS, y la pregunta de la resistencia no
+tiene ninguna — sus ceros son estructurales, no un hallazgo.
+**Causa:** la frase agregaba los contadores que existían en vez de los que
+explican el color. El desglose por bandas (6 verdes · 2 rojas) viajaba por señal
+desde PHASE-44.9 y ninguna plantilla lo citaba.
+**Solución:** contar por banda desde las señales, omitiendo los segmentos a cero
+—«0 en ámbar» ocupa el sitio de una noticia sin serlo— y citar limpias y sin
+comprobar sólo cuando son > 0.
+**Regla:** antes de interpolar un contador en una frase, comprueba si puede
+valer cero **por construcción** en algún caso normal. Un cero estructural leído
+como dato es peor que no dar el dato: el lector saca una conclusión, y es la
+contraria. Corolario de redacción cazado por un golden: «Puntuaron {n} señales»
+con n=1 produce «1 señales», y el gate que prohíbe dígitos en las plantillas
+impide arreglarlo escribiendo el singular — la salida es una frase que no
+necesite concordar («Señales que puntúan: …»).
+
 ### [Ejemplo] No usar float para importes monetarios
 
 **Error:** Se usó `float` para almacenar precios.
