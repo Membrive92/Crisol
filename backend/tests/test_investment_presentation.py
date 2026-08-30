@@ -445,3 +445,367 @@ def test_el_estado_de_evidencia_coincide_con_el_del_frontend(caso: dict[str, obj
     resultado = evidence_of(question)
     assert resultado.state == caso["expected"], caso["name"]
     assert resultado.outcomes_recorded == caso["outcomes_recorded"], caso["name"]
+
+
+# ── El porqué del veredicto (PHASE-44.25) ─────────────────────────────
+#
+# El caso es el que reportó el usuario: McDonald's sale «Evitar» por el X-Score
+# y el lector no puede reconstruir el argumento — el titular nombra una señal
+# que la tabla no marca, junto a un Z''-Score en verde que nadie concilia, y la
+# fila más severa de la pregunta (el escenario de stress) sale sin número.
+
+
+def _condicion(
+    key: str,
+    rule: str,
+    text: str,
+    met: bool | None,
+    *,
+    inverse: str = "",
+    signals: list[dict] | None = None,
+    reason: str | None = None,
+) -> dict:
+    return {
+        "key": key,
+        "rule": rule,
+        "text": text,
+        "met": met,
+        "reason": reason,
+        "inverse": inverse,
+        "signals": signals or [],
+    }
+
+
+def _señal_cond(key: str, label: str, band: str | None, value: str | None) -> dict:
+    return {
+        "key": key,
+        "label": label,
+        "kind": "metric",
+        "band": band,
+        "value": value,
+        "status": "ok",
+    }
+
+
+def _verdict_mcd() -> dict:
+    """El veredicto de un run como el de MCD: «Evitar» por el X-Score."""
+    return {
+        "safety_profile": {
+            "label": "avoid",
+            "blocking_reasons": ["X-Score en rojo (riesgo de quiebra)"],
+            "conditions": [
+                _condicion(
+                    "avoid_manipulation",
+                    "avoid",
+                    "M-Score y accruals ambos en rojo (manipulación probable)",
+                    False,
+                    inverse="el M-Score o los accruals salieran del rojo",
+                    signals=[
+                        _señal_cond("m_score", "M-Score de Beneish", "healthy", "-2.6"),
+                        _señal_cond("accruals", "Accruals de Sloan", "healthy", "0.035"),
+                    ],
+                ),
+                _condicion(
+                    "avoid_insolvency",
+                    "avoid",
+                    "Z''-Score en rojo (riesgo de insolvencia)",
+                    False,
+                    inverse="el Z''-Score saliera del rojo",
+                    signals=[_señal_cond("z_score", "Z''-Score de Altman", "healthy", "5.20")],
+                ),
+                _condicion(
+                    "avoid_bankruptcy",
+                    "avoid",
+                    "X-Score en rojo (riesgo de quiebra)",
+                    True,
+                    inverse="el X-Score saliera del rojo",
+                    signals=[_señal_cond("FZ", "X-Score de Zmijewski", "stressed", "0.87")],
+                ),
+                _condicion(
+                    "avoid_dividend_funding",
+                    "avoid",
+                    "dividendo financiado con deuda o emisión",
+                    False,
+                    inverse="el dividendo dejara de financiarse con deuda o emisión",
+                    signals=[],
+                ),
+                _condicion(
+                    "cons_fz",
+                    "conservative",
+                    "X-Score no está en verde",
+                    True,
+                    inverse="el X-Score se pusiera en verde",
+                    signals=[_señal_cond("FZ", "X-Score de Zmijewski", "stressed", "0.87")],
+                ),
+            ],
+        },
+        "dividend_verdict": "stressed",
+        "stress": {
+            "scenarios": [
+                {
+                    "key": "ST1",
+                    "coverage_before": "1.08",
+                    "coverage_after": "0.92",
+                    "sentence": "Con las ventas cayendo un 10 %, la cobertura pasa de 1,08 a 0,92.",
+                },
+                {
+                    "key": "ST2",
+                    "coverage_before": "1.08",
+                    "coverage_after": "1.05",
+                    "sentence": "Con los tipos subiendo, la cobertura pasa de 1,08 a 1,05.",
+                },
+            ]
+        },
+        "questions": [
+            {
+                "key": "resilience",
+                "verdict": "stressed",
+                "evaluated_count": 8,
+                "clear_count": 0,
+                "unchecked_count": 0,
+                "audited": True,
+                "load_bearing": ["z_score"],
+                "signals": [
+                    {
+                        "key": "FZ",
+                        "label": "X-Score de Zmijewski",
+                        "kind": "metric",
+                        "counted": True,
+                        "band": "stressed",
+                        "value": "0.87",
+                        "status": "ok",
+                    },
+                    {
+                        "key": "stress",
+                        "label": "Escenario de stress (deja de cubrir)",
+                        "kind": "derived",
+                        "counted": True,
+                        "band": "stressed",
+                        "value": None,
+                    },
+                    {
+                        "key": "z_score",
+                        "label": "Z''-Score de Altman",
+                        "kind": "metric",
+                        "counted": True,
+                        "band": "healthy",
+                        "value": "5.20",
+                        "status": "ok",
+                    },
+                ],
+            }
+        ],
+    }
+
+
+def _report(verdict: dict):
+    from app.modules.investment.analysis.presentation.origin import ThresholdProfile
+    from app.modules.investment.analysis.presentation.report import build_report
+
+    return build_report(
+        verdict=verdict,
+        thresholds_used={},
+        profile=ThresholdProfile(
+            effective="generic", sector="consumer_discretionary", is_financial=False, is_reit=False
+        ),
+        profile_thresholds=ALL_DEFAULT_THRESHOLDS,
+    )
+
+
+def test_la_senal_que_disparo_el_sello_va_marcada() -> None:
+    """El titular nombraba el X-Score y ninguna fila lo marcaba: el lector tenía
+    que reconocer que «X-Score en rojo» y la fila `FZ 0,87` son lo mismo."""
+    layer = _report(_verdict_mcd())
+    por_clave = {s.key: s for s in layer.questions[0].signals}
+
+    assert por_clave["FZ"].drove_verdict is True
+    # Roja pero NO decisiva: el stress tiñe la pregunta y no está en la matriz.
+    assert por_clave["stress"].drove_verdict is False
+    assert por_clave["z_score"].drove_verdict is False
+
+
+def test_la_fila_del_stress_deja_de_estar_hueca() -> None:
+    """Sus cifras estaban persistidas con la frase ya redactada, tres cards más
+    abajo, y nadie las cruzaba con la fila que las resume."""
+    layer = _report(_verdict_mcd())
+    stress = next(s for s in layer.questions[0].signals if s.key == "stress")
+
+    assert len(stress.evidence_sentences) == 1, "sólo los escenarios que dejan de cubrir"
+    assert "1,08" in stress.evidence_sentences[0]
+    # El escenario que SÍ cubre (1,05) no se cita: no explica el rojo.
+    assert all("1,05" not in frase for frase in stress.evidence_sentences)
+
+
+def test_el_porque_dice_que_condicion_decidio_y_que_lo_sacaria() -> None:
+    layer = _report(_verdict_mcd())
+    assert layer.why is not None
+    assert layer.why.decided_by == ("avoid_bankruptcy",)
+    assert layer.why.exit_sentence.startswith(
+        "Dejaría de ser «Evitar» si el X-Score saliera del rojo"
+    )
+    assert "Vigilar" in layer.why.exit_sentence
+
+
+def test_la_discrepancia_entre_los_dos_modelos_se_dice() -> None:
+    """X-Score en rojo justo encima de un Z''-Score en verde, sin una línea que
+    lo explique, es la contradicción que rompe la lectura."""
+    layer = _report(_verdict_mcd())
+    assert layer.why is not None
+    assert layer.why.models_disagree is not None
+    assert "X-Score de Zmijewski" in layer.why.models_disagree
+    assert "Z''-Score de Altman" in layer.why.models_disagree
+
+
+def test_sin_discrepancia_no_se_inventa_la_frase() -> None:
+    verdict = _verdict_mcd()
+    for condicion in verdict["safety_profile"]["conditions"]:
+        if condicion["key"] == "avoid_insolvency":
+            condicion["signals"][0]["band"] = "stressed"
+    layer = _report(verdict)
+
+    assert layer.why is not None
+    assert layer.why.models_disagree is None
+
+
+def test_un_run_sin_la_matriz_evaluada_no_recibe_porque_inventado() -> None:
+    """Precondición, no etiqueta: componerlo con la regla de HOY afirmaría sobre
+    aquel análisis algo que su motor no comprobó."""
+    verdict = _verdict_mcd()
+    verdict["safety_profile"].pop("conditions")
+    layer = _report(verdict)
+
+    assert layer.why is None
+    assert all(not s.drove_verdict for q in layer.questions for s in q.signals)
+    # Pero las frases del escenario SÍ llegan: son un hecho persistido del run.
+    stress = next(s for s in layer.questions[0].signals if s.key == "stress")
+    assert stress.evidence_sentences
+
+
+def test_el_contrafactual_calla_lo_que_no_se_pudo_comprobar() -> None:
+    """Prometer que algo bastaría sin haberlo mirado es la promesa vacía que
+    PHASE-44.17 quitó de las banderas."""
+    from app.modules.investment.analysis.presentation.narrative import exit_sentence
+
+    conditions = [
+        _condicion(
+            "avoid_bankruptcy",
+            "avoid",
+            "X-Score en rojo",
+            True,
+            inverse="el X-Score saliera del rojo",
+        ),
+        _condicion(
+            "avoid_manipulation",
+            "avoid",
+            "M-Score y accruals ambos en rojo",
+            None,
+            inverse="el M-Score o los accruals salieran del rojo",
+            reason="no se calculó en este ejercicio",
+        ),
+    ]
+    frase = exit_sentence(safety_label="avoid", conditions=conditions)
+
+    assert "el X-Score saliera del rojo" in frase
+    assert "el M-Score o los accruals salieran del rojo" not in frase
+    assert "quedaría por comprobar" in frase
+    assert "M-Score y accruals ambos en rojo" in frase
+
+
+def test_el_bullet_de_que_miraria_enlaza_con_su_senal() -> None:
+    """`key` era `pregunta:ETIQUETA` y una etiqueta no localiza nada: ya
+    divergieron una vez («M-Score» vs «M-Score de Beneish»)."""
+    layer = _report(_verdict_mcd())
+    con_clave = [c for c in layer.next_checks if c.signal_key]
+
+    assert con_clave, "ningún bullet trae la clave de su señal"
+    assert {c.signal_key for c in con_clave} <= {"FZ", "stress", "z_score"}
+
+
+# ── El sumario del Dictamen (PHASE-44.26) ─────────────────────────────
+#
+# La selección vive AQUÍ junto a las frases que la nombran: qué entra y en qué
+# orden es parte de lo que la frase afirma. El selector del cliente queda como
+# fallback para backends anteriores.
+
+
+def test_el_sumario_nombra_lo_que_pesa_y_lo_que_sale_limpio() -> None:
+    layer = _report(_verdict_mcd())
+
+    assert layer.summary is not None
+    # Rojas primero, con la frase que las nombra — sin números: los números van
+    # en las filas, formateados por unidad en la capa compartida.
+    assert layer.summary.concern_keys[0] in ("FZ", "stress")
+    assert "X-Score de Zmijewski" in layer.summary.concerns_intro
+    assert not any(c.isdigit() for c in layer.summary.concerns_intro)
+    # El verde de la misma pregunta sale en la otra lista.
+    assert "z_score" in layer.summary.strength_keys
+    assert "Z''-Score de Altman" in layer.summary.strengths_intro.replace("\\", "")
+
+
+def test_el_sumario_recorta_ambar_pero_jamas_una_roja() -> None:
+    verdict = _verdict_mcd()
+    señales = verdict["questions"][0]["signals"]
+    # Ocho rojas más las de MCD: todas las rojas salen.
+    for i in range(8):
+        señales.append(
+            {
+                "key": f"r{i}",
+                "label": f"Roja {i}",
+                "kind": "metric",
+                "counted": True,
+                "band": "stressed",
+                "value": "1",
+                "status": "ok",
+            }
+        )
+    layer = _report(verdict)
+
+    assert layer.summary is not None
+    rojas = [k for k in layer.summary.concern_keys]
+    assert len(rojas) >= 10  # las 8 sintéticas + FZ + stress
+
+
+def test_una_financiera_no_aporta_ni_rojo_ni_verde_al_sumario() -> None:
+    verdict = _verdict_mcd()
+    # La pregunta pasa a permanentemente no auditable: sin portantes.
+    verdict["questions"][0]["audited"] = False
+    verdict["questions"][0]["load_bearing"] = []
+    layer = _report(verdict)
+
+    assert layer.summary is not None
+    assert layer.summary.concern_keys == ()
+    assert layer.summary.strength_keys == ()
+    assert layer.summary.concerns_intro == ""
+
+
+def test_un_verde_sin_evidencia_no_es_fortaleza_en_el_servidor() -> None:
+    verdict = _verdict_mcd()
+    # La pregunta queda no auditada TEMPORALMENTE (con portantes): sus rojas
+    # siguen listándose con su matiz; sus verdes no son fortaleza.
+    verdict["questions"][0]["audited"] = False
+    layer = _report(verdict)
+
+    assert layer.summary is not None
+    assert "FZ" in layer.summary.concern_keys
+    assert layer.summary.strength_keys == ()
+
+
+def test_el_sumario_trae_el_stress_con_su_margen() -> None:
+    verdict = _verdict_mcd()
+    verdict["stress"]["breakeven_fcf_drop"] = "0.07"
+    layer = _report(verdict)
+
+    assert layer.summary is not None
+    assert len(layer.summary.stress_sentences) == 2
+    assert layer.summary.stress_margin == (
+        "La caja libre podría caer un 7 % antes de dejar de cubrir el dividendo."
+    )
+
+
+def test_un_run_sin_desglose_no_recibe_sumario_inventado() -> None:
+    verdict = _verdict_mcd()
+    for question in verdict["questions"]:
+        question.pop("signals")
+    layer = _report(verdict)
+
+    assert layer.summary is None

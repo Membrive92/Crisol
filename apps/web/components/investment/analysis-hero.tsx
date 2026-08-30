@@ -5,6 +5,7 @@ import Link from 'next/link';
 import {
   colors,
   DIVIDEND,
+  dividendSourceLabel,
   fontSize,
   fontWeight,
   questionEvidence,
@@ -49,6 +50,14 @@ export interface AnalysisHeroProps {
    */
   guideHref: string;
   /**
+   * A dónde lleva «Ver el porqué», o `null` si no hay informe que abrir.
+   *
+   * La compone la página, como las demás: el hero se monta sin router en los
+   * tests. `null` y no un literal por defecto — un enlace a ninguna parte es
+   * peor que no tenerlo (PHASE-44.24.H).
+   */
+  whyHref?: string | null | undefined;
+  /**
    * Por qué falló el último re-análisis, si falló.
    *
    * Vivía sólo en la tarjeta de «aún no se ha analizado», que por definición no
@@ -70,9 +79,11 @@ export function AnalysisHero({
   rerunning,
   printHref,
   guideHref,
+  whyHref = null,
   rerunError,
 }: AnalysisHeroProps) {
   const safety = run ? SAFETY[run.verdict.safety_profile.label] : null;
+  const dividendSource = dividendSourceLabel(run);
 
   return (
     <Card style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
@@ -182,6 +193,25 @@ export function AnalysisHero({
             </p>
           ) : null}
 
+          {/* El titular nombraba la señal que decidió el sello y no llevaba a
+              ninguna parte: la evidencia vivía en la 4ª card, tras un
+              desplegable cerrado. En el dictamen impreso no se renderiza — un
+              modo que ignora un control no lo esconde, no lo pinta. */}
+          {whyHref ? (
+            <Link
+              data-print="hide"
+              href={whyHref as never}
+              style={{
+                color: colors.primary,
+                fontSize: fontSize.sm,
+                textDecoration: 'none',
+                alignSelf: 'flex-start',
+              }}
+            >
+              Ver el porqué: la regla y su evidencia ↓
+            </Link>
+          ) : null}
+
           <div
             style={{
               display: 'flex',
@@ -194,7 +224,15 @@ export function AnalysisHero({
               fontSize: fontSize.xs,
             }}
           >
-            <span>{DIVIDEND[run.verdict.dividend_verdict]}</span>
+            <span>
+              {DIVIDEND[run.verdict.dividend_verdict]}
+              {/* De cuál de las dos preguntas sale. Es el PEOR de «¿cabe en la
+                  caja?» y «¿aguanta un golpe?», así que el hero puede anunciar
+                  «Dividendo en riesgo» con la pregunta del dividendo en verde —
+                  y sin esta coda el lector se queda con la contradicción
+                  (PHASE-44.25). */}
+              {dividendSource ? ` ${dividendSource}` : ''}
+            </span>
             <span>
               · Confianza{' '}
               <strong style={{ color: colors.text }}>

@@ -114,6 +114,15 @@ function makeCtx(run: AnalysisRun): TabContext {
 }
 
 describe('TabVerdict (móvil)', () => {
+  it('la auditoría del sello nace PLEGADA, igual que en web (PHASE-44.26)', () => {
+    // El mismo cableado en las dos apps: el defecto de una se busca en la otra
+    // antes de que lo encuentre el usuario (lección 44.24.H).
+    const { queryByText, getByText } = render(<TabVerdict ctx={makeCtx(makeRun([]))} />);
+    expect(queryByText(/Se evita si se cumple/i)).toBeNull();
+    fireEvent.press(getByText(/auditoría del sello/i));
+    expect(queryByText(/Se evita si se cumple/i)).not.toBeNull();
+  });
+
   it('pinta la ETIQUETA de la señal, no su clave interna', () => {
     const run = makeRun([
       {
@@ -127,9 +136,11 @@ describe('TabVerdict (móvil)', () => {
       } as QuestionSignal,
     ]);
 
-    const { queryByText, getByText } = render(<TabVerdict ctx={makeCtx(run)} />);
+    const { queryByText, getAllByText } = render(<TabVerdict ctx={makeCtx(run)} />);
 
-    expect(getByText('El dividendo se financia con deuda')).toBeTruthy();
+    // Dos apariciones desde PHASE-44.26: la fila de su pregunta y la del
+    // sumario. Lo que el test ata es que NINGUNA sea la clave cruda.
+    expect(getAllByText('El dividendo se financia con deuda').length).toBeGreaterThan(0);
     expect(queryByText(/B4_dividend_funded_externally/)).toBeNull();
   });
 
@@ -242,8 +253,11 @@ describe('TabVerdict (móvil): las señales navegan', () => {
 
   it('tocar una métrica lleva a su pestaña con la fila resaltada', () => {
     const goTo = jest.fn();
-    const { getByText } = render(<TabVerdict ctx={{ ...makeCtx(makeRun([metrica])), goTo }} />);
-    fireEvent.press(getByText(/Cobertura de intereses/));
+    const { getAllByText } = render(
+      <TabVerdict ctx={{ ...makeCtx(makeRun([metrica])), goTo }} />,
+    );
+    // La primera aparición es la del sumario (PHASE-44.26); también navega.
+    fireEvent.press(getAllByText(/Cobertura de intereses/)[0]!);
     expect(goTo).toHaveBeenCalledWith('ratios', 'S2');
   });
 
@@ -272,10 +286,10 @@ describe('TabVerdict (móvil): las señales navegan', () => {
 
   it('tocar una bandera no hace nada, y la fila está DESHABILITADA', () => {
     const goTo = jest.fn();
-    const { getByText, queryByRole } = render(
+    const { getAllByText, queryByRole } = render(
       <TabVerdict ctx={{ ...makeCtx(makeRun([bandera])), goTo }} />,
     );
-    const texto = getByText(/El dividendo se financia con deuda/);
+    const texto = getAllByText(/El dividendo se financia con deuda/)[0]!;
     fireEvent.press(texto);
     expect(goTo).not.toHaveBeenCalled();
     expect(queryByRole('button', { name: /El dividendo se financia/ })).toBeNull();
@@ -285,10 +299,10 @@ describe('TabVerdict (móvil): las señales navegan', () => {
   });
 
   it('una métrica con destino está HABILITADA', () => {
-    const { getByText } = render(
+    const { getAllByText } = render(
       <TabVerdict ctx={{ ...makeCtx(makeRun([metrica])), goTo: jest.fn() }} />,
     );
-    const presionable = fila(getByText(/Cobertura de intereses/));
+    const presionable = fila(getAllByText(/Cobertura de intereses/)[0]!);
     expect(presionable).not.toBeNull();
     expect(
       (presionable!.props.accessibilityState as { disabled?: boolean } | undefined)?.disabled,

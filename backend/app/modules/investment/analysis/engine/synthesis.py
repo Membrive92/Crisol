@@ -27,7 +27,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from app.modules.investment.analysis.engine.base_ratios import BaseRatiosResult
 from app.modules.investment.analysis.engine.catalog import definition_for
@@ -85,6 +85,13 @@ reales: la pantalla **subestimaba** la evidencia mientras el veredicto verde la
 - `unchecked` — no se pudo comprobar. Es ausencia de evidencia.
 - `informational` — no puntúa por diseño (banderas `info`).
 """
+
+SafetyRuleKind = Literal["avoid", "conservative"]
+"""A qué lista pertenece una condición de la matriz de seguridad.
+
+Cambia el significado de `met`: en una condición de «Evitar», cumplirse es lo
+MALO; en una de «Conservador», lo bueno. La pantalla necesita saberlo para no
+tener que deducirlo del orden (PHASE-44.25)."""
 
 
 # ── Salida ────────────────────────────────────────────────────────────
@@ -188,11 +195,70 @@ class QuestionVerdict:
 
 
 @dataclass(frozen=True)
+class ConditionSignal:
+    """Una señal implicada en una condición de la matriz, con su lectura.
+
+    La condición se AUTO-CONTIENE: quien pinta la card no tiene que cruzarla con
+    `questions[].signals` para enseñar el número que la hizo cierta o falsa. Esa
+    dependencia es justo la que hoy obliga a la pantalla a emparejar por cadenas
+    de texto (PHASE-44.25).
+    """
+
+    key: str
+    """La clave REAL de la métrica o la bandera: `FZ`, `m_score`, `B4_…`."""
+    label: str
+    kind: Literal["metric", "flag"]
+    band: Band | None
+    value: Decimal | None
+    status: MetricStatus | None = None
+
+
+@dataclass(frozen=True)
+class SafetyConditionResult:
+    """Una condición de la matriz de seguridad, EVALUADA (PHASE-44.25).
+
+    Las diez se evalúan y se publican siempre, también en un perfil «Evitar»:
+    antes se retornaba en cuanto una de «Evitar» se cumplía, así que «qué
+    tendría que cambiar para salir» ni siquiera se calculaba, y la pantalla
+    rellenaba ese hueco infiriendo de `blocking_reasons` — con lo que
+    fabricaba ✓ de condiciones que nadie había comprobado.
+
+    `met=None` es el tri-estado honesto (familia PHASE-44.17): «no se pudo
+    comprobar» no es «no se cumple». En una financiera los scores forenses
+    salen `not_computable` y sus condiciones no se pueden afirmar ni negar.
+    """
+
+    key: str
+    rule: SafetyRuleKind
+    text: str
+    """La afirmación, byte-igual a la que viaja en `blocking_reasons`."""
+    met: bool | None
+    reason: str | None = None
+    """Por qué no se pudo comprobar. Obligatorio si `met` es None."""
+    signals: tuple[ConditionSignal, ...] = ()
+    inverse: str = ""
+    """El giro contrafactual, SIN números: «el X-Score saliera del rojo».
+
+    Se persiste con la condición en vez de leerse del catálogo al servir para
+    que el run se auto-contenga: componer el contrafactual de un run viejo con
+    la redacción de HOY volvería a mezclar lo que aquel análisis dijo con la
+    regla vigente, que es justo lo que esta fase viene a separar."""
+
+    def __post_init__(self) -> None:
+        if self.met is None and not self.reason:
+            raise ValueError(f"{self.key}: una condición no comprobable DEBE explicar por qué")
+
+
+@dataclass(frozen=True)
 class SafetyProfile:
     label: SafetyLabel
     blocking_reasons: tuple[str, ...] = ()
     """Qué impide un perfil mejor (para 'watch' y 'avoid'): las condiciones de
     Conservador que no se cumplen, o las de Evitar que sí."""
+    conditions: tuple[SafetyConditionResult, ...] = ()
+    """Las diez condiciones evaluadas (PHASE-44.25). Aditivo: los runs
+    anteriores no lo tienen y la pantalla lo trata como ausente, nunca como
+    vacío — no se reconstruye con la regla de HOY sobre un run de otro motor."""
 
 
 @dataclass(frozen=True)
@@ -205,6 +271,15 @@ class Confidence:
     days_stale: int | None
 
 
+DividendVerdictSource = Literal["dividend", "resilience", "both"]
+"""Qué pregunta decidió el veredicto del dividendo (PHASE-44.25).
+
+Es el peor de «¿el dividendo cabe en la caja?» y «¿aguanta un golpe?», así que
+el hero puede decir «el dividendo está en riesgo» con la pregunta del dividendo
+en VERDE. Sin este campo, el payload no permitía saber cuál de las dos lo
+decidió y el lector se quedaba con una contradicción aparente."""
+
+
 @dataclass(frozen=True)
 class SynthesisResult:
     questions: tuple[QuestionVerdict, ...]
@@ -212,6 +287,9 @@ class SynthesisResult:
     dividend_verdict: DividendVerdict
     confidence: Confidence
     flags: tuple[Flag, ...]
+    dividend_verdict_source: DividendVerdictSource | None = None
+    """Aditivo, y por eso va al final: los runs anteriores no lo traen y la
+    pantalla lo omite en vez de inventarlo."""
 
     def question(self, key: str) -> QuestionVerdict | None:
         for verdict in self.questions:
@@ -586,13 +664,14 @@ def compute(
     audited = tuple(_audit(question, series.security, all_signals) for question in questions)
 
     safety = _safety_profile(forensic, flag_severity, evaluations, year)
-    verdict = _dividend_verdict(series, audited)
+    verdict, verdict_source = _dividend_verdict(series, audited)
     confidence = _confidence(series)
 
     return SynthesisResult(
         questions=audited,
         safety_profile=safety,
         dividend_verdict=verdict,
+        dividend_verdict_source=verdict_source,
         confidence=confidence,
         flags=all_flags,
     )
@@ -789,6 +868,118 @@ def _stress_signal(stress: StressResult, security: SecuritySnapshot) -> Question
 # ── Matriz de seguridad ───────────────────────────────────────────────
 
 
+class SafetyConditionDef(NamedTuple):
+    """Una condición de la matriz, DECLARADA (PHASE-44.25).
+
+    La regla vive junto a la fórmula, como el catálogo de métricas, y viaja
+    como dato — escribirla en la pantalla es el mecanismo exacto que dejó la
+    checklist del veredicto con cinco condiciones cuando el motor evalúa seis,
+    y casada con el motor por igualdad de cadena.
+
+    - `text` es la afirmación tal y como se persiste en `blocking_reasons`
+      cuando esta condición es la que bloquea: byte-igual a la de siempre, para
+      que los runs guardados y los goldens del titular no se muevan.
+    - `inverse` es el giro contrafactual, SIN números: los cortes se calibran
+      por sector y un umbral escrito en prosa caduca en silencio (PHASE-44.21).
+      El número lo pone la capa que pinta, desde el `thresholds_used` del run.
+    - `signal_keys` son las claves REALES de las señales implicadas. Es el
+      puente que faltaba: con él, la condición enlaza con su fila y con su
+      ficha sin que nadie tenga que emparejar etiquetas.
+    """
+
+    key: str
+    rule: SafetyRuleKind
+    text: str
+    inverse: str
+    signal_keys: tuple[str, ...]
+
+
+SAFETY_MATRIX: tuple[SafetyConditionDef, ...] = (
+    SafetyConditionDef(
+        key="avoid_manipulation",
+        rule="avoid",
+        text="M-Score y accruals ambos en rojo (manipulación probable)",
+        inverse="el M-Score o los accruals salieran del rojo",
+        signal_keys=("m_score", "accruals"),
+    ),
+    SafetyConditionDef(
+        key="avoid_insolvency",
+        rule="avoid",
+        text="Z''-Score en rojo (riesgo de insolvencia)",
+        inverse="el Z''-Score saliera del rojo",
+        signal_keys=("z_score",),
+    ),
+    SafetyConditionDef(
+        key="avoid_bankruptcy",
+        rule="avoid",
+        text="X-Score en rojo (riesgo de quiebra)",
+        inverse="el X-Score saliera del rojo",
+        signal_keys=("FZ",),
+    ),
+    SafetyConditionDef(
+        key="avoid_dividend_funding",
+        rule="avoid",
+        text="dividendo financiado con deuda o emisión",
+        inverse="el dividendo dejara de financiarse con deuda o emisión",
+        signal_keys=("B4_dividend_funded_externally",),
+    ),
+    SafetyConditionDef(
+        key="cons_m_score",
+        rule="conservative",
+        text="M-Score no está en verde",
+        inverse="el M-Score se pusiera en verde",
+        signal_keys=("m_score",),
+    ),
+    SafetyConditionDef(
+        key="cons_z_score",
+        rule="conservative",
+        text="Z''-Score no está en verde",
+        inverse="el Z''-Score se pusiera en verde",
+        signal_keys=("z_score",),
+    ),
+    SafetyConditionDef(
+        key="cons_fz",
+        rule="conservative",
+        text="X-Score no está en verde",
+        inverse="el X-Score se pusiera en verde",
+        signal_keys=("FZ",),
+    ),
+    SafetyConditionDef(
+        key="cons_f_score",
+        rule="conservative",
+        text="F-Score < 7",
+        inverse="el F-Score llegara a su corte",
+        signal_keys=("f_score",),
+    ),
+    SafetyConditionDef(
+        key="cons_accruals",
+        rule="conservative",
+        text="Accruals no están en verde",
+        inverse="los accruals se pusieran en verde",
+        signal_keys=("accruals",),
+    ),
+    SafetyConditionDef(
+        key="cons_b4_checked",
+        rule="conservative",
+        text="no se ha podido comprobar si el dividendo se financia con deuda o emisión",
+        inverse="se pudiera comprobar si el dividendo se financia con deuda o emisión",
+        signal_keys=("B4_dividend_funded_externally",),
+    ),
+)
+"""Las diez condiciones del sello, en el ORDEN en que se evalúan.
+
+El orden importa: `blocking_reasons` se deriva recorriéndolas, y su contenido
+tiene que salir byte-igual al del motor 1.7.0 para no mover los goldens del
+titular ni el significado de los runs guardados.
+
+Las de `conservative` están redactadas en NEGATIVO —«M-Score no está en
+verde»— porque eso es lo que se persiste cuando bloquean el sello. La condición
+se cumple (`met=True`) cuando el negativo es cierto, es decir cuando FALTA algo
+para «Conservador»: en esa lista, `met=True` es la mala noticia igual que en la
+de «Evitar». Un solo significado de `met` para las diez.
+"""
+
+
 def _safety_profile(
     forensic: ForensicResult,
     flags: Mapping[str, Severity],
@@ -803,6 +994,17 @@ def _safety_profile(
     del mapa optimista de banderas: si no se pudo evaluar, la ausencia de
     bandera se traducía en «no está en rojo» y el sello subía sin haberlo
     comprobado (PHASE-44.17).
+
+    Desde PHASE-44.25 las DIEZ condiciones se evalúan siempre y se publican en
+    `conditions`. Antes se retornaba en cuanto una de «Evitar» se cumplía, así
+    que las de «Conservador» no llegaban a calcularse y no había forma de decir
+    qué haría falta para salir del sello — la pantalla lo rellenaba infiriendo
+    de `blocking_reasons` y acababa afirmando que se cumplían condiciones que
+    nadie había comprobado.
+
+    `label` y `blocking_reasons` se DERIVAN de las condiciones y salen
+    byte-iguales a los del motor 1.7.0: es lo que permite que los runs
+    guardados y los goldens del titular no se muevan.
     """
     m = forensic.get("m_score", year)
     z = forensic.get("z_score", year)
@@ -813,39 +1015,130 @@ def _safety_profile(
     b4 = evaluations.get("B4_dividend_funded_externally")
     b4_unchecked = b4 is None or b4.outcome == "not_computable"
 
-    # Evitar
-    avoid_reasons: list[str] = []
-    if _band(m) == "stressed" and _band(accruals) == "stressed":
-        avoid_reasons.append("M-Score y accruals ambos en rojo (manipulación probable)")
-    if _band(z) == "stressed":
-        avoid_reasons.append("Z''-Score en rojo (riesgo de insolvencia)")
-    if _band(fz) == "stressed":
-        avoid_reasons.append("X-Score en rojo (riesgo de quiebra)")
-    if b4_red:
-        avoid_reasons.append("dividendo financiado con deuda o emisión")
-    if avoid_reasons:
-        return SafetyProfile(label="avoid", blocking_reasons=tuple(avoid_reasons))
+    metrics: dict[str, MetricResult | None] = {
+        "m_score": m,
+        "z_score": z,
+        "FZ": fz,
+        "f_score": f_score,
+        "accruals": accruals,
+    }
 
-    # Conservador
-    conservative_checks: list[tuple[bool, str]] = [
-        (_band(m) == "healthy", "M-Score no está en verde"),
-        (_band(z) == "healthy", "Z''-Score no está en verde"),
-        (_band(fz) == "healthy", "X-Score no está en verde"),
-        (f_score is not None and f_score.value is not None and f_score.value >= 7, "F-Score < 7"),
-        (_band(accruals) == "healthy", "Accruals no están en verde"),
-        # Una condición de «Evitar» que NO se ha podido comprobar impide el
-        # sello: «Conservador» afirma que ninguna se cumple, y de ésta no se
-        # sabe. El verde se gana, no se hereda de un dato que falta.
-        (
-            not b4_unchecked,
-            "no se ha podido comprobar si el dividendo se financia con deuda o emisión "
-            f"({b4.reason if b4 is not None and b4.reason else 'sin evaluación de la regla'})",
-        ),
-    ]
-    unmet = tuple(reason for ok, reason in conservative_checks if not ok)
+    def _cond_signals(definition: SafetyConditionDef) -> tuple[ConditionSignal, ...]:
+        """Las señales implicadas, con su lectura, para que la card no tenga que
+        cruzarse con `questions[].signals` para enseñar el número."""
+        out: list[ConditionSignal] = []
+        for key in definition.signal_keys:
+            if key in metrics:
+                metric = metrics[key]
+                catalogued = definition_for(key)
+                out.append(
+                    ConditionSignal(
+                        key=key,
+                        label=catalogued.label if catalogued is not None else key,
+                        kind="metric",
+                        band=_band(metric),
+                        value=metric.value if metric is not None else None,
+                        status=metric.status if metric is not None else None,
+                    )
+                )
+            else:
+                out.append(
+                    ConditionSignal(
+                        key=key,
+                        label=flag_label(key),
+                        kind="flag",
+                        band=None,
+                        value=None,
+                        status=None,
+                    )
+                )
+        return tuple(out)
+
+    def _holds(metric: MetricResult | None, band: Band) -> tuple[bool | None, str | None]:
+        """¿La métrica está en esa banda? `None` = no se pudo comprobar.
+
+        Antes una banda ausente colapsaba en «no se cumple», que en la lista de
+        «Evitar» se lee como una comprobación superada (familia PHASE-44.17).
+        """
+        actual = _band(metric)
+        if actual is None:
+            return None, (
+                metric.reason
+                if metric is not None and metric.reason
+                else "no se calculó en este ejercicio"
+            )
+        return actual == band, None
+
+    # `met` significa lo MISMO en las diez: «la afirmación de `text` es cierta».
+    # En «Evitar» eso dispara el sello; en «Conservador» —redactadas en negativo,
+    # que es como se persisten— eso es lo que FALTA para el sello.
+    # Cada entrada es (met, motivo si no se pudo, texto efectivo si difiere).
+    evaluated: dict[str, tuple[bool | None, str | None, str | None]] = {}
+
+    m_red, m_red_why = _holds(m, "stressed")
+    acc_red, acc_red_why = _holds(accruals, "stressed")
+    if m_red is False or acc_red is False:
+        # Basta que UNA esté fuera del rojo para que la conjunción sea falsa,
+        # aunque la otra no se haya podido calcular.
+        evaluated["avoid_manipulation"] = (False, None, None)
+    elif m_red is None or acc_red is None:
+        evaluated["avoid_manipulation"] = (None, m_red_why or acc_red_why, None)
+    else:
+        evaluated["avoid_manipulation"] = (m_red and acc_red, None, None)
+
+    z_red, z_red_why = _holds(z, "stressed")
+    evaluated["avoid_insolvency"] = (z_red, z_red_why, None)
+    fz_red, fz_red_why = _holds(fz, "stressed")
+    evaluated["avoid_bankruptcy"] = (fz_red, fz_red_why, None)
+    # La bandera es evidencia binaria: o saltó o no. `b4_unchecked` gobierna la
+    # sexta condición de Conservador, que es donde esa incertidumbre pesa.
+    evaluated["avoid_dividend_funding"] = (b4_red, None, None)
+
+    m_green, m_green_why = _holds(m, "healthy")
+    evaluated["cons_m_score"] = (None if m_green is None else not m_green, m_green_why, None)
+    z_green, z_green_why = _holds(z, "healthy")
+    evaluated["cons_z_score"] = (None if z_green is None else not z_green, z_green_why, None)
+    fz_green, fz_green_why = _holds(fz, "healthy")
+    evaluated["cons_fz"] = (None if fz_green is None else not fz_green, fz_green_why, None)
+    evaluated["cons_f_score"] = (
+        not (f_score is not None and f_score.value is not None and f_score.value >= 7),
+        None,
+        None,
+    )
+    acc_green, acc_green_why = _holds(accruals, "healthy")
+    evaluated["cons_accruals"] = (None if acc_green is None else not acc_green, acc_green_why, None)
+    # El texto EFECTIVO de ésta lleva el motivo entre paréntesis: es lo que se
+    # persiste desde PHASE-44.17 y lo que leen los runs ya guardados.
+    evaluated["cons_b4_checked"] = (
+        b4_unchecked,
+        None,
+        "no se ha podido comprobar si el dividendo se financia con deuda o emisión "
+        f"({b4.reason if b4 is not None and b4.reason else 'sin evaluación de la regla'})",
+    )
+
+    conditions = tuple(
+        SafetyConditionResult(
+            key=definition.key,
+            rule=definition.rule,
+            text=evaluated[definition.key][2] or definition.text,
+            met=evaluated[definition.key][0],
+            reason=evaluated[definition.key][1],
+            signals=_cond_signals(definition),
+            inverse=definition.inverse,
+        )
+        for definition in SAFETY_MATRIX
+    )
+
+    avoid_reasons = tuple(c.text for c in conditions if c.rule == "avoid" and c.met is True)
+    if avoid_reasons:
+        return SafetyProfile(label="avoid", blocking_reasons=avoid_reasons, conditions=conditions)
+
+    # Una condición de Conservador que no se pudo comprobar tampoco se da por
+    # cumplida: el verde se gana. `met is not False` incluye ese `None`.
+    unmet = tuple(c.text for c in conditions if c.rule == "conservative" and c.met is not False)
     if not unmet:
-        return SafetyProfile(label="conservative")
-    return SafetyProfile(label="watch", blocking_reasons=unmet)
+        return SafetyProfile(label="conservative", conditions=conditions)
+    return SafetyProfile(label="watch", blocking_reasons=unmet, conditions=conditions)
 
 
 def _band(metric: MetricResult | None) -> Band | None:
@@ -857,23 +1150,35 @@ def _band(metric: MetricResult | None) -> Band | None:
 
 def _dividend_verdict(
     series: StatementSeries, questions: tuple[QuestionVerdict, ...]
-) -> DividendVerdict:
+) -> tuple[DividendVerdict, DividendVerdictSource | None]:
     """not_applicable si la empresa es financiera o no reparte; si no, el peor de
-    las preguntas 3 (cabe en la caja) y 4 (aguanta un golpe)."""
+    las preguntas 3 (cabe en la caja) y 4 (aguanta un golpe).
+
+    Devuelve también CUÁL de las dos lo decidió (PHASE-44.25): el veredicto
+    puede venir entero de la resistencia con la pregunta del dividendo en
+    verde, y sin decirlo el hero contradice a la pantalla de abajo.
+    """
     if series.security.is_financial:
-        return "not_applicable"
+        return "not_applicable", None
     latest = series.latest
     dividends = latest.dividends_paid if latest is not None else None
     if dividends is None or dividends == 0:
-        return "not_applicable"
+        return "not_applicable", None
 
     by_key = {q.key: q.verdict for q in questions}
-    relevant = [by_key.get("dividend"), by_key.get("resilience")]
-    if "stressed" in relevant:
-        return "stressed"
-    if "caution" in relevant:
-        return "caution"
-    return "healthy"
+    dividend = by_key.get("dividend")
+    resilience = by_key.get("resilience")
+
+    def _source(band: Band) -> DividendVerdictSource:
+        if dividend == band and resilience == band:
+            return "both"
+        return "dividend" if dividend == band else "resilience"
+
+    if "stressed" in (dividend, resilience):
+        return "stressed", _source("stressed")
+    if "caution" in (dividend, resilience):
+        return "caution", _source("caution")
+    return "healthy", "both"
 
 
 # ── Confianza ─────────────────────────────────────────────────────────

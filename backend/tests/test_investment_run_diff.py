@@ -138,19 +138,23 @@ def test_los_scores_forenses_van_en_su_propio_bloque_y_no_entre_las_bandas() -> 
     assert diff.bands == []
 
 
-def test_los_ocho_forenses_salen_del_catalogo_del_motor() -> None:
+def test_los_forenses_salen_del_catalogo_del_motor() -> None:
     """Escritos a mano tenían DOS claves inventadas y les faltaban DOS reales.
 
     El único síntoma habría sido que `F7` y `FZ` aparecieran en el bloque de
     métricas corrientes — un agrupamiento raro que nadie mira dos veces.
+
+    Son NUEVE desde PHASE-44.25: `FZ_P` es el X-Score leído como probabilidad.
+    Que el comparador liste las dos al moverse es deliberado — son la misma
+    noticia dicha dos veces, y la segunda es la que se entiende sin traducir.
     """
     from app.modules.investment.analysis.engine import forensic
     from app.modules.investment.analysis.presentation.diff import _SCORE_KEYS
 
     assert set(_SCORE_KEYS) == {d.key for d in forensic.METRIC_CATALOG}
-    assert len(_SCORE_KEYS) == 8
+    assert len(_SCORE_KEYS) == 9
 
-    # Y se comporta: cada uno de los ocho cae en `scores`, no en `bands`.
+    # Y se comporta: cada uno cae en `scores`, no en `bands`.
     for clave in _SCORE_KEYS:
         antes = _with_metrics(_run(), _metric(clave, 2024, "1", "healthy"))
         despues = _with_metrics(_run(), _metric(clave, 2024, "1", "stressed"))

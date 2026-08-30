@@ -22,6 +22,8 @@ export * from './investment-signal-read';
 export * from './investment-score-rows';
 export * from './investment-sparkline';
 export * from './investment-verdict-labels';
+export * from './investment-verdict-why';
+export * from './investment-dictamen';
 export * from './investment-statement-rows';
 export * from './investment-flags';
 export * from './investment-run-diff';

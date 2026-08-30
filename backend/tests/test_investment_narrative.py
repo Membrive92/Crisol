@@ -12,14 +12,9 @@ from typing import Any
 import pytest
 
 from app.modules.investment.analysis.presentation.narrative import (
-    DIVIDEND_TEMPLATES,
-    EVIDENCE_TEMPLATES,
-    HEADLINE_TEMPLATES,
     NARRATIVE_VERSION,
-    NEXT_CHECK_TEMPLATES,
     QUESTION_TEMPLATES,
     QUESTION_TOPIC,
-    RESCUE_TEMPLATES,
     headline,
     next_checks,
     question_sentence,
@@ -28,6 +23,8 @@ from app.modules.investment.analysis.presentation.narrative import (
 
 TEMPLATE_FINGERPRINTS: dict[str, str] = {
     "1.0.0": "716fc8daebd7186e7470afcbc39621703ed2df66d5942b4b2c84b4b810d6c9bb",
+    "1.1.0": "1987613d573aa48425f10d2a459c2af128e3f2615dfb46f943b3510f1b298a2a",
+    "1.2.0": "db98d13c8e01883d431354172791d05d46c30c5396e1acaa7f862f8ca33f84fa",
 }
 """Huella del TEXTO de las plantillas, por versión de narrativa.
 
@@ -77,6 +74,55 @@ def test_las_plantillas_no_cambian_sin_mover_narrative_version() -> None:
     )
 
 
+def test_tocar_cualquier_grupo_de_plantillas_mueve_la_huella() -> None:
+    """La huella tiene que VER todos los grupos de plantillas del módulo.
+
+    El gate de arriba compara un hash. Si alguien añade un `Mapping` de
+    plantillas y se olvida de meterlo en `templates_fingerprint`, ese hash no se
+    mueve: el gate sigue verde sobre textos que nadie ha registrado, y el bump
+    de versión vuelve a depender de que alguien se acuerde. Es el mecanismo de
+    PHASE-44.17 — un gate que nunca falla puede estar mirando a otro lado.
+
+    Se comprueba el EFECTO y no la presencia: los grupos se descubren por
+    introspección y de cada uno se toca un texto, verificando que la huella
+    cambia. Una lista a mano aquí tendría el mismo problema que viene a cerrar.
+    """
+    from app.modules.investment.analysis.presentation import narrative
+
+    grupos = {
+        nombre: valor
+        for nombre, valor in vars(narrative).items()
+        if nombre.isupper()
+        and isinstance(valor, dict)
+        and valor
+        and all(isinstance(k, str) and isinstance(v, str) for k, v in valor.items())
+    }
+    assert len(grupos) >= 7, (
+        f"la introspección sólo encuentra {sorted(grupos)}: el criterio ha caducado y el "
+        "gate estaría midiendo menos de lo que cree"
+    )
+
+    base = templates_fingerprint()
+    ciegos: list[str] = []
+    for nombre, grupo in grupos.items():
+        clave = next(iter(grupo))
+        original = grupo[clave]
+        grupo[clave] = f"{original} (sonda)"
+        try:
+            if templates_fingerprint() == base:
+                ciegos.append(nombre)
+        finally:
+            grupo[clave] = original
+
+    assert not ciegos, (
+        f"estos grupos de plantillas NO entran en la huella: {sorted(ciegos)}. "
+        "Añádelos al payload de `templates_fingerprint`, o cambiar su texto no "
+        "exigirá mover NARRATIVE_VERSION."
+    )
+    # Y la restauración funcionó: si no, los tests de abajo medirían otro texto.
+    assert templates_fingerprint() == base
+
+
 def test_ninguna_plantilla_escribe_un_numero_a_mano() -> None:
     """Los únicos números de una plantilla son sus parámetros.
 
@@ -86,23 +132,71 @@ def test_ninguna_plantilla_escribe_un_numero_a_mano() -> None:
     redactada la frase que los rodea — que es lo que le fallaba a la versión
     basada en pistas.
     """
+    from app.modules.investment.analysis.presentation import narrative
+
     placeholders = re.compile(r"\{[^}]*\}")
     culpables: list[str] = []
+    # Por INTROSPECCIÓN, no por lista a mano: la versión anterior enumeraba 7
+    # grupos y era ciega a los 3 que PHASE-44.25 añadió — el gate seguía verde
+    # sobre plantillas que nunca miró. Mismo descubrimiento que el test de la
+    # huella, así que un grupo nuevo entra en los dos a la vez.
     grupos = {
-        "questions": QUESTION_TEMPLATES,
-        "evidence": EVIDENCE_TEMPLATES,
-        "rescue": RESCUE_TEMPLATES,
-        "headline": HEADLINE_TEMPLATES,
-        "dividend": DIVIDEND_TEMPLATES,
-        "next_check": NEXT_CHECK_TEMPLATES,
-        "topic": QUESTION_TOPIC,
+        nombre: valor
+        for nombre, valor in vars(narrative).items()
+        if nombre.isupper()
+        and isinstance(valor, dict)
+        and valor
+        and all(isinstance(k, str) and isinstance(v, str) for k, v in valor.items())
     }
+    assert (
+        len(grupos) >= 10
+    ), f"la introspección sólo encuentra {sorted(grupos)}: el criterio ha caducado"
     for nombre, grupo in grupos.items():
         for clave, texto in grupo.items():
             desnuda = placeholders.sub("", texto)
             if any(caracter.isdigit() for caracter in desnuda):
                 culpables.append(f"{nombre}.{clave}: {desnuda!r}")
     assert culpables == [], culpables
+
+
+def test_golden_las_entradas_del_sumario() -> None:
+    """Texto EXACTO de las frases del sumario (PHASE-44.26).
+
+    Nombran señales y NO llevan números: los números van en las filas de datos,
+    formateados por unidad en la capa compartida.
+    """
+    from app.modules.investment.analysis.presentation.narrative import (
+        concerns_intro,
+        strengths_intro,
+    )
+
+    assert concerns_intro(["X-Score de Zmijewski", "Payout sobre caja libre"]) == (
+        "Lo que más pesa en contra: X-Score de Zmijewski y Payout sobre caja libre."
+    )
+    assert strengths_intro(["Conversión CFO/beneficio"]) == (
+        "Del lado bueno, con la comprobación superada: Conversión CFO/beneficio."
+    )
+    # Vacío = sin frase, no una frase vacía con dos puntos colgando.
+    assert concerns_intro([]) == ""
+    assert strengths_intro([]) == ""
+
+
+def test_golden_el_margen_de_stress() -> None:
+    from decimal import Decimal
+
+    from app.modules.investment.analysis.presentation.narrative import (
+        stress_margin_sentence,
+    )
+
+    assert stress_margin_sentence(Decimal("0.07")) == (
+        "La caja libre podría caer un 7 % antes de dejar de cubrir el dividendo."
+    )
+    assert stress_margin_sentence(Decimal("0.214")) == (
+        "La caja libre podría caer un 21 % antes de dejar de cubrir el dividendo."
+    )
+    # Sin dato no se inventa un margen; y un negativo (ya no cubre) tampoco.
+    assert stress_margin_sentence(None) is None
+    assert stress_margin_sentence(Decimal("-0.05")) is None
 
 
 def test_hay_una_plantilla_por_estado_de_presentacion() -> None:
@@ -125,8 +219,8 @@ def test_golden_pregunta_verde_con_desenlaces() -> None:
     frase, evidencia = question_sentence(_question())
     assert evidencia.state == "evaluated"
     assert frase == (
-        "La contabilidad: sin señales en contra. Se evaluaron 5 señales, 2 se "
-        "comprobaron y salieron limpias y 0 no se pudieron comprobar."
+        "La contabilidad: sin señales en contra. Señales que puntúan: 1 en verde; "
+        "además, 2 se comprobaron y salieron limpias."
     )
 
 
@@ -137,8 +231,8 @@ def test_golden_pregunta_roja_cita_las_dos_peores() -> None:
     )
     assert frase == (
         "El dividendo frente a la caja: hay un problema — Payout sobre caja libre y "
-        "Años de dividendo en caja. Se evaluaron 5 señales, 2 se comprobaron y "
-        "salieron limpias y 0 no se pudieron comprobar."
+        "Años de dividendo en caja. Señales que puntúan: 1 en verde; además, 2 se "
+        "comprobaron y salieron limpias."
     )
 
 
@@ -226,7 +320,8 @@ def test_golden_titular_de_cada_perfil() -> None:
     assert headline(
         safety_label="conservative", blocking_reasons=[], dividend_verdict="healthy"
     ) == (
-        "Perfil conservador: las cinco condiciones del motor se cumplen. El dividendo cabe en la caja."
+        "Perfil conservador: todas las condiciones del motor se cumplen. "
+        "El dividendo cabe en la caja."
     )
     assert headline(
         safety_label="avoid",
@@ -256,7 +351,9 @@ def test_una_pregunta_permanentemente_no_auditable_no_aporta_nada_que_vigilar() 
         load_bearing=[],
         unaudited_reasons=["la resiliencia de una financiera es capital regulatorio"],
     )
-    checks = next_checks([banco], sentences={"resilience": [("Escenario de stress", "cruzado")]})
+    checks = next_checks(
+        [banco], sentences={"resilience": [("stress", "Escenario de stress", "cruzado")]}
+    )
     assert all("Escenario de stress" not in c.text for c in checks)
 
 
@@ -268,7 +365,9 @@ def test_una_pregunta_temporalmente_no_auditada_si_aporta_pero_con_su_aviso() ->
         load_bearing=["m_score", "accruals"],
         unaudited_reasons=["M-Score: no se pudo calcular"],
     )
-    checks = next_checks([pregunta], sentences={"accounting": [("Accruals de Sloan", "cruzado")]})
+    checks = next_checks(
+        [pregunta], sentences={"accounting": [("accruals", "Accruals de Sloan", "cruzado")]}
+    )
     assert len(checks) == 1
     assert "Accruals de Sloan" in checks[0].text
     assert "no está auditada" in checks[0].text
@@ -297,7 +396,7 @@ def test_que_miraria_no_pasa_de_su_limite(limit: int) -> None:
     pregunta = _question(verdict="stressed")
     checks = next_checks(
         [pregunta],
-        sentences={"accounting": [(f"señal {i}", "cruzado") for i in range(6)]},
+        sentences={"accounting": [(f"k{i}", f"señal {i}", "cruzado") for i in range(6)]},
         limit=limit,
     )
     assert len(checks) == limit

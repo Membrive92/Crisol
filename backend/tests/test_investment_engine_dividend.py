@@ -583,8 +583,8 @@ def test_el_catalogo_agregado_incluye_la_capa_dividendo() -> None:
     etiqueta de una sola fuente, pero NO siembran umbral: su `direction` es
     `None`, así que `ALL_DEFAULT_THRESHOLDS` no crece con ellas.
     """
-    assert len(catalog.ALL_METRIC_DEFINITIONS) == 64
-    assert len(set(catalog.ALL_METRIC_KEYS)) == 64
+    assert len(catalog.ALL_METRIC_DEFINITIONS) == 65
+    assert len(set(catalog.ALL_METRIC_KEYS)) == 65
 
 
 def test_el_catalogo_dividendo_tiene_14_metricas() -> None:

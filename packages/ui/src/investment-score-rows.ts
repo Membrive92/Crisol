@@ -63,6 +63,25 @@ export interface ScoreBreakdownView {
  *   score se publica en otra unidad, la etiqueta de la serie la seguiría.
  * @param help fichas del engine; sin ellas se pinta la clave cruda.
  */
+/**
+ * Los scores que NO tienen desglose de variables, por diseño.
+ *
+ * Son un ratio único o una lectura de otro score, no un agregado: pedirles
+ * componentes no tiene sentido. La distinción importa porque la pantalla dice
+ * cosas distintas — «no tiene desglose por diseño» frente a «sin desglose para
+ * este ejercicio», que suena a dato que falta.
+ *
+ * Vive aquí y no en cada app porque estaba escrita a mano en las DOS, y las dos
+ * se habían quedado sin `FZ_P` a la vez (PHASE-44.25).
+ */
+export const NO_BREAKDOWN_BY_DESIGN: ReadonlySet<string> = new Set([
+  'accruals',
+  'F5',
+  'F6',
+  'FZ',
+  'FZ_P',
+]);
+
 export function scoreBreakdownRows(
   metricKey: string,
   breakdowns: readonly ScoreBreakdown[] | undefined,

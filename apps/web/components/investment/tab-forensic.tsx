@@ -1,6 +1,13 @@
 'use client';
 
-import { colors, fontSize, FORENSIC_KEYS, REPORT_LEGEND, spacing } from '@crisol/ui';
+import {
+  colors,
+  fontSize,
+  FORENSIC_KEYS,
+  FORENSIC_ROWS,
+  REPORT_LEGEND,
+  spacing,
+} from '@crisol/ui';
 import type { AnalysisRun, Security } from '@crisol/types';
 
 import { Card, CardTitle } from '@/components/ui/card';
@@ -67,7 +74,7 @@ export function TabForensic({
       </InlineNotice>
 
       <Card>
-        <CardTitle size="sm">Los ocho scores en el último ejercicio ({verdictYear})</CardTitle>
+        <CardTitle size="sm">Los scores en el último ejercicio ({verdictYear})</CardTitle>
         <div
           style={{
             marginTop: spacing.md,
@@ -76,18 +83,19 @@ export function TabForensic({
             gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))',
           }}
         >
-          {FORENSIC_KEYS.map((key) => (
+          {FORENSIC_ROWS.map((row) => (
             <ScoreBreakdownCard
-              key={key}
-              metricKey={key}
-              metric={verdictYear === undefined ? undefined : index.get(key, verdictYear)}
+              key={row.key}
+              metricKey={row.key}
+              metric={verdictYear === undefined ? undefined : index.get(row.key, verdictYear)}
               breakdowns={forensic.breakdowns}
               year={verdictYear}
               index={index}
               catalog={catalog}
               thresholdsUsed={run.thresholds_used}
-              variant={key === 'z_score' ? run.z_variant : undefined}
+              variant={row.key === 'z_score' ? run.z_variant : undefined}
               help={help}
+              {...(row.reading ? { readingKey: row.reading } : {})}
             />
           ))}
         </div>
@@ -100,7 +108,7 @@ export function TabForensic({
             marksLegend={REPORT_LEGEND}
             highlightKey={highlightKey}
             years={years}
-            rows={FORENSIC_KEYS.map((key) => metricRow(key, options))}
+            rows={FORENSIC_ROWS.map((row) => metricRow(row.key, options))}
             verdictYear={verdictYear}
             firstColumnLabel="Score"
             legend={

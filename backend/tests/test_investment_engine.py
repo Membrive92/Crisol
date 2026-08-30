@@ -1173,3 +1173,128 @@ def test_el_engine_no_depende_de_la_capa_de_presentacion() -> None:
         if "analysis.presentation" in modulo.read_text(encoding="utf-8")
     ]
     assert culpables == [], f"el engine importa la capa de presentación: {culpables}"
+
+
+# ── El X-Score leído como probabilidad (PHASE-44.25) ──────────────────
+#
+# Reportado por el usuario: «si me dices que cuanto más bajo mejor, ¿por qué me
+# lo pones en rojo?». El 0,87 de McDonald's era el MEJOR de su serie y seguía
+# más de un punto por encima del corte — pero para verlo había que comparar
+# mentalmente con dos cortes negativos.
+
+
+def test_la_probabilidad_invierte_los_cortes_conocidos() -> None:
+    """Los cortes de FZ son Φ⁻¹(0,15) y Φ⁻¹(0,40) por construcción.
+
+    Si la conversión no los devolviera exactamente, las dos filas se pintarían
+    con criterios distintos y una podría salir verde con la otra en rojo.
+    """
+    from app.modules.investment.analysis.engine.forensic import (
+        ZMIJEWSKI_P_CUTOFFS,
+        zmijewski_probability,
+    )
+
+    for probabilidad, score in ZMIJEWSKI_P_CUTOFFS:
+        assert zmijewski_probability(score) == probabilidad.quantize(Decimal("0.0001"))
+
+
+def test_las_dos_lecturas_del_x_score_nunca_discrepan_de_banda() -> None:
+    """Φ es monótona, así que bandear X y bandear P tiene que dar lo mismo.
+
+    Se comprueba a los dos lados de cada corte y en los propios cortes: si
+    alguien recalibrara una de las dos filas y no la otra, la pantalla enseñaría
+    la misma comprobación en dos colores.
+    """
+    from app.modules.investment.analysis.engine.forensic import (
+        DEFAULT_THRESHOLDS,
+        zmijewski_probability,
+    )
+
+    for crudo in ("-3", "-1.5", "-1.036433", "-1", "-0.5", "-0.253347", "0", "0.87", "2"):
+        score = Decimal(crudo)
+        banda_x = DEFAULT_THRESHOLDS["FZ"].band_for(score)
+        banda_p = DEFAULT_THRESHOLDS["FZ_P"].band_for(zmijewski_probability(score))
+        assert (
+            banda_x == banda_p
+        ), f"X={crudo}: la puntuación dice {banda_x} y la probabilidad {banda_p}"
+
+
+def test_la_probabilidad_hereda_el_motivo_cuando_el_score_no_se_puede_calcular() -> None:
+    """Dos huecos con razones distintas para la misma causa se leen como dos
+    problemas distintos."""
+    from app.modules.investment.analysis.engine.forensic import _zmijewski_as_probability
+    from app.modules.investment.analysis.engine.metrics import Amount
+
+    ausente = Amount(value=None, provenance=Provenance.DERIVED, reason="falta el pasivo total")
+    derivada = _zmijewski_as_probability(ausente)
+
+    assert derivada.is_missing
+    assert derivada.reason == "falta el pasivo total"
+
+
+def test_la_serie_de_mcd_se_lee_en_probabilidad() -> None:
+    """El caso concreto que abrió esto. La serie MEJORA cuatro años seguidos y
+    sigue en rojo, y en probabilidad se ve por qué: baja del 93 % al 81 %."""
+    from app.modules.investment.analysis.engine.forensic import zmijewski_probability
+
+    serie = [zmijewski_probability(Decimal(v)) for v in ("1.47", "1.14", "1.07", "0.87")]
+
+    assert serie == sorted(serie, reverse=True), "la serie mejora, y la traducción lo conserva"
+    assert serie[-1] > Decimal("0.40"), "sigue por encima del corte del rojo"
+
+
+# ── La pareja escala/lectura (PHASE-44.25) ────────────────────────────
+
+
+def test_toda_pareja_de_escala_apunta_a_metricas_que_existen() -> None:
+    from app.modules.investment.analysis.engine.catalog import ALL_METRIC_KEYS
+    from app.modules.investment.analysis.engine.forensic import SCALE_COMPANIONS
+
+    conocidas = set(ALL_METRIC_KEYS)
+    for primaria, acompanante in SCALE_COMPANIONS.items():
+        assert primaria in conocidas, f"{primaria} no está en el catálogo"
+        assert acompanante in conocidas, f"{acompanante} no está en el catálogo"
+
+
+def test_la_pareja_comparte_direccion_y_bandas_equivalentes() -> None:
+    """Las dos lecturas son la MISMA comprobación: no pueden discrepar de color.
+
+    Si alguien recalibrara una y no la otra, la pantalla enseñaría la misma
+    medida en dos colores dentro de la misma tarjeta — y como la acompañante
+    existe justamente para explicar a la primaria, la contradicción se leería
+    como un fallo del informe.
+    """
+    from app.modules.investment.analysis.engine.forensic import (
+        DEFAULT_THRESHOLDS,
+        SCALE_COMPANIONS,
+        zmijewski_probability,
+    )
+
+    for primaria, acompanante in SCALE_COMPANIONS.items():
+        una = DEFAULT_THRESHOLDS[primaria]
+        otra = DEFAULT_THRESHOLDS[acompanante]
+        assert (
+            una.direction == otra.direction
+        ), f"{primaria} y {acompanante} se leen en direcciones opuestas"
+        # Y los cortes son imagen uno del otro: se comprueba bandeando el mismo
+        # hecho por los dos caminos, a ambos lados de cada corte.
+        for crudo in ("-3", "-1.5", "-1.036433", "-1", "-0.5", "-0.253347", "0", "0.87", "2"):
+            score = Decimal(crudo)
+            assert una.band_for(score) == otra.band_for(
+                zmijewski_probability(score)
+            ), f"{primaria}={crudo}: las dos lecturas discrepan de banda"
+
+
+def test_la_pareja_se_apaga_junta_en_financieras() -> None:
+    """Dejar una encendida pintaría la MISMA comprobación aplicable y no
+    aplicable a la vez. La omisión existía y era inerte sólo por casualidad."""
+    from app.modules.investment.analysis.engine.forensic import SCALE_COMPANIONS
+    from app.modules.investment.analysis.engine.sector_profiles import (
+        FINANCIALS_NOT_APPLICABLE,
+    )
+
+    for primaria, acompanante in SCALE_COMPANIONS.items():
+        exenta = primaria in FINANCIALS_NOT_APPLICABLE
+        assert (
+            acompanante in FINANCIALS_NOT_APPLICABLE
+        ) == exenta, f"{primaria} y {acompanante} no se apagan juntas en financieras"

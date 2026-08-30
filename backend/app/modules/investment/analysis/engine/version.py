@@ -163,8 +163,65 @@ Historial:
 
   Los runs guardados conservan su `thresholds_version` y no traen `origin`, así
   que la pantalla lo deriva para ellos y lo declara como derivado.
+- 1.8.0 — PHASE-44.25: **la matriz de seguridad se persiste evaluada**, condición
+  a condición.
+
+  `_safety_profile` sabía con precisión de señal por qué una empresa sale
+  «Evitar» —evalúa la banda del X-Score con el `MetricResult` en la mano— y
+  tiraba esa precisión al serializar: sólo guardaba `blocking_reasons`, prosa
+  en español sin ninguna clave. La pantalla, para marcar «esta fila decidió el
+  sello», no tenía más remedio que emparejar cadenas de texto.
+
+  Y había un hueco peor: al entrar por la rama «Evitar» se retornaba **antes**
+  de evaluar las seis condiciones de «Conservador», así que «qué tendría que
+  cambiar para salir» ni siquiera se calculaba. La checklist de la pantalla lo
+  rellenaba infiriendo de `blocking_reasons` y acababa afirmando que se
+  cumplían condiciones que nadie había comprobado.
+
+  Ahora:
+
+  1. `SAFETY_MATRIX` declara las diez condiciones junto a la fórmula —con su
+     texto, su giro contrafactual SIN números (los cortes se calibran por
+     sector) y las CLAVES de las señales implicadas—, y viaja como dato.
+  2. Las diez se evalúan siempre y se publican en `SafetyProfile.conditions`,
+     cada una con sus señales y su valor.
+  3. `met` es tri-estado: `None` es «no se pudo comprobar», que no es «no se
+     cumple». En una financiera los forenses salen `not_computable` y sus
+     condiciones no se pueden ni afirmar ni negar — colapsarlo en `False` se
+     lee, en la lista de «Evitar», como una comprobación superada.
+  4. `dividend_verdict_source` dice cuál de las dos preguntas decidió el
+     veredicto del dividendo: es el peor de las dos, así que el hero puede
+     anunciar «el dividendo está en riesgo» con la pregunta del dividendo en
+     verde y sin decir de dónde viene.
+
+  `label` y `blocking_reasons` se DERIVAN de las condiciones y salen
+  byte-iguales a los de 1.7.0 — hay golden de equivalencia. Ninguna métrica
+  cambia de valor y el `thresholds_version` no se mueve: la calibración es la
+  misma. La huella del contrato sí, y por eso sube la versión.
+- 1.9.0 — PHASE-44.25: **`FZ_P`**, el X-Score leído como probabilidad (métrica
+  65).
+
+  `ZMIJEWSKI_P_CUTOFFS` llevaba desde que se escribió declarando que «la
+  conversión a probabilidad es de presentación»… y sólo se usaba en los tests.
+  En pantalla quedaba un `0,87` en rojo con dos cortes NEGATIVOS al lado, y para
+  situarlo había que comparar mentalmente. Lo reportó el usuario con la
+  pregunta exacta que eso produce: «si me dices que cuanto más bajo mejor, ¿por
+  qué me lo pones en rojo?» — y tenía razón: 0,87 era el MEJOR de su serie
+  (venía de 1,47) y seguía más de un punto por encima del corte del rojo.
+
+  `zmijewski_probability` (Φ con `erf`, junto a la fórmula) traduce la
+  puntuación, y `FZ_P` la publica como métrica catalogada con los cortes de FZ
+  leídos como probabilidad — 15 % y 40 %, los mismos por construcción. Φ es
+  monótona, así que las dos filas no pueden discrepar de banda, y hay un test
+  que lo afirma ejercicio a ejercicio.
+
+  Hereda el motivo del X-Score cuando éste no se puede calcular: dos huecos con
+  razones distintas para la misma causa se leen como dos problemas.
+
+  Sube `thresholds_version` (métrica nueva CON banda) y la huella. Ninguna
+  métrica existente cambia de valor.
 """
 
 from __future__ import annotations
 
-ENGINE_VERSION = "1.7.0"
+ENGINE_VERSION = "1.9.0"

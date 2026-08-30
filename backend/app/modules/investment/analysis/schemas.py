@@ -171,11 +171,61 @@ class ReportSignalResponse(BaseModel):
     threshold_origin: str
     """De dónde salió la vara. `not_recorded` cuando el run no la registró para
     ESA métrica, que no es lo mismo que la genérica."""
+    drove_verdict: bool = False
+    """Si esta señal hizo cierta una condición de «Evitar» que se cumple.
+
+    No es «está en rojo»: el escenario de stress tiñe su pregunta y no está en
+    la matriz del sello (PHASE-44.25)."""
+    evidence_sentences: list[str] = Field(default_factory=list)
+    """Lo que da cuerpo a una señal sin número — hoy, los escenarios de stress
+    que dejan de cubrir, con sus dos coberturas dentro."""
 
 
 class NextCheckResponse(BaseModel):
     key: str
     text: str
+    signal_key: str | None = None
+    """La clave de la señal, para enlazar el bullet con su fila."""
+
+
+class ConditionSignalResponse(BaseModel):
+    """El enriquecimiento de una señal de la matriz: lo que se calcula al servir.
+
+    El valor y la banda viajan dentro de la condición del run; aquí sólo va lo
+    que el run no guarda, y la pantalla cruza por clave."""
+
+    key: str
+    distance: SignalDistanceResponse | None = None
+    threshold_origin: str
+
+
+class ReportSummaryResponse(BaseModel):
+    """El sumario del Dictamen: la selección y sus frases, del servidor.
+
+    Las claves viajan para que la pantalla pinte las filas con número, unidad y
+    enlace; la prosa nombra sin números. Ausente en runs sin desglose."""
+
+    concerns_intro: str = ""
+    concern_keys: list[str] = Field(default_factory=list)
+    concerns_overflow: int = 0
+    strengths_intro: str = ""
+    strength_keys: list[str] = Field(default_factory=list)
+    strengths_overflow: int = 0
+    stress_sentences: list[str] = Field(default_factory=list)
+    stress_margin: str | None = None
+
+
+class ReportWhyResponse(BaseModel):
+    """Por qué este veredicto.
+
+    Ausente (`null`) cuando el run no trae la matriz evaluada: componerlo con la
+    regla de HOY afirmaría sobre aquel análisis algo que su motor no comprobó.
+    """
+
+    decided_by: list[str] = Field(default_factory=list)
+    exit_sentence: str = ""
+    models_disagree: str | None = None
+    signals: list[ConditionSignalResponse] = Field(default_factory=list)
 
 
 class ReportQuestionResponse(BaseModel):
@@ -219,6 +269,8 @@ class ReportLayerResponse(BaseModel):
     no cambia ningún número, así que no puede marcar como caducado un run."""
     headline: str = ""
     next_checks: list[NextCheckResponse] = Field(default_factory=list)
+    why: ReportWhyResponse | None = None
+    summary: ReportSummaryResponse | None = None
 
 
 class AnalysisRunResponse(BaseModel):

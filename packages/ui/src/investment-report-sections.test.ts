@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   allScreenMetricKeys,
+  FORENSIC_KEYS,
+  FORENSIC_ROWS,
   locateMetric,
   STRESS_ANCHOR,
   RATIO_FAMILIES,
@@ -95,5 +97,41 @@ describe('locateMetric', () => {
     // vacuidad: no habría ninguna clave que comprobar.
     expect(SECTION_PLACEMENT.length).toBeGreaterThan(8);
     expect(allScreenMetricKeys().size).toBeGreaterThan(50);
+  });
+});
+
+/**
+ * La pareja escala/lectura (PHASE-44.25).
+ *
+ * El X-Score y su probabilidad se pintaban como dos filas contiguas, y verlas
+ * separadas y parecidas hacía pensar que una era la otra multiplicada por 100
+ * — no lo son (Φ(0) = 50 %, no 0 %). Lo que estos tests atan es que la
+ * acompañante NO pueda volver a ser una fila.
+ */
+describe('FORENSIC_ROWS', () => {
+  it('ninguna lectura acompañante es también una fila', () => {
+    const filas = new Set(FORENSIC_ROWS.map((row) => row.key));
+    const acompanantes = FORENSIC_ROWS.flatMap((row) => (row.reading ? [row.reading] : []));
+
+    expect(acompanantes.length).toBeGreaterThan(0);
+    for (const clave of acompanantes) {
+      expect(filas.has(clave)).toBe(false);
+    }
+  });
+
+  it('las claves del bloque se DERIVAN de las filas, no se escriben aparte', () => {
+    // Es lo que mantiene verde el gate del backend («toda métrica del motor
+    // tiene sitio en pantalla») sin una segunda lista que se quede atrás.
+    const esperadas = FORENSIC_ROWS.flatMap((row) =>
+      row.reading ? [row.key, row.reading] : [row.key],
+    );
+    expect([...FORENSIC_KEYS]).toEqual(esperadas);
+  });
+
+  it('toda acompañante tiene destino propio para que su ⓘ y su enlace existan', () => {
+    for (const row of FORENSIC_ROWS) {
+      if (!row.reading) continue;
+      expect(locateMetric(row.reading)).not.toBeNull();
+    }
   });
 });

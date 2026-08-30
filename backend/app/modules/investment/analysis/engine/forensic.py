@@ -20,6 +20,7 @@ Montier).
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
@@ -155,6 +156,20 @@ METRIC_CATALOG: tuple[MetricDefinition, ...] = (
         ),
     ),
     MetricDefinition(
+        "FZ_P",
+        "Probabilidad de insolvencia (Zmijewski)",
+        "forense",
+        MetricUnit.PERCENT,
+        _LOWER,
+        high_ok=Decimal("0.15"),
+        high_alarm=Decimal("0.40"),
+        note=(
+            "Φ(X) del X-Score: la MISMA comprobación en la escala que se lee sin "
+            "traducir. Los cortes son los de FZ leídos como probabilidad, así que "
+            "las dos lecturas no pueden discrepar de banda (Φ es monótona)."
+        ),
+    ),
+    MetricDefinition(
         "F7",
         "C-Score de Montier",
         "forense",
@@ -173,12 +188,52 @@ METRIC_CATALOG: tuple[MetricDefinition, ...] = (
 METRIC_KEYS: tuple[str, ...] = tuple(definition.key for definition in METRIC_CATALOG)
 DEFAULT_THRESHOLDS: Mapping[str, ThresholdSpec] = thresholds_from(METRIC_CATALOG)
 
+SCALE_COMPANIONS: Mapping[str, str] = {"FZ": "FZ_P"}
+"""Métrica → su MISMA comprobación en otra escala (PHASE-44.25).
+
+No es una métrica más: es la misma medida leída de otra forma, y por eso la
+pantalla las funde en una fila en vez de ponerlas una debajo de otra — verlas
+separadas y parecidas hace pensar que una es la otra multiplicada, que fue
+justo lo que pasó.
+
+La pareja se declara AQUÍ, junto a la fórmula, porque es una propiedad del
+modelo y no de la pantalla: que Φ(X) sea la lectura de X lo decide Zmijewski,
+no el diseño. La capa que pinta la consume; si se declarara allí, un perfil
+sectorial podría mover una vara y no la otra sin que nada lo viera.
+"""
+
 ZMIJEWSKI_P_CUTOFFS: tuple[tuple[Decimal, Decimal], ...] = (
     (Decimal("0.15"), Decimal("-1.036433")),
     (Decimal("0.40"), Decimal("-0.253347")),
 )
 """(P, Φ⁻¹(P)) — la correspondencia que justifica los cortes de `FZ`. Se usa en
-los tests para comprobar que bandear X y bandear P dan lo mismo."""
+los tests para comprobar que bandear X y bandear P dan lo mismo, y en
+`zmijewski_probability` para traducir la puntuación a la escala que el lector
+entiende."""
+
+
+def zmijewski_probability(score: Decimal) -> Decimal:
+    """P(insolvencia) = Φ(X), la lectura del X-Score en la escala que se entiende.
+
+    El modelo es un **probit**: su salida es un número sin unidad en una escala
+    NEGATIVA, y los cortes de la banda son los cuantiles normales de P=15% y
+    P=40%. En pantalla eso dejaba un «0,87» que sólo se puede situar comparando
+    mentalmente con dos cortes negativos — y de ahí la pregunta razonable de
+    «si más bajo es mejor, ¿por qué está en rojo?»: 0,87 es el mejor de una
+    serie que venía de 1,47 y sigue muy por encima del corte.
+
+    Vive aquí, junto a la fórmula, y no en la pantalla que la pinta: la
+    correspondencia X↔P es del modelo, no del formato. Φ se calcula con `erf`,
+    que es exacto hasta la precisión del float; el resultado se redondea a
+    cuatro decimales porque es una lectura, no una entrada de ningún cálculo
+    posterior.
+    """
+    # `erf` devuelve float por definición, así que la precisión de esta lectura
+    # es la del float — bastante de sobra para una probabilidad que se redondea
+    # a cuatro decimales. El 0,5 sí va como cadena: un literal float ahí metería
+    # error donde no hace falta ninguno.
+    probability = Decimal("0.5") * (1 + Decimal(math.erf(float(score) / math.sqrt(2))))
+    return probability.quantize(Decimal("0.0001"))
 
 
 # ── Resultado ─────────────────────────────────────────────────────────
@@ -643,6 +698,17 @@ def compute_working_capital_anomaly(
     return Amount(value=wc_growth - revenue_growth, provenance=Provenance.DERIVED)
 
 
+def _zmijewski_as_probability(score: Amount) -> Amount:
+    """El X-Score leído como probabilidad, conservando su procedencia.
+
+    Si el score no se pudo calcular, ésta tampoco: hereda el MISMO motivo. Dos
+    huecos con razones distintas para la misma causa se leen como dos problemas.
+    """
+    if score.is_missing or score.value is None:
+        return score
+    return Amount(value=zmijewski_probability(score.value), provenance=score.provenance)
+
+
 def compute_zmijewski(series: StatementSeries, statement: CanonicalStatement) -> Amount:
     """FZ: `X = −4,336 − 4,513·ROA + 5,679·apalancamiento + 0,004·liquidez`.
 
@@ -735,7 +801,12 @@ def compute(
         metrics.append(
             to_metric_result("accruals", year, compute_accruals(series, statement), specs)
         )
-        metrics.append(to_metric_result("FZ", year, compute_zmijewski(series, statement), specs))
+        zmijewski = compute_zmijewski(series, statement)
+        metrics.append(to_metric_result("FZ", year, zmijewski, specs))
+        # La misma comprobación en la escala que se entiende. Se deriva del
+        # mismo `Amount`, así que si el X-Score no se pudo calcular ésta hereda
+        # su motivo en vez de inventarse un hueco distinto.
+        metrics.append(to_metric_result("FZ_P", year, _zmijewski_as_probability(zmijewski), specs))
 
         # ── Scores que exigen t−1 ──
         if previous is None:

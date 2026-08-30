@@ -548,9 +548,48 @@ export interface QuestionVerdict {
   notes?: string[];
 }
 
+/** A qué lista pertenece una condición del sello. */
+export type SafetyRuleKind = 'avoid' | 'conservative';
+
+/** Una señal implicada en una condición, con su lectura de ESE análisis. */
+export interface ConditionSignal {
+  key: string;
+  label: string;
+  kind: 'metric' | 'flag';
+  band: MetricBand | null;
+  value: string | null;
+  status?: MetricStatus | null;
+}
+
+/**
+ * Una condición de la matriz de seguridad, EVALUADA (PHASE-44.25).
+ *
+ * `met` es tri-estado: `null` es «no se pudo comprobar», que no es «no se
+ * cumple» — en la lista de «Evitar», colapsarlo se lee como una comprobación
+ * superada.
+ */
+export interface SafetyCondition {
+  key: string;
+  rule: SafetyRuleKind;
+  /** La afirmación, byte-igual a la que viaja en `blocking_reasons`. */
+  text: string;
+  met: boolean | null;
+  /** Por qué no se pudo comprobar. Presente si `met` es `null`. */
+  reason?: string | null;
+  signals?: ConditionSignal[];
+  /** El giro contrafactual, sin números: «el X-Score saliera del rojo». */
+  inverse?: string;
+}
+
 export interface SafetyProfile {
   label: SafetyLabel;
   blocking_reasons: string[];
+  /**
+   * Las diez condiciones evaluadas. **Ausente** en runs de motor < 1.8.0: ahí
+   * la pantalla no puede afirmar el estado de ninguna, porque aquel motor ni
+   * siquiera evaluaba las de «Conservador» cuando el perfil era «Evitar».
+   */
+  conditions?: SafetyCondition[];
 }
 
 export interface Confidence {
@@ -587,6 +626,14 @@ export interface VerdictBlock {
   safety_profile: SafetyProfile;
   dividend_verdict: DividendVerdict;
   stress: StressBlock;
+  /**
+   * Qué pregunta decidió el veredicto del dividendo (PHASE-44.25).
+   *
+   * Es el peor de «¿cabe en la caja?» y «¿aguanta un golpe?», así que el hero
+   * puede anunciar «el dividendo está en riesgo» con la pregunta del dividendo
+   * en verde. Ausente en runs anteriores.
+   */
+  dividend_verdict_source?: 'dividend' | 'resilience' | 'both' | null;
 }
 
 /**
@@ -788,6 +835,18 @@ export interface ReportSignal {
   severity_rank: number;
   distance?: SignalDistance | null;
   threshold_origin: ThresholdOrigin;
+  /**
+   * Si esta señal hizo cierta una condición de «Evitar» que se cumple.
+   *
+   * NO es «está en rojo»: el escenario de stress tiñe su pregunta y no está en
+   * la matriz del sello.
+   */
+  drove_verdict?: boolean;
+  /**
+   * Frases ya redactadas que dan cuerpo a una señal sin número — hoy, los
+   * escenarios de stress que dejan de cubrir, con sus dos coberturas dentro.
+   */
+  evidence_sentences?: string[];
 }
 
 export interface ReportQuestion {
@@ -807,6 +866,34 @@ export interface ReportQuestion {
 export interface NextCheck {
   key: string;
   text: string;
+  /**
+   * La clave REAL de la señal, para enlazar el bullet con su fila. `key` es
+   * `pregunta:ETIQUETA` y una etiqueta no localiza nada.
+   */
+  signal_key?: string | null;
+}
+
+/** El enriquecimiento de una señal de la matriz que el run no guarda. */
+export interface ConditionSignalReading {
+  key: string;
+  distance?: SignalDistance | null;
+  threshold_origin: ThresholdOrigin;
+}
+
+/**
+ * Por qué este veredicto (PHASE-44.25).
+ *
+ * Ausente cuando el run no trae la matriz evaluada: componerlo con la regla de
+ * HOY afirmaría sobre aquel análisis algo que su motor no comprobó.
+ */
+export interface ReportWhy {
+  /** Las claves de las condiciones de «Evitar» que se cumplen. */
+  decided_by: string[];
+  /** Qué tendría que cambiar para salir del sello. */
+  exit_sentence: string;
+  /** Los dos modelos de insolvencia en extremos opuestos, dicho en voz alta. */
+  models_disagree?: string | null;
+  signals?: ConditionSignalReading[];
 }
 
 /**
@@ -821,6 +908,23 @@ export interface ThresholdProfile {
   sector: SectorInternal;
   is_financial: boolean;
   is_reit: boolean;
+}
+
+/**
+ * El sumario del Dictamen, seleccionado y enunciado en el SERVIDOR
+ * (PHASE-44.26): qué entra y en qué orden es parte de lo que la frase afirma.
+ * Las claves viajan para que la pantalla pinte las filas con número y enlace.
+ * Ausente en runs sin desglose y en backends anteriores.
+ */
+export interface ReportSummary {
+  concerns_intro?: string;
+  concern_keys?: string[];
+  concerns_overflow?: number;
+  strengths_intro?: string;
+  strength_keys?: string[];
+  strengths_overflow?: number;
+  stress_sentences?: string[];
+  stress_margin?: string | null;
 }
 
 /**
@@ -841,6 +945,14 @@ export interface ReportLayer {
   headline?: string;
   /** Hasta tres cosas que mirar, las peores primero. */
   next_checks?: NextCheck[];
+  /**
+   * Por qué el sello dice lo que dice (PHASE-44.25).
+   *
+   * Ausente para un run que no trae la matriz evaluada — y ahí la pantalla no
+   * lo suple: lo dice.
+   */
+  why?: ReportWhy | null;
+  summary?: ReportSummary | null;
 }
 
 export interface AnalysisRunSummary {

@@ -10,6 +10,7 @@ import {
   DIVIDEND_BLOCKS,
   effectiveThreshold,
   FORENSIC_KEYS,
+  FORENSIC_ROWS,
   formatMetricValue,
   formatPercentDelta,
   formatThreshold,
@@ -39,13 +40,23 @@ import {
   type MetricIndex,
   type MetricRowOptions,
   type ScoreHelpIndex,
+  NO_BREAKDOWN_BY_DESIGN,
   scoreBreakdownRows,
   coreItemCoverage,
   REPORT_LEGEND,
   REPORT_SCOPE,
   SAFETY,
-  safetyRules,
-  type SafetyChecklist,
+  blockingSummary,
+  dictamenLists,
+  DICTAMEN_TITLES,
+  overflowLabel,
+  type DictamenRow,
+  distanceSentence,
+  orderedSignals,
+  originSentence,
+  reportSignalsOf,
+  verdictWhyRows,
+  type WhySection,
 } from '@crisol/ui';
 import type {
   AnalysisRun,
@@ -54,8 +65,10 @@ import type {
   FinancialStatement,
   QuestionSignal,
   QuestionVerdict,
+  ReportSignal,
   Security,
   StatementKind,
+  ThresholdProfile,
 } from '@crisol/types';
 
 import { useValuation } from '@crisol/services';
@@ -426,21 +439,27 @@ export function TabForensic({ ctx }: { ctx: TabContext }) {
         note="Un score es un agregado: lo que dice el modelo está en sus variables. Al lado de cada una, cuánto se ha movido desde el ejercicio anterior — un nivel suelto no significa nada."
       >
         <View style={{ gap: spacing.md }}>
-          {FORENSIC_KEYS.map((key) => (
-            <ScoreCard key={key} metricKey={key} ctx={ctx} year={verdictYear} />
+          {FORENSIC_ROWS.map((row) => (
+            <ScoreCard
+              key={row.key}
+              metricKey={row.key}
+              {...(row.reading ? { readingKey: row.reading } : {})}
+              ctx={ctx}
+              year={verdictYear}
+            />
           ))}
         </View>
       </Block>
 
       <Block
-        title={`Los ocho scores (hasta ${verdictYear})`}
+        title={`Los scores (hasta ${verdictYear})`}
         note="Todos book-based: se calculan sólo con las cuentas publicadas, nunca con la cotización. Es lo que hace que reejecutar un análisis antiguo devuelva el mismo resultado."
       >
         <YearMatrix
           marksLegend={REPORT_LEGEND}
           highlightKey={ctx.highlightKey}
           years={years}
-          rows={FORENSIC_KEYS.map((key) => metricRow(key, options(ctx)))}
+          rows={FORENSIC_ROWS.map((row) => metricRow(row.key, options(ctx)))}
           verdictYear={verdictYear}
           firstColumnLabel="Score"
           // Derivada del run, igual que en web (PHASE-44.17): qué scores faltan y
@@ -459,8 +478,6 @@ export function TabForensic({ ctx }: { ctx: TabContext }) {
  * Misma lista que en web, y por el mismo motivo: distinguir «no tiene desglose»
  * de «este año no se pudo calcular».
  */
-const NO_BREAKDOWN_BY_DESIGN = new Set(['accruals', 'F5', 'F6', 'FZ']);
-
 /**
  * El desglose de un score forense en RN (PHASE-44.24.D).
  *
@@ -471,19 +488,42 @@ const NO_BREAKDOWN_BY_DESIGN = new Set(['accruals', 'F5', 'F6', 'FZ']);
  */
 function ScoreCard({
   metricKey,
+  readingKey,
   ctx,
   year,
 }: {
   metricKey: string;
+  /** La MISMA comprobación en otra escala, si la tiene (PHASE-44.25). */
+  readingKey?: string | undefined;
   ctx: TabContext;
   year: number | undefined;
 }) {
   const [open, setOpen] = useState(false);
+  const [readingOpen, setReadingOpen] = useState(false);
   const ficha = ctx.help?.score(metricKey);
   const base = ctx.catalog.definition(metricKey);
   const definition = effectiveThreshold(metricKey, ctx.run.thresholds_used, base);
   const metric = year === undefined ? undefined : ctx.index.get(metricKey, year);
   const notComputable = !metric || metric.status === 'not_computable';
+
+  // La misma comprobación en la escala que se lee sin traducir. Sólo si el run
+  // la trae CON número: un motor anterior no la calculaba, y un «no calculable»
+  // ahí culparía a los datos de la empresa de un hueco que es del motor.
+  const readingMetric =
+    readingKey && year !== undefined ? ctx.index.get(readingKey, year) : undefined;
+  const readingBase = readingKey ? ctx.catalog.definition(readingKey) : undefined;
+  const readingDefinition = readingKey
+    ? effectiveThreshold(readingKey, ctx.run.thresholds_used, readingBase)
+    : undefined;
+  const reading =
+    readingKey && readingMetric?.value != null && readingMetric.status !== 'not_computable'
+      ? {
+          label: readingBase?.label ?? readingKey,
+          value: formatMetricValue(readingMetric.value, readingDefinition?.unit),
+          threshold: formatThreshold(readingDefinition),
+          ficha: ctx.help?.score(readingKey),
+        }
+      : null;
   const view = scoreBreakdownRows(
     metricKey,
     ctx.run.scores_detail.forensic.breakdowns,
@@ -516,6 +556,33 @@ function ScoreCard({
 
       {formatThreshold(definition) ? (
         <Text style={styles.scoreThreshold}>{formatThreshold(definition)}</Text>
+      ) : null}
+
+      {/* La misma medida leída sin traducir, con SU corte: una vara en
+          porcentaje bajo un número en escala de puntuación invita a leer uno
+          como el otro. Sólo si el run la trae. */}
+      {reading ? (
+        <View style={{ gap: 1, marginTop: 2 }}>
+          <Pressable
+            disabled={!reading.ficha}
+            accessibilityRole={reading.ficha ? 'button' : undefined}
+            accessibilityLabel={reading.ficha ? `Qué es «${reading.label}»` : undefined}
+            onPress={() => setReadingOpen((v) => !v)}
+          >
+            <Text style={styles.scoreReading}>
+              {reading.label}: {reading.value}
+              {reading.ficha ? ' ⓘ' : ''}
+            </Text>
+          </Pressable>
+          {reading.threshold ? (
+            <Text style={styles.scoreThreshold}>{reading.threshold}</Text>
+          ) : null}
+          {readingOpen && reading.ficha ? (
+            <Text style={styles.scoreHelp}>
+              {reading.ficha.what} {reading.ficha.reading}
+            </Text>
+          ) : null}
+        </View>
       ) : null}
 
       {/* Los tres campos separados, igual que en web: «qué mide» se lee
@@ -759,46 +826,21 @@ export function TabVerdict({
   const safety = SAFETY[profile.label];
   // Las mismas reglas que web, del mismo view-model: si el motor añade una
   // condición, las dos pantallas la ganan a la vez (PHASE-44.24.E).
-  const checklist = safetyRules(profile);
+  const why = verdictWhyRows(profile, run.report?.why, run.thresholds_used, catalog);
+  const { blocking, blockingLabel } = blockingSummary(profile);
+  // Las listas del sumario: la MISMA selección determinista que web, de la
+  // capa compartida (PHASE-44.26).
+  const lists = dictamenLists(run, catalog);
+  // La auditoría del sello nace plegada: el Dictamen se lee de arriba abajo.
+  const [auditOpen, setAuditOpen] = useState(false);
   // Las frases las compone el SERVIDOR (PHASE-44.24.B): deterministas y con
   // goldens, para que el dictamen de las dos apps no pueda discrepar.
   const sentenceOf = (key: string) => run.report?.questions?.find((q) => q.key === key)?.sentence;
 
   return (
     <View style={{ gap: spacing.md }}>
-      <View style={styles.card}>
-        <View style={styles.profileHead}>
-          <Text style={styles.cardTitle}>Perfil de seguridad</Text>
-          <Text style={[styles.profileBadge, { color: safety.fg, backgroundColor: safety.bg }]}>
-            {safety.label}
-          </Text>
-        </View>
-        <Text style={styles.note}>
-          El perfil no es una nota media: sale de reglas booleanas sobre los scores forenses. Estas
-          son, con lo que ha pasado en este análisis.
-        </Text>
-        <RuleChecklist block={checklist.avoid} />
-        <RuleChecklist block={checklist.conservative} />
-        {checklist.blocking.length > 0 ? (
-          <Text style={styles.blocking}>
-            {checklist.blockingLabel}
-            {checklist.blocking.join('; ')}.
-          </Text>
-        ) : null}
-      </View>
-
-      {run.report?.next_checks?.length ? (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Qué miraría a continuación</Text>
-          {run.report.next_checks.map((check) => (
-            <Text key={check.key} style={styles.note}>
-              {'· '}
-              {check.text}
-            </Text>
-          ))}
-        </View>
-      ) : null}
-
+      {/* §1 arranca directamente con las preguntas: la prosa del servidor.
+          El sello va en la cabecera de la primera card del sumario (§2). */}
       {verdict.questions.map((question) => {
         // Mismo tri-estado que la web, de la misma función: un verde por
         // ausencia de prueba —y un run viejo que ni siquiera registró qué se
@@ -843,6 +885,8 @@ export function TabVerdict({
                   signals={question.signals ?? []}
                   catalog={catalog}
                   thresholdsUsed={run.thresholds_used}
+                  report={reportSignalsOf(run.report, question.key)}
+                  profile={run.report?.threshold_profile}
                   goTo={ctx.goTo}
                 />
               </>
@@ -850,9 +894,124 @@ export function TabVerdict({
           </View>
         );
       })}
-      <FlagList flags={run.flags ?? []} help={ctx.help} />
+      {/* §2 — El dictamen, razonado (PHASE-44.26): qué preocupa, qué está
+          bien y el stress en UNA card, con las entradas en prosa del SERVIDOR.
+          Misma estructura que web, de las mismas listas. */}
+      <View style={styles.card}>
+        <View style={styles.profileHead}>
+          <Text style={styles.cardTitle}>{DICTAMEN_TITLES.reasoned}</Text>
+          <Text style={[styles.profileBadge, { color: safety.fg, backgroundColor: safety.bg }]}>
+            {safety.label}
+          </Text>
+        </View>
 
-      <StressCard run={run} />
+        <Text style={styles.ruleTitle}>{DICTAMEN_TITLES.concerns}</Text>
+        {lists.concernsIntro ? <Text style={styles.sentence}>{lists.concernsIntro}</Text> : null}
+        {lists.concerns.length > 0 ? (
+          <>
+            {lists.concerns.map((row) => (
+              <SummaryRowMobile key={row.key} row={row} goTo={ctx.goTo} />
+            ))}
+            {overflowLabel(lists.concernsOverflow) ? (
+              <Text style={styles.note}>
+                {overflowLabel(lists.concernsOverflow)} — todas en las tablas de cada pregunta.
+              </Text>
+            ) : null}
+          </>
+        ) : run.report?.next_checks?.length ? (
+          run.report.next_checks.map((check) => (
+            <Text key={check.key} style={styles.note}>
+              {'· '}
+              {check.text}
+            </Text>
+          ))
+        ) : null}
+        {run.flags.length > 0 ? (
+          <Text style={styles.evidence}>Banderas encendidas: {run.flags.length}</Text>
+        ) : null}
+        <FlagList flags={run.flags ?? []} help={ctx.help} />
+
+        <Text style={styles.ruleTitle}>{DICTAMEN_TITLES.strengths}</Text>
+        {lists.strengthsIntro ? <Text style={styles.sentence}>{lists.strengthsIntro}</Text> : null}
+        {lists.strengths.length > 0 ? (
+          <>
+            {lists.strengths.map((row) => (
+              <SummaryRowMobile key={row.key} row={row} goTo={ctx.goTo} />
+            ))}
+            {overflowLabel(lists.strengthsOverflow) ? (
+              <Text style={styles.note}>
+                {overflowLabel(lists.strengthsOverflow)} — el resto, en sus pestañas.
+              </Text>
+            ) : null}
+          </>
+        ) : (
+          <Text style={styles.note}>
+            Ninguna señal comprobada salió en verde en este análisis.
+          </Text>
+        )}
+        {lists.scenariosHolding.map((sentence) => (
+          <Text key={sentence} style={styles.note}>
+            {sentence}
+          </Text>
+        ))}
+        {lists.clean.length > 0 ? (
+          <Text style={styles.evidence}>
+            Comprobado y limpio: {lists.clean.map((check) => check.label).join(' · ')} —{' '}
+            {lists.clean[0]?.reason}.
+          </Text>
+        ) : null}
+        {lists.discarded.length > 0 ? (
+          <Text style={styles.evidence}>
+            Comprobado y descartado del sello: {lists.discarded.join(' · ')}.
+          </Text>
+        ) : null}
+        <Text style={styles.signalHint}>{DICTAMEN_TITLES.strengthsFootnote}</Text>
+
+        <StressSection run={run} marginSentence={lists.stressMargin} />
+
+        {why.modelsDisagree ? <Text style={styles.evidence}>{why.modelsDisagree}</Text> : null}
+        {why.exitSentence ? <Text style={styles.exitSentence}>{why.exitSentence}</Text> : null}
+      </View>
+
+      {/* §5 — La auditoría del sello, plegada por defecto (PHASE-44.26). */}
+      <View style={styles.card}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded: auditOpen }}
+          onPress={() => setAuditOpen((v) => !v)}
+        >
+          <Text style={styles.cardTitle}>
+            {auditOpen ? '▾ ' : '▸ '}
+            {DICTAMEN_TITLES.audit}
+          </Text>
+          <Text style={styles.signalHint}>{DICTAMEN_TITLES.auditHint}</Text>
+        </Pressable>
+        {auditOpen ? (
+          <>
+            <Text style={styles.note}>
+              El perfil no es una nota media: sale de reglas fijas sobre los scores forenses y la
+              bandera del dividendo. Estas son, con lo que ha pasado en este análisis. Es una
+              comprobación de reglas, no una recomendación de compra o venta.
+            </Text>
+            {why.sections.map((section) => (
+              <RuleChecklist key={section.key} section={section} />
+            ))}
+            {why.legacy ? (
+              <Text style={styles.note}>
+                Este análisis lo produjo un motor anterior, que no registraba la matriz condición
+                a condición: de las de «Conservador» no quedó constancia. Vuelve a analizar para
+                ver el detalle completo.
+              </Text>
+            ) : null}
+            {blocking.length > 0 ? (
+              <Text style={styles.blocking}>
+                {blockingLabel}
+                {blocking.join('; ')}.
+              </Text>
+            ) : null}
+          </>
+        ) : null}
+      </View>
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Alcance: lo que este informe NO cubre</Text>
@@ -876,28 +1035,74 @@ export function TabVerdict({
   );
 }
 
-/** Una de las dos listas de reglas del perfil, con su marca por condición. */
-function RuleChecklist({
-  block,
+/**
+ * Una fila del sumario del Dictamen (PHASE-44.26): etiqueta tocable, valor,
+ * banda, distancia y — para señales sin número — sus frases persistidas.
+ */
+function SummaryRowMobile({
+  row,
+  goTo,
 }: {
-  block: SafetyChecklist['avoid'] | SafetyChecklist['conservative'];
+  row: DictamenRow;
+  goTo?: ((tab: string, highlight: string | null) => void) | undefined;
 }) {
+  const target = goTo ? locateMetric(row.key) : null;
+  const navegable = Boolean(target && !target.anchor);
+  const band = bandColors(row.band);
+  return (
+    <Pressable
+      disabled={!navegable}
+      accessibilityRole={navegable ? 'button' : undefined}
+      onPress={() => (target && goTo ? goTo(target.tab, target.highlight ?? row.key) : undefined)}
+      style={{ gap: 1 }}
+    >
+      <Text style={styles.rule}>
+        <Text style={{ color: colors.text }}>
+          {row.label}
+          {navegable ? ' ›' : ''}
+        </Text>
+        {row.value ? ` · ${row.value}` : ''}
+        {' · '}
+        <Text style={{ color: band.fg }}>{bandLabel(row.band)}</Text>
+        {row.distance ? ` — ${row.distance}` : ''}
+        {row.unaudited ? ` · ${EVIDENCE_LABEL['not-audited'].toLowerCase()}` : ''}
+      </Text>
+      {row.sentences.map((sentence) => (
+        <Text key={sentence} style={styles.signalHint}>
+          {sentence}
+        </Text>
+      ))}
+    </Pressable>
+  );
+}
+
+/**
+ * Una lista de condiciones del sello, con su estado en PALABRAS.
+ *
+ * Mismas filas que web, del mismo view-model. El glifo anterior era bimodal —en
+ * «Evitar», cumplir pintaba ✕— así que la única línea que respondía a «por qué
+ * evitar» salía literalmente negada (PHASE-44.25).
+ */
+function RuleChecklist({ section }: { section: WhySection }) {
   return (
     <View style={{ gap: 2, marginTop: spacing.xs }}>
-      <Text style={styles.ruleTitle}>{block.title}</Text>
-      {block.rules.map((rule) => {
-        // En la lista de «Evitar», cumplir una regla es la MALA noticia: el
-        // color no puede salir de `met` a secas.
-        const malo = block.metIsBad ? rule.met : !rule.met;
-        return (
-          <Text
-            key={rule.text}
-            style={[styles.rule, { color: malo ? colors.danger : colors.textMuted }]}
-          >
-            {rule.met ? '✓' : '✕'} {rule.text}
+      <Text style={styles.ruleTitle}>{section.title}</Text>
+      {section.rows.map((row) => (
+        <View key={row.key} style={{ gap: 1 }}>
+          <Text style={[styles.rule, { color: row.isBad ? colors.danger : colors.textMuted }]}>
+            <Text style={styles.ruleState}>{row.stateLabel}</Text>
+            {' · '}
+            {row.text}
+            {row.decided ? ' · decidió el veredicto' : ''}
           </Text>
-        );
-      })}
+          {row.reason ? <Text style={styles.signalHint}>{row.reason}</Text> : null}
+          {row.signals.map((signal) => (
+            <Text key={signal.key} style={styles.signalHint}>
+              {[signal.label, signal.reading, signal.cut].filter(Boolean).join(' · ')}
+            </Text>
+          ))}
+        </View>
+      ))}
     </View>
   );
 }
@@ -910,12 +1115,19 @@ function RuleChecklist({
  * — que es justo lo que móvil no enseñaba, así que un escenario en rojo era
  * invisible en el teléfono.
  */
-function StressCard({ run }: { run: AnalysisRun }) {
+function StressSection({
+  run,
+  marginSentence,
+}: {
+  run: AnalysisRun;
+  /** El margen enunciado por el SERVIDOR. Con él, el cálculo local calla. */
+  marginSentence?: string | null | undefined;
+}) {
   const stress = run.verdict.stress;
   const scenarios = stress?.scenarios ?? [];
   return (
-    <View style={styles.card}>
-      <Text style={styles.cardTitle}>Escenarios de stress</Text>
+    <View style={{ gap: spacing.xs, marginTop: spacing.xs }}>
+      <Text style={styles.ruleTitle}>Escenarios de stress</Text>
       <Text style={styles.note}>
         La cobertura se mide sobre caja libre (flujo de explotación − inversión), no sobre el FFO.
         En una socimi puede no coincidir con la cobertura de la pestaña Dividendo.
@@ -935,7 +1147,11 @@ function StressCard({ run }: { run: AnalysisRun }) {
           </View>
         ))
       )}
-      {stress?.breakeven_fcf_drop ? (
+      {marginSentence ? (
+        // La frase del SERVIDOR (narrative 1.2.0), con goldens. El cálculo
+        // local queda para backends que aún no la mandan.
+        <Text style={styles.note}>{marginSentence}</Text>
+      ) : stress?.breakeven_fcf_drop ? (
         <Text style={styles.note}>
           Margen de caída de la caja libre antes de dejar de cubrir el dividendo:{' '}
           {(Number(stress.breakeven_fcf_drop) * 100).toLocaleString('es-ES', {
@@ -1081,11 +1297,16 @@ function SignalList({
   signals,
   catalog,
   thresholdsUsed,
+  report,
+  profile,
   goTo,
 }: {
   signals: QuestionSignal[];
   catalog: CatalogIndex;
   thresholdsUsed: AnalysisRun['thresholds_used'];
+  /** La capa de lectura de ESTA pregunta, indexada por clave de señal. */
+  report?: Map<string, ReportSignal> | undefined;
+  profile?: ThresholdProfile | undefined;
   goTo?: ((tab: string, highlight: string | null) => void) | undefined;
 }) {
   if (signals.length === 0) {
@@ -1096,7 +1317,10 @@ function SignalList({
   }
   return (
     <View style={{ gap: spacing.xs, marginTop: spacing.xs }}>
-      {signals.map((signal) => {
+      {/* El ORDEN lo decide el servidor (`severity_rank`): móvil pintaba las
+          señales en el orden crudo del run, así que la roja podía salir la
+          última mientras en web encabezaba su tabla. */}
+      {orderedSignals(signals, report ? [...report.values()] : undefined).map((signal) => {
         const definition = effectiveThreshold(
           signal.key,
           thresholdsUsed,
@@ -1104,6 +1328,9 @@ function SignalList({
         );
         const threshold = formatThreshold(definition);
         const band = bandColors(signal.band);
+        const read = report?.get(signal.key);
+        const distance = distanceSentence(read?.distance, definition?.unit);
+        const origin = read ? originSentence(read.threshold_origin, profile?.effective) : null;
         // Mismo registro que web: una señal con fila en otra pestaña se toca y
         // lleva allí; una bandera o un ancla, no (aquí no hay scroll a una
         // card). Sin destino, texto plano — no un toque que no hace nada.
@@ -1125,7 +1352,27 @@ function SignalList({
                 {signal.label}
                 {navegable ? ' ›' : ''}
               </Text>
-              {threshold ? <Text style={styles.signalHint}>{threshold}</Text> : null}
+              {read?.drove_verdict ? (
+                /* La señal que hizo cierta una condición de «Evitar». No es
+                   «está en rojo»: el escenario de stress tiñe la pregunta sin
+                   estar en la matriz del sello (PHASE-44.25). */
+                <Text style={styles.decisive}>decidió el veredicto</Text>
+              ) : null}
+              {threshold ? (
+                <Text style={styles.signalHint}>
+                  {threshold}
+                  {origin ? ` · ${origin}` : ''}
+                </Text>
+              ) : null}
+              {distance ? <Text style={styles.signalHint}>{distance}</Text> : null}
+              {/* En móvil los anclas no navegan, así que el número del
+                  escenario va EN la fila: si no, la señal más severa queda sin
+                  cuerpo y sus cifras viven varias cards más abajo. */}
+              {read?.evidence_sentences?.map((frase) => (
+                <Text key={frase} style={styles.signalHint}>
+                  {frase}
+                </Text>
+              ))}
               {!signal.counted ? (
                 <Text style={styles.signalHint}>no puntúa · {signal.reason}</Text>
               ) : null}
@@ -1238,6 +1485,17 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   rule: { fontSize: fontSize.xs, lineHeight: 17 },
+  /** El estado de una condición, en palabras y no en un glifo bimodal. */
+  ruleState: { fontWeight: fontWeight.semibold, textTransform: 'uppercase' as const },
+  /** La señal que hizo cierta una condición de «Evitar». */
+  decisive: {
+    color: colors.danger,
+    fontSize: 10,
+    fontWeight: fontWeight.semibold,
+    marginTop: 1,
+  },
+  /** Qué tendría que cambiar para salir del sello. */
+  exitSentence: { color: colors.text, fontSize: fontSize.xs, lineHeight: 17, marginTop: spacing.xs },
   blocking: { color: colors.warning, fontSize: fontSize.xs, lineHeight: 17, marginTop: spacing.xs },
   sentence: { color: colors.text, fontSize: fontSize.sm, lineHeight: 20, marginTop: 2 },
   scopeTerm: { color: colors.text, fontWeight: fontWeight.semibold },
@@ -1256,6 +1514,8 @@ const styles = StyleSheet.create({
   scoreHead: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.sm },
   scoreLabel: { color: colors.text, fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
   scoreValue: { fontSize: fontSize.md, fontWeight: fontWeight.bold },
+  /** La lectura acompañante: la misma medida en la escala que se entiende. */
+  scoreReading: { color: colors.text, fontSize: fontSize.xs, marginTop: 2 },
   scoreThreshold: { color: colors.textSubtle, fontSize: fontSize.xs },
   scoreHelp: { color: colors.textMuted, fontSize: fontSize.xs, lineHeight: 18, marginTop: 4 },
   scoreNote: { color: colors.textMuted, fontSize: fontSize.xs, lineHeight: 18 },

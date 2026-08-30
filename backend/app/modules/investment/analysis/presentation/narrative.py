@@ -28,6 +28,7 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 from app.modules.investment.analysis.presentation.evidence import (
@@ -37,7 +38,7 @@ from app.modules.investment.analysis.presentation.evidence import (
     scored_labels,
 )
 
-NARRATIVE_VERSION = "1.0.0"
+NARRATIVE_VERSION = "1.2.0"
 """Versión de los TEXTOS, independiente de la del motor.
 
 Sube cuando cambia una plantilla. Es distinta de `ENGINE_VERSION` a propósito:
@@ -48,6 +49,45 @@ como caducado un run que sigue siendo válido.
 Historial:
 - 1.0.0 — PHASE-44.24.B: las cuatro preguntas, el titular y «qué miraría a
   continuación».
+- 1.1.0 — PHASE-44.25: el veredicto argumenta.
+
+  1. **El contrafactual** (`PROFILE_WHY_TEMPLATES`): qué tendría que cambiar
+     para salir del sello. Se compone de los giros que el motor persiste con
+     cada condición, y NUNCA nombra una que no se pudo comprobar: afirmar que
+     algo bastaría cuando no se ha podido mirar es la misma promesa vacía que
+     PHASE-44.17 quitó de las banderas.
+  2. **La discrepancia entre los dos modelos de insolvencia** se enuncia cuando
+     se da. La explicación de fondo sigue viviendo en la ficha del score, junto
+     a la fórmula; esta frase la SEÑALA y apunta a ella.
+  3. **La evidencia se cuenta por bandas** (`with_bands`). «Se evaluaron 8
+     señales, 0 se comprobaron y salieron limpias» es cierto y se lee como «las
+     8 salieron mal»: `clear_count` sólo cuenta banderas y la pregunta de la
+     resistencia no tiene ninguna, así que sus ceros son estructurales. Lo que
+     explica el color es 6 en verde y 2 en rojo, y eso ya viajaba por señal sin
+     que ninguna frase lo agregara.
+  4. **El titular deja de tragarse motivos** (`avoid_more` / `watch_more`):
+     cortaba en los dos primeros sin decir que había más.
+  5. El titular de «Conservador» deja de decir «las cinco condiciones»: el
+     motor comprueba seis. Un recuento en prosa caduca en silencio.
+- 1.2.0 — PHASE-44.26: el sumario del Dictamen se compone en el servidor.
+
+  La primera entrega del rediseño (prosa primero, auditoría plegada) enseñaba
+  «qué preocupa» y «qué está bien» como listas de DATOS seleccionadas en el
+  cliente. La prueba manual del usuario pidió más: «un informe en texto
+  desarrollado… en el formato actual lo tienes pero dividido y sin apenas
+  explicar». Eso es prosa, y la prosa del veredicto se compone aquí.
+
+  Con ella, la SELECCIÓN de las dos listas también se muda al servidor
+  (`build_report`): tenerla en el cliente y las frases aquí habría sido dos
+  fuentes para la misma decisión — qué entra y en qué orden ES parte de lo que
+  la frase afirma. El selector del cliente queda como fallback para backends
+  anteriores, documentado como tal.
+
+  Tres plantillas nuevas (`SUMMARY_TEMPLATES`): la entrada de «lo que pesa en
+  contra» y la de «lo que sale limpio» —que NOMBRAN señales, sin números: los
+  números van en las filas de datos, formateados por unidad en la capa
+  compartida— y el margen de caída de la caja libre, cuyo número entra por
+  placeholder como en las frases de stress del propio motor.
 """
 
 
@@ -90,6 +130,27 @@ EVIDENCE_TEMPLATES: Mapping[str, str] = {
         "Se evaluaron {evaluadas} señales y {sin_puntuar} no puntuaron; el motor de "
         "entonces no distinguía las comprobadas y limpias de las que no se pudieron mirar"
     ),
+    # Lo que de verdad explica el color de la pregunta (PHASE-44.25).
+    # Sin cardinal delante: «Puntuaron 1 señales» no concuerda, y el gate de
+    # plantillas prohíbe escribir el número a mano para arreglarlo. El desglose
+    # ya lleva sus cifras.
+    "with_bands": "Señales que puntúan: {desglose}",
+    "with_bands_and_rest": "Señales que puntúan: {desglose}; además, {resto}",
+    # Ninguna puntuó: no hay desglose que dar, y el recuento sí.
+    "none_scored": "Ninguna de las {candidatas} señales pudo puntuar",
+}
+
+BAND_COUNT_TEMPLATES: Mapping[str, str] = {
+    "healthy": "{n} en verde",
+    "caution": "{n} en ámbar",
+    "stressed": "{n} en rojo",
+}
+"""Los trozos del desglose. Se omiten los que valen cero: «0 en ámbar» ocupa el
+mismo sitio que una noticia y no la es."""
+
+REST_TEMPLATES: Mapping[str, str] = {
+    "clear": "{n} se comprobaron y salieron limpias",
+    "unchecked": "{n} no se pudieron comprobar",
 }
 
 RESCUE_TEMPLATES: Mapping[str, str] = {
@@ -99,9 +160,47 @@ RESCUE_TEMPLATES: Mapping[str, str] = {
 }
 
 HEADLINE_TEMPLATES: Mapping[str, str] = {
-    "conservative": "Perfil conservador: las cinco condiciones del motor se cumplen. {dividendo}",
+    # Sin recuento: el motor comprueba seis condiciones y la frase decía cinco.
+    # Un cardinal en prosa caduca en cuanto la matriz gana una condición.
+    "conservative": "Perfil conservador: todas las condiciones del motor se cumplen. {dividendo}",
     "watch": "Perfil a vigilar: {bloqueo}. {dividendo}",
     "avoid": "Perfil a evitar: {bloqueo}. {dividendo}",
+    # Con más de dos motivos el titular citaba dos y se comía el resto en
+    # silencio (PHASE-44.25).
+    "watch_more": "Perfil a vigilar: {bloqueo}, y {mas} condiciones más. {dividendo}",
+    "avoid_more": "Perfil a evitar: {bloqueo}, y {mas} condiciones más. {dividendo}",
+}
+
+SUMMARY_TEMPLATES: Mapping[str, str] = {
+    # Nombran señales; los NÚMEROS no van aquí: viajan en las filas de datos y
+    # los formatea la capa compartida por unidad, igual en las tres superficies.
+    "concerns_intro": "Lo que más pesa en contra: {nombres}.",
+    "strengths_intro": "Del lado bueno, con la comprobación superada: {nombres}.",
+    # El margen entra por placeholder, como los números de las frases de
+    # stress que el motor persiste.
+    "stress_margin": (
+        "La caja libre podría caer un {margen} antes de dejar de cubrir el dividendo."
+    ),
+}
+
+PROFILE_WHY_TEMPLATES: Mapping[str, str] = {
+    # El contrafactual. Redactado por inversión de la regla —«dejaría de»— y
+    # nunca como consejo: el informe comprueba reglas, no recomienda comprar.
+    "avoid_exit": (
+        "Dejaría de ser «Evitar» si {cambios}. Pasaría a «Vigilar»; para «Conservador» "
+        "tendrían que cumplirse además todas sus condiciones"
+    ),
+    # Lo que no se pudo comprobar NO entra en el contrafactual: decir que algo
+    # bastaría sin haberlo mirado es una promesa vacía (familia PHASE-44.17).
+    "avoid_exit_unknown": "Y quedaría por comprobar: {pendientes}",
+    "watch_exit": "Sería «Conservador» si {cambios}",
+    "watch_exit_unknown": "Y quedaría por comprobar: {pendientes}",
+    "conservative_fall": "Perdería el sello si {condiciones}",
+    "models_disagree": (
+        "Los dos modelos de insolvencia no coinciden: {rojo} está en rojo y {sano} en "
+        "verde. La discrepancia es en sí el hallazgo — cada score explica qué mide en "
+        "su ficha, y su desglose está en la pestaña Forense"
+    ),
 }
 
 DIVIDEND_TEMPLATES: Mapping[str, str] = {
@@ -150,6 +249,10 @@ def templates_fingerprint() -> str:
         "dividend": dict(sorted(DIVIDEND_TEMPLATES.items())),
         "next_check": dict(sorted(NEXT_CHECK_TEMPLATES.items())),
         "topic": dict(sorted(QUESTION_TOPIC.items())),
+        "band_count": dict(sorted(BAND_COUNT_TEMPLATES.items())),
+        "rest": dict(sorted(REST_TEMPLATES.items())),
+        "profile_why": dict(sorted(PROFILE_WHY_TEMPLATES.items())),
+        "summary": dict(sorted(SUMMARY_TEMPLATES.items())),
     }
     blob = json.dumps(payload, separators=(",", ":"), ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -164,6 +267,12 @@ class NextCheck:
 
     key: str
     text: str
+    signal_key: str | None = None
+    """La clave REAL de la señal, para que el bullet pueda enlazar con su fila.
+
+    `key` es `pregunta:ETIQUETA` y una etiqueta no sirve para localizar nada:
+    ya divergieron una vez («M-Score» vs «M-Score de Beneish»). Es `None` en los
+    bullets que no hablan de una señal concreta («nada que vigilar»)."""
 
 
 def _join(labels: Sequence[str]) -> str:
@@ -177,16 +286,65 @@ def _join(labels: Sequence[str]) -> str:
 
 
 def _evidence_sentence(question: Mapping[str, Any], evidence: Evidence) -> str:
+    """Qué se comprobó, en la forma que EXPLICA el color de la pregunta.
+
+    La versión anterior citaba «{limpias} se comprobaron y salieron limpias y
+    {sin_comprobar} no se pudieron comprobar», y esos dos contadores sólo miran
+    banderas: en «¿aguanta un golpe?», que no tiene ninguna, valen cero por
+    construcción. La frase salía «Se evaluaron 8 señales, 0 se comprobaron y
+    salieron limpias», que se lee como «las 8 salieron mal» cuando 6 estaban en
+    verde (PHASE-44.25).
+
+    El desglose por bandas es lo que sostiene el semáforo, y ya viajaba por
+    señal sin que ninguna frase lo agregara.
+    """
     evaluated = int(question.get("evaluated_count") or 0)
-    if evidence.outcomes_recorded:
-        return EVIDENCE_TEMPLATES["with_outcomes"].format(
-            evaluadas=evaluated,
-            limpias=int(question.get("clear_count") or 0),
-            sin_comprobar=int(question.get("unchecked_count") or 0),
+    clear = int(question.get("clear_count") or 0)
+    unchecked = int(question.get("unchecked_count") or 0)
+    signals = [s for s in (question.get("signals") or []) if isinstance(s, Mapping)]
+
+    # Un run sin señales estructuradas (motor 1.0.0) no permite desglosar: se
+    # dice lo que aquel motor sí registró, ni más ni menos.
+    if not evidence.outcomes_recorded or not signals:
+        if evidence.outcomes_recorded:
+            return EVIDENCE_TEMPLATES["with_outcomes"].format(
+                evaluadas=evaluated, limpias=clear, sin_comprobar=unchecked
+            )
+        return EVIDENCE_TEMPLATES["without_outcomes"].format(
+            evaluadas=evaluated, sin_puntuar=int(question.get("unavailable_count") or 0)
         )
-    return EVIDENCE_TEMPLATES["without_outcomes"].format(
-        evaluadas=evaluated, sin_puntuar=int(question.get("unavailable_count") or 0)
+
+    counts: dict[str, int] = {"stressed": 0, "caution": 0, "healthy": 0}
+    for signal in signals:
+        if not signal.get("counted"):
+            continue
+        band = str(signal.get("band") or "")
+        if band in counts:
+            counts[band] += 1
+    scored = sum(counts.values())
+
+    if not scored:
+        return EVIDENCE_TEMPLATES["none_scored"].format(candidatas=len(signals))
+
+    # Las peores primero, y los ceros fuera: «0 en ámbar» ocupa el sitio de una
+    # noticia sin serlo.
+    breakdown = _join(
+        [
+            BAND_COUNT_TEMPLATES[band].format(n=counts[band])
+            for band in ("stressed", "caution", "healthy")
+            if counts[band]
+        ]
     )
+    rest = _join(
+        [
+            REST_TEMPLATES[key].format(n=n)
+            for key, n in (("clear", clear), ("unchecked", unchecked))
+            if n
+        ]
+    )
+    if rest:
+        return EVIDENCE_TEMPLATES["with_bands_and_rest"].format(desglose=breakdown, resto=rest)
+    return EVIDENCE_TEMPLATES["with_bands"].format(desglose=breakdown)
 
 
 def _rescue_sentence(question: Mapping[str, Any], *, legacy: bool) -> str:
@@ -253,32 +411,162 @@ def question_sentence(
     )
 
 
+#: Cuántos motivos caben en el titular antes de resumir el resto.
+_HEADLINE_REASONS = 2
+
+
 def headline(
     *, safety_label: str, blocking_reasons: Sequence[str], dividend_verdict: str | None
 ) -> str:
-    """El titular: perfil de seguridad y dividendo, en una frase."""
+    """El titular: perfil de seguridad y dividendo, en una frase.
+
+    Cita los dos primeros motivos y DICE cuántos más hay. Antes cortaba en dos
+    sin avisar, así que con tres condiciones cumplidas la tercera desaparecía
+    del titular y sólo sobrevivía en la card (PHASE-44.25).
+    """
     dividend = DIVIDEND_TEMPLATES.get(
         str(dividend_verdict or "not_applicable"), DIVIDEND_TEMPLATES["not_applicable"]
     )
-    template = HEADLINE_TEMPLATES.get(safety_label, HEADLINE_TEMPLATES["watch"])
     if safety_label == "conservative":
-        return template.format(dividendo=dividend)
-    return template.format(
-        bloqueo=_join([str(r) for r in blocking_reasons][:2]) or "no se ha registrado el motivo",
+        return HEADLINE_TEMPLATES["conservative"].format(dividendo=dividend)
+
+    reasons = [str(r) for r in blocking_reasons]
+    base = safety_label if safety_label in ("avoid", "watch") else "watch"
+    extra = len(reasons) - _HEADLINE_REASONS
+    if extra > 0:
+        return HEADLINE_TEMPLATES[f"{base}_more"].format(
+            bloqueo=_join(reasons[:_HEADLINE_REASONS]),
+            mas=extra,
+            dividendo=dividend,
+        )
+    return HEADLINE_TEMPLATES[base].format(
+        bloqueo=_join(reasons) or "no se ha registrado el motivo",
         dividendo=dividend,
     )
+
+
+def _conditions_of(conditions: Sequence[Mapping[str, Any]], rule: str) -> list[Mapping[str, Any]]:
+    return [c for c in conditions if isinstance(c, Mapping) and c.get("rule") == rule]
+
+
+def exit_sentence(*, safety_label: str, conditions: Sequence[Mapping[str, Any]]) -> str:
+    """Qué tendría que cambiar para salir del sello (PHASE-44.25).
+
+    Se compone de los giros que el motor persistió con cada condición, así que
+    un run viejo —que no los trae— no recibe frase en vez de una compuesta con
+    la regla de hoy.
+
+    Una condición que NO se pudo comprobar nunca entra en «bastaría con»: se
+    dice aparte, porque prometer que algo bastaría sin haberlo mirado es la
+    misma promesa vacía que PHASE-44.17 quitó de las banderas.
+    """
+    if not conditions:
+        return ""
+
+    if safety_label == "conservative":
+        return PROFILE_WHY_TEMPLATES["conservative_fall"].format(
+            condiciones="se cumpliera cualquiera de las condiciones de «Evitar» o dejara "
+            "de cumplirse alguna de las suyas"
+        )
+
+    rule = "avoid" if safety_label == "avoid" else "conservative"
+    relevant = _conditions_of(conditions, rule)
+    changes = [str(c.get("inverse") or "") for c in relevant if c.get("met") is True]
+    pending = [str(c.get("text") or "") for c in relevant if c.get("met") is None]
+
+    changes = [c for c in changes if c]
+    if not changes and not pending:
+        return ""
+
+    parts: list[str] = []
+    if changes:
+        key = "avoid_exit" if safety_label == "avoid" else "watch_exit"
+        parts.append(PROFILE_WHY_TEMPLATES[key].format(cambios=_join(changes)))
+    if pending:
+        key = "avoid_exit_unknown" if safety_label == "avoid" else "watch_exit_unknown"
+        parts.append(PROFILE_WHY_TEMPLATES[key].format(pendientes=_join(pending)))
+    return ". ".join(parts) + "."
+
+
+def concerns_intro(labels: Sequence[str]) -> str:
+    """La entrada de «qué preocupa», nombrando las señales que se listan."""
+    if not labels:
+        return ""
+    return SUMMARY_TEMPLATES["concerns_intro"].format(nombres=_join(list(labels)))
+
+
+def strengths_intro(labels: Sequence[str]) -> str:
+    """La entrada de «qué está bien». Sólo nombra lo que la lista enseña."""
+    if not labels:
+        return ""
+    return SUMMARY_TEMPLATES["strengths_intro"].format(nombres=_join(list(labels)))
+
+
+def stress_margin_sentence(breakeven: Any) -> str | None:
+    """El margen de caída de la caja libre, en una frase.
+
+    Vivía sólo como número en la card de stress de web, compuesto en JSX — la
+    única pieza del sumario que el servidor no decía. `None` sin dato: no se
+    inventa un margen.
+    """
+    if breakeven is None:
+        return None
+    try:
+        valor = Decimal(str(breakeven))
+    except (ArithmeticError, ValueError):
+        return None
+    if valor < 0:
+        return None
+    pct = (valor * 100).quantize(Decimal("1"))
+    return SUMMARY_TEMPLATES["stress_margin"].format(margen=f"{pct} %".replace(".", ","))
+
+
+#: Los dos modelos de insolvencia, por la condición que los evalúa.
+_INSOLVENCY_PAIR = ("avoid_insolvency", "avoid_bankruptcy")
+
+
+def models_disagree(conditions: Sequence[Mapping[str, Any]]) -> str | None:
+    """Los dos modelos de quiebra en extremos opuestos, dicho en voz alta.
+
+    Ver un X-Score en rojo justo encima de un Z''-Score en verde, sin una línea
+    que lo explique, es la contradicción que hace que el veredicto no se
+    entienda. La explicación de fondo vive en la ficha de cada score, junto a la
+    fórmula; esta frase señala el hecho de ESTE run y apunta allí.
+    """
+    by_key = {str(c.get("key") or ""): c for c in conditions if isinstance(c, Mapping)}
+    lecturas: dict[str, tuple[str, str]] = {}
+    for key in _INSOLVENCY_PAIR:
+        condition = by_key.get(key)
+        if condition is None:
+            return None
+        signals = [s for s in (condition.get("signals") or []) if isinstance(s, Mapping)]
+        if not signals:
+            return None
+        band = str(signals[0].get("band") or "")
+        label = str(signals[0].get("label") or signals[0].get("key") or "")
+        if not band or not label:
+            return None
+        lecturas[key] = (band, label)
+
+    bandas = {key: value[0] for key, value in lecturas.items()}
+    if set(bandas.values()) != {"stressed", "healthy"}:
+        return None
+    rojo = next(label for band, label in lecturas.values() if band == "stressed")
+    sano = next(label for band, label in lecturas.values() if band == "healthy")
+    return PROFILE_WHY_TEMPLATES["models_disagree"].format(rojo=rojo, sano=sano) + "."
 
 
 def next_checks(
     questions: Sequence[Mapping[str, Any]],
     *,
-    sentences: Mapping[str, Sequence[tuple[str, str]]],
+    sentences: Mapping[str, Sequence[tuple[str, str, str]]],
     limit: int = 3,
 ) -> list[NextCheck]:
     """Qué miraría a continuación: hasta tres señales, las peores primero.
 
-    `sentences` son, por pregunta, los pares (etiqueta, distancia) de sus
-    señales ámbar y rojas YA ordenadas por severidad.
+    `sentences` son, por pregunta, las ternas (clave, etiqueta, distancia) de
+    sus señales ámbar y rojas YA ordenadas por severidad. La clave viaja para
+    que el bullet enlace con la fila que lo produce.
 
     Tres reglas, y cada una viene de un caso concreto:
 
@@ -317,11 +605,12 @@ def next_checks(
             if evidence.state == "not-audited"
             else NEXT_CHECK_TEMPLATES["signal"]
         )
-        for label, distance in sentences.get(key, ()):
+        for signal_key, label, distance in sentences.get(key, ()):
             collected.append(
                 NextCheck(
                     key=f"{key}:{label}",
                     text=template.format(etiqueta=label, distancia=distance),
+                    signal_key=signal_key or None,
                 )
             )
 

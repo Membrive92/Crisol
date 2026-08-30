@@ -380,6 +380,220 @@ def test_b4_rojo_fuerza_evitar() -> None:
     assert profile.label == "avoid"
 
 
+# ── La matriz de seguridad como dato (PHASE-44.25) ────────────────────
+#
+# El motor sabía por qué una empresa sale «Evitar» y lo serializaba como prosa
+# sin claves, y en esa rama ni siquiera evaluaba las condiciones de
+# «Conservador» — así que «qué haría falta para salir» no existía como dato y la
+# pantalla lo inferìa emparejando cadenas.
+
+
+def _todas_las_bandas(**overrides: str) -> forensic_layer.ForensicResult:
+    """Las cinco métricas de la matriz, sanas salvo lo que se indique."""
+    bandas = {
+        "m_score": "healthy",
+        "z_score": "healthy",
+        "FZ": "healthy",
+        "f_score": "healthy",
+        "accruals": "healthy",
+    }
+    bandas.update(overrides)
+    return _forensic_with(**bandas)
+
+
+def _cond(profile: synthesis.SafetyProfile, key: str) -> synthesis.SafetyConditionResult:
+    encontrada = [c for c in profile.conditions if c.key == key]
+    assert encontrada, f"la matriz no publicó la condición {key}"
+    return encontrada[0]
+
+
+def test_la_matriz_publica_las_diez_condiciones_tambien_en_evitar() -> None:
+    """El caso que no existía: en «Evitar» se retornaba antes de evaluar las de
+    Conservador, así que no había con qué componer el contrafactual."""
+    forensic = _todas_las_bandas(FZ="stressed")
+    profile = synthesis._safety_profile(forensic, {}, _b4_checked(), 2024)
+
+    assert profile.label == "avoid"
+    assert len(profile.conditions) == 10
+    assert [c.key for c in profile.conditions] == [d.key for d in synthesis.SAFETY_MATRIX]
+    # Las seis de Conservador están EVALUADAS, no ausentes ni supuestas.
+    conservadoras = [c for c in profile.conditions if c.rule == "conservative"]
+    assert len(conservadoras) == 6
+    assert all(c.met is not None for c in conservadoras)
+    # Y la que falta se identifica: el X-Score no está en verde.
+    assert _cond(profile, "cons_fz").met is True
+    assert _cond(profile, "cons_m_score").met is False
+
+
+def test_blocking_reasons_sale_byte_igual_al_del_motor_anterior() -> None:
+    """Golden de EQUIVALENCIA.
+
+    `label` y `blocking_reasons` pasan a derivarse de las condiciones. Si un
+    solo carácter se moviera, los runs ya guardados dirían otra cosa que los
+    nuevos y los goldens del titular (que citan estos textos) mentirían.
+
+    Los textos de abajo están copiados del motor 1.7.0, no generados por el
+    1.8.0: comparar la salida consigo misma no probaría nada.
+    """
+    # (a) Evitar por las cuatro condiciones a la vez.
+    forensic = _todas_las_bandas(
+        m_score="stressed", accruals="stressed", z_score="stressed", FZ="stressed"
+    )
+    profile = synthesis._safety_profile(
+        forensic, {"B4_dividend_funded_externally": "red"}, _b4_checked(), 2024
+    )
+    assert profile.label == "avoid"
+    assert profile.blocking_reasons == (
+        "M-Score y accruals ambos en rojo (manipulación probable)",
+        "Z''-Score en rojo (riesgo de insolvencia)",
+        "X-Score en rojo (riesgo de quiebra)",
+        "dividendo financiado con deuda o emisión",
+    )
+
+    # (b) Vigilar con las cinco primeras de Conservador incumplidas.
+    forensic = _forensic_with(
+        m_score="caution",
+        z_score="caution",
+        FZ="caution",
+        f_score="caution",
+        accruals="caution",
+    )
+    profile = synthesis._safety_profile(forensic, {}, _b4_checked(), 2024)
+    assert profile.label == "watch"
+    assert profile.blocking_reasons == (
+        "M-Score no está en verde",
+        "Z''-Score no está en verde",
+        "X-Score no está en verde",
+        "F-Score < 7",
+        "Accruals no están en verde",
+    )
+
+    # (c) Conservador: ninguna razón.
+    profile = synthesis._safety_profile(_todas_las_bandas(), {}, _b4_checked(), 2024)
+    assert profile.label == "conservative"
+    assert profile.blocking_reasons == ()
+
+
+def test_la_sexta_condicion_conserva_su_motivo_interpolado() -> None:
+    """El texto de la condición de B4 lleva el motivo entre paréntesis desde
+    PHASE-44.17; es lo que leen los runs guardados y no puede quedarse en la
+    versión abreviada del catálogo."""
+    sin_evaluar: dict[str, FlagEvaluation] = {}
+    profile = synthesis._safety_profile(_todas_las_bandas(), {}, sin_evaluar, 2024)
+
+    assert profile.label == "watch"
+    assert profile.blocking_reasons == (
+        "no se ha podido comprobar si el dividendo se financia con deuda o emisión "
+        "(sin evaluación de la regla)",
+    )
+    assert _cond(profile, "cons_b4_checked").text == profile.blocking_reasons[0]
+
+
+def test_una_banda_ausente_no_se_cuenta_como_condicion_descartada() -> None:
+    """El tri-estado. Con el score sin calcular, «no se cumple» se leería en la
+    lista de Evitar como una comprobación superada (familia PHASE-44.17)."""
+    # `_forensic_with` sólo crea las métricas que se le nombran: sin FZ, la
+    # condición del X-Score no se puede ni afirmar ni negar.
+    forensic = _forensic_with(
+        m_score="healthy", z_score="healthy", f_score="healthy", accruals="healthy"
+    )
+    profile = synthesis._safety_profile(forensic, {}, _b4_checked(), 2024)
+
+    quiebra = _cond(profile, "avoid_bankruptcy")
+    assert quiebra.met is None
+    assert quiebra.reason, "una condición no comprobable DEBE decir por qué"
+    # Y no se concede el sello: el verde se gana.
+    assert profile.label == "watch"
+    assert _cond(profile, "cons_fz").met is None
+
+
+def test_la_conjuncion_es_falsa_aunque_falte_uno_de_los_dos() -> None:
+    """M-Score fuera del rojo basta para descartar «manipulación probable»,
+    aunque los accruals no se hayan podido calcular: la conjunción ya es falsa
+    y decir «no se pudo comprobar» sería menos honesto, no más."""
+    forensic = _forensic_with(m_score="healthy", z_score="healthy", FZ="healthy", f_score="healthy")
+    profile = synthesis._safety_profile(forensic, {}, _b4_checked(), 2024)
+
+    assert _cond(profile, "avoid_manipulation").met is False
+
+
+def test_cada_condicion_trae_las_senales_que_la_deciden_con_su_valor() -> None:
+    """Sin esto la card tendría que cruzarse con `questions[].signals` para
+    enseñar el número — que es la dependencia que obliga a emparejar por texto."""
+    forensic = _todas_las_bandas(FZ="stressed")
+    profile = synthesis._safety_profile(forensic, {}, _b4_checked(), 2024)
+
+    quiebra = _cond(profile, "avoid_bankruptcy")
+    assert [s.key for s in quiebra.signals] == ["FZ"]
+    assert quiebra.signals[0].kind == "metric"
+    assert quiebra.signals[0].band == "stressed"
+    assert quiebra.signals[0].value is not None
+    assert quiebra.signals[0].label != "FZ", "la señal viaja con su etiqueta del catálogo"
+
+    manipulacion = _cond(profile, "avoid_manipulation")
+    assert [s.key for s in manipulacion.signals] == ["m_score", "accruals"]
+
+    b4 = _cond(profile, "avoid_dividend_funding")
+    assert [s.key for s in b4.signals] == ["B4_dividend_funded_externally"]
+    assert b4.signals[0].kind == "flag"
+
+
+def test_las_claves_de_la_matriz_existen_de_verdad() -> None:
+    """El enlace condición→señal no puede quedar colgando.
+
+    El gate vive aquí, donde están las claves REALES del motor: comprobarlo en
+    la pantalla sería comparar un registro consigo mismo.
+    """
+    from app.modules.investment.analysis.engine.catalog import ALL_METRIC_KEYS
+    from app.modules.investment.analysis.engine.flag_catalog import FLAG_LABELS
+
+    conocidas = set(ALL_METRIC_KEYS) | set(FLAG_LABELS)
+    for definition in synthesis.SAFETY_MATRIX:
+        assert definition.signal_keys, f"{definition.key} no declara ninguna señal"
+        huerfanas = set(definition.signal_keys) - conocidas
+        assert not huerfanas, (
+            f"{definition.key} apunta a señales que no existen: {sorted(huerfanas)}. "
+            "El enlace de la card moriría contra una fila inexistente."
+        )
+
+
+def test_el_contrafactual_no_lleva_numeros_escritos_a_mano() -> None:
+    """Los cortes se calibran por sector (PHASE-44.21): un umbral en prosa
+    caduca en silencio. El número lo pone quien pinta, desde el run."""
+    for definition in synthesis.SAFETY_MATRIX:
+        assert definition.inverse, f"{definition.key} no declara su giro contrafactual"
+        assert not any(char.isdigit() for char in definition.inverse), (
+            f"{definition.key}: el contrafactual escribe un número a mano "
+            f"({definition.inverse!r})"
+        )
+
+
+def test_la_procedencia_del_veredicto_de_dividendo_se_registra() -> None:
+    """El hero puede decir «el dividendo está en riesgo» con la pregunta del
+    dividendo en VERDE, porque es el peor de dos. Sin esto, el lector se queda
+    con una contradicción aparente y sin forma de resolverla."""
+    serie = StatementSeries(
+        security=SecuritySnapshot(
+            ticker="MALA", sector=SectorInternal.INDUSTRIALS, accounting_std=AccountingStd.GAAP
+        ),
+        statements=(_distressed_year(2023), _distressed_year(2024)),
+        as_of=date(2025, 3, 31),
+    )
+    resultado = _synthesize(serie)
+
+    por_clave = {q.key: q.verdict for q in resultado.questions}
+    culpables = {
+        clave
+        for clave in ("dividend", "resilience")
+        if por_clave.get(clave) == resultado.dividend_verdict
+    }
+    if resultado.dividend_verdict == "not_applicable":
+        assert resultado.dividend_verdict_source is None
+    else:
+        esperado = "both" if len(culpables) == 2 else next(iter(culpables))
+        assert resultado.dividend_verdict_source == esperado
+
+
 def _señal(nombre: str, band: str | None, *, reason: str | None = None) -> synthesis.QuestionSignal:
     """Señal de prueba. `band=None` = candidata que no puntúa."""
     return synthesis.QuestionSignal(

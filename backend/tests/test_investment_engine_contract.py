@@ -34,6 +34,7 @@ from typing import Literal, get_args, get_origin
 from app.modules.investment.analysis import engine as engine_pkg
 from app.modules.investment.analysis.engine.catalog import ALL_METRIC_KEYS
 from app.modules.investment.analysis.engine.flag_catalog import FLAG_LABELS
+from app.modules.investment.analysis.engine.synthesis import SAFETY_MATRIX
 from app.modules.investment.analysis.engine.version import ENGINE_VERSION
 
 _ENGINE_DIR = Path(engine_pkg.__file__).parent
@@ -83,6 +84,8 @@ ENGINE_SHAPE_FINGERPRINTS: dict[str, str] = {
     "1.5.0": "589e12a914b05bec80096449da5644c0b8e45193175aef84ef9a2a0ea41ff599",
     "1.6.0": "bd234d92e86b07e7e7147471d56e9617265016be1efaf61f354f0cd65851dd5a",
     "1.7.0": "082325f38f165ec92096b658ca128995f069a70f711abc65a576e4ec3e2d3520",
+    "1.8.0": "99198ac63bb6a06591b09f5f0edee094d3e2b681ddcb01a223099fc91dde3b92",
+    "1.9.0": "7762a1c869232426f564db8d0ff2d972fc28f7937b0b3832d80b09a40384352f",
 }
 """Huella de la forma de salida por versión de engine.
 
@@ -191,9 +194,19 @@ _FLAG_EMISSION = re.compile(
     r"""(?:_flag\(\s*\n?\s*["']|Flag\(\s*\n?\s*key=["']|\bkey=["'])([A-Za-z0-9_]+)["']""",
 )
 
-_NOT_FLAGS = frozenset(ALL_METRIC_KEYS)
-"""Las claves de métrica también aparecen como `key="…"` al construir
-`ScoreBreakdown` y series de la evolutiva. No son banderas."""
+_NOT_FLAGS = frozenset(ALL_METRIC_KEYS) | {c.key for c in SAFETY_MATRIX}
+"""Claves que el escáner ve y que NO son banderas.
+
+- Las de métrica aparecen como `key="…"` al construir `ScoreBreakdown` y series
+  de la evolutiva.
+- Las de la matriz de seguridad (PHASE-44.25) son un tercer vocabulario:
+  identifican una CONDICIÓN del sello, no una bandera, y su nombre legible vive
+  en la propia condición (`SafetyConditionDef.text`), no en `FLAG_LABELS`.
+
+Se derivan del catálogo y no se escriben a mano: una lista literal aquí
+caducaría en cuanto la matriz ganara una condición, y el gate empezaría a pedir
+un nombre de bandera para algo que no lo es.
+"""
 
 
 def _emitted_flag_keys() -> set[str]:

@@ -44,6 +44,7 @@ import {
   buildMetricIndex,
   buildScoreHelpIndex,
   collectRunMetrics,
+  WHY_ANCHOR,
 } from '@crisol/ui';
 import { TabDividend } from '@/components/investment/tab-dividend';
 import { TabEvolution } from '@/components/investment/tab-evolution';
@@ -140,6 +141,19 @@ export default function SecurityAnalysisPage() {
   );
 
   /**
+   * Abrir un análisis del histórico.
+   *
+   * Si el que se abre era la BASE de la comparación, la comparación se borra:
+   * si no, `run` y `compare` quedan apuntando al mismo análisis y el servidor
+   * responde «no se puede comparar un análisis consigo mismo» — un error del
+   * que además no se podía salir, porque la fila actual no pintaba el botón.
+   */
+  const handleSelectRun = useCallback(
+    (id: string) => setParam(id === compareBaseId ? { run: id, compare: null } : { run: id }),
+    [compareBaseId, setParam],
+  );
+
+  /**
    * Reejecuta y borra la selección del histórico.
    *
    * Sin el borrado, el análisis recién hecho quedaría detrás del que el usuario
@@ -183,10 +197,28 @@ export default function SecurityAnalysisPage() {
    * `next/navigation` dentro de `SignalTable` haría que `useRouter` lanzara en
    * los tests, que la montan sin router.
    */
-  const hrefForSignal = useCallback(
-    (signal: { key: string }) =>
-      signalHrefFor(pathname, searchParams.toString(), { tab, sub }, signal.key),
+  /**
+   * El ancla de la card del porqué, conservando lo que ya viaja en la URL.
+   *
+   * Se compone sobre los params actuales y no como literal: una referencia con
+   * query REEMPLAZA la query entera (RFC 3986 §5.3), así que un `?tab=…` suelto
+   * se llevaría por delante el `?run=` del histórico.
+   */
+  const whyHref = useMemo(() => {
+    const next = new URLSearchParams(searchParams.toString());
+    next.set('tab', 'veredicto');
+    next.set('sub', 'dictamen');
+    return `${pathname}?${next.toString()}#${WHY_ANCHOR}`;
+  }, [pathname, searchParams]);
+
+  const hrefForSignalKey = useCallback(
+    (key: string) => signalHrefFor(pathname, searchParams.toString(), { tab, sub }, key),
     [pathname, searchParams, sub, tab],
+  );
+
+  const hrefForSignal = useCallback(
+    (signal: { key: string }) => hrefForSignalKey(signal.key),
+    [hrefForSignalKey],
   );
 
   const selectedRun = useAnalysisRun(selectedRunId);
@@ -301,6 +333,9 @@ export default function SecurityAnalysisPage() {
         rerunning={run.isPending}
         printHref={printHref}
         guideHref={guideHref}
+        // En modo dictamen NO se pinta: ese modo ya fuerza la pestaña, así que
+        // el enlace no movería nada (PHASE-44.24.H).
+        whyHref={printMode || !activeRun ? null : whyHref}
         {...(run.isError
           ? { rerunError: formatApiError(run.error, 'No se pudo ejecutar el análisis.') }
           : {})}
@@ -512,6 +547,7 @@ export default function SecurityAnalysisPage() {
               // En el dictamen las señales se pintan como texto: `tab` está
               // forzado, así que un enlace cambiaría la URL sin mover nada.
               hrefFor={printMode ? undefined : hrefForSignal}
+              hrefForKey={printMode ? undefined : hrefForSignalKey}
               sub={sub}
               onSubChange={handleSubChange}
               printMode={printMode}
@@ -521,7 +557,7 @@ export default function SecurityAnalysisPage() {
                     runs={runs.data?.items ?? []}
                     selectedId={selectedRunId}
                     compareId={compareBaseId}
-                    onSelect={(id) => setParam({ run: id })}
+                    onSelect={handleSelectRun}
                     onCompare={(id) => setParam({ compare: id })}
                   />
                   <RunComparison

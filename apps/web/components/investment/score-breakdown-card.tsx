@@ -10,6 +10,7 @@ import { HelpButton, helpTextStyle } from './help-toggle';
 import { formatMetricValue, formatThreshold } from '@crisol/ui';
 import {
   effectiveThreshold,
+  NO_BREAKDOWN_BY_DESIGN,
   scoreBreakdownRows,
   type CatalogIndex,
   type MetricIndex,
@@ -24,10 +25,18 @@ import {
  * primero es una propiedad del modelo, el segundo un hueco de datos. Sin la
  * distinción, `accruals` parecería siempre roto.
  */
-const NO_BREAKDOWN_BY_DESIGN = new Set(['accruals', 'F5', 'F6', 'FZ']);
-
 export interface ScoreBreakdownCardProps {
   metricKey: string;
+  /**
+   * La MISMA comprobación en otra escala, si la tiene (PHASE-44.25).
+   *
+   * No es otra métrica: es la lectura que no hay que interpretar. La pareja la
+   * declara el motor (`SCALE_COMPANIONS`); aquí sólo se pinta, y siempre con su
+   * propio corte al lado — una vara en porcentaje bajo un número en escala de
+   * puntuación invita a leer uno como el otro, que es el defecto que esto viene
+   * a cerrar.
+   */
+  readingKey?: string | undefined;
   metric: MetricResult | undefined;
   /** TODOS los desgloses del run: la delta necesita el ejercicio anterior. */
   breakdowns: readonly ScoreBreakdown[] | undefined;
@@ -48,6 +57,7 @@ export interface ScoreBreakdownCardProps {
 
 export function ScoreBreakdownCard({
   metricKey,
+  readingKey,
   metric,
   breakdowns,
   year,
@@ -58,6 +68,7 @@ export function ScoreBreakdownCard({
   help,
 }: ScoreBreakdownCardProps) {
   const [helpOpen, setHelpOpen] = useState(false);
+  const [readingHelpOpen, setReadingHelpOpen] = useState(false);
   const ficha = help?.score(metricKey);
   const base = catalog.definition(metricKey);
   const definition: MetricDefinition | undefined = effectiveThreshold(
@@ -67,6 +78,31 @@ export function ScoreBreakdownCard({
   );
   const threshold = formatThreshold(definition);
   const notComputable = !metric || metric.status === 'not_computable';
+
+  /**
+   * La misma comprobación en la escala que se lee sin traducir.
+   *
+   * Se compone sólo si el run la trae Y tiene número: un análisis de un motor
+   * anterior no la calculaba, y anunciar ahí un «no calculable» culparía a los
+   * datos de la empresa de un hueco que es del motor (PHASE-44.16).
+   */
+  const readingMetric =
+    readingKey && year !== undefined ? index.get(readingKey, year) : undefined;
+  const readingBase = readingKey ? catalog.definition(readingKey) : undefined;
+  const readingDefinition = readingKey
+    ? effectiveThreshold(readingKey, thresholdsUsed, readingBase)
+    : undefined;
+  const reading =
+    readingKey && readingMetric?.value != null && readingMetric.status !== 'not_computable'
+      ? {
+          label: readingBase?.label ?? readingKey,
+          value: formatMetricValue(readingMetric.value, readingDefinition?.unit),
+          // Su propio corte, en su propia escala. Sin esto, la vara en
+          // porcentaje quedaría bajo el número en escala de puntuación.
+          threshold: formatThreshold(readingDefinition),
+          ficha: help?.score(readingKey),
+        }
+      : null;
 
   // El desglose lo arma `@crisol/ui`: la delta frente al ejercicio anterior y el
   // orden se deciden una vez y las dos apps pintan lo mismo (PHASE-44.24.D).
@@ -134,6 +170,43 @@ export function ScoreBreakdownCard({
 
       {threshold ? (
         <span style={{ color: colors.textSubtle, fontSize: fontSize.xs }}>{threshold}</span>
+      ) : null}
+
+      {/* La misma medida, leída sin traducir. Sólo si el run la trae: un
+          análisis de un motor anterior no la tiene y la tarjeta es la de
+          siempre, sin una línea de más ni una frase de «no calculable» que
+          culparía a los datos de la empresa. */}
+      {reading ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <span style={{ color: colors.text, fontSize: fontSize.sm }}>
+            {reading.label}: <strong>{reading.value}</strong>
+            {reading.ficha ? (
+              <>
+                {' '}
+                <HelpButton
+                  label={reading.label}
+                  help={reading.ficha.what}
+                  open={readingHelpOpen}
+                  onToggle={() => setReadingHelpOpen((v) => !v)}
+                />
+              </>
+            ) : null}
+          </span>
+          {reading.threshold ? (
+            <span style={{ color: colors.textSubtle, fontSize: fontSize.xs }}>
+              {reading.threshold}
+            </span>
+          ) : null}
+          {readingHelpOpen && reading.ficha ? (
+            <div style={{ ...helpTextStyle, borderRadius: radius.sm, borderBottom: 'none' }}>
+              <p style={{ margin: 0 }}>{reading.ficha.what}</p>
+              <p style={{ margin: `${spacing.xs}px 0 0` }}>
+                <strong style={{ color: colors.text }}>Cómo se lee: </strong>
+                {reading.ficha.reading}
+              </p>
+            </div>
+          ) : null}
+        </div>
       ) : null}
 
       {/* Los tres campos separados y no una parrafada: «qué mide» se lee siempre,

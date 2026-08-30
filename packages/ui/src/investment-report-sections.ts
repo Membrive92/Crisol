@@ -53,16 +53,46 @@ export const RATIO_FAMILIES: readonly ReportSection[] = [
  * Los ocho scores forenses, en el orden en que se leen: primero manipulación,
  * luego quiebra, luego calidad.
  */
-export const FORENSIC_KEYS: readonly string[] = [
-  'm_score',
-  'accruals',
-  'F7',
-  'F6',
-  'z_score',
-  'FZ',
-  'f_score',
-  'F5',
+/**
+ * Una fila del bloque forense, con la lectura que la acompaña si la tiene.
+ *
+ * `reading` NO es otra métrica: es la MISMA comprobación en otra escala, y la
+ * pareja la declara el motor (`SCALE_COMPANIONS`, forensic.py) porque es una
+ * propiedad del modelo. Aquí sólo se consume.
+ *
+ * Se modela como pareja y no como dos entradas de la lista porque, puestas una
+ * debajo de otra, las dos lecturas se parecen tanto que invitan a pensar que
+ * una es la otra multiplicada — pasó con el X-Score (0,87) y su probabilidad
+ * (80,7 %), y no lo son: Φ(0) es 50 %, no 0 %. Con esta forma, devolver la
+ * acompañante a la lista de filas deja de ser posible en vez de depender de
+ * que alguien recuerde no hacerlo.
+ */
+export interface ForensicRow {
+  key: string;
+  reading?: string;
+}
+
+export const FORENSIC_ROWS: readonly ForensicRow[] = [
+  { key: 'm_score' },
+  { key: 'accruals' },
+  { key: 'F7' },
+  { key: 'F6' },
+  { key: 'z_score' },
+  { key: 'FZ', reading: 'FZ_P' },
+  { key: 'f_score' },
+  { key: 'F5' },
 ];
+
+/**
+ * Todas las claves del bloque, filas y acompañantes.
+ *
+ * DERIVADA y no escrita a mano: alimenta el registro de ubicaciones y el gate
+ * del backend que exige que toda métrica del motor tenga sitio en pantalla, y
+ * una segunda lista se quedaría atrás en cuanto la primera cambiara.
+ */
+export const FORENSIC_KEYS: readonly string[] = FORENSIC_ROWS.flatMap((row) =>
+  row.reading ? [row.key, row.reading] : [row.key],
+);
 
 /** Bloques del análisis de dividendo. */
 export const DIVIDEND_BLOCKS: readonly ReportSection[] = [
@@ -189,6 +219,15 @@ export interface SectionPlacement {
  * destinos: la señal «Escenario de stress» no es una fila, es esa card.
  */
 export const STRESS_ANCHOR = 'stress-scenarios';
+
+/**
+ * El ancla de la card «Por qué este veredicto» (PHASE-44.25).
+ *
+ * Vive aquí y no en la página que la compone porque la usan el hero (para
+ * enlazar) y la card (para recibir el salto): dos literales sueltos divergen en
+ * cuanto alguien renombra uno.
+ */
+export const WHY_ANCHOR = 'por-que-este-veredicto';
 
 export const SECTION_PLACEMENT: readonly SectionPlacement[] = [
   ...RATIO_FAMILIES.map((family) => ({ metrics: family.metrics, tab: 'ratios', sub: family.key })),

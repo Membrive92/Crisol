@@ -7,8 +7,11 @@ import {
   distanceSentence,
   fontSize,
   fontWeight,
+  layout,
+  MARK,
   orderedSignals,
   originSentence,
+  radius,
   spacing,
 } from '@crisol/ui';
 import type { QuestionSignal, ReportSignal, ThresholdSpec } from '@crisol/types';
@@ -114,6 +117,26 @@ export function SignalTable({
                       signal.label
                     );
                   })()}
+                  {read?.drove_verdict ? (
+                    /* La marca que faltaba: el titular nombraba esta señal y
+                       ninguna fila decía que era la misma cosa. No es «está en
+                       rojo» — el escenario de stress tiñe la pregunta sin estar
+                       en la matriz del sello (PHASE-44.25). */
+                    <span
+                      style={{
+                        marginLeft: spacing.xs,
+                        color: colors.danger,
+                        backgroundColor: colors.dangerSoft,
+                        borderRadius: radius.sm,
+                        padding: `0 ${spacing.xs}px`,
+                        fontSize: fontSize.xs,
+                        fontWeight: fontWeight.semibold,
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      decidió el veredicto
+                    </span>
+                  ) : null}
                   {threshold ? (
                     <span
                       style={{
@@ -129,11 +152,41 @@ export function SignalTable({
                       {origin ? ` · ${origin}` : ''}
                     </span>
                   ) : null}
+                  {read?.evidence_sentences?.map((frase) => (
+                    /* Una señal derivada no tiene número, y ésta salía «Valor —
+                       · Riesgo · Distancia —»: la fila más severa de la
+                       pregunta era la más hueca, con sus cifras tres cards más
+                       abajo. Las frases las redactó el motor del run. */
+                    <span
+                      key={frase}
+                      style={{
+                        display: 'block',
+                        maxWidth: layout.prose,
+                        color: colors.textMuted,
+                        fontSize: fontSize.xs,
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      {frase}
+                    </span>
+                  ))}
                 </td>
                 <td style={cellStyle('right', signal.counted)}>
                   {signal.kind === 'metric'
                     ? formatMetricValue(signal.value, definition?.unit)
                     : '—'}
+                  {/* La marca de aproximación. `ReportSignal.status` se publica
+                      desde 44.24.C «para que la pantalla imprima la marca junto
+                      al valor» y esta tabla no lo leía: un número citado sin su
+                      marca miente sobre su propia fiabilidad. */}
+                  {read?.status === 'approximation' ? (
+                    <span
+                      title={MARK.approximation.title}
+                      style={{ color: colors.textSubtle }}
+                    >
+                      {MARK.approximation.glyph}
+                    </span>
+                  ) : null}
                 </td>
                 <td style={{ ...cellStyle('right', signal.counted), whiteSpace: 'nowrap' }}>
                   <BandChip band={signal.band} />

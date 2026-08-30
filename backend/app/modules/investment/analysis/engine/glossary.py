@@ -773,19 +773,39 @@ METRIC_HELP: dict[str, MetricHelp] = {
     "FZ": MetricHelp(
         what=(
             "Probit de quiebra de Zmijewski, con sólo tres ratios de balance: resultado "
-            "sobre activo, pasivo total sobre activo y liquidez corriente. No usa "
-            "reservas ni fondo de maniobra, y el motor publica la puntuación exacta, no "
-            "la probabilidad que se deriva de ella."
+            "sobre activo, pasivo total sobre activo y liquidez corriente. El motor "
+            "publica la puntuación exacta, no la probabilidad de la que salen los cortes. "
+            "Si el filing no da el pasivo total, la ingesta lo deduce restando patrimonio "
+            "al activo."
         ),
         why=(
-            "Es la segunda opinión sobre la solvencia y con menos ingredientes, así que "
-            "sobrevive donde el otro modelo no llega a calcularse. Cuando ambos coinciden "
-            "la señal es fuerte; cuando discrepan, la discrepancia es el hallazgo."
+            "Es la segunda opinión sobre la solvencia, y con menos ingredientes sobrevive "
+            "donde el otro no llega a calcularse. Si coinciden, la señal es fuerte; si "
+            "discrepan, la discrepancia es el hallazgo: aquí el apalancamiento pesa tanto "
+            "que un patrimonio negativo por recompras lo dispara sin tensión real."
         ),
         reading=(
-            "Cuanto más bajo, mejor; no se calcula en financieras. Si el informe anual no "
-            "publica el pasivo total, la ingesta lo deduce restando patrimonio al activo "
-            "y el término de deuda hereda esa deducción."
+            "La escala es NEGATIVA y cruza a rojo antes del cero: un valor positivo ya "
+            "está en zona mala, y bajar dentro del rojo sigue siendo rojo. No se calcula "
+            "en financieras."
+        ),
+    ),
+    "FZ_P": MetricHelp(
+        what=(
+            "La puntuación del X-Score leída como lo que el modelo estima: la "
+            "probabilidad de que la empresa entre en insolvencia. Es la misma "
+            "comprobación, no una segunda opinión."
+        ),
+        why=(
+            "La puntuación vive en una escala negativa que no se interpreta sola, y "
+            "esta comprobación decide el sello. En probabilidad la cifra se discute "
+            "sin traducir: se ve de un vistazo si el modelo está gritando o "
+            "susurrando, y cuánto se mueve entre ejercicios."
+        ),
+        reading=(
+            "Menos es mejor. Es la misma comprobación que el X-Score, no una "
+            "segunda, así que comparte su color. Un patrimonio neto negativo por "
+            "recompras la dispara aunque no haya tensión de caja."
         ),
     ),
     "F7": MetricHelp(

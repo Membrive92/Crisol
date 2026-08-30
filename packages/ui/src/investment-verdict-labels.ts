@@ -38,9 +38,14 @@ export const DIVIDEND: Record<DividendVerdict, string> = {
 };
 
 /**
- * Las cinco condiciones que exige el perfil Conservador, tal y como las evalúa
+ * Las condiciones que exige el perfil Conservador, tal y como las evalúa
  * `_safety_profile` en el motor. Se imprimen SIEMPRE, cumplidas o no: un sello
  * sin sus reglas no es auditable.
+ *
+ * **Desde PHASE-44.25 son sólo el FALLBACK.** Un run del motor ≥ 1.8.0 trae la
+ * matriz evaluada condición a condición, y entonces `verdictWhyRows` pinta el
+ * dato en vez de esta copia — que estaba casada con el motor por igualdad de
+ * cadena y ya se había quedado en cinco cuando el motor comprobaba seis.
  */
 export const CONSERVATIVE_RULES: readonly string[] = [
   'M-Score en verde',
@@ -58,57 +63,25 @@ export const AVOID_RULES: readonly string[] = [
   'dividendo financiado con deuda o emisión',
 ];
 
-export interface SafetyRule {
-  text: string;
-  /** Si la condición se cumple en ESTE análisis. */
-  met: boolean;
-}
-
-export interface SafetyChecklist {
-  /** Las cuatro que fuerzan «Evitar». Cumplirlas es la mala noticia. */
-  avoid: { title: string; metIsBad: true; rules: SafetyRule[] };
-  /** Las cinco que exige «Conservador». */
-  conservative: { title: string; metIsBad: false; rules: SafetyRule[] };
-  /** Lo que el motor da como motivo, tal cual. Vacío si no bloquea nada. */
-  blocking: readonly string[];
-  /** El rótulo del bloque de motivos, según el perfil. */
-  blockingLabel: string;
-}
-
 /**
- * El perfil de seguridad convertido en dos listas auditables.
+ * Los motivos que el run da, con su rótulo.
+ *
+ * Lo que ANTES hacía esta función —inferir el estado de cada condición
+ * comparando cadenas— lo hace ahora `verdictWhyRows` sobre la matriz que el
+ * motor evalúa y persiste. La inferencia por texto no era sólo frágil: bajo un
+ * perfil «Evitar» afirmaba que se cumplían condiciones de «Conservador» que el
+ * motor de entonces ni siquiera había llegado a evaluar (PHASE-44.25).
  *
  * @param profile el `safety_profile` del run.
  */
-export function safetyRules(profile: SafetyProfile): SafetyChecklist {
-  const blocking = profile.blocking_reasons ?? [];
+export function blockingSummary(profile: SafetyProfile): {
+  blocking: readonly string[];
+  blockingLabel: string;
+} {
   return {
-    avoid: {
-      title: 'Se evita si se cumple CUALQUIERA de estas',
-      metIsBad: true,
-      rules: AVOID_RULES.map((text) => ({ text, met: blocking.includes(text) })),
-    },
-    conservative: {
-      title: 'Es conservador sólo si se cumplen LAS CINCO',
-      metIsBad: false,
-      rules: CONSERVATIVE_RULES.map((text) => ({
-        text,
-        // `blocking_reasons` de un perfil «watch» lista lo que NO se cumple,
-        // con el texto en negativo («M-Score no está en verde»).
-        met:
-          profile.label === 'conservative'
-            ? true
-            : !blocking.some((reason) => isNegationOf(reason, text)),
-      })),
-    },
-    blocking,
+    blocking: profile.blocking_reasons ?? [],
     blockingLabel: profile.label === 'avoid' ? 'Motivos: ' : 'Falta para Conservador: ',
   };
-}
-
-function isNegationOf(reason: string, rule: string): boolean {
-  const head = rule.split(' ')[0] ?? '';
-  return head.length > 0 && reason.startsWith(head);
 }
 
 /**

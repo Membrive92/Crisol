@@ -341,10 +341,28 @@ SCORE_HELP: Mapping[str, ScoreHelp] = {
             "la señal es fuerte; cuando discrepan, la discrepancia es el hallazgo."
         ),
         reading=(
-            "Menos es mejor. El motor publica la puntuación exacta y no la "
-            "probabilidad equivalente, que es sólo una forma de presentarla; las "
-            "bandas están puestas en los puntos que corresponden a esa "
-            "probabilidad. No aplica a entidades financieras."
+            "Menos es mejor, y la escala es NEGATIVA: un valor positivo ya está en "
+            "zona mala. Junto al valor va la misma comprobación traducida a "
+            "probabilidad, que es la lectura que no hay que interpretar. No aplica "
+            "a entidades financieras."
+        ),
+    ),
+    "FZ_P": ScoreHelp(
+        what=(
+            "El X-Score traducido a la probabilidad de insolvencia que el modelo le "
+            "asigna. Mismo cálculo y mismos cortes, en la escala en la que la cifra "
+            "se entiende sin compararla con nada."
+        ),
+        why=(
+            "Una puntuación en escala negativa no dice por sí sola si es alta o "
+            "baja, y esta comprobación es de las que deciden el sello: leerla en "
+            "probabilidad es lo que permite discutirla."
+        ),
+        reading=(
+            "Menos es mejor. Es el X-Score visto de otra forma, así que su color "
+            "coincide con el suyo por construcción. Ojo: una empresa con patrimonio "
+            "neto negativo por recompras dispara este modelo sin tener tensión de "
+            "caja."
         ),
     ),
     "F7": ScoreHelp(

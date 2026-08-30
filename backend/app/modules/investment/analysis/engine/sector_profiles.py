@@ -222,6 +222,9 @@ FINANCIALS_NOT_APPLICABLE: Mapping[str, str] = {
     "F5": _FIN_MODEL,
     "F6": _FIN_MODEL,
     "FZ": _FIN_MODEL,
+    # La lectura en probabilidad se apaga con su score: dejar una encendida
+    # pintaría la MISMA comprobación aplicable y no aplicable a la vez.
+    "FZ_P": _FIN_MODEL,
     "F7": _FIN_MODEL,
 }
 """Qué se apaga en una financiera y por qué (documento de calibración §5).
