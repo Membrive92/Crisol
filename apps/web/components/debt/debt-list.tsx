@@ -11,6 +11,7 @@ import {
   fontSize,
   fontWeight,
   formatAmount,
+  layout,
   radius,
   spacing,
 } from '@crisol/ui';
@@ -210,7 +211,7 @@ export function DebtList({ liabilities, loading }: DebtListProps) {
               margin: `${spacing.xs}px 0 0 0`,
               fontSize: fontSize.sm,
               color: colors.textMuted,
-              maxWidth: 480,
+              maxWidth: layout.prose,
               lineHeight: 1.5,
             }}
           >

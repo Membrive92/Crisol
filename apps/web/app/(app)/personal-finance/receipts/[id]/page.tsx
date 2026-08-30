@@ -8,10 +8,7 @@ import { toast } from '@crisol/store';
 import type { ReceiptConfirmRequest } from '@crisol/types';
 import { colors, fontSize, formatDate, layout, spacing } from '@crisol/ui';
 
-import {
-  ExtractionSummary,
-  ReceiptConfirmForm,
-} from '@/components/receipts/confirm-form';
+import { ExtractionSummary, ReceiptConfirmForm } from '@/components/receipts/confirm-form';
 import { ReceiptImage } from '@/components/receipts/receipt-image';
 import { ReceiptStatusBadge } from '@/components/receipts/status-badge';
 import { Button } from '@/components/ui/button';
@@ -69,78 +66,92 @@ export default function ReceiptDetailPage() {
   }
 
   return (
-    <div style={{ maxWidth: layout.pageNarrow, margin: '0 auto', padding: spacing.lg }}>
-      <header style={{ marginBottom: spacing.lg }}>
-        <Button variant="ghost" onClick={() => router.push('/personal-finance/receipts')}>
-          ← Volver
-        </Button>
-        <h1
-          style={{
-            fontSize: fontSize.xl,
-            color: colors.text,
-            marginTop: spacing.sm,
-            marginBottom: 0,
-          }}
-        >
-          Detalle de ticket
-        </h1>
-      </header>
+    <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
+      {/* Una sola columna: el ancho de PÁGINA es el global, y lo que no debe
+          ensancharse se acota aquí dentro. Con el contenedor entero a
+          `pageNarrow` la pantalla era una columna centrada flotando en el
+          medio del monitor, desalineada con el resto de la app. */}
+      <div style={{ maxWidth: layout.pageNarrow }}>
+        <header style={{ marginBottom: spacing.lg }}>
+          <Button variant="ghost" onClick={() => router.push('/personal-finance/receipts')}>
+            ← Volver
+          </Button>
+          <h1
+            style={{
+              fontSize: fontSize.xl,
+              color: colors.text,
+              marginTop: spacing.sm,
+              marginBottom: 0,
+            }}
+          >
+            Detalle de ticket
+          </h1>
+        </header>
 
-      <Card style={{ padding: spacing.lg }}>
-        {isLoading ? (
-          <p>Cargando…</p>
-        ) : isError ? (
-          <p style={{ color: colors.danger }}>
-            Error: {error instanceof Error ? error.message : 'desconocido'}
-          </p>
-        ) : receipt ? (
-          <>
-            <div style={{ display: 'flex', gap: spacing.sm, alignItems: 'center', marginBottom: spacing.md }}>
-              <ReceiptStatusBadge status={receipt.status} />
-              <span style={{ fontSize: fontSize.sm, color: colors.textMuted }}>
-                {formatDate(receipt.created_at)}
-              </span>
-            </div>
+        <Card style={{ padding: spacing.lg }}>
+          {isLoading ? (
+            <p>Cargando…</p>
+          ) : isError ? (
+            <p style={{ color: colors.danger }}>
+              Error: {error instanceof Error ? error.message : 'desconocido'}
+            </p>
+          ) : receipt ? (
+            <>
+              <div
+                style={{
+                  display: 'flex',
+                  gap: spacing.sm,
+                  alignItems: 'center',
+                  marginBottom: spacing.md,
+                }}
+              >
+                <ReceiptStatusBadge status={receipt.status} />
+                <span style={{ fontSize: fontSize.sm, color: colors.textMuted }}>
+                  {formatDate(receipt.created_at)}
+                </span>
+              </div>
 
-            <div style={{ marginBottom: spacing.lg }}>
-              <ReceiptImage receiptId={receipt.id} />
-            </div>
+              <div style={{ marginBottom: spacing.lg }}>
+                <ReceiptImage receiptId={receipt.id} />
+              </div>
 
-            {receipt.status === 'pending' ? (
-              <>
-                <ReceiptConfirmForm
-                  extraction={receipt.extraction}
-                  submitting={confirmMutation.isPending || rejectMutation.isPending}
-                  onSubmit={handleConfirm}
-                  onReject={handleReject}
-                />
-                <ExtractionSummary extraction={receipt.extraction} />
-              </>
-            ) : (
-              <>
-                <p style={{ color: colors.textMuted, fontSize: fontSize.sm }}>
-                  Este ticket ya fue {receipt.status === 'confirmed' ? 'confirmado' : 'rechazado'}.
-                </p>
-                <ExtractionSummary extraction={receipt.extraction} />
-              </>
-            )}
-          </>
-        ) : (
-          <p style={{ color: colors.textMuted }}>Recibo no encontrado.</p>
-        )}
-      </Card>
+              {receipt.status === 'pending' ? (
+                <>
+                  <ReceiptConfirmForm
+                    extraction={receipt.extraction}
+                    submitting={confirmMutation.isPending || rejectMutation.isPending}
+                    onSubmit={handleConfirm}
+                    onReject={handleReject}
+                  />
+                  <ExtractionSummary extraction={receipt.extraction} />
+                </>
+              ) : (
+                <>
+                  <p style={{ color: colors.textMuted, fontSize: fontSize.sm }}>
+                    Este ticket ya fue {receipt.status === 'confirmed' ? 'confirmado' : 'rechazado'}
+                    .
+                  </p>
+                  <ExtractionSummary extraction={receipt.extraction} />
+                </>
+              )}
+            </>
+          ) : (
+            <p style={{ color: colors.textMuted }}>Recibo no encontrado.</p>
+          )}
+        </Card>
 
-      <ConfirmDialog
-        open={confirmingReject}
-        title="¿Rechazar este ticket?"
-        description="La transacción no se creará y el ticket quedará marcado como rechazado."
-        confirmLabel="Rechazar"
-        cancelLabel="Atrás"
-        tone="danger"
-        loading={rejectMutation.isPending}
-        onConfirm={confirmReject}
-        onCancel={() => setConfirmingReject(false)}
-      />
+        <ConfirmDialog
+          open={confirmingReject}
+          title="¿Rechazar este ticket?"
+          description="La transacción no se creará y el ticket quedará marcado como rechazado."
+          confirmLabel="Rechazar"
+          cancelLabel="Atrás"
+          tone="danger"
+          loading={rejectMutation.isPending}
+          onConfirm={confirmReject}
+          onCancel={() => setConfirmingReject(false)}
+        />
+      </div>
     </div>
   );
 }

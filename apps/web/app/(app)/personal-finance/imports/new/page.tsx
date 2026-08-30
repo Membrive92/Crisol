@@ -63,17 +63,13 @@ export default function NewImportPage() {
       if (applied === 0) {
         toast.info('La IA no encontró categoría clara para los conceptos pendientes.');
       } else {
-        toast.success(
-          `IA sugirió ${applied} ${applied === 1 ? 'categoría' : 'categorías'}.`,
-        );
+        toast.success(`IA sugirió ${applied} ${applied === 1 ? 'categoría' : 'categorías'}.`);
       }
       return suggestions;
     } catch (err) {
       toast.dismiss(loadingId);
       toast.error(
-        err instanceof Error
-          ? `Error con IA: ${err.message}`
-          : 'Error al sugerir con IA',
+        err instanceof Error ? `Error con IA: ${err.message}` : 'Error al sugerir con IA',
       );
       return undefined;
     }
@@ -128,9 +124,7 @@ export default function NewImportPage() {
     // Toast persistente con cronómetro mientras Ollama procesa las
     // páginas — la inferencia visión en CPU puede tardar varios
     // minutos y sin feedback el usuario asume que la app está colgada.
-    const loadingId = toast.loading(
-      'IA leyendo las páginas del PDF…',
-    );
+    const loadingId = toast.loading('IA leyendo las páginas del PDF…');
     previewMutation.mutate(
       {
         accountId: uploadValue.accountId,
@@ -166,9 +160,7 @@ export default function NewImportPage() {
     commitMutation.mutate(
       {
         jobId: preview.job_id,
-        ...(Object.keys(categoryOverrides).length > 0
-          ? { categoryOverrides }
-          : {}),
+        ...(Object.keys(categoryOverrides).length > 0 ? { categoryOverrides } : {}),
         // PHASE-47.A — sin los avisos reconocidos el backend responde 409.
         ...(acknowledgedWarnings.length > 0 ? { acknowledgedWarnings } : {}),
       },
@@ -211,66 +203,71 @@ export default function NewImportPage() {
 
   const canRetryWithVision =
     preview !== null &&
-    (preview.source === 'pdfplumber_smart' ||
-      preview.source === 'pdfplumber_legacy');
+    (preview.source === 'pdfplumber_smart' || preview.source === 'pdfplumber_legacy');
 
   return (
-    <div style={{ maxWidth: layout.pageNarrow, margin: '0 auto', padding: spacing.lg }}>
-      <h1
-        style={{
-          fontSize: fontSize.xl,
-          color: colors.text,
-          marginTop: 0,
-          marginBottom: spacing.lg,
-        }}
-      >
-        Nueva importación
-      </h1>
+    <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
+      {/* Una sola columna: el ancho de PÁGINA es el global, y lo que no debe
+          ensancharse se acota aquí dentro. Con el contenedor entero a
+          `pageNarrow` la pantalla era una columna centrada flotando en el
+          medio del monitor, desalineada con el resto de la app. */}
+      <div style={{ maxWidth: layout.pageNarrow }}>
+        <h1
+          style={{
+            fontSize: fontSize.xl,
+            color: colors.text,
+            marginTop: 0,
+            marginBottom: spacing.lg,
+          }}
+        >
+          Nueva importación
+        </h1>
 
-      <Stepper currentStep={step} />
+        <Stepper currentStep={step} />
 
-      <Card style={{ padding: spacing.lg }}>
-        {step === 'upload' ? <UploadStep onContinue={handleUploadContinue} /> : null}
-        {step === 'mapping' && uploadValue ? (
-          <MappingStep
-            detectedHeaders={uploadValue.detectedHeaders}
-            submitting={previewMutation.isPending}
-            errorMessage={
-              previewMutation.isError
-                ? previewMutation.error instanceof Error
-                  ? previewMutation.error.message
-                  : 'Error al generar el preview'
-                : null
-            }
-            onBack={handleMappingBack}
-            onSubmit={handleMappingSubmit}
-          />
-        ) : null}
-        {step === 'preview' && preview ? (
-          <PreviewStep
-            preview={preview}
-            committing={commitMutation.isPending}
-            reprocessing={previewMutation.isPending}
-            canRetryWithVision={canRetryWithVision}
-            categories={categories ?? []}
-            errorMessage={
-              commitMutation.isError
-                ? commitMutation.error instanceof Error
-                  ? commitMutation.error.message
-                  : 'Error al confirmar'
-                : null
-            }
-            onConfirm={handlePreviewConfirm}
-            onRetryWithVision={handlePreviewRetryWithVision}
-            onBack={handlePreviewBack}
-            onAiSuggest={handleAiSuggest}
-            aiSuggesting={aiSuggestMutation.isPending}
-          />
-        ) : null}
-        {step === 'result' && result ? (
-          <ResultStep job={result} onRestart={handleRestart} />
-        ) : null}
-      </Card>
+        <Card style={{ padding: spacing.lg }}>
+          {step === 'upload' ? <UploadStep onContinue={handleUploadContinue} /> : null}
+          {step === 'mapping' && uploadValue ? (
+            <MappingStep
+              detectedHeaders={uploadValue.detectedHeaders}
+              submitting={previewMutation.isPending}
+              errorMessage={
+                previewMutation.isError
+                  ? previewMutation.error instanceof Error
+                    ? previewMutation.error.message
+                    : 'Error al generar el preview'
+                  : null
+              }
+              onBack={handleMappingBack}
+              onSubmit={handleMappingSubmit}
+            />
+          ) : null}
+          {step === 'preview' && preview ? (
+            <PreviewStep
+              preview={preview}
+              committing={commitMutation.isPending}
+              reprocessing={previewMutation.isPending}
+              canRetryWithVision={canRetryWithVision}
+              categories={categories ?? []}
+              errorMessage={
+                commitMutation.isError
+                  ? commitMutation.error instanceof Error
+                    ? commitMutation.error.message
+                    : 'Error al confirmar'
+                  : null
+              }
+              onConfirm={handlePreviewConfirm}
+              onRetryWithVision={handlePreviewRetryWithVision}
+              onBack={handlePreviewBack}
+              onAiSuggest={handleAiSuggest}
+              aiSuggesting={aiSuggestMutation.isPending}
+            />
+          ) : null}
+          {step === 'result' && result ? (
+            <ResultStep job={result} onRestart={handleRestart} />
+          ) : null}
+        </Card>
+      </div>
     </div>
   );
 }

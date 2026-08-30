@@ -84,7 +84,10 @@ export default function AmortizationPage() {
   }
 
   return (
-    <div style={{ maxWidth: layout.pageNarrow, margin: '0 auto', padding: spacing.lg }}>
+    // El cuadro es una tabla de siete columnas: estrangularla a `pageNarrow`
+    // la dejaba ilegible en un monitor donde el resto de la app usa el ancho
+    // completo.
+    <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
       <Link
         href="/settings/accounts"
         style={{
@@ -625,7 +628,7 @@ function EmptyState({
           margin: `${spacing.sm}px 0`,
           fontSize: fontSize.sm,
           color: colors.textMuted,
-          maxWidth: 480,
+          maxWidth: layout.prose,
           marginLeft: 'auto',
           marginRight: 'auto',
           lineHeight: 1.5,

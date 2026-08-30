@@ -17,36 +17,42 @@ export default function ImportDetailPage() {
   const { data, isLoading, isError, error } = useImport(id);
 
   return (
-    <div style={{ maxWidth: layout.pageNarrow, margin: '0 auto', padding: spacing.lg }}>
-      <header style={{ marginBottom: spacing.lg }}>
-        <Button variant="ghost" onClick={() => router.push('/personal-finance/imports')}>
-          ← Volver
-        </Button>
-        <h1
-          style={{
-            fontSize: fontSize.xl,
-            color: colors.text,
-            marginTop: spacing.sm,
-            marginBottom: 0,
-          }}
-        >
-          Detalle de importación
-        </h1>
-      </header>
+    <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
+      {/* Una sola columna: el ancho de PÁGINA es el global, y lo que no debe
+          ensancharse se acota aquí dentro. Con el contenedor entero a
+          `pageNarrow` la pantalla era una columna centrada flotando en el
+          medio del monitor, desalineada con el resto de la app. */}
+      <div style={{ maxWidth: layout.pageNarrow }}>
+        <header style={{ marginBottom: spacing.lg }}>
+          <Button variant="ghost" onClick={() => router.push('/personal-finance/imports')}>
+            ← Volver
+          </Button>
+          <h1
+            style={{
+              fontSize: fontSize.xl,
+              color: colors.text,
+              marginTop: spacing.sm,
+              marginBottom: 0,
+            }}
+          >
+            Detalle de importación
+          </h1>
+        </header>
 
-      <Card style={{ padding: spacing.lg }}>
-        {isLoading ? (
-          <p>Cargando…</p>
-        ) : isError ? (
-          <p style={{ color: colors.danger }}>
-            Error: {error instanceof Error ? error.message : 'desconocido'}
-          </p>
-        ) : data ? (
-          <ResultStep job={data} onRestart={() => router.push('/personal-finance/imports/new')} />
-        ) : (
-          <p style={{ color: colors.textMuted }}>Job no encontrado.</p>
-        )}
-      </Card>
+        <Card style={{ padding: spacing.lg }}>
+          {isLoading ? (
+            <p>Cargando…</p>
+          ) : isError ? (
+            <p style={{ color: colors.danger }}>
+              Error: {error instanceof Error ? error.message : 'desconocido'}
+            </p>
+          ) : data ? (
+            <ResultStep job={data} onRestart={() => router.push('/personal-finance/imports/new')} />
+          ) : (
+            <p style={{ color: colors.textMuted }}>Job no encontrado.</p>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }

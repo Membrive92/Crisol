@@ -8,6 +8,7 @@ import {
   fontSize,
   fontWeight,
   formatAmount,
+  layout,
   radius,
   spacing,
 } from '@crisol/ui';
@@ -95,7 +96,7 @@ export function EffortRatioSection({
               margin: `${spacing.xs}px 0 0 0`,
               fontSize: fontSize.xs,
               color: colors.textMuted,
-              maxWidth: 520,
+              maxWidth: layout.prose,
               lineHeight: 1.5,
             }}
           >

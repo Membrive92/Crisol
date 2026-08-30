@@ -81,6 +81,41 @@ const ORIGIN_ENTRIES: readonly GuideEntry[] = [
   },
 ];
 
+/**
+ * El histórico de análisis y su comparador, en lenguaje del usuario.
+ *
+ * Vive aquí, y no en la pantalla que lo pinta, porque lo dicen DOS sitios: el
+ * texto del propio selector y la sección de esta guía. Escrito dos veces, el
+ * día que el comparador cambie de reglas una de las dos versiones seguirá
+ * prometiendo las de antes — y la que miente es la que nadie contrasta con la
+ * pantalla que tiene al lado.
+ */
+export const RUN_HISTORY_COPY = {
+  /** Qué es la lista. */
+  intro:
+    'Cada análisis es una foto: se conserva tal y como se calculó, con el motor y los cortes de aquel día. No se recalcula nunca.',
+  /** Qué hace pulsar la fecha. */
+  open: 'Pulsa la fecha para ABRIR ese análisis: cambia todo el informe de arriba.',
+  /** Qué hace pulsar «comparar». Sólo web: en móvil no hay selector de base. */
+  compare:
+    'Pulsa «comparar» para contrastar el que estás viendo contra ése. Debajo aparece qué se ha movido entre los dos.',
+  /**
+   * La misma idea SIN nombrar el control, para la guía.
+   *
+   * La guía la renderizan las dos apps y móvil no tiene selector de base
+   * —contrasta siempre con el inmediatamente anterior—, así que la frase de
+   * web prometería ahí un botón que no existe.
+   */
+  compareConcept:
+    'La comparación contrasta el análisis que estás viendo con otro guardado: en la web eliges cuál con «comparar»; en el móvil, con el inmediatamente anterior.',
+  /** Qué se lista en la comparación. */
+  contents:
+    'Se listan el perfil (Conservador / Vigilar / Evitar), el veredicto del dividendo, las cuatro preguntas —su color y si estaban auditadas—, los ocho scores forenses, las métricas que cruzan un corte, las banderas que se encienden o se apagan, y las reexpresiones que la SEC registró entre las dos fechas.',
+  /** Qué significa el ⚠ de una fila. */
+  incomparable:
+    'Un análisis marcado con ⚠ se calculó con otro motor u otra calibración. Al compararlo sólo se dirá qué cambió del MÉTODO, y ni un solo cambio de la empresa: un corte que se mueve no es un negocio que empeora, y presentarlos juntos lleva justo a la conclusión contraria.',
+} as const;
+
 export const REPORT_GUIDE: readonly GuideSection[] = [
   {
     key: 'colors',
@@ -147,6 +182,51 @@ export const REPORT_GUIDE: readonly GuideSection[] = [
         term: 'Estados',
         meaning:
           'las cuentas tal como las publica el emisor, con la marca de qué partidas no venían y se dedujeron. Es el suelo de todo lo demás.',
+      },
+    ],
+  },
+  {
+    key: 'why',
+    title: 'Por qué el veredicto dice lo que dice',
+    intro:
+      'El sello no es una nota media de las cuatro preguntas: sale de reglas fijas sobre los scores forenses y la bandera del dividendo. La card «Por qué este veredicto» las enseña todas, cumplidas o no, con el número que las hace ciertas o falsas.',
+    entries: [
+      {
+        term: 'se cumple',
+        meaning:
+          'la afirmación de esa línea es cierta en este análisis. En la lista de «Evitar» eso es lo que dispara el sello; en la de «Conservador», que están redactadas en negativo, es lo que falta para conseguirlo.',
+      },
+      {
+        term: 'sin poder comprobar',
+        meaning:
+          'no hay dato para afirmarla ni para negarla, y al lado se dice por qué. No cuenta como superada: el verde se gana, no se hereda de un hueco.',
+      },
+      {
+        term: 'decidió el veredicto',
+        meaning:
+          'esa señal es la que hizo cierta una condición de «Evitar». No es lo mismo que estar en rojo: una señal puede teñir su pregunta sin estar en la matriz del sello.',
+      },
+      {
+        term: '¿Puntúa?',
+        meaning:
+          'si la señal contó para el color de su pregunta. Un «no» NO significa que esté bien: significa que no pudo contar, y la fila dice por qué.',
+      },
+    ],
+  },
+  {
+    key: 'comparison',
+    title: 'Los análisis guardados y qué compara',
+    intro: `${RUN_HISTORY_COPY.intro} ${RUN_HISTORY_COPY.open}`,
+    entries: [
+      {
+        term: 'comparar dos análisis',
+        meaning: `${RUN_HISTORY_COPY.compareConcept} ${RUN_HISTORY_COPY.contents}`,
+      },
+      { term: '⚠ junto a «comparar»', meaning: RUN_HISTORY_COPY.incomparable },
+      {
+        term: 'nada se ha movido',
+        meaning:
+          'los dos análisis dicen lo mismo. Con dos ejecuciones del mismo día sobre los mismos ejercicios es lo esperable: la comparación cobra sentido cuando el emisor publica un cierre nuevo o reexpresa uno anterior.',
       },
     ],
   },

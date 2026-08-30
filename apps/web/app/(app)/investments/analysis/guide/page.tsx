@@ -49,9 +49,15 @@ function BackToReport() {
 
 export default function AnalysisGuidePage() {
   return (
+    // El ancho de PÁGINA es el global (`pageWide`), como el informe del que se
+    // viene y como el resto de la app: esta pantalla lo fijaba a `pageNarrow`
+    // por su cuenta, así que en un monitor grande salía una columna de 720 px
+    // flotando en el centro. Que ese ancho no produzca líneas de 2.300 px lo
+    // resuelve el grid de abajo, no un contenedor estrecho — son dos cosas
+    // distintas (PHASE-44.24.H).
     <div
       style={{
-        maxWidth: layout.pageNarrow,
+        maxWidth: layout.pageWide,
         margin: '0 auto',
         padding: spacing.lg,
         display: 'flex',
@@ -59,7 +65,7 @@ export default function AnalysisGuidePage() {
         gap: spacing.lg,
       }}
     >
-      <div>
+      <div style={{ maxWidth: layout.prose }}>
         <Suspense fallback={null}>
           <BackToReport />
         </Suspense>
@@ -79,65 +85,79 @@ export default function AnalysisGuidePage() {
         </p>
       </div>
 
-      {REPORT_GUIDE.map((section) => (
-        <Card key={section.key}>
-          <CardTitle size="sm">{section.title}</CardTitle>
-          <p
-            style={{
-              margin: `${spacing.sm}px 0 0`,
-              color: colors.textMuted,
-              fontSize: fontSize.sm,
-              lineHeight: 1.6,
-            }}
-          >
-            {section.intro}
-          </p>
-          <dl
-            style={{
-              margin: `${spacing.md}px 0 0`,
-              display: 'grid',
-              gridTemplateColumns: 'minmax(min(40%, 160px), auto) 1fr',
-              columnGap: spacing.lg,
-              rowGap: spacing.sm,
-            }}
-          >
-            {section.entries.map((entry) => (
-              <div key={entry.term} style={{ display: 'contents' }}>
-                <dt
-                  style={{
-                    color: colors.text,
-                    fontSize: fontSize.sm,
-                    fontWeight: fontWeight.semibold,
-                  }}
-                >
-                  <span
+      {/* Las secciones fluyen en columnas: con el ancho global y una sola
+          columna, cada definición sería una línea de borde a borde. `auto-fill`
+          da cuatro columnas en un monitor grande y una en un portátil, sin
+          punto de ruptura escrito a mano; el `min(100%, …)` evita que la
+          columna desborde por debajo de su propio mínimo. */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${layout.prose}px), 1fr))`,
+          gap: spacing.lg,
+          alignItems: 'start',
+        }}
+      >
+        {REPORT_GUIDE.map((section) => (
+          <Card key={section.key}>
+            <CardTitle size="sm">{section.title}</CardTitle>
+            <p
+              style={{
+                margin: `${spacing.sm}px 0 0`,
+                color: colors.textMuted,
+                fontSize: fontSize.sm,
+                lineHeight: 1.6,
+              }}
+            >
+              {section.intro}
+            </p>
+            <dl
+              style={{
+                margin: `${spacing.md}px 0 0`,
+                display: 'grid',
+                gridTemplateColumns: 'minmax(min(40%, 160px), auto) 1fr',
+                columnGap: spacing.lg,
+                rowGap: spacing.sm,
+              }}
+            >
+              {section.entries.map((entry) => (
+                <div key={entry.term} style={{ display: 'contents' }}>
+                  <dt
                     style={{
-                      display: 'inline-block',
-                      minWidth: 24,
-                      textAlign: 'center',
-                      backgroundColor: colors.surface,
-                      borderRadius: radius.sm,
-                      padding: `0 ${spacing.xs}px`,
+                      color: colors.text,
+                      fontSize: fontSize.sm,
+                      fontWeight: fontWeight.semibold,
                     }}
                   >
-                    {entry.term}
-                  </span>
-                </dt>
-                <dd
-                  style={{
-                    margin: 0,
-                    color: colors.textMuted,
-                    fontSize: fontSize.sm,
-                    lineHeight: 1.6,
-                  }}
-                >
-                  {entry.meaning}
-                </dd>
-              </div>
-            ))}
-          </dl>
-        </Card>
-      ))}
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        minWidth: 24,
+                        textAlign: 'center',
+                        backgroundColor: colors.surface,
+                        borderRadius: radius.sm,
+                        padding: `0 ${spacing.xs}px`,
+                      }}
+                    >
+                      {entry.term}
+                    </span>
+                  </dt>
+                  <dd
+                    style={{
+                      margin: 0,
+                      color: colors.textMuted,
+                      fontSize: fontSize.sm,
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    {entry.meaning}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </Card>
+        ))}
+      </div>
     </div>
   );
 }

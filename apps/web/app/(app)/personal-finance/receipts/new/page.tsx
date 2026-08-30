@@ -3,19 +3,12 @@
 import { useState, type ChangeEvent } from 'react';
 import { useRouter } from 'next/navigation';
 
-import {
-  useConfirmReceipt,
-  useExtractReceipt,
-  useRejectReceipt,
-} from '@crisol/services';
+import { useConfirmReceipt, useExtractReceipt, useRejectReceipt } from '@crisol/services';
 import { toast } from '@crisol/store';
 import type { Receipt, ReceiptConfirmRequest, ReceiptExtraction } from '@crisol/types';
 import { colors, fontSize, fontWeight, layout, radius, spacing } from '@crisol/ui';
 
-import {
-  ExtractionSummary,
-  ReceiptConfirmForm,
-} from '@/components/receipts/confirm-form';
+import { ExtractionSummary, ReceiptConfirmForm } from '@/components/receipts/confirm-form';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { Card } from '@/components/ui/card';
@@ -136,146 +129,154 @@ export default function NewReceiptPage() {
   const inExtraction = stagedReceipt !== null && stagedExtraction !== null;
 
   return (
-    <div style={{ maxWidth: layout.pageNarrow, margin: '0 auto', padding: spacing.lg }}>
-      <h1
-        style={{
-          fontSize: fontSize.xl,
-          color: colors.text,
-          marginTop: 0,
-          marginBottom: spacing.lg,
-        }}
-      >
-        Subir ticket
-      </h1>
+    <div style={{ maxWidth: layout.pageWide, margin: '0 auto', padding: spacing.lg }}>
+      {/* Una sola columna: el ancho de PÁGINA es el global, y lo que no debe
+          ensancharse se acota aquí dentro. Con el contenedor entero a
+          `pageNarrow` la pantalla era una columna centrada flotando en el
+          medio del monitor, desalineada con el resto de la app. */}
+      <div style={{ maxWidth: layout.pageNarrow }}>
+        <h1
+          style={{
+            fontSize: fontSize.xl,
+            color: colors.text,
+            marginTop: 0,
+            marginBottom: spacing.lg,
+          }}
+        >
+          Subir ticket
+        </h1>
 
-      {!inExtraction ? (
-        <Card style={{ padding: spacing.lg }}>
-          <p
-            style={{
-              marginTop: 0,
-              fontSize: fontSize.sm,
-              color: colors.textMuted,
-            }}
-          >
-            Sube una foto del ticket. La IA local lee importe, fecha, comercio
-            y líneas; tú confirmas o editas antes de crear la transacción.
-          </p>
-
-          <div style={{ marginBottom: spacing.md }}>
-            <span
+        {!inExtraction ? (
+          <Card style={{ padding: spacing.lg }}>
+            <p
               style={{
-                display: 'block',
-                marginBottom: spacing.xs,
+                marginTop: 0,
                 fontSize: fontSize.sm,
-                fontWeight: fontWeight.medium,
-                color: colors.text,
+                color: colors.textMuted,
               }}
             >
-              Imagen (JPEG / PNG / WebP / HEIC, máx 8 MB)
-            </span>
-            <label
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: spacing.sm,
-                cursor: 'pointer',
-              }}
-            >
+              Sube una foto del ticket. La IA local lee importe, fecha, comercio y líneas; tú
+              confirmas o editas antes de crear la transacción.
+            </p>
+
+            <div style={{ marginBottom: spacing.md }}>
               <span
                 style={{
-                  padding: `${spacing.sm}px ${spacing.md}px`,
-                  borderRadius: radius.md,
+                  display: 'block',
+                  marginBottom: spacing.xs,
                   fontSize: fontSize.sm,
-                  fontWeight: fontWeight.semibold,
-                  backgroundColor: 'transparent',
+                  fontWeight: fontWeight.medium,
                   color: colors.text,
-                  border: `1px solid ${colors.border}`,
                 }}
               >
-                Seleccionar archivo
+                Imagen (JPEG / PNG / WebP / HEIC, máx 8 MB)
               </span>
-              <span style={{ fontSize: fontSize.sm, color: colors.textMuted }}>
-                {file ? file.name : 'Ningún archivo seleccionado'}
-              </span>
-              <input
-                type="file"
-                accept={ACCEPTED_IMAGE_TYPES.join(',')}
-                onChange={handleFileChange}
+              <label
                 style={{
-                  position: 'absolute',
-                  width: 1,
-                  height: 1,
-                  padding: 0,
-                  margin: -1,
-                  overflow: 'hidden',
-                  clip: 'rect(0, 0, 0, 0)',
-                  whiteSpace: 'nowrap',
-                  border: 0,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: spacing.sm,
+                  cursor: 'pointer',
+                }}
+              >
+                <span
+                  style={{
+                    padding: `${spacing.sm}px ${spacing.md}px`,
+                    borderRadius: radius.md,
+                    fontSize: fontSize.sm,
+                    fontWeight: fontWeight.semibold,
+                    backgroundColor: 'transparent',
+                    color: colors.text,
+                    border: `1px solid ${colors.border}`,
+                  }}
+                >
+                  Seleccionar archivo
+                </span>
+                <span style={{ fontSize: fontSize.sm, color: colors.textMuted }}>
+                  {file ? file.name : 'Ningún archivo seleccionado'}
+                </span>
+                <input
+                  type="file"
+                  accept={ACCEPTED_IMAGE_TYPES.join(',')}
+                  onChange={handleFileChange}
+                  style={{
+                    position: 'absolute',
+                    width: 1,
+                    height: 1,
+                    padding: 0,
+                    margin: -1,
+                    overflow: 'hidden',
+                    clip: 'rect(0, 0, 0, 0)',
+                    whiteSpace: 'nowrap',
+                    border: 0,
+                  }}
+                />
+              </label>
+            </div>
+
+            {previewUrl ? (
+              <img
+                src={previewUrl}
+                alt="Vista previa"
+                style={{
+                  maxWidth: '100%',
+                  maxHeight: 320,
+                  marginBottom: spacing.md,
+                  borderRadius: 8,
+                  border: `1px solid ${colors.border}`,
                 }}
               />
-            </label>
-          </div>
+            ) : null}
 
-          {previewUrl ? (
-            <img
-              src={previewUrl}
-              alt="Vista previa"
-              style={{
-                maxWidth: '100%',
-                maxHeight: 320,
-                marginBottom: spacing.md,
-                borderRadius: 8,
-                border: `1px solid ${colors.border}`,
-              }}
-            />
-          ) : null}
-
-          {/* `uploadError` (validación local: tipo / tamaño) se queda
+            {/* `uploadError` (validación local: tipo / tamaño) se queda
               inline porque es contexto del input. Errores de
               extracción (red / Ollama) se muestran via toast. */}
-          {uploadError ? (
-            <div style={{ color: colors.danger, fontSize: fontSize.sm, marginBottom: spacing.sm }}>
-              {uploadError}
-            </div>
-          ) : null}
+            {uploadError ? (
+              <div
+                style={{ color: colors.danger, fontSize: fontSize.sm, marginBottom: spacing.sm }}
+              >
+                {uploadError}
+              </div>
+            ) : null}
 
-          <div style={{ display: 'flex', gap: spacing.sm }}>
-            <Button onClick={handleExtract} disabled={!file || extractMutation.isPending}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                {extractMutation.isPending ? (
-                  <Spinner size={14} color={colors.onPrimary} />
-                ) : null}
-                {extractMutation.isPending ? 'Analizando…' : 'Analizar ticket'}
-              </span>
-            </Button>
-          </div>
-        </Card>
-      ) : (
-        <Card style={{ padding: spacing.lg }}>
-          {/* PHASE-11.5: confirm/reject errors van por toast; el prop
+            <div style={{ display: 'flex', gap: spacing.sm }}>
+              <Button onClick={handleExtract} disabled={!file || extractMutation.isPending}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  {extractMutation.isPending ? (
+                    <Spinner size={14} color={colors.onPrimary} />
+                  ) : null}
+                  {extractMutation.isPending ? 'Analizando…' : 'Analizar ticket'}
+                </span>
+              </Button>
+            </div>
+          </Card>
+        ) : (
+          <Card style={{ padding: spacing.lg }}>
+            {/* PHASE-11.5: confirm/reject errors van por toast; el prop
               `errorMessage` queda opcional en el form para futuras
               validaciones locales que tengan sentido inline. */}
-          <ReceiptConfirmForm
-            extraction={stagedExtraction}
-            submitting={confirmMutation.isPending || rejectMutation.isPending}
-            onSubmit={handleConfirm}
-            onReject={handleReject}
-          />
-          <ExtractionSummary extraction={stagedExtraction} />
-        </Card>
-      )}
+            <ReceiptConfirmForm
+              extraction={stagedExtraction}
+              submitting={confirmMutation.isPending || rejectMutation.isPending}
+              onSubmit={handleConfirm}
+              onReject={handleReject}
+            />
+            <ExtractionSummary extraction={stagedExtraction} />
+          </Card>
+        )}
 
-      <ConfirmDialog
-        open={confirmingReject}
-        title="¿Rechazar este ticket?"
-        description="La transacción no se creará y el ticket quedará marcado como rechazado."
-        confirmLabel="Rechazar"
-        cancelLabel="Atrás"
-        tone="danger"
-        loading={rejectMutation.isPending}
-        onConfirm={confirmReject}
-        onCancel={() => setConfirmingReject(false)}
-      />
+        <ConfirmDialog
+          open={confirmingReject}
+          title="¿Rechazar este ticket?"
+          description="La transacción no se creará y el ticket quedará marcado como rechazado."
+          confirmLabel="Rechazar"
+          cancelLabel="Atrás"
+          tone="danger"
+          loading={rejectMutation.isPending}
+          onConfirm={confirmReject}
+          onCancel={() => setConfirmingReject(false)}
+        />
+      </div>
     </div>
   );
 }

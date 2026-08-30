@@ -562,7 +562,7 @@ function PageHeader() {
             margin: `${spacing.xs}px 0 0 0`,
             color: colors.textMuted,
             fontSize: fontSize.sm,
-            maxWidth: 640,
+            maxWidth: layout.prose,
             lineHeight: 1.5,
           }}
         >

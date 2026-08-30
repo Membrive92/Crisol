@@ -5,6 +5,7 @@ import {
   fontSize,
   fontWeight,
   formatAmount,
+  layout,
   radius,
   spacing,
 } from '@crisol/ui';
@@ -79,7 +80,7 @@ export function PaymentsSummaryCard({
               margin: `${spacing.xs}px 0 0 0`,
               fontSize: fontSize.xs,
               color: colors.textMuted,
-              maxWidth: 480,
+              maxWidth: layout.prose,
               lineHeight: 1.5,
             }}
           >
