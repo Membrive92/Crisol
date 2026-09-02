@@ -8,17 +8,12 @@ Si llegas sin contexto, lee antes [`PROJECT-GUIDE.md`](PROJECT-GUIDE.md).
 
 ## Lo primero al retomar
 
-**Todo el código está commiteado en `main`, pero `main` va CINCO commits por
-delante de `origin/main` y no tiene upstream configurado.** Los commits del 29
-y 30 de agosto (`3784f59` · `2af80a4` · `89ca390` · `5af1f7a` · `5c69132`)
-están sólo en esta máquina; `origin/main` se quedó en `6627698` (23-ago). Es la
-segunda vez que pasa (ya ocurrió con 44.9→44.20). Cuando des el visto bueno:
-`git push origin main` (y, si quieres que `git status` avise en adelante,
-`git branch --set-upstream-to=origin/main main`).
-
-Lo único sin commitear son DOCUMENTOS: el plan de 44.28 con su auditoría
-adversarial, seis lecciones de 44.28 y la puesta al día de hoy (esta misma,
-`PROJECT-GUIDE.md` nuevo incluido). No hay código pendiente.
+**Todo está commiteado y subido**: `main` == `origin/main` (push del
+2026-09-02, `ed27daf`), y `main` tiene ya upstream configurado, así que
+`git status` avisará si vuelve a haber commits locales sin subir. Antes de ese
+push, los cinco commits del 29 y 30 de agosto llevaban diez días sólo en esta
+máquina — la segunda vez que pasaba (ya ocurrió con 44.9→44.20). No hay código
+ni documentos pendientes.
 
 **Lo que espera tu prueba manual** (verde en la suite, sin recorrer en la app
 o recorrido sólo a medias):
@@ -112,8 +107,7 @@ run real).
 
 ## Lo siguiente, por orden
 
-1. **Tu prueba manual** (arriba), el commit de los documentos pendientes y el
-   `git push origin main` de los cinco commits que faltan.
+1. **Tu prueba manual** (arriba).
 2. **Inversión**: 44.27-E1 (bug vivo de la amortización parcial) → 44.28 por
    entregas (plan §6, con el gate de cobertura anclado en claves y las
    familias de redundancia). Relanzar JNJ y NKE con el motor actual.
@@ -172,8 +166,9 @@ reescribe entero cada sesión. Lo punzante ahora mismo:
   (`BACKEND_ORIGIN`), hoy 8002 — `dev.ps1` lo deriva de ahí.
 - **Una revisión adversarial se lee empezando por cuántos agentes murieron**:
   un resultado vacío o pequeño es indistinguible de una revisión limpia.
-- **`git log origin/main..HEAD` antes de dar algo por subido**: `main` no
-  tiene upstream y `git status` no avisa de los commits sin push.
+- **`git log origin/main..HEAD` antes de dar algo por subido**: `main` ya
+  tiene upstream (desde el 2026-09-02), pero la costumbre de comprobarlo es
+  lo que destapó los dos lotes de commits que se quedaron sin subir.
 
 ---
 
