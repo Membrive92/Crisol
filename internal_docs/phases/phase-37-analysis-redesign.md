@@ -16,7 +16,7 @@ categorización ciega a la dirección y el módulo de deuda leyendo el interés
 de transacciones inexistentes).
 
 Plan completo (con ADR informal y wireframes) en
-[`../phase-37-analysis-redesign.md`](../phase-37-analysis-redesign.md).
+[`../improvements/phase-37-analysis-redesign-plan.md`](../improvements/phase-37-analysis-redesign-plan.md).
 
 ## Qué se implementó
 

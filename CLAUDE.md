@@ -6,6 +6,9 @@
 - Lang: TypeScript strict (frontend), Python 3.12+ (backend)
 
 ## Documentación clave
+- **Guía maestra para entender y continuar el proyecto sin contexto previo:
+  internal_docs/PROJECT-GUIDE.md (leer PRIMERO si llegas nuevo)**
+- **Estado de HOY (qué está sin probar, qué sigue): internal_docs/HANDOFF.md**
 - Índice de internal docs: @internal_docs/README.md
 - Arquitectura del sistema: @internal_docs/architecture.md
 - Desglose de fases y metodología: @internal_docs/development-spec.md
@@ -21,9 +24,9 @@
     gestión de estado (Zustand + TanStack Query), y estándares de testing/calidad.
   - Las referencias están en .claude/skills/frontend-best-practices/references/
     (architecture.md, components.md, state-and-data.md, testing-and-quality.md)
-- Local AI integration: pendiente — el módulo `backend/app/modules/ai/` ya
-  existe con cliente Ollama y `/ai/health` (PHASE-0.3). La skill se creará en
-  PHASE-5.1 junto con el pipeline de extracción de tickets.
+- IA local: no hay skill aparte. Las reglas viven en la sección «IA local» de
+  abajo y el módulo en `backend/app/modules/ai/` (cliente Ollama,
+  `extract_receipt`, `extract_bank_statement_page`, `/ai/health`).
 
 ## IA local — principios no negociables
 - Runtime: Ollama (local). Modelo visión por defecto: qwen2.5-vl:7b.
@@ -50,8 +53,8 @@ pnpm format           # Prettier
 ```bash
 cd backend
 uvicorn app.main:app --reload                    # Dev server
-pytest tests/ -v                                 # Todos los tests
-pytest tests/modules/test_auth.py -v             # Tests de un módulo
+pytest tests/ -v                                 # Todos los tests (NUNCA dos a la vez: una sola BD de test)
+pytest tests/test_auth.py -v                     # Tests de un módulo (ficheros planos test_*.py)
 alembic upgrade head                             # Aplicar migraciones
 alembic revision --autogenerate -m "desc"        # Nueva migración
 mypy app/                                        # Type check Python
@@ -59,10 +62,22 @@ mypy app/                                        # Type check Python
 
 ### Docker
 ```bash
-docker compose up -d          # Levantar todo
-docker compose logs -f app    # Ver logs backend
+docker compose up -d          # Postgres + MinIO + Ollama (el backend corre en el host)
 docker compose down           # Parar todo
 ```
+
+### Entorno de desarrollo (Windows) — reglas duras
+- `.\dev.ps1` levanta todo en ventanas separadas; `.\dev.ps1 -Stop` lo para.
+- El backend de dev escucha en el puerto de `apps/web/.env.local`
+  (`BACKEND_ORIGIN`, hoy 8002), NO en el 8000 del Makefile. Si «los cambios del
+  backend no aparecen», comprueba puerto y uvicorn zombi antes que el código.
+- Intérprete del backend: `backend/.venv/Scripts/python.exe` (3.12, el de CI).
+  El `python` del PATH es otro y su verde no vale.
+- NUNCA dos `pytest` a la vez (incluidos los de subagentes): comparten
+  `crisol_test`. Redirige la suite a fichero; `| tail` enmascara el exit code.
+- Formatear: `prettier --write <fichero>`, nunca `pnpm format`.
+- Un test nuevo se verifica ROMPIENDO la línea que dice proteger y comprobando
+  que la rotura entró (ver internal_docs/lessons.md).
 
 ## Reglas de código — OBLIGATORIAS
 
@@ -90,17 +105,25 @@ docker compose down           # Parar todo
 
 ## Desarrollo incremental
 - IMPORTANTE: Leer internal_docs/development-spec.md antes de cada fase
-- Cada fase es una rama `feat/phase-X.Y-nombre` → PR → CI verde → squash merge a main
+- Diseño original: rama `feat/phase-X.Y-nombre` → PR → CI verde → squash merge.
+  **Práctica real**: commit sólo tras la prueba manual del usuario y push
+  directo a `main`. Comprueba `git log origin/main..HEAD` antes de dar algo por subido
 - Cada fase se documenta en internal_docs/phases/ ANTES del merge
-- Commits: `tipo(scope): descripción — Refs: PHASE-X.Y`
+- Commits: `tipo(scope): descripción — Refs: PHASE-X.Y` — mensaje en INGLÉS;
+  la documentación, en español
 - NO anticipar funcionalidad de fases futuras
-- Al terminar una fase: lint + typecheck + tests deben pasar (local Y en CI)
-- Un PR = una fase. Squash merge recomendado.
+- Al terminar una fase: lint + typecheck + tests + knip + `check_docs.py` deben
+  pasar (local Y en CI); phase doc en internal_docs/phases/, fila en
+  internal_docs/README.md, endpoints/schema si tocan, HANDOFF reescrito
+- Un commit (o pocos) = una fase. No mezclar fases.
 
 ## Verificación rápida
 ```bash
-# Ejecutar ANTES de marcar una fase como completada
-pnpm lint && pnpm typecheck && pnpm test && cd backend && pytest && mypy app/
+# Ejecutar ANTES de marcar una fase como completada (incluye knip y check_docs)
+make verify
+# o, a mano y con el intérprete del proyecto:
+pnpm lint && pnpm typecheck && pnpm test && pnpm knip && python scripts/check_docs.py
+cd backend && .venv/Scripts/python.exe -m pytest tests/ -q && .venv/Scripts/python.exe -m mypy app/ scripts/
 ```
 
 ## Lecciones aprendidas

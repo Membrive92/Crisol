@@ -1,70 +1,101 @@
 # Arquitectura — Crisol
 
 > Documento vivo. Se actualiza cuando una fase introduce cambios arquitectónicos.
-> Última actualización (PHASE-44.11, [ADR-0009](decisions/0009-single-fx-source-currency-transversal.md)):
-> `currency/` queda declarado módulo **transversal** —lo era de facto desde
-> PHASE-8.1— y `exchange_rates` es la única fuente de tipos de cambio de la
-> aplicación. Antes: refactor a `personal_finance/`, con los sub-features de
-> finanzas personales bajo un único módulo de dominio.
+> Última actualización: 2026-09-02 — puesta al día contrastada con el árbol real
+> (`app/main.py`, `modules/`, `packages/`, registro de módulos): el documento
+> describía el MVP de un solo módulo y seis tablas; hoy hay cuatro módulos
+> activos, dos dominios y una treintena de tablas. Antes: PHASE-44.11
+> ([ADR-0009](decisions/0009-single-fx-source-currency-transversal.md)),
+> `currency/` declarado transversal.
+>
+> Visión de conjunto para quien llega nuevo: [`PROJECT-GUIDE.md`](PROJECT-GUIDE.md).
 
 ---
 
 ## 1. Visión general
 
-Crisol es una aplicación de finanzas personales "multiportfolio" modular,
-multi-usuario, con IA local para extracción de tickets mediante visión por
-computador. Se entrega como monorepo con **web (Next.js)** y **móvil (Expo)**
-compartiendo lógica, tipos y UI.
+Crisol es una aplicación de finanzas personales modular, _local-first_, con IA
+local para extracción de tickets por visión. Se entrega como monorepo con
+**web (Next.js)** y **móvil (Expo)** compartiendo tipos, servicios, estado y la
+lógica pura de presentación.
 
-El MVP entrega **un único módulo** (Finanzas Personales) pero la arquitectura
-está diseñada para que añadir módulos futuros (crypto, inversiones, inmuebles)
-sea **sumar carpetas**, no refactorizar.
+Hoy tiene **dos dominios** y cuatro módulos activos en la shell:
+
+- **Finanzas domésticas** (`personal-finance` + `debt` en la UI; un solo
+  módulo backend `personal_finance/`): cuentas, transacciones, imports de
+  extractos, tickets, categorías, presupuestos, gastos fijos, deuda y análisis.
+- **Inversión** (`investments`): análisis fundamental forense sobre 10-K de la
+  SEC + cartera. Espacio separado, **no reconciliado** con el patrimonio de
+  Finanzas domésticas (decisión del usuario, PHASE-44.7).
+- **Dashboard**: agregación de módulos (balance / stocks, ADR-0006).
+
+`crypto` y `real-estate` existen en el registro como `enabled: false`. Añadir
+un módulo sigue siendo **sumar carpetas**: un directorio en
+`backend/app/modules/`, sus rutas bajo `apps/*/…/<módulo>/`, y una entrada en
+`packages/types/src/registry/modules.ts`.
 
 ---
 
 ## 2. Principios arquitectónicos
 
 1. **Modularidad vertical**. Cada feature vive en su propio módulo
-   (backend + frontend) con fronteras claras. Los módulos no se importan entre
-   sí directamente — se comunican vía DB o eventos.
+   (backend + frontend) con fronteras claras. Los módulos de dominio no se
+   importan entre sí — comparten vía `core/` o vía los transversales.
 2. **Privacidad por diseño**. Ningún dato del usuario sale del equipo donde
-   corre la app. IA 100% local vía Ollama. Imágenes de tickets se guardan en
-   MinIO local y nunca se envían a servicios externos.
+   corre la app. IA 100 % local vía Ollama. Las imágenes de tickets se guardan
+   en MinIO local. Lo único que sale son peticiones a fuentes públicas (SEC,
+   BCE, cotizaciones).
 3. **Aislamiento multi-tenant**. Toda query a tablas de dominio filtra por
-   `user_id`. Tests de aislamiento obligatorios.
-4. **Typescript/Python estrictos**. Sin `any`, sin `float` para dinero, sin
-   `@ts-ignore`. Ver [CLAUDE.md](../CLAUDE.md) para reglas completas.
+   `user_id` (salvo las tablas GLOBALES del módulo Inversión, ADR-0007, que
+   no contienen datos del usuario). Tests de aislamiento obligatorios.
+4. **TypeScript/Python estrictos**. Sin `any`, sin `float` para dinero, sin
+   `@ts-ignore`. Ver [CLAUDE.md](../CLAUDE.md) para las reglas completas.
 5. **Desarrollo incremental**. Cada fase es entregable, verificable y
    documentada antes de avanzar. Ver [development-spec.md](development-spec.md).
 6. **IA como herramienta, nunca autoridad**. La IA sugiere y extrae, pero
-   **nunca persiste en BD sin confirmación humana**.
+   **nunca persiste en BD sin confirmación humana**. Generalizado en
+   [ADR-0011](decisions/0011-system-initiated-debt-event-translation.md): el
+   sistema **propone** traducciones (un cargo → un evento de deuda) y el
+   usuario **declara**.
+7. **La verdad del dinero vive en la transacción** (`flow`), no en la
+   categoría ([ADR-0004](decisions/0004-transaction-level-money-truth.md)); y
+   **el extracto del banco es la autoridad** sobre la dirección de un
+   movimiento (PHASE-47.G). Ver §9.1.
+8. **Fuente única**. Un tipo de cambio (`exchange_rates`, ADR-0009), una
+   definición de «qué es un mes» (`user_month`), una declaración por
+   redacción bancaria, un catálogo de métricas. Si dos módulos deben coincidir
+   en «qué es X», hay UNA declaración y un gate que ata a los consumidores.
 
 ---
 
 ## 3. Stack
 
-| Capa              | Tecnología                                      |
-|-------------------|-------------------------------------------------|
-| Web               | Next.js 14+ (App Router)                        |
-| Móvil             | Expo SDK 50+ (React Native)                     |
-| Monorepo          | Turborepo + pnpm workspaces                     |
-| Lenguaje FE       | TypeScript 5.x estricto                         |
-| Estilos           | NativeWind / Tailwind CSS                       |
-| Estado cliente    | Zustand                                         |
-| Estado servidor   | TanStack Query                                  |
-| Backend           | FastAPI + SQLAlchemy 2.0 (async)                |
-| Lenguaje BE       | Python 3.12+                                    |
-| DB                | PostgreSQL 16 + extensión pgvector              |
-| Migraciones       | Alembic                                         |
-| Blob storage      | MinIO (S3-compatible, local)                    |
-| IA local          | Ollama (runtime) + qwen2.5-vl:7b (visión)       |
-| Auth              | JWT propio (access + refresh) + argon2id        |
-| Tests FE          | Vitest + Testing Library                        |
-| Tests BE          | Pytest + httpx                                  |
-| Lint/Format FE    | ESLint + Prettier                               |
-| Lint/Format BE    | Ruff + Black + Mypy                             |
-| CI                | GitHub Actions                                  |
-| Containerización  | Docker Compose                                  |
+| Capa               | Tecnología                                                                |
+| ------------------ | ------------------------------------------------------------------------- |
+| Web                | Next.js (App Router)                                                      |
+| Móvil              | Expo (React Native, Expo Router)                                          |
+| Monorepo           | Turborepo + pnpm workspaces                                               |
+| Lenguaje FE        | TypeScript estricto (`exactOptionalPropertyTypes` incluido)               |
+| Estilos            | Tokens de diseño (`packages/ui`, `DESIGN.md`) + estilos inline / RN       |
+| Estado cliente     | Zustand                                                                   |
+| Estado servidor    | TanStack Query                                                            |
+| Charts             | Recharts (web) · react-native-gifted-charts (móvil) · SVG propio (informe) |
+| Backend            | FastAPI + SQLAlchemy 2.0 (async, asyncpg)                                 |
+| Lenguaje BE        | Python 3.12 (`backend/.venv`, el mismo que CI)                            |
+| DB                 | PostgreSQL 16 + pgvector + pg_trgm                                        |
+| Migraciones        | Alembic (aditivas y reversibles; `alembic check` en CI)                   |
+| Jobs               | APScheduler en proceso ([ADR-0002](decisions/0002-apscheduler.md))        |
+| Blob storage       | MinIO (S3-compatible, local)                                              |
+| IA local           | Ollama + qwen2.5-vl (visión)                                              |
+| Auth               | JWT propio (access + refresh rotado) + argon2id + WebAuthn (passkeys)     |
+| Datos externos     | EDGAR (`edgartools`), Frankfurter (BCE), yfinance / Finnhub, FIRDS (ESMA/FCA) |
+| Tests FE           | Vitest + Testing Library (web, packages) · jest-expo (móvil)              |
+| Tests BE           | Pytest + httpx (una sola BD de test compartida)                           |
+| Lint/Format FE     | ESLint + Prettier + knip (código muerto)                                  |
+| Lint/Format BE     | Ruff + Black + Mypy                                                       |
+| Docs               | `scripts/check_docs.py` (enlaces, migraciones citadas, números volátiles) |
+| CI                 | GitHub Actions (`.github/workflows/ci.yml`)                               |
+| Containerización   | Docker Compose (postgres · minio · ollama; el backend corre en el host)    |
 
 ---
 
@@ -74,13 +105,13 @@ sea **sumar carpetas**, no refactorizar.
                     ┌──────────────┐     ┌──────────────┐
                     │  Web (Next)  │     │ Mobile (Expo)│
                     └──────┬───────┘     └──────┬───────┘
-                           │                    │
+                           │ /api/* rewrite      │ EXPO_PUBLIC_API_URL
                            └────────┬───────────┘
-                                    │ HTTPS / JSON
-                           ┌────────▼────────┐
-                           │ Backend FastAPI │
-                           │  (modular)      │
-                           └────────┬────────┘
+                                    │ HTTP / JSON
+                           ┌────────▼────────┐        ┌──────────────────────┐
+                           │ Backend FastAPI │───────▶│ SEC EDGAR · BCE ·     │
+                           │  (modular)      │        │ yfinance/Finnhub      │
+                           └────────┬────────┘        └──────────────────────┘
                                     │
               ┌─────────────────────┼─────────────────────┐
               │                     │                     │
@@ -90,9 +121,11 @@ sea **sumar carpetas**, no refactorizar.
       └────────────────┘   └─────────────────┘   └─────────────────┘
 ```
 
-Todos los servicios se levantan con `docker compose up -d`. El backend corre
-normalmente en el host durante desarrollo (hot reload), pero tiene su propia
-imagen para despliegue.
+Los tres contenedores se levantan con `docker compose up -d`. El backend
+corre en el host durante desarrollo; en Windows, `dev.ps1` arranca todo y
+**deriva el puerto del backend de `apps/web/.env.local`** (`BACKEND_ORIGIN`),
+que es el que manda sobre el rewrite de Next — hoy 8002, no el 8000 del
+Makefile. No hay imagen del backend todavía (ver §11).
 
 ---
 
@@ -101,61 +134,52 @@ imagen para despliegue.
 ```
 crisol/
 ├── apps/
-│   ├── web/                # Next.js App Router (apps/web/components/* solo-web)
-│   └── mobile/             # Expo Router (apps/mobile/components/* solo-mobile)
+│   ├── web/                # Next.js App Router · app/(app)/<módulo>/… · components/ solo-web
+│   └── mobile/             # Expo Router · app/(modules)/<módulo>/… · components/ solo-móvil
 ├── packages/
-│   ├── types/              # Tipos del dominio compartidos
-│   ├── ui/                 # Design tokens + formatters puros (ADR 0001)
-│   ├── services/           # Cliente API + TanStack Query hooks + query keys
-│   └── store/              # Zustand stores (auth)
-├── tooling/
-│   ├── eslint/
-│   └── typescript/
+│   ├── types/              # modelos + DTOs del dominio + registro de módulos
+│   ├── ui/                 # tokens + formatters + capas PURAS de presentación (sin componentes, ADR-0001)
+│   ├── services/           # cliente API (axios + interceptor de refresh) · endpoints · hooks TanStack Query
+│   │                       #   · query keys · helpers de período (`period/user-month.ts`)
+│   └── store/              # Zustand: auth · currency · toast (storage.native.ts para RN)
+├── tooling/                # eslint · typescript compartidos
 ├── backend/
 │   ├── app/
-│   │   ├── main.py
-│   │   ├── core/           # Config, DB, security, deps
-│   │   └── modules/        # Un directorio por módulo de dominio
-│   ├── alembic/            # Migraciones
-│   ├── tests/
-│   └── pyproject.toml
-├── docker-compose.yml
-├── Makefile
-├── CLAUDE.md
-└── internal_docs/
-    ├── README.md
-    ├── architecture.md
-    ├── development-spec.md
-    ├── lessons.md
-    ├── api/                # endpoints.md (PHASE-4.1)
-    ├── data-model/         # schema.md (PHASE-4.1)
-    ├── decisions/          # ADRs (0001-ui-tokens-only)
-    ├── phases/             # 1 doc por fase completada
-    └── ai-context/
+│   │   ├── main.py         # registra los 20 routers
+│   │   ├── core/           # config · database · deps · security · storage · scheduler · civil_dates · rate_limit
+│   │   └── modules/        # ver §6
+│   ├── alembic/            # migraciones
+│   ├── scripts/            # data-fix y seeds con --dry-run
+│   ├── tests/              # pytest (ficheros planos test_*.py)
+│   └── data/edgar_cache/   # caché local de hechos XBRL
+├── scripts/check_docs.py   # podredumbre documental
+├── dev.ps1 · Makefile · docker-compose.yml · knip.config.ts · CLAUDE.md · DESIGN.md
+└── internal_docs/          # ver README.md (índice) y PROJECT-GUIDE.md (guía)
 ```
 
 Notas sobre el monorepo actual:
 
-- `packages/ui` contiene **solo design tokens y formatters** —
-  no componentes RN/web (ver [ADR 0001](decisions/0001-ui-tokens-only.md)).
-  Los componentes UI viven en cada app (`apps/web/components/`,
-  `apps/mobile/components/`).
-- `packages/utils`, `packages/hooks`, `packages/features` y
-  `packages/config` están planeados en la spec original pero **no se
-  han creado todavía**: las apps no los han necesitado y no tiene
-  sentido crear paquetes vacíos.
-- Desde PHASE-6.1, las apps tienen una **shell de módulos**: web bajo
-  `apps/web/app/(app)/<module-id>/...` y mobile bajo
-  `apps/mobile/app/(modules)/<module-id>/...`. Sólo `personal-finance`
-  está activo; el registro `MODULES` en `@crisol/types/registry/modules.ts`
-  declara el resto como `enabled: false`. Settings sigue cross-cutting
-  (`apps/web/app/(app)/settings/`).
+- `packages/ui` sigue **sin componentes** React ([ADR-0001](decisions/0001-ui-tokens-only.md)):
+  los componentes viven en cada app. Lo que SÍ contiene, además de tokens y
+  formatters, es la **lógica pura de presentación** que las dos apps
+  comparten: qué filas pinta una matriz, en qué orden, con qué rótulo y qué
+  texto explicativo (`investment-*.ts`, `cycle-copy.ts`, `deferred-copy.ts`,
+  `breakdown-structure.ts`…). Es deliberado: una lista de «qué se muestra»
+  diverge entre web y móvil igual que una fórmula (lección PHASE-44.13).
+- `packages/utils`, `packages/hooks`, `packages/features` y `packages/config`
+  de la spec original **no existen**: las apps no los han necesitado.
+- **Shell de módulos** (desde PHASE-6.1): el registro `MODULES` en
+  `packages/types/src/registry/modules.ts` declara `dashboard`,
+  `personal-finance`, `debt` e `investments` como activos. Settings es
+  transversal (`apps/web/app/(app)/settings/`, incluye el ciclo del usuario).
+- Los filtros de las pantallas web viajan en la URL (PHASE-27); el informe de
+  Inversión también (`?tab=`, `?run=`, `?print=1`).
 
 Reglas de imports vigentes:
 
 ```
 types     →  (sin deps internas)
-ui        →  (sin deps internas — solo tokens y funciones puras)
+ui        →  (sin deps internas — tokens y funciones puras)
 services  →  types
 store     →  types
 apps/*    →  cualquier package
@@ -167,31 +191,43 @@ apps/*    →  cualquier package
 
 Hay dos niveles:
 
-1. **Módulos de dominio** (`personal_finance/`, en el futuro `crypto/`,
-   `inversiones/`, `inmuebles/`…). Cada uno agrupa los sub-features que
-   pertenecen a esa "cartera". Son **sumar carpetas** — el MVP entrega
-   sólo `personal_finance/`.
-2. **Módulos transversales** (`auth/`, `users/`, `ai/`, `currency/`).
+1. **Módulos de dominio**: `personal_finance/` e `investment/`. Cada uno
+   agrupa los sub-features de su «cartera». **No se importan entre sí** —
+   comparten vía `core/` o vía los transversales.
+2. **Módulos transversales**: `auth/`, `users/`, `ai/`, `currency/`.
    Servicios de infraestructura que cualquier módulo de dominio puede usar,
    **siempre a través de su `service.py`** (nunca importando sus `models`
-   ni sus clientes HTTP).
+   ni sus clientes HTTP). Consumir `currency.service` desde un módulo de
+   dominio es lo esperado, no una excepción ([ADR-0009](decisions/0009-single-fx-source-currency-transversal.md)).
 
 ```
 backend/app/modules/
-├── auth/                    # cross-cutting
-├── users/                   # cross-cutting
-├── ai/                      # cross-cutting (cliente Ollama, prompts)
-├── currency/                # cross-cutting (tipos de cambio BCE —
-│                            #   `exchange_rates` es la ÚNICA fuente de
-│                            #   tipos de la app, ADR-0009)
-├── investment/              # módulo de dominio
-└── personal_finance/        # módulo de dominio
-    ├── __init__.py
-    ├── categories/
-    ├── transactions/
-    ├── dashboard/
-    ├── imports/
-    └── receipts/
+├── auth/  (+ webauthn/)         # JWT + refresh rotado + passkeys + rate limit
+├── users/                       # perfil y preferencias (cycle_start_day)
+├── ai/                          # cliente Ollama, prompts, extract_receipt, extract_bank_statement_page
+├── currency/                    # BCE vía Frankfurter → exchange_rates (ÚNICA fuente de FX) + cron estricto
+├── personal_finance/
+│   ├── accounts/                # cuentas, saldos, ancla del extracto, position_history
+│   ├── transactions/            # CRUD, papelera, flow, import_hash, recategorización
+│   ├── transfers/               # pares, link/unlink, from-source/from-debt, classify_import_flow
+│   ├── imports/                 # parsers CSV/XLSX/PDF, fingerprint de cabecera, preview → confirm
+│   ├── receipts/                # tickets: MinIO → ai → confirmación
+│   ├── categories/ · category_rules/ · bank_mappings/ · categorization.py
+│   ├── budgets/ · fixed_expenses/
+│   ├── debt/                    # health · history · amortization · installments · reconciliation · deferral · attribution
+│   ├── dashboard/ · analytics/  # balance vs cuenta de resultados (ADR-0006)
+│   ├── seed/                    # categorías + reglas de bancos ES
+│   └── user_month.py            # «qué es un mes para este usuario» (PHASE-48)
+└── investment/
+    ├── catalog/                 # securities, venues (MIC), capabilities, buscador en 3 capas, directorio FIRDS
+    ├── fundamentals/ (adapters/)# EDGAR → 49 partidas canónicas, reexpresiones
+    ├── analysis/
+    │   ├── engine/              # PURO: 6 capas + valuation + catálogo + glosario + sector_profiles + version
+    │   ├── presentation/        # PURO: distancia, orden, evidencia, narrativa, diff, rehydrate
+    │   └── service/repository/router
+    ├── thresholds/              # seed convergente de bandas por sector × norma
+    ├── portfolio/               # lotes, FIFO, dividendos, acciones corporativas, resumen en EUR
+    └── pricing/ (adapters/)     # yfinance (default) · finnhub
 ```
 
 Cada sub-módulo sigue siempre la misma estructura interna:
@@ -207,31 +243,44 @@ Cada sub-módulo sigue siempre la misma estructura interna:
 ```
 
 **Reglas no negociables**:
-- Los sub-módulos dentro de `personal_finance/` pueden importar entre sí
-  por ser parte del mismo dominio (`transactions` enlaza `categories`).
-  **Distintos módulos de dominio** (`personal_finance` ↔ `investment`) no se
-  importan entre sí — comparten vía core o eventos. Esta regla **no** aplica a
-  los transversales: consumir `currency.service` desde un módulo de dominio es
-  lo esperado, no una excepción ([ADR-0009](decisions/0009-single-fx-source-currency-transversal.md)).
+
+- Los sub-módulos dentro de `personal_finance/` pueden importar entre sí por
+  ser parte del mismo dominio. Los seis sub-módulos de deuda viven en `debt/`
+  desde PHASE-47.A y un test de capas por AST impide que el ciclo
+  `accounts ↔ debt` vuelva; las URLs `/accounts/debt-*` se conservan por
+  contrato.
 - `repository.py` **nunca** usa string interpolation en SQL — siempre bind params.
 - `service.py` recibe `db` y `user_id` como parámetros, nunca accede al `Request`.
 - Todas las queries de dominio filtran por `user_id`.
 - `Decimal` para todo importe monetario. `float` está prohibido.
+- El `engine/` de Inversión es **puro**: sin BD, red ni reloj (test por AST).
+  Toda la impureza vive en los `service.py`.
 
-### Módulos del MVP
+### Módulos y responsabilidades
 
-| Módulo                            | Estado | Responsabilidad                                                |
-|-----------------------------------|--------|----------------------------------------------------------------|
-| `users`                           | ✅     | CRUD de usuarios, perfil                                       |
-| `auth`                            | ✅     | Registro, login, refresh token con rotación, logout, `/me`, "Recordarme 30 días" |
-| `auth.webauthn`                   | ✅     | Passkeys (Touch ID / Windows Hello / llaves físicas) — registro y login sin password |
-| `ai`                              | ✅     | Cliente Ollama + `/ai/health` + extract_receipt + extract_bank_statement_page |
-| `currency`                        | ✅     | Tipos de cambio del BCE (vía Frankfurter) + cron nocturno. **Única fuente de tipos de la app** ([ADR-0009](decisions/0009-single-fx-source-currency-transversal.md)); se consume por `currency.service` |
-| `personal_finance.categories`     | ✅     | Categorías de gasto/ingreso por usuario                        |
-| `personal_finance.transactions`   | ✅     | CRUD de transacciones, filtros, aislamiento, `import_hash`     |
-| `personal_finance.dashboard`      | ✅     | Agregaciones y KPIs (read-only sobre transactions/categories)  |
-| `personal_finance.imports`        | ✅     | Importación CSV/XLSX/PDF con dedup por hash, jobs auditables   |
-| `personal_finance.receipts`       | ✅     | Pipeline de tickets: upload → ai → confirmación → persistencia |
+| Módulo                          | Responsabilidad                                                                                                                                       |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `users`                         | Perfil y preferencias; `cycle_start_day` redefine «mes» y «año» en toda la app (PHASE-48)                                                              |
+| `auth` · `auth.webauthn`        | Registro, login, refresh con rotación por familia, logout, «recordarme 30 días», passkeys, rate limit en login                                          |
+| `ai`                            | Cliente Ollama, `/ai/health`, extracción de ticket y de página de extracto bancario; sugerencia de categoría (PHASE-20)                                 |
+| `currency`                      | Tipos del BCE, cron nocturno estricto, `convert` con exclusión estándar cuando falta tasa. Única fuente de FX (ADR-0009)                                |
+| `personal_finance.accounts`     | Cuentas activo/pasivo, saldos derivados de `flow`, ancla del extracto, patrimonio a fecha, `settlement_account_id`, `counts_as_debt`                    |
+| `personal_finance.transactions` | CRUD, filtros por URL, papelera atómica del par, `flow` + `flow_declared_at`, `is_exceptional`, recategorización en bloque                              |
+| `personal_finance.transfers`    | Pares internos, dirección explícita, `classify_import_flow` (texto + signo + categoría + cadena de saldos), conversión a deuda                          |
+| `personal_finance.imports`      | CSV/XLSX/PDF con smart-parsers por rol, dedup por hash civil, guardarraíl de cuenta equivocada (409), auto-anclaje, declaraciones que sobreviven        |
+| `personal_finance.receipts`     | Ticket → MinIO → visión → confirmación → una transacción                                                                                                |
+| `personal_finance.categories` + rules + mappings | kind · role · is_transfer · expense_nature; motor de reglas + seed ES + autoaprendizaje (salta conceptos de dirección ambigua)         |
+| `personal_finance.budgets`      | Presupuesto mensual por categoría en el mes del usuario; cross-currency opt-in; avisos proactivos                                                       |
+| `personal_finance.fixed_expenses` | Detector de recurrentes, pausa/cancela, auto-post, reconciliación con `expected`                                                                     |
+| `personal_finance.debt`         | Cuadro francés persistido, «el cuadro manda» (MUX), reconciliación desde el extracto, recibo aplazado, atribución de cargos, DTI con bandas BdE         |
+| `personal_finance.dashboard`    | Balance/stocks: patrimonio, serie histórica, tarjetas de módulo (ADR-0006)                                                                             |
+| `personal_finance.analytics`    | Cuenta de resultados/flujos: estructural vs puntual, tasa de ahorro dual, proyección de fin de mes, runway, insights, top movimientos con signo         |
+| `investment.catalog`            | Identidad sobre registros oficiales (EDGAR + FIRDS, ADR-0008/0010), buscador local-first en tres capas, analizabilidad con motivo                       |
+| `investment.fundamentals`       | Ingesta EDGAR por job síncrono, 49 partidas canónicas, corrección de escala con testigo, reexpresiones                                                  |
+| `investment.analysis`           | Motor de 6 capas + valoración, `AnalysisRun` inmutable con cortes efectivos, presentación (narrativa en servidor, diff, tolerancia a runs viejos)        |
+| `investment.thresholds`         | Bandas por sector × norma; seed convergente; `applies` y `model_variant`                                                                                |
+| `investment.portfolio`          | Lotes, ventas FIFO, dividendos, acciones corporativas auditadas, resumen en divisa nativa y EUR                                                          |
+| `investment.pricing`            | Cotizaciones por lote con TTL; la divisa la declara el proveedor                                                                                        |
 
 ---
 
@@ -239,25 +288,26 @@ Cada sub-módulo sigue siempre la misma estructura interna:
 
 - **JWT propio**:
   - Access token: 15 min, en memoria (frontend) / Authorization header.
-  - Refresh token: 7 días, rotación en cada uso (revocación marcada en BD).
+  - Refresh token: 7 días (30 con «recordarme»), rotación en cada uso con
+    familia identificable (`refresh_tokens.token_id` / `family_id`).
 - **Storage de refresh token**:
-  - Web: cookie `httpOnly` `SameSite=Lax` (`Secure` configurable, off
-    en dev HTTP). Same-origin garantizado vía Next.js rewrites
-    (`/api/*` → backend). XSS no puede leerla.
-  - Mobile: `expo-secure-store`. El backend acepta el refresh tanto en
-    cookie (web) como en body (mobile); si llegan ambos, gana la
-    cookie.
+  - Web: cookie `httpOnly` `SameSite=Lax` con `Path=/` (`Secure`
+    configurable, off en dev HTTP). Same-origin garantizado vía Next.js
+    rewrites (`/api/*` → backend). XSS no puede leerla.
+  - Mobile: `expo-secure-store`. El backend acepta el refresh tanto en cookie
+    (web) como en body (mobile); si llegan ambos, gana la cookie.
+- **Passkeys** (WebAuthn): registro y login sin contraseña.
 - **Password hashing**: argon2id (`argon2-cffi`).
-- **Rate limiting**: futuro. No bloqueante para MVP.
+- **Rate limiting**: en login (`core/rate_limit.py`).
 - **CORS**: estricto por entorno (`settings.cors_origins_list`).
 - **Headers de seguridad**: CSP, HSTS, X-Frame-Options pendientes
-  (Next.js middleware + reverse proxy en despliegue).
+  (reverse proxy en despliegue).
+- Auditoría completa de seguridad y remediación en
+  [`audits/2026-05-30-full-app-audit.md`](audits/2026-05-30-full-app-audit.md).
 
 ---
 
 ## 8. Flujo de IA — extracción de ticket
-
-Este es el flujo diferenciador del MVP.
 
 ```
  ┌──────────┐   1. subir imagen   ┌──────────────┐
@@ -279,7 +329,7 @@ Este es el flujo diferenciador del MVP.
       │                             ┌──────────┐
       │                             │  Ollama  │
       │                             │ qwen2.5  │
-      │                             │  -vl:7b  │
+      │                             │   -vl    │
       │                             └─────┬────┘
       │                                   │ 5. JSON con líneas
       │                                   ▼
@@ -293,61 +343,98 @@ Este es el flujo diferenciador del MVP.
              │ 7. usuario edita y confirma
              ▼
       ┌──────────────┐
-      │ transactions │  ← se crean las transacciones
+      │ transactions │  ← se crea UNA transacción con el total (line_items se persisten, no se materializan)
       └──────────────┘
 ```
 
 **Invariantes**:
+
 1. La imagen nunca sale del equipo.
 2. Ninguna transacción se crea sin confirmación explícita del usuario.
 3. El estado `Receipt` (`pending | confirmed | rejected`) es auditable.
 4. Si Ollama no responde, la extracción devuelve un error claro y el usuario
    puede añadir el ticket manualmente.
 
-Las reglas de implementación del módulo `ai/` se detallarán en una skill
-`local-ai-integration` que se creará en PHASE-5.1 junto con el código.
+El mismo módulo ofrece `extract_bank_statement_page` (fallback de visión para
+PDFs sin texto) y la sugerencia de categoría del motor de reglas (PHASE-20).
+Sólo `backend/app/modules/ai/` importa el cliente HTTP de Ollama; el resto
+consume `ai.service.<función>` y recibe tipos del dominio. No hay una skill
+aparte: las reglas están en la sección «IA local» de [CLAUDE.md](../CLAUDE.md).
 
 ---
 
-## 9. Modelo de datos (MVP)
+## 9. Modelo de datos
 
 Convenciones:
-- Todas las tablas tienen `id UUID PRIMARY KEY`, `created_at`, `updated_at`.
-- Todas las tablas de dominio tienen `user_id UUID NOT NULL` con FK a `users`.
+
+- `id UUID PRIMARY KEY`, `created_at`, `updated_at` en las tablas mutables.
+- Toda tabla de dominio tiene `user_id UUID NOT NULL` con FK a `users`
+  (`ON DELETE CASCADE`), **salvo las tablas globales del módulo Inversión**
+  (`securities`, `financial_statements`, `restatement_flags`,
+  `scoring_thresholds`, `price_quotes`, `listing_directory`) y
+  `exchange_rates` — datos objetivos que no pertenecen a nadie
+  ([ADR-0007](decisions/0007-investment-global-tables.md)).
 - Importes en `NUMERIC(14, 2)` (Decimal, nunca float).
-- Fechas en `TIMESTAMPTZ`.
-- FK con `ON DELETE CASCADE` en relaciones hijas del usuario.
+- Fechas en `TIMESTAMPTZ`; **las fechas civiles (extracto) se anclan en UTC
+  en la frontera de entrada** (`core/civil_dates.py`, PHASE-47.J).
+- Migraciones aditivas y reversibles; un backfill reproduce el comportamiento
+  previo, nunca corrige datos (la corrección va en `backend/scripts/` con
+  `--dry-run`, lección PHASE-34).
 
-### Entidades
+Detalle completo, migración a migración y columna a columna, en
+[`data-model/schema.md`](data-model/schema.md). El head de Alembic se consulta
+con `alembic heads`, nunca se escribe en un documento.
 
-Estado actual del schema documentado en detalle en
-[`data-model/schema.md`](data-model/schema.md). Tablas implementadas:
-
-```
-users               (PHASE-1.1) ✅
-refresh_tokens      (PHASE-1.1) ✅
-categories          (PHASE-2.1) ✅
-transactions        (PHASE-2.1, PHASE-4.1: + import_hash) ✅
-import_jobs         (PHASE-4.1) ✅
-receipts            (PHASE-5.1) ✅
-```
-
-Resumen rápido:
+Resumen relacional (Finanzas domésticas):
 
 ```
-users ─┬─< refresh_tokens
-       ├─< categories ──┐
-       ├─< transactions ┘   (category_id ON DELETE SET NULL)
-       ├─< import_jobs
-       └─< receipts ───┐
-                       │
-                       └─→ transactions   (receipts.transaction_id ON DELETE SET NULL)
-
-transactions.import_hash → unique partial index (user_id, import_hash)
-                           para deduplicar imports sin afectar a manual.
-transactions.receipt_id  → UUID sin FK formal; consistencia mantenida
-                           por receipts.service.confirm_receipt.
+users ─┬─< accounts ──────────┬─< transactions ──┬─ transfer_pair_id → transactions (par interno)
+       │   ├─ parent_account_id (compra a plazos bajo tarjeta)      ├─ amortization_source_id → transactions (cargo que amortiza)
+       │   ├─ settlement_account_id (activo que cobra el pasivo)    ├─ deferred_by_account_id → accounts (recibo aplazado)
+       │   └─< liability_installments (cuadro de amortización)      └─ category_id → categories (SET NULL)
+       ├─< categories (kind · role · is_transfer · expense_nature)
+       ├─< category_rules · bank_category_mappings
+       ├─< budgets · fixed_expenses
+       ├─< import_jobs (header_fingerprint, preview_payload)
+       ├─< receipts ─→ transactions
+       └─< refresh_tokens · webauthn_credentials
 ```
+
+Resumen relacional (Inversión):
+
+```
+securities (GLOBAL) ─┬─< financial_statements (GLOBAL, por ejercicio y filing, is_latest_view)
+                     ├─< restatement_flags (GLOBAL)
+                     ├─< price_quotes (GLOBAL, TTL)
+                     ├─< ingestion_jobs (user)
+                     ├─< analysis_runs (user; JSONB: scores_detail · dividend_analysis · evolution · flags · verdict · thresholds_used)
+                     └─< inv_lots ─< inv_sale_allocations >─ inv_sales   (user; posición = lotes − allocations)
+                          inv_dividends_received · inv_corporate_actions ─< inv_lot_adjustments
+scoring_thresholds (GLOBAL: sector × norma × métrica) · listing_directory (GLOBAL: FIRDS, PK (isin, mic))
+```
+
+### 9.1 Invariantes del dominio (los que gobiernan cualquier cambio)
+
+| Invariante                                                                                                     | Fase / ADR    |
+| -------------------------------------------------------------------------------------------------------------- | ------------- |
+| La dirección y la transfer-ness del dinero están en `transactions.flow`; saldo = Σ signo(`flow`, `nature`); la categoría es descriptiva | 34 · ADR-0004 |
+| Una transferencia interna no es ingreso ni gasto; sus dos patas se borran y restauran juntas                    | 21.3 · 41     |
+| El extracto manda: la cadena de saldos gobierna la dirección; la convención de signos es del fichero, no de la fila | 46 · 47.G     |
+| `anchored_statement_balance` es un testigo externo: se re-deriva `opening_balance` y se audita (`make audit-balances`) | 39 · 47.G     |
+| Una declaración manual de dirección lleva firma (`flow_declared_at`) y sobrevive a la reimportación             | 47.I          |
+| Una fecha de extracto es civil: se ancla en UTC; el `import_hash` se calcula sin zona                            | 47.J          |
+| Una devolución es gasto negativo, no ingreso; el neto no se mueve                                               | 47.H          |
+| Dashboard = balance (stocks) · Análisis = cuenta de resultados (flujos)                                         | 43 · ADR-0006 |
+| Estructural vs puntual: `tx.is_exceptional` > `category.expense_nature` > heurística                            | 37.3 · 43.2   |
+| El saldo vivo de una deuda con cuadro sale del cuadro (MUX por pasivo, nunca suma de fuentes)                    | 36 · 45       |
+| La cuota de una compra a plazos es gasto de caja; la liquidación de tarjeta y la creación de deuda son neutras   | 38 · 47.F     |
+| Una compra aplazada sale del resultado del mes (caja) y se queda en el desglose (gasto)                          | 47.E          |
+| El sistema propone la traducción movimiento→evento de deuda; el usuario declara                                 | ADR-0011      |
+| `cycle_start_day` REDEFINE el mes y el año del usuario en toda la app (no es un preset)                         | 48            |
+| `exchange_rates` es la única fuente de FX; sin tasa, exclusión con motivo, nunca estimación                      | ADR-0009      |
+| El engine de Inversión es puro; el run es inmutable y lleva sus cortes efectivos; el tipo del run es la unión de versiones | 44.2 · 44.9 · 44.16 |
+| Identidad de valores sólo sobre registros oficiales; precios sobre capas tolerantes                              | ADR-0008 · 0010 |
+| Una definición de métrica vive junto a la fórmula y viaja por el catálogo; nunca se escribe en la pantalla       | 44.23 · 44.24 |
 
 ---
 
@@ -380,26 +467,34 @@ volumes:
   ollamadata:
 ```
 
-El backend corre en el host durante desarrollo. En despliegue futuro se añade
-un servicio `app` al compose con su Dockerfile.
+El backend corre en el host durante desarrollo (`dev.ps1` en Windows; `make
+dev-backend` en otros). Los tests de backend usan `crisol_test` en el mismo
+Postgres — **una sola base compartida**, por lo que nunca se lanzan dos suites
+a la vez.
 
 ---
 
 ## 11. Estrategia de despliegue futuro
 
-No bloqueante para MVP. La arquitectura permite:
-- Despliegue en VPS con el mismo `docker-compose.yml` + reverse proxy (Caddy/Traefik).
-- Build de frontend web estático desde `apps/web`.
+No bloqueante. La arquitectura permite:
+
+- Despliegue en VPS con el mismo `docker-compose.yml` + reverse proxy (Caddy/Traefik)
+  añadiendo un servicio `app` con su Dockerfile (no existe todavía).
+- Build de frontend web desde `apps/web` (CI ya lo compila).
 - Móvil: distribución por EAS Build (Expo).
 - Ollama puede ejecutarse en el mismo host si tiene GPU, o en host separado.
 
-Decisiones formales de despliegue irán a `internal_docs/decisions/` cuando toque.
+Antes de cualquier despliegue: reset de contraseña, headers de seguridad y
+secreto JWT de producción (ver `backlog.md`).
 
 ---
 
 ## 12. Referencias
 
+- [PROJECT-GUIDE.md](PROJECT-GUIDE.md) — guía maestra para entender y continuar el proyecto
+- [HANDOFF.md](HANDOFF.md) — estado de hoy
 - [CLAUDE.md](../CLAUDE.md) — reglas de código obligatorias
-- [development-spec.md](development-spec.md) — fases y metodología
-- [README.md](README.md) — estado actual
+- [development-spec.md](development-spec.md) — metodología y plantilla de fase
+- [README.md](README.md) — índice y tabla de fases
+- [decisions/](decisions/) — ADRs 0001-0011
 - [frontend-best-practices/](../.claude/skills/frontend-best-practices/) — convenciones frontend

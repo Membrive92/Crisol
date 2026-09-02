@@ -2175,10 +2175,6 @@ devuelven — aquí las dos devuelven `(date, date)` y el compilador no puede
 ayudar. La señal de que hay dos preguntas: si con el caso degenerado (día 1)
 ambas dan lo mismo, es que llevaban años siendo la misma por accidente.
 
----
-
-## Ejemplos de referencia (no son lecciones reales)
-
 ### [PHASE-44.25] Una pantalla que no puede afirmar algo lo DICE; inferirlo de un texto no es frágil, es que AFIRMA comprobaciones que nadie hizo
 
 **Error:** la checklist del veredicto derivaba el estado de cada condición del
@@ -2231,21 +2227,6 @@ contraria. Corolario de redacción cazado por un golden: «Puntuaron {n} señale
 con n=1 produce «1 señales», y el gate que prohíbe dígitos en las plantillas
 impide arreglarlo escribiendo el singular — la salida es una frase que no
 necesite concordar («Señales que puntúan: …»).
-
-### [Ejemplo] No usar float para importes monetarios
-
-**Error:** Se usó `float` para almacenar precios.
-**Causa:** Inercia — float es el default numérico en Python.
-**Solución:** Cambiar a `Decimal(14,2)` en el modelo y `NUMERIC` en PostgreSQL.
-**Regla:** SIEMPRE usar `Decimal` para cualquier dato monetario. NUNCA `float`.
-
-### [Ejemplo] Query sin filtro de user_id
-
-**Error:** Un endpoint devolvía transacciones de todos los usuarios.
-**Causa:** Se olvidó añadir `.where(Transaction.user_id == user_id)` en el repo.
-**Solución:** Añadir filtro y test que verifica aislamiento entre usuarios.
-**Regla:** TODA query a tablas de dominio DEBE filtrar por `user_id`.
-Añadir test de aislamiento multi-usuario.
 
 ### [PHASE-44.24] Una definición vive junto a la fórmula, y el gate se escribe en las DOS direcciones
 **Error (evitado por diseño):** el informe pinta 64 métricas, 49 partidas y 8
@@ -2555,3 +2536,180 @@ sí puede fallar sola.
 Pregúntate qué otro fichero tiene que estar de acuerdo con éste, y escribe el
 test donde puedas leer los dos. Si los dos lados están en repos o lenguajes
 distintos, el gate va en el que tiene las claves REALES, no en el que las cita.
+
+### [PHASE-44.28] La DIRECCIÓN escrita dentro de una plantilla es una afirmación que acierta o miente según la empresa — la atribución se calcula
+
+**Error:** el mockup del informe anual, aprobado por el usuario como contrato de
+aceptación, decía de PepsiCo: «deuda neta/EBITDA sale del verde… **no por más
+deuda, sino por menos beneficio**». Recomputado con la fórmula exacta del motor:
+la deuda neta **sube un 13,2 %** (35.040 → 39.652 M$) y el EBITDA cae un 6,8 %.
+Es al revés, y además la deuda pesa más — 64 % del deterioro por log-share.
+**Causa:** escribir el «porqué» como PROSA. Un cociente puede empeorar por el
+numerador, por el denominador o por los dos, y cada empresa lo hace de una
+manera; una plantilla que lleva la dirección dentro es correcta para el caso que
+tenías delante al redactarla y falsa para el siguiente. El error entró por la
+vía más peligrosa: viendo el S4 subir y el beneficio caer, la frase «es por el
+beneficio» **suena** verdadera, y nadie divide.
+**Agravante que casi lo salva:** la fila estaba marcada con un «✓» en la columna
+«Verificada en PEP». Un ✓ no distingue «lo comprobé» de «me lo creí» — y ahí es
+donde se escondió.
+**Solución:** la atribución se **CALCULA** (reparto log-share entre los dos
+factores entre t−1 y t) y la plantilla sólo tiene el hueco. Y la columna de
+verificación pasa a llevar los NÚMEROS, no una marca.
+**Regla:** en una capa narrativa sin LLM, toda relación causal entre dos
+magnitudes se compone desde una identidad aritmética **evaluada en tiempo de
+ejecución**, nunca desde una dirección redactada. Si no puedes escribir el gate
+numérico que reproduce el efecto, no tienes un mecanismo: tienes una corazonada
+bien escrita. Corolario de método: sustituye todo «✓» de una tabla de
+verificación por el valor medido — la marca es indistinguible de la fe.
+
+### [PHASE-44.28] Endurecer UNA de dos condiciones unidas por O deja la O viva por el otro lado, y ningún dato real lo enseña
+
+**Error (evitado en revisión):** la decisión del usuario era que el sello
+«Evitar» por insolvencia exigiera que **los dos** modelos coincidieran. El plan
+la implementaba endureciendo `avoid_bankruptcy` (Zmijewski). Pero
+`SAFETY_MATRIX` declara DOS condiciones independientes —`avoid_insolvency` por
+Altman y `avoid_bankruptcy` por Zmijewski— y el sello se decide con
+`if avoid_reasons:`, o sea **basta una**. Con el cambio, una empresa con Altman
+rojo y Zmijewski verde habría seguido saliendo «Evitar» por un solo modelo:
+exactamente lo que la decisión declara imposible.
+**Causa:** confundir la condición que uno está mirando con la propiedad que se
+quiere garantizar. La propiedad era «ningún modelo decide solo»; el cambio
+afectaba a un modelo.
+**Y los tres tests propuestos eran ciegos:** las dos empresas de la BD (PEP y
+MCD) tienen `z_score` verde y `FZ` rojo los cinco ejercicios, así que ambas
+bajan por la MISMA rama; el sintético con los dos rojos da «Evitar» se toque o
+no la otra condición. **El único caso que distingue «fusiono las dos» de
+«endurezco una» —`z_score` rojo con `FZ` verde— no existía en ningún dato.**
+**Solución:** fusionar las dos en una condición con dos `signal_keys`, y añadir
+el test sintético que ejercita la rama que ningún dato real cubre, verificándolo
+restaurando la condición vieja.
+**Regla:** cuando una decisión sea sobre una PROPIEDAD del agregado («ninguno
+decide solo», «hacen falta dos»), enumera todas las condiciones que pueden
+producir ese resultado antes de tocar una. Y comprueba si tus fixtures reales
+ejercitan cada rama: si todas caen por el mismo camino, tu suite no puede
+distinguir el arreglo correcto del incompleto, por muchos tests que tenga.
+
+### [PHASE-44.28] `0 < 0` es falso, así que una racha de «no ha bajado» premia a quien nunca ha subido
+
+**Error:** ejecutando el motor con `dividends_paid = 0` los cinco ejercicios
+—una empresa que no reparte dividendo— la pregunta «¿el dividendo cabe en la
+caja?» sale **verde y auditada**, D1/D2/D4/D5/D8 y T3 salen `ok`/`healthy` con
+valor 0, y `trajectory.streak_no_cut` vale **4**: cuatro años consecutivos sin
+recortar el dividendo, de una empresa que jamás ha pagado uno. La causa es
+literal: `compute_streak_no_cut` compara `current < previous` y `0 < 0` es
+falso.
+**Causa:** una racha definida por NEGACIÓN («no ha bajado») cuenta como éxito la
+ausencia del hecho. Y los ceros de un cociente con numerador cero son
+indistinguibles, para el semáforo, de un payout excelente.
+**Solución:** un predicado explícito `pays_dividend` derivado de la serie de DPS
+—nunca de `dividend_verdict == 'not_applicable'`, que colapsa «financiera» y «no
+reparte»—, que gobierna si la sección se compone, si sus métricas entran
+siquiera en el grupo de verdes, y si la racha se puede citar.
+**Regla:** toda métrica definida como «no ha ocurrido lo malo» necesita una
+precondición de que lo bueno EXISTE. Antes de dar por buena una racha, un
+mínimo, un «sin incidencias», pregúntate qué devuelve con la serie vacía o a
+cero — y si la respuesta es el mismo valor que con una serie ejemplar, la
+métrica no mide lo que dice. Es la familia de [PHASE-44.17] (el default
+optimista tapa el tercer estado) aplicada al caso degenerado.
+
+### [PHASE-44.28] Un ajuste sectorial que alcanza a media familia de métricas deja a la otra media en verde con el denominador negativo
+
+**Error:** en Realty Income (socimi), `D4` (payout ajustado por SBC) sale
+**−427,1 %** y `D5` (retorno total sobre caja libre) **−447,2 %**, y **las dos
+en VERDE**. El motor sustituye la base repartible por FFO cuando el emisor es
+una socimi —correcto, porque la amortización del inmueble no refleja deterioro
+económico—, pero ese ajuste alcanza a D1/D2/D3/D8 y **no** a D4/D5, que siguen
+dividiendo por `fcf` crudo. Con caja libre negativa, un cociente negativo pasa
+el corte «menor que» y el semáforo lo pinta sano.
+**Causa:** una excepción sectorial aplicada métrica a métrica en vez de a la
+familia. Nada obliga a que las métricas que comparten denominador compartan
+también su ajuste, así que la coherencia depende de que quien lo escribió las
+enumerara todas.
+**Solución:** una guarda TRANSVERSAL por el **signo del denominador**, no por la
+etiqueta del sector: todo cociente con denominador ≤ 0 se declara «no
+interpretable», sin banda y fuera del grupo de verdes, **aunque el motor le haya
+puesto `healthy`**. Una guarda `not_reit` habría arreglado este caso y ninguno
+de los otros.
+**Regla:** cuando apliques una excepción a un subconjunto de métricas que
+comparten fórmula, enumera la familia por su DENOMINADOR y comprueba que ninguna
+se queda fuera. Y para el modo de fallo que eso deja abierto, la guarda correcta
+es sobre la aritmética (el signo, el cero) y no sobre la condición que lo
+provocó: la primera cubre los casos que no imaginaste. Corolario: un valor
+negativo que pasa un corte «menor que» es verde por accidente, no por mérito —
+todo corte unidireccional necesita saber qué hace con el otro lado del cero.
+
+### [PHASE-44.28] Un contrato de ESTILO se lee como contrato de COBERTURA en cuanto lleva la palabra «aprobado»
+
+**Error:** el mockup del informe, aprobado por el usuario y declarado «contrato
+de aceptación», nombra 11 métricas. La regla de cobertura del mismo plan obliga
+a **24** sobre ese run. Dos de las trece ausentes eran materiales: una métrica en
+rojo los cinco ejercicios en la sección que habla de su tema, y otra que salta de
+2,4 % a 19,4 % en la sección que narra la calidad del ejercicio. Un implementador
+que tomara el mockup como vara habría escrito un compositor que incumple el gate
+desde el primer commit — o, peor, habría relajado el gate para que el mockup
+pasara.
+**Segundo defecto, en el mecanismo:** el gate comparaba **etiquetas** del
+catálogo contra el texto. El mockup escribe «el pasivo pesa el 81 % del activo»
+donde la etiqueta es «Apalancamiento» — o sea que **el gate literal falla sobre
+el propio texto aprobado**, y penaliza la buena redacción.
+**Solución:** decir en el plan que el mockup es la vara de ESTILO y no de
+cobertura, con el recuento medido de la diferencia; anclar el gate en la CLAVE
+(cada sección emite sus `covered_keys`) y no en la etiqueta; y acotar la
+obligación con **familias de redundancia** —tres métricas que el propio motor
+declara traducción una de otra cuentan como una—, que baja el listón de 24 a 16
+sin perder ningún hecho.
+**Regla:** cuando apruebes un ejemplo como referencia, escribe **de qué es vara**
+— estilo, cobertura, formato, todas — porque quien lo implemente asumirá que lo
+es de todo. Y mide la diferencia entre el ejemplo y la regla en el mismo
+documento: si no la mides, el implementador la descubre eligiendo cuál de las dos
+incumplir. Corolario de gates: un gate que busca ETIQUETAS dentro de prosa premia
+al que escribe como el catálogo y castiga al que escribe bien; ancla en
+identificadores y deja que la prosa sea prosa.
+
+### [PHASE-44.28] Una revisión que muere A MEDIAS es más peligrosa que una que muere entera
+
+**Error:** tres pasadas del mismo workflow de revisión. La primera devolvió
+`{"lentes":0,"brutos":0,"consolidado":null}` con los 5 agentes muertos por
+límite — indistinguible de una revisión limpia, y ya está escrito en
+[PHASE-44.14]. La segunda devolvió `{"lentes":1,"brutos":4}`: **cuatro hallazgos
+concretos, con citas, todos ciertos**. Esa es la trampa nueva — un resultado
+pequeño pero REAL invita a darlo por completo, porque tiene la forma de una
+revisión que fue y volvió. Sólo el bloque de fallos decía que 4 de 5 lentes no
+habían corrido. La tercera, con las tres que faltaban, encontró **41 hallazgos
+brutos y 16 confirmados, siete de ellos bloqueantes**, incluida una cifra
+invertida en el contrato de aceptación.
+**Causa:** el agregado (`filter(...).length`) no distingue «poco que reportar»
+de «poco ejecutado», y con resultados no vacíos la ambigüedad es más creíble.
+**Solución:** leer SIEMPRE el bloque de fallos antes que el resultado, y
+relanzar sólo lo muerto **con la lista de lo ya verificado dentro del prompt** —
+así los agentes nuevos no queman contexto repitiendo y atacan lo residual.
+**Regla:** de una herramienta de verificación, mira primero cuántas
+comprobaciones se ejecutaron y cuántas murieron; sólo después el veredicto. Y
+cuando una tanda muera a medias, **no aceptes la parte viva como la revisión**:
+reporta la cobertura junto al hallazgo y relanza el resto. «Cuatro hallazgos» y
+«cuatro hallazgos de una quinta parte del trabajo» son afirmaciones distintas, y
+la segunda es la única honesta.
+
+
+---
+
+## Ejemplos de referencia (no son lecciones reales)
+
+> Dos entradas sintéticas que ilustran el formato. Todas las demás lecciones
+> de este fichero son reales.
+
+### [Ejemplo] No usar float para importes monetarios
+
+**Error:** Se usó `float` para almacenar precios.
+**Causa:** Inercia — float es el default numérico en Python.
+**Solución:** Cambiar a `Decimal(14,2)` en el modelo y `NUMERIC` en PostgreSQL.
+**Regla:** SIEMPRE usar `Decimal` para cualquier dato monetario. NUNCA `float`.
+
+### [Ejemplo] Query sin filtro de user_id
+
+**Error:** Un endpoint devolvía transacciones de todos los usuarios.
+**Causa:** Se olvidó añadir `.where(Transaction.user_id == user_id)` en el repo.
+**Solución:** Añadir filtro y test que verifica aislamiento entre usuarios.
+**Regla:** TODA query a tablas de dominio DEBE filtrar por `user_id`.
+Añadir test de aislamiento multi-usuario.

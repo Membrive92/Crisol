@@ -6,8 +6,10 @@ para extracción automática de tickets mediante visión por computador.
 Web + móvil desde un monorepo. Todo local, sin dependencias de servicios
 externos: la privacidad de los datos financieros es un principio no negociable.
 
-> 🚧 En desarrollo activo — actualmente en fase de bootstrap.
-> Consulta [internal_docs/README.md](internal_docs/README.md) para el estado actual.
+> 🚧 En desarrollo activo (desde abril de 2026; ~50 fases entregadas).
+> Estado por fase en [internal_docs/README.md](internal_docs/README.md); dónde
+> estamos hoy en [internal_docs/HANDOFF.md](internal_docs/HANDOFF.md).
+> Si llegas sin contexto: [internal_docs/PROJECT-GUIDE.md](internal_docs/PROJECT-GUIDE.md).
 
 ---
 
@@ -49,6 +51,8 @@ docker exec -it crisol-ollama ollama pull qwen2.5-vl:7b
 
 # 5. Arrancar frontend y backend
 make dev
+# En Windows, mejor: .\dev.ps1 (levanta todo en ventanas separadas y deriva el
+# puerto del backend de apps/web/.env.local — ver internal_docs/PROJECT-GUIDE.md §2)
 ```
 
 Servicios disponibles:
@@ -82,6 +86,8 @@ make docker-down      # Parar servicios
 
 ## Documentación
 
+- [internal_docs/PROJECT-GUIDE.md](internal_docs/PROJECT-GUIDE.md) — guía maestra para entender y continuar el proyecto
+- [internal_docs/HANDOFF.md](internal_docs/HANDOFF.md) — dónde estamos hoy
 - [CLAUDE.md](CLAUDE.md) — reglas de código obligatorias
 - [CONTRIBUTING.md](CONTRIBUTING.md) — workflow de contribución
 - [internal_docs/README.md](internal_docs/README.md) — índice y estado de fases

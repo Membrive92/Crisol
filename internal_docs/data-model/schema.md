@@ -1,8 +1,10 @@
 # Schema de base de datos
 
 > Estado actual del modelo de datos. Se actualiza cuando una fase
-> introduce migraciones. Última actualización: `users.cycle_start_day`
-> (el mes lo define el usuario, entregable C1).
+> introduce migraciones. Última actualización: 2026-09-02 — puesta al día
+> contrastada con el ORM y con `alembic history`: entran las cinco migraciones
+> que faltaban en la tabla (PHASE-40, 43.2, 44.1, 44.6, 44.8) y las columnas
+> `accounts.counts_as_debt` y `categories.expense_nature`.
 >
 > Aquí NO se escribe cuál es el head de Alembic: se consulta con
 > `alembic heads`. El literal que había en esta cabecera llevaba muchas
@@ -62,6 +64,11 @@
 | `b5r81t3qo5s4r0` | AUDIT-2026-07 | `transactions.absorbed_as_mirror` (BOOLEAN NOT NULL DEFAULT FALSE) — cargo espejo absorbido. |
 | `c6s92u4rp6t5s1` | 37.3 | `transactions.is_exceptional` (BOOLEAN NULL) — override estructural/puntual. |
 | `d7t03v5sq7u6t2` | 39   | `transactions.statement_balance` (NUMERIC(14,2) NULL) + `accounts.anchored_statement_balance` (NUMERIC(14,2) NULL) — saldo del extracto por movimiento + ancla persistida del saldo real. |
+| `e8u14w6tr8v7u3` | 40   | `accounts.counts_as_debt` (BOOLEAN NOT NULL DEFAULT TRUE) — una tarjeta pagada íntegra cada mes sale del módulo de deuda (deuda viva, DTI, composición, historia) pero sigue en el patrimonio. Lo declara el usuario; la app no puede inferirlo. |
+| `f9v25x7us9w8v4` | 43.2 | `categories.expense_nature` + enum `expensenature` (`AUTO` / `STRUCTURAL` / `EXCEPTIONAL`) — override por categoría de la naturaleza estructural/puntual, segundo nivel de la cascada de ADR-0006 (`tx.is_exceptional` > `category.expense_nature` > heurística). Todas las filas arrancan en `AUTO`. |
+| `aa1b47c9d2e6f0` | 44.1 | Cimientos del módulo Inversión: 8 enums nativos + 13 tablas nuevas (catálogo, fundamentales, umbrales y precios GLOBALES — ADR-0007; cartera y análisis por usuario). Puramente aditiva; el downgrade elimina tablas y enums en orden inverso. |
+| `bb2c58d0e3f7a1` | 44.6 | `financial_statements.pretax_income` — la 49.ª partida canónica: el EBIT se deriva del resultado antes de impuestos REPORTADO porque `OperatingIncomeLoss` no es fiable en XBRL (JNJ dejó de publicarlo; los REIT no lo tienen). |
+| `cc3d69e1f4a8b2` | 44.8 | `securities.analysis_status` — la evidencia contada en la SEC de si un valor se puede analizar (`ok` / `no_annual` / `non_gaap`…). `cik IS NOT NULL` era un predicado falso: SPY tiene CIK y no presenta 10-K. |
 | `d4e15f9a3b7c62` | 44.9 | `analysis_runs.thresholds_used` (JSONB NOT NULL DEFAULT `'{}'`) — los cortes EFECTIVOS del run. Aditiva y reversible. |
 | `f2b84a6c1d9e73` | 44.14 | `listing_directory` (GLOBAL, PK `(isin, mic)`) + extensión `pg_trgm` + índice GIN sobre `name` — el directorio oficial UE/UK de FIRDS. Aditiva y reversible (el downgrade tira la tabla; la extensión se queda, porque desinstalarla en un downgrade parcial rompería a quien la use). |
 | `g3c95b7d2e8f41` | 44.21 | `scoring_thresholds.not_applicable_reason` (`TEXT NULL`). Aditiva y reversible. **Sin backfill**: las filas existentes quedan en `NULL` hasta que la sincronización del arranque las reescriba desde la calibración del engine — inventar aquí una razón para ~1.500 filas sería escribir a mano lo que el motor deriva. |
@@ -72,9 +79,9 @@
 | `l8h51g3c6d4f07` | C1 (ciclo del usuario) | `users.cycle_start_day` (`SMALLINT` NULL) + `CHECK (cycle_start_day BETWEEN 1 AND 28)`. Aditiva y reversible. **Sin backfill y sin default numérico**: `NULL` **es** el estado correcto de todo el mundo (mes natural), no un hueco por rellenar — un `1` por defecto afirmaría que el usuario declaró que su mes empieza el día 1 (lección PHASE-44.11). |
 | `m9i62h4d7e5g18` | 47 | `transactions.flow_declared_at` (`TIMESTAMPTZ` NULL) — firma de que la DIRECCIÓN la declaró el usuario, y cuándo. Aditiva y reversible. **Sin backfill**: `NULL` es el estado honesto de todo lo existente (de esas filas no consta declaración), y deducirla comparando con el clasificador de hoy es justo la conjetura que la columna existe para evitar. Consecuencia dicha en voz alta: las declaraciones anteriores a esta migración no llevan firma, así que una reimportación todavía se las llevaría; a partir de aquí, no. |
 
-> **Deuda documental**: las 14 tablas del módulo Inversión (13 de PHASE-44.1 más
-> `listing_directory` de 44.14) y las migraciones intermedias entre
-> `d7t03v5sq7u6t2` y `cc3d69e1f4a8b2` no están recogidas en esta tabla. Su modelo
+> **Deuda documental**: las columnas de las 14 tablas del módulo Inversión (13
+> de PHASE-44.1 más `listing_directory` de 44.14) no están desglosadas aquí — la
+> sección «Módulo Inversión» de abajo las resume. Su modelo completo
 > vive en las phase docs
 > ([44.1](../phases/phase-44.1-investment-foundations.md),
 > [44.14](../phases/phase-44.14-eu-uk-listing-directory.md)) y en los ADR
@@ -157,7 +164,7 @@ Challenge efímero de un flujo de registro/autenticación. Migraciones
 | `expires_at` | `TIMESTAMPTZ` | expiración. |
 | `created_at` | `TIMESTAMPTZ` | `now()`. |
 
-### `categories` (`PHASE-2.1`)
+### `categories` (`PHASE-2.1`, ampliada en `PHASE-23.1`, `PHASE-30.1`, `PHASE-43.2`)
 
 | Columna | Tipo | Notas |
 |---------|------|-------|
@@ -169,6 +176,7 @@ Challenge efímero de un flujo de registro/autenticación. Migraciones
 | `kind` | `ENUM('income','expense')` | tipo `categorykind`. |
 | `is_transfer` | `BOOLEAN` | NOT NULL, default `FALSE` (PHASE-23.1, migración `n1d25f7ba0e8d4`). TRUE = transferencia interna: fuera del cashflow pero conserva el signo del `kind` en el saldo (separa exclusión y signo — lección PHASE-23.1). |
 | `role` | `ENUM('GENERIC','TRANSFER','DEBT_PAYMENT','DEBT_INTEREST')` | tipo `categoryrole`, NOT NULL, default `GENERIC` (PHASE-30.1, migración `s6i70k2gf5j3h9`). Rol semántico; los callers de deuda filtran por `role IN (DEBT_PAYMENT, DEBT_INTEREST)`. Índice parcial `ix_categories_role_debt`. Backfill deriva de `is_transfer` + nombres del seed. |
+| `expense_nature` | `ENUM('AUTO','STRUCTURAL','EXCEPTIONAL')` | tipo `expensenature`, NOT NULL, default `AUTO` (PHASE-43.2, migración `f9v25x7us9w8v4`). Override manual de estructural/puntual por categoría; `AUTO` deja decidir a la heurística de recurrencia. Sólo tiene efecto en categorías de gasto. Precedencia (ADR-0006): `transactions.is_exceptional` > esto > heurística. |
 | `created_at` / `updated_at` | `TIMESTAMPTZ` | |
 
 ### `transactions` (`PHASE-2.1` + `PHASE-4.1` + `PHASE-10.1` + `PHASE-21.3` + `PHASE-34` + `PHASE-37.3` + `PHASE-39` + `PHASE-45`)
@@ -327,7 +335,7 @@ UNIQUE `(user_id, pattern, match_type, field, category_id)` — el
 mismo patrón puede mapear a categorías distintas si difiere algún
 otro campo, pero no se duplica la combinación exacta.
 
-### `accounts` (`PHASE-21.2`, ampliada en `PHASE-22`, `PHASE-24.2/24.3`, `PHASE-30.4`, `PHASE-32`, `PHASE-35`)
+### `accounts` (`PHASE-21.2`, ampliada en `PHASE-22`, `PHASE-24.2/24.3`, `PHASE-30.4`, `PHASE-32`, `PHASE-35`, `PHASE-39`, `PHASE-40`, `PHASE-47.A`)
 
 | Columna | Tipo | Notas |
 |---------|------|-------|
@@ -354,6 +362,7 @@ otro campo, pero no se duplica la combinación exacta.
 | `display_order` | `INTEGER` | default `0`. Orden en UI. |
 | `is_archived` | `BOOLEAN` | default `FALSE`. Si TRUE, oculta del selector pero conserva histórico. |
 | `is_default` | `BOOLEAN` | default `FALSE` (PHASE-32, migración `w0m25o7lk9n8m4`). Cuenta principal del usuario, pre-seleccionada en formularios. Única por usuario (la fuerza el service, sin constraint en BD). Su saldo refleja ahorro neto (ver excepción abajo). |
+| `counts_as_debt` | `BOOLEAN` NOT NULL | default `TRUE` (PHASE-40, migración `e8u14w6tr8v7u3`). `FALSE` = tarjeta que se paga íntegra cada mes: fuera del módulo de deuda (deuda viva, DTI, composición, historia, movimientos) pero dentro del patrimonio neto. Lo declara el usuario. |
 | `created_at`/`updated_at` | `TIMESTAMPTZ` | `now()`. |
 
 `transactions.account_id` (NOT NULL, FK CASCADE),

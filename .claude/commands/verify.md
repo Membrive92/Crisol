@@ -3,7 +3,9 @@
 Verifica que la fase $ARGUMENTS está lista para PR y merge.
 
 ## Checks automáticos (local)
-1. `make verify` verde (lint + typecheck + tests, frontend + backend)
+1. `make verify` verde (lint + typecheck + tests + knip + check_docs, frontend +
+   backend). Backend SIEMPRE con `backend/.venv/Scripts/python.exe`, y nunca dos
+   pytest a la vez
 2. Si falla algo, reporta exactamente qué y dónde
 
 ## Checks de documentación
@@ -22,6 +24,9 @@ Verifica que la fase $ARGUMENTS está lista para PR y merge.
 13. ¿Algún `float` para importes monetarios?
 14. ¿Las funciones públicas tienen JSDoc/docstring?
 15. ¿Los tests cubren la lógica de negocio y el aislamiento multi-usuario?
+16. ¿Cada test nuevo se verificó ROMPIENDO la línea que dice proteger, y la
+    rotura entró? (internal_docs/lessons.md)
+17. ¿Se reescribió internal_docs/HANDOFF.md y lo durable fue a backlog.md?
 
 ## Checks de git / PR
 16. ¿Estoy en una rama `feat/phase-X.Y-*` (no en main)?

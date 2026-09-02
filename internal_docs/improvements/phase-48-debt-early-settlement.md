@@ -1,5 +1,11 @@
 # PHASE-48 — Liquidación anticipada: concepto, doble saldo y reparación de julio
 
+> **Aviso de numeración (2026-09-02)**: el número PHASE-48 ya se usó para «El
+> mes lo define el usuario» ([entregada](../phases/phase-48-the-user-defines-the-month.md)).
+> Este plan sigue SIN abrir; al abrirlo hay que renumerarlo (propuesta:
+> PHASE-49) y actualizar las referencias en `README.md` y en la phase doc de
+> 47.A, que lo citan como «el plan de PHASE-48».
+
 **Estado**: 📋 planificada — v2, sustituye íntegramente a la versión anterior
 de este fichero (escrita antes de PHASE-47; numeración y prerequisitos
 actualizados a la realidad post-47).

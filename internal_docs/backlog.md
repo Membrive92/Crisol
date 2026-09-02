@@ -12,6 +12,15 @@
 >   (no se tacha) — la phase doc deja la traza histórica.
 > - Si un item se promueve a fase formal, se traslada a
 >   `phases/phase-X.Y-*.md` y se borra de aquí.
+> - 2026-09-02: **puesta al día contrastada con el código.** Se borran las
+>   entradas resueltas que seguían vivas: cotizaciones «desactivadas sin
+>   Finnhub» y «summary sin FX» (44.11: yfinance por defecto y EUR vía BCE),
+>   captura por cámara en móvil (existe desde 11.4), tests de componente móvil
+>   (11.6/14.6), «sin preview del import» (`POST /imports/preview` existe),
+>   `dashboard-filters.tsx` (ya no existe), `rangeForPeriod` duplicada (vive en
+>   `packages/services/src/period/`), y `MonthlyChart` atado al año (la query
+>   acepta rango desde PHASE-42). La devolución del recibo que entraba como el
+>   recibo queda resuelta en lo general por 47.G (la cadena de saldos manda).
 > - Última actualización: 2026-07-23 (PHASE-44.7: módulo Inversión completo —
 >   se borran los follow-ups resueltos (seed de umbrales, golden test, módulo
 >   oculto en el frontend) y se alta la **prueba manual pendiente**, que bloquea
@@ -107,7 +116,10 @@ metadato opcional de display, los 3 estados colapsan a 1, y la deuda deja de
 depender del par. Habilitado por "todas las cuentas importadas". Plan
 incremental en 5 fases (T1–T5), sin migración destructiva, en
 [`decisions/0005-simplify-transfers-flow-driven.md`](decisions/0005-simplify-transfers-flow-driven.md).
-**Propuesta — no implementada.** Riesgo: refactor de zona muy curada
+**Parcialmente implementada**: PHASE-41 entregó T4 (retirada de la pestaña de
+transferencias y de la maquinaria de emparejado heurístico) conservando
+`link`/`unlink` y `from-source`/`from-debt`, que son load-bearing. El resto de
+fases del ADR sigue como propuesta. Riesgo: refactor de zona muy curada
 (PHASE-23→34); mitigado con golden tests de equivalencia por fase.
 
 ---
@@ -207,14 +219,13 @@ Items de la auditoría conscientemente diferidos durante la remediación
 
 Si quieres atacar trabajo real, por orden de valor:
 
-1. **Captura por ticket en mobile** (`expo-camera` /
-   `expo-image-picker`) — el backend de receipts ya lo soporta; falta
-   la pantalla de captura. Es el hueco funcional más grande de mobile.
-2. **Materializar `line_items` de tickets en transacciones** — hoy un
+1. **Materializar `line_items` de tickets en transacciones** — hoy un
    ticket crea **una** sola tx con el total; desglosar por línea daría
    gasto por categoría real desde el ticket.
-3. **Endurecer auth** — **reset / forgot password** + **rate-limit en
-   `/auth/login`**. Lo mínimo antes de cualquier despliegue.
+2. **Endurecer auth** — **reset / forgot password** (el rate-limit de login
+   ya existe en `core/rate_limit.py`). Lo mínimo antes de cualquier despliegue.
+3. **Paridad móvil de los tres charts del informe de Inversión** y del
+   endpoint de módulo para la tarjeta de Inversión en el dashboard.
 
 ---
 
@@ -241,9 +252,11 @@ Si quieres atacar trabajo real, por orden de valor:
 
 ## Módulo Inversión — follow-ups (fase 44)
 
-Limitaciones conscientes del módulo. El engine (6 capas, 57 métricas), el adapter
-EDGAR, la persistencia, la API (28 endpoints) y el informe con siete pestañas
-están **construidos** (44.7, 44.8 E1 y 44.9); lo de aquí es lo que queda.
+Limitaciones conscientes del módulo. El engine (6 capas + valoración), el
+adapter EDGAR, el buscador local-first, la persistencia, la API, el informe con
+siete pestañas (web y móvil) y el veredicto argumentado están **construidos**
+(44.7 → 44.26); lo de aquí es lo que queda. Lo planificado sin código está en
+`improvements/phase-44.27-*` y `phase-44.28-*`.
 
 > **Este fichero es el sitio DURABLE de la deuda del módulo.** `HANDOFF.md` la
 > repite para la sesión en curso, pero se reescribe entero cada vez — lo que sólo
@@ -252,13 +265,15 @@ están **construidos** (44.7, 44.8 E1 y 44.9); lo de aquí es lo que queda.
 ### Validación manual pendiente
 
 El flujo Análisis con MCD se validó a mano el 2026-07-26 (y el smoke en vivo
-cazó el bug del `getattr` sobre un método). Lo que **sigue sin recorrerse**:
+cazó el bug del `getattr` sobre un método). El usuario hizo una **primera
+pasada** sobre el informe de 44.24 a finales de agosto, de la que salieron la
+auditoría UX 44.24.H y tres arreglos más. Lo que **sigue sin recorrerse**:
 
-- **[PHASE-44.9] El informe con siete pestañas, entero.** Recorrido: MCD (le falta
-  `cogs` → varias métricas no calculables con motivo), Realty Income (socimi:
-  balance no clasificado, la liquidez casi entera cae) y JNJ. En cada uno, las
-  siete pestañas y **recargar en cada una**. Los análisis guardados antes de 44.9
-  hay que reejecutarlos.
+- **[PHASE-44.24 → 44.26] Segunda pasada del informe y la primera del Dictamen
+  (44.25/44.26).** La pregunta de aceptación de 44.26: ¿se entiende rápido qué
+  está bien y qué riesgos, sin abrir nada técnico? Recorrido: MCD, PEP y JNJ
+  (relanzados con el motor actual), las siete pestañas y **recargar en cada
+  una**. Guion en `HANDOFF.md`.
 - **[PHASE-44.13] El buscador con índice y el informe en móvil.** Consultas de
   prueba y qué debe pasar, en la phase doc.
 - **[PHASE-44.11] Los precios contra el bróker del usuario.** No delegable.
@@ -271,13 +286,6 @@ Playbook paso a paso en
 
 ### Follow-ups funcionales
 
-- **[PHASE-44.7] Sin `FINNHUB_API_KEY`**: cotizaciones y búsqueda externa
-  desactivadas. El adapter está construido y probado con fixtures; en cuanto haya
-  key, la cartera muestra valor de mercado, P&L latente y peso sin tocar código.
-- **[PHASE-44.7] Summary en divisa nativa**: los totales mezclan divisas si la
-  cartera es multi-moneda. Falta integrar un feed de FX vivo para convertir a una
-  divisa base — la fórmula del P&L (opción A) ya reparte precio/divisa cuando
-  `fx_actual` exista (hoy cae a `fx_compra` → `fx_effect = 0`).
 - **[PHASE-44.7] `spinoff` y `return_of_capital`**: se registran pero aplicarlas
   devuelve 400. El modelo `CorporateAction` (un `ratio` escalar) no expresa el
   security destino ni la fracción de base; exige ampliar el modelo + migración.
@@ -460,8 +468,6 @@ Playbook paso a paso en
 
 - **[PHASE-4.1]** El fichero importado no se persiste. Para re-auditar
   hay que volver a subirlo.
-- **[PHASE-4.1]** Sin endpoint de preview previo al import — el pipeline
-  es síncrono y va a completion en el mismo request.
 - **[PHASE-4.3]** PDFs sin texto extraíble (escaneados) terminan en
   `failed`. Fallback OCR vía Ollama documentado como branch
   `feat/pdf-vision-fallback` (no abierto).
@@ -500,21 +506,11 @@ Playbook paso a paso en
 
 ---
 
-## Mobile (área más débil)
+## Mobile
 
-- **[PHASE-5.2]** Sin captura por cámara. El backend ya lo soporta —
-  falta integrar `expo-camera` / `expo-image-picker`.
-- **[PHASE-9.2]** `MonthlyChart` ligado a año en curso (la query
-  `useDashboardByMonth` sólo acepta `year`). Si se quiere "últimos
-  12 meses rolling" o rango libre, requiere cambio en backend.
-- **[PHASE-9.2]** `rangeForPeriod` duplicada entre web y mobile (15
-  líneas puras). Mover a `packages/ui` cuando aparezca un tercer caller.
-- **[PHASE-9.2]** `apps/mobile/components/dashboard/dashboard-filters.tsx`
-  quedó sin callers tras PHASE-9.2 (lo reemplazó `currency-picker.tsx`).
-  Eliminar si no resurge necesidad de year picker.
-- **[PHASE-11.6]** Cobertura UI mobile mínima — `jest-expo` ya
-  configurado y un test smoke (Toaster), pero pantallas
-  (`analysis`, `transactions`, `trash`, `receipt/new`) sin tests.
+- **[PHASE-11.6 → 14.6]** Cobertura UI móvil parcial: `jest-expo` configurado y
+  tests de componentes en dashboard, deuda e inversión, pero varias pantallas
+  completas (`transactions`, `trash`, `receipt/new`) siguen sin test.
 - **[PHASE-2.2]** Pull-to-refresh: web no tiene equivalente — depende
   de `staleTime` para revalidar.
 
@@ -542,8 +538,6 @@ Playbook paso a paso en
 
 ## Tests
 
-- **[PHASE-2.2]** Mobile component tests pospuestos — requieren
-  `jest-expo` setup.
 - **[PHASE-5.1]** Sin smoke real de extracción de ticket (requiere
   modelo descargado).
 - **[PHASE-5.2]** Sin E2E de UI — la cobertura vive en lógica pura
@@ -592,7 +586,14 @@ al tocar zonas afines (la fuente canónica es `lessons.md`):
 - jsdom no implementa `Blob.text()` — usar `FileReader` para tests de
   parsers de ficheros.
 
-## Extracto sin signos: una devolución de recibo se lee como el recibo (PHASE-47.E)
+## ~~Extracto sin signos: una devolución de recibo se lee como el recibo~~ (PHASE-47.E → resuelto en lo general por 47.G)
+
+> **Resuelto en lo general**: desde PHASE-47.G la cadena de saldos del extracto
+> MANDA sobre la dirección deducida del texto (no sólo rellena las ausentes),
+> que es exactamente el arreglo que esta entrada pedía. Queda por comprobar con
+> un caso real que el extracto de la TARJETA traiga saldo por fila — si no lo
+> trae, la cadena no puede corregir nada ahí y la mitigación sigue siendo la
+> guarda de dirección del dedup. Se conserva el diagnóstico.
 
 `classify_import_flow` deduce la dirección del TEXTO cuando el fichero no trae
 signo, y para una liquidación de tarjeta elige salida. La segunda pasada de

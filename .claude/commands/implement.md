@@ -9,12 +9,16 @@ Vas a implementar la fase: $ARGUMENTS
 - Lee la documentación de la fase anterior en internal_docs/phases/
 - Lee internal_docs/architecture.md si la fase toca arquitectura
 - Lee internal_docs/lessons.md para no repetir errores conocidos
-- Lee la skill relevante (frontend-best-practices, local-ai-integration)
+- Lee internal_docs/PROJECT-GUIDE.md si es tu primera sesión en el proyecto, y
+  internal_docs/HANDOFF.md siempre (qué está sin probar, qué sigue)
+- Lee la skill frontend-best-practices si la fase toca frontend
 - Confirma conmigo el alcance antes de escribir código
 
 ### 2. Rama
-- `git checkout main && git pull`
-- `git checkout -b feat/phase-X.Y-nombre-corto`
+- Práctica real: se trabaja sobre `main` y se hace push directo tras mi prueba
+  manual. Si prefieres rama: `git checkout -b feat/phase-X.Y-nombre-corto`
+- Antes de nada: `git status` y `git log origin/main..HEAD` para saber qué hay
+  sin commitear y sin subir
 
 ### 3. Implementación
 - Sigue el patrón del stack (router → service → repository para backend)

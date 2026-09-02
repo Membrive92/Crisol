@@ -49,13 +49,17 @@ DOC_GLOBS = ("internal_docs/**/*.md", "CLAUDE.md", "README.md")
 LIVE_DOCS = (
     DOCS_DIR / "backlog.md",
     DOCS_DIR / "HANDOFF.md",
+    DOCS_DIR / "PROJECT-GUIDE.md",
 )
 """Documentos que describen el AHORA y se reescriben.
 
 La distinción con `phases/` es la que cierra el patrón: una phase doc es una
 **foto fechada** —un recuento de tests allí es historia y envejece bien—; estos
-dos describen el presente, así que un número que cambia cada fase es podredumbre
+describen el presente, así que un número que cambia cada fase es podredumbre
 garantizada. Nadie vuelve a `backlog.md` a actualizar un `BE 1042`.
+`PROJECT-GUIDE.md` (2026-09-02) entra por la misma razón: es la guía de entrada
+para quien llega sin contexto, y una guía de entrada con un recuento viejo
+enseña a desconfiar del resto.
 """
 
 HEAD_CLAIM_DOCS = (*LIVE_DOCS, DOCS_DIR / "data-model" / "schema.md")

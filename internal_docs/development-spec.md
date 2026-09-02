@@ -54,8 +54,12 @@
 Antes de empujar:
 
 ```bash
-make verify   # lint + typecheck + tests (frontend + backend)
+make verify   # lint + typecheck + tests + knip (código muerto) + check_docs (frontend + backend)
 ```
+
+Backend siempre con el intérprete del proyecto
+(`backend/.venv/Scripts/python.exe`) y nunca dos `pytest` a la vez: la suite
+comparte una sola base de test.
 
 **No pushes sin `make verify` verde.** Si CI se va a quejar, mejor saberlo
 antes del PR.
@@ -73,7 +77,15 @@ Actualiza:
 - `internal_docs/data-model/schema.md` — si hay migraciones (archivo se crea en PHASE-1.1).
 - `internal_docs/lessons.md` — si aprendiste algo que podía evitarse.
 
-### 2.5. Pull Request
+### 2.5. Entrega
+
+> **Práctica real (desde mediados de 2026)**: el usuario prueba a mano la fase
+> en la app en marcha, da el visto bueno, y el commit se sube por **push directo
+> a `main`** — sin PR. Los mensajes van en inglés. Todo lo demás de esta sección
+> (rama, PR, squash) describe el diseño original y sigue siendo válido si se
+> prefiere trabajar con ramas. Comprueba `git log origin/main..HEAD` antes de
+> dar algo por subido: la máquina del usuario ha tenido commits locales sin push
+> durante semanas.
 
 ```bash
 git push -u origin feat/phase-X.Y-nombre-corto
@@ -177,6 +189,13 @@ PHASE-X.Z — <nombre>
 ---
 
 ## 5. Fases
+
+> Este apartado describe las fases FUNDACIONALES (0-5), tal como se planearon
+> al arrancar. Desde la fase 6 las fases se definen conforme aparecen —casi
+> siempre a partir de un dato que no cuadra al usuario— con un plan en
+> `improvements/` y la foto final en `phases/`. **La lista completa y su estado
+> está en la tabla de [`README.md`](README.md)**; la visión de conjunto, en
+> [`PROJECT-GUIDE.md`](PROJECT-GUIDE.md).
 
 ### Fase 0 — Bootstrap
 

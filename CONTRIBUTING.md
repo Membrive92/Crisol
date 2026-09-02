@@ -1,9 +1,11 @@
 # Contribuir a Crisol
 
-Este proyecto sigue un workflow de desarrollo incremental por fases, con cada
-fase entregada en su propio PR a `main`. Consulta
-[internal_docs/development-spec.md](internal_docs/development-spec.md) para el
-desglose completo.
+Este proyecto sigue un workflow de desarrollo incremental por fases. El diseño
+original es «una fase, un PR»; la práctica real desde hace meses es **commit
+tras la prueba manual del usuario y push directo a `main`**. Consulta
+[internal_docs/development-spec.md](internal_docs/development-spec.md) para la
+metodología y [internal_docs/PROJECT-GUIDE.md](internal_docs/PROJECT-GUIDE.md)
+para la visión de conjunto.
 
 ---
 
@@ -16,8 +18,9 @@ desglose completo.
 4. Implementa siguiendo las reglas.
 5. `make verify` debe pasar en local.
 6. Documenta la fase en `internal_docs/phases/`.
-7. Abre PR. CI verde obligatorio (el workflow de CI se configurará en PHASE-0.1).
-8. Squash merge a `main`. Elimina la rama.
+7. Prueba manual del usuario. Sin ella no hay commit.
+8. Commit (mensaje en inglés) y push a `main`. CI (`.github/workflows/ci.yml`)
+   corre en cada push; si abres PR, CI verde obligatorio y squash merge.
 
 ---
 

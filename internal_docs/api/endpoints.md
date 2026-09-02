@@ -1,9 +1,11 @@
 # API endpoints
 
 > Catálogo del backend. Se actualiza cada vez que una fase añade o
-> modifica endpoints. Última actualización: PHASE-44.9 (módulo `investment`
-> documentado por primera vez — 28 endpoints; cubre también la deuda documental
-> de 44.7 y 44.8).
+> modifica endpoints. Última actualización: 2026-09-02 — contrastado contra
+> las rutas reales de la app (`app.routes`): entran los cinco que faltaban
+> (`/dashboard/module-summary`, `/debt/dashboard-summary`,
+> `/analytics/expense-structure/explain` de PHASE-43; `/investment/analysis/help`
+> y `/runs/compare` de PHASE-44.24).
 
 Convenciones generales:
 
@@ -295,6 +297,14 @@ expense`. Las devoluciones entran a propósito —son gasto de su
 
 ---
 
+### Tarjeta de módulo (PHASE-43.4, ADR-0006)
+
+| Método | Ruta                        | Auth | Query                                                    | Response                                                                                                                        |
+| ------ | --------------------------- | ---- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/dashboard/module-summary` | sí   | `currency` o `target_currency`, `date_from?`, `date_to?` | `200 ModuleDashboardSummary` — la tarjeta de Finanzas Domésticas del dashboard: flujo del período, ahorro y veredicto. Sin rango, el último mes con datos. |
+
+---
+
 ## Analytics (`PHASE-37.3` + `PHASE-37.4`)
 
 Read-only. Mismo modo de moneda que el dashboard: `currency` (legacy,
@@ -305,6 +315,7 @@ agrega). Sin ninguno, default legacy `USD`.
 | ------ | ------------------------------ | ---- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | GET    | `/analytics/expense-structure` | sí   | `currency` o `target_currency`, `date_from?`, `date_to?` | `200 ExpenseStructureResponse { reference_currency, income_total, structural_total, exceptional_total, structural_monthly_avg, savings_rate_gross, savings_rate_structural, top_exceptional[], exceptional_by_category[] }` |
 | GET    | `/analytics/month-outlook`     | sí   | `currency` o `target_currency`                           | `200 MonthOutlookResponse { reference_currency, committed_remaining, committed_items[], days_remaining, liquid_balance, runway_months }`                                                                                    |
+| GET    | `/analytics/expense-structure/explain` | sí | `currency` o `target_currency`, `date_from?`, `date_to?` | `200 CategoryStructureExplain[]` — **(PHASE-43.2)** por qué cada categoría del desglose es Fija o Variable: qué nivel de la cascada decidió (`tx.is_exceptional` > `category.expense_nature` > heurística) y con qué evidencia. |
 
 Reglas:
 
@@ -627,6 +638,12 @@ Reglas:
   usa la tasa de hoy. `reference_currency` de la respuesta = target.
   Txs / gastos en divisas sin tasa quedan excluidos silenciosamente.
 
+### Tarjeta de módulo (PHASE-43.4, ADR-0006)
+
+| Método | Ruta                      | Auth | Query                                          | Response                                                                                                                              |
+| ------ | ------------------------- | ---- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/debt/dashboard-summary` | sí   | `target_currency?`, `date_from?`, `date_to?`   | `200 ModuleDashboardSummary` — la tarjeta de Deuda del dashboard: deuda viva (al cierre del período si hay rango), veredicto y enlace. |
+
 ## Transfers (`PHASE-21.3`)
 
 | Método | Ruta                                       | Auth | Body / Query                                                                    | Response                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
@@ -695,10 +712,10 @@ Reglas:
 
 ---
 
-## Investment (`PHASE-44.1` … `PHASE-44.9`)
+## Investment (`PHASE-44.1` … `PHASE-44.24`)
 
 Módulo de inversión: catálogo de valores, ingesta de fundamentales desde EDGAR,
-motor de análisis forense y cartera. **28 endpoints**, todos con auth.
+motor de análisis forense y cartera. Todos con auth.
 
 Alcance de datos: `securities`, `financial_statements`, `scoring_thresholds` y
 los precios son **globales** (ADR-0007 — un 10-K es el mismo para todos); los
@@ -727,10 +744,12 @@ los precios son **globales** (ADR-0007 — un 10-K es el mismo para todos); los
 
 | Método | Ruta                                             | Descripción                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ------ | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| GET    | `/investment/analysis/help`                      | **(44.24.A)** Los textos de ayuda que el catálogo de métricas no puede llevar: la ficha de cada score forense con el nombre de sus variables, y la de cada bandera con dónde comprobarla en las cuentas. Estático (definición del engine). Va antes de `/{security_id}/…` para que `help` no se parsee como UUID. |
 | GET    | `/investment/analysis/metrics`                   | **(44.9)** Las métricas del engine con `label`, `family`, `unit`, `direction`, los 4 cortes por defecto y su `note`. **(44.23)** Además `help`: qué mide y cómo se calcula, para la «i» del informe. Vive en `engine/glossary.py`, junto a la fórmula, y un gate exige una por métrica. Estático; el recuento sale del propio catálogo.                                                                                                                                                                                                                                                                                              |
 | POST   | `/investment/analysis/{security_id}/run`         | Ejecuta las 6 capas y persiste el `AnalysisRun`. `409` si no hay estados ingeridos; `422` con motivo si el valor **no es analizable** (sin CIK, sin 10-K…).                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | GET    | `/investment/analysis/{security_id}/runs/latest` | **(44.9)** El último run con todo el desglose. `404` si no hay ninguno.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | GET    | `/investment/analysis/{security_id}/valuation`   | **(44.12)** Múltiplos de valoración (PER, P/ventas, P/VC, P/FCF, EV/EBITDA + valor contable por acción y rentabilidad de la caja libre) cruzando la cotización viva con el último ejercicio cerrado. `?price=` simula otro precio y cubre los valores sin cobertura del proveedor. **No sale del `AnalysisRun` y no se persiste**: un múltiplo se mueve con el precio y el run tiene que poder reejecutarse dando lo mismo. Nunca falla por falta de cotización — responde `200` con `available:false` y el motivo. `provider_status` (`live`/`cached`/`unreachable`) alimenta el semáforo: «no lo he preguntado» no es «está bien». |
+| GET    | `/investment/analysis/{security_id}/runs/compare` | **(44.24.F)** Qué ha cambiado entre dos análisis del mismo valor (`base`, `target`; sin ellos, los dos últimos). `404` si no hay dos o si un id no pertenece al valor. Si el motor o la calibración difieren, `comparable=false` y las listas de cambios de la EMPRESA vienen **vacías**: presentar un cambio de banda como degradación del negocio cuando lo que se movió fue el corte lleva a la conclusión contraria. |
 | GET    | `/investment/analysis/{security_id}/runs`        | Histórico ligero (sin los JSONB).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | GET    | `/investment/analysis/runs/{run_id}`             | Un run por id con todo el desglose. `404` si es de otro usuario.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 

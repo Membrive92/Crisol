@@ -57,16 +57,20 @@ durante una sesión que no encaje en lessons.md ni en un ADR.
 
 ---
 
-## Estructura sugerida (vacía por ahora)
+## Estructura actual
 
 ```
 ai-context/
-├── README.md               # este archivo
-├── domain-glossary.md      # (futuro) términos del dominio financiero
-├── model-evaluations.md    # (futuro) resultados de pruebas de modelos
-├── prompts/                # (futuro) snippets y versiones de prompts
-└── samples/                # (futuro) ejemplos anonimizados de tickets, CSVs...
+├── README.md                    # este archivo
+└── excel-analisis-empresas.md   # transcripción íntegra del cuaderno de análisis de
+                                 # empresas del usuario (la «hoja» de cada métrica, sus
+                                 # umbrales y su lectura). Es la fuente de
+                                 # investment-threshold-divergences.md
 ```
 
-No hay nada obligatorio que crear hoy. Este directorio crecerá de forma
-orgánica a medida que el proyecto avance y Claude necesite recordar cosas.
+El glosario del dominio (términos de banca del usuario, jerga del repo) vive en
+[`../PROJECT-GUIDE.md`](../PROJECT-GUIDE.md) §9, porque forma parte de lo que
+hay que saber para trabajar y no de lo que se consulta bajo demanda. Las
+evaluaciones de modelos de visión y los prompts siguen sin fichero propio: los
+prompts están en `backend/app/modules/ai/` y su historia en las phase docs de
+5.1 y 20.

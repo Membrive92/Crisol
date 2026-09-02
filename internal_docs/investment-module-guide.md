@@ -1,5 +1,17 @@
 # Módulo de Inversión — Guía completa (lógica, decisiones, scripts, pruebas)
 
+> **Nota de vigencia (2026-09-02)**: este documento se escribió al cerrar
+> PHASE-44.7 y describe la arquitectura y los flujos, que siguen siendo los
+> mismos. Lo que ha cambiado desde entonces y aquí NO está: el buscador
+> local-first en tres capas y el directorio FIRDS (44.8/44.13/44.14), precios
+> con `yfinance` y valoración en EUR (44.11), múltiplos de valoración (44.12),
+> honestidad de ausencias y calibración sectorial (44.17/44.21), el informe con
+> siete pestañas, glosario, charts y paridad móvil (44.9/44.20/44.22/44.23), y el
+> veredicto argumentado con dictamen (44.24/44.25/44.26). Para eso, las phase
+> docs de `phases/phase-44.*.md` y la visión de conjunto en
+> [`PROJECT-GUIDE.md`](PROJECT-GUIDE.md) §5. El playbook manual de §9 sigue
+> siendo válido como base; el guion actualizado está en `HANDOFF.md`.
+>
 > Documento de referencia del módulo `investment` tras PHASE-44.7. Cubre la
 > arquitectura y la lógica de cada capa, las decisiones tomadas (y por qué), qué
 > hace cada script, el catálogo de endpoints y un **playbook de pruebas manuales**
@@ -27,12 +39,14 @@ de valores:
   dividendos, acciones corporativas (split/stock_dividend) y un resumen con valor
   de mercado (cuando hay cotizaciones).
 
-**Estado**: construido de punta a punta (backend + web + móvil), verde en tests
-automáticos (BE 1042 · FE lint/typecheck/tests/knip). **Sin prueba manual en vivo
-todavía** — ese es el objetivo de este documento.
+**Estado** (al cerrar 44.7): construido de punta a punta (backend + web +
+móvil) y verde en la suite. La prueba manual del flujo Análisis con MCD se hizo
+el 2026-07-26; el informe completo recibió una primera pasada del usuario a
+finales de agosto (44.24.H). El estado vivo está en `HANDOFF.md`.
 
 **Privacidad**: sólo sale de la máquina la petición a `data.sec.gov` (10-K
-públicos) y, si se activa, a Finnhub (cotizaciones). Ningún dato del usuario.
+públicos), las cotizaciones (`yfinance` por defecto; Finnhub opcional) y las
+tasas del BCE vía `currency`. Ningún dato del usuario.
 
 ---
 
@@ -375,20 +389,22 @@ curl -s -H "$AUTH" -H 'Content-Type: application/json' \
 
 ## 10. Limitaciones conocidas y follow-ups
 
-- **Sin API key de Finnhub**: precios y búsqueda externa desactivados.
-- **Summary en divisa nativa** de cada posición (sin conversión a base con FX
-  vivo); los totales mezclan divisas si la cartera es multi-moneda.
+> Lista de 44.7, con lo que se ha resuelto desde entonces tachado. La deuda
+> viva del módulo se mantiene en [`backlog.md`](backlog.md) («Módulo Inversión»).
+
+- ~~Sin API key de Finnhub: precios desactivados~~ → 44.11: `yfinance` por
+  defecto, sin credencial.
+- ~~Summary en divisa nativa, sin FX~~ → 44.11: totales en EUR con el tipo del
+  BCE por posición (`fx_as_of`), exclusión con motivo cuando falta tasa.
 - **Spinoff / return_of_capital**: registrar sí, aplicar no (falta modelo con
-  security destino + fracción de base).
-- **Charts del informe** (evolución common-size, stress, heatmap de Δ%) y
-  **statement viewer**: diferidos; el informe MVP muestra veredicto + métricas.
-- **Paridad móvil completa del informe**: sólo el veredicto (los paneles de
-  métricas y charts son follow-up — es ~3 entregas como marcó el análisis).
-- **Sin tests de componente FE** específicos del módulo (la lógica está cubierta
-  en backend + services); follow-up.
+  security destino + fracción de base). Sigue.
+- ~~Charts del informe~~ → 44.22 (sólo web; móvil sigue con tablas).
+- ~~Paridad móvil sólo del veredicto~~ → 44.13/44.20/44.25: las siete pestañas
+  desde la capa compartida de `packages/ui`.
+- ~~Sin tests de componente FE~~ → hay tests de componente en web y móvil.
 - **`10-K/A` (enmiendas)** y ejercicios sin 10-K propio: fuera a propósito (ver
-  cabos sueltos en el doc de 44.6).
-- **Prueba manual en vivo**: pendiente (este documento). Hasta hacerla, el pipeline
-  está validado con hechos sintéticos y fixtures reales, pero el flujo UI + SEC en
-  vivo no se ha ejecutado end-to-end.
+  cabos sueltos en el doc de 44.6). Sigue.
+- ~~Prueba manual en vivo pendiente~~ → MCD validado el 2026-07-26; primera
+  pasada del informe completo a finales de agosto. Lo que queda por recorrer
+  está en `HANDOFF.md`.
 ```
